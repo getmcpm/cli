@@ -65,6 +65,26 @@ const SECRET_PATTERNS: ReadonlyArray<{ label: string; pattern: RegExp }> = [
     label: "Slack token",
     pattern: /xox[baprs]-[0-9A-Za-z\-]{10,}/g,
   },
+  // OpenAI API keys (legacy sk- and project sk-proj- prefix)
+  {
+    label: "OpenAI API key",
+    pattern: /sk-(proj-)?[A-Za-z0-9]{40,}/g,
+  },
+  // Anthropic API keys
+  {
+    label: "Anthropic API key",
+    pattern: /sk-ant-[A-Za-z0-9\-_]{80,}/g,
+  },
+  // Google API keys
+  {
+    label: "Google API key",
+    pattern: /AIza[0-9A-Za-z_-]{35}/g,
+  },
+  // npm automation/publish tokens
+  {
+    label: "npm token",
+    pattern: /npm_[A-Za-z0-9]{36}/g,
+  },
 ];
 
 /**
@@ -101,8 +121,10 @@ const PROMPT_INJECTION_PATTERNS: ReadonlyArray<{ label: string; pattern: RegExp;
   { label: "system prompt access", pattern: /system\s+prompt/i, severity: "high" },
   { label: "you are now", pattern: /you\s+are\s+now\s+[a-z]/i, severity: "high" },
   { label: "act as persona", pattern: /act\s+as\s+(an?\s+)?(?:unrestricted|different|new|alternate)/i, severity: "high" },
-  // Base64-encoded content in descriptions — look for long base64 segments or padded blocks
-  { label: "base64-encoded content", pattern: /[A-Za-z0-9+/]{20,}={1,2}/, severity: "high" },
+  // Base64-encoded content in descriptions — threshold raised to 40 chars to reduce false positives
+  { label: "base64-encoded content", pattern: /[A-Za-z0-9+/]{40,}={1,2}/, severity: "high" },
+  // Zero-width / invisible characters used for obfuscation
+  { label: "zero-width characters (obfuscation)", pattern: /[\u200B\u200C\u200D\uFEFF\u00AD]/, severity: "high" },
   // Exfil patterns — sending data to external URLs
   { label: "exfiltration to URL", pattern: /(?:sends?|posts?|transmits?|uploads?)\s+(?:all\s+)?(?:data|content|files?|information|secrets?|credentials?)\s+to\s+https?:\/\//i, severity: "critical" },
   { label: "exfiltration URL destination", pattern: /to\s+https?:\/\/[^\s]+(?:collect|steal|exfil|harvest)/i, severity: "critical" },
