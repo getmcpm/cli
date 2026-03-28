@@ -448,6 +448,7 @@ export async function handleInstall(
 
 import { Command } from "commander";
 import chalk from "chalk";
+import { input, password } from "@inquirer/prompts";
 import { detectInstalledClients as _detectClients } from "../config/detector.js";
 import { getConfigPath as _getConfigPath } from "../config/paths.js";
 import { addInstalledServer as _addToStore } from "../store/servers.js";
@@ -502,19 +503,20 @@ async function promptEnvVarsDefault(
     if (!envVar.isRequired && !envVar.isSecret) continue;
 
     const defaultVal = envVar.default ?? "";
-    const prompted = await new Promise<string>((resolve) => {
-      const rl = readline.createInterface({
-        input: process.stdin,
-        output: process.stdout,
-      });
-      const prompt = envVar.description
-        ? `  ${envVar.name} (${envVar.description})${defaultVal ? ` [${defaultVal}]` : ""}: `
-        : `  ${envVar.name}${defaultVal ? ` [${defaultVal}]` : ""}: `;
-      rl.question(prompt, (answer) => {
-        rl.close();
-        resolve(answer.trim() || defaultVal);
-      });
-    });
+    const promptMessage = envVar.description
+      ? `${envVar.name} (${envVar.description}):`
+      : `${envVar.name}:`;
+
+    let prompted: string;
+    if (envVar.isSecret) {
+      // Use password prompt to mask secret input — value is never echoed to the terminal
+      prompted = await password({ message: promptMessage });
+      if (!prompted && defaultVal) {
+        prompted = defaultVal;
+      }
+    } else {
+      prompted = await input({ message: promptMessage, default: defaultVal });
+    }
 
     if (prompted) {
       result[envVar.name] = prompted;
