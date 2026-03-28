@@ -21,6 +21,47 @@ import type { TrustScore, TrustScoreInput } from "../scanner/trust-score.js";
 import type { InstalledServer } from "../store/servers.js";
 
 // ---------------------------------------------------------------------------
+// Identifier validation — guard against command injection
+// ---------------------------------------------------------------------------
+
+const NPM_IDENTIFIER_RE = /^(@[a-z0-9-~][a-z0-9-._~]*\/)?[a-z0-9-~][a-z0-9-._~]*$/;
+const PYPI_IDENTIFIER_RE = /^[A-Za-z0-9]([A-Za-z0-9._-]*[A-Za-z0-9])?$/;
+const OCI_IDENTIFIER_RE =
+  /^[a-z0-9]+([._-][a-z0-9]+)*(\/[a-z0-9]+([._-][a-z0-9]+)*)*:[a-zA-Z0-9._-]+$/;
+
+/**
+ * Validate a package identifier against the expected pattern for its registry
+ * type. Throws if the identifier looks potentially malicious.
+ */
+export function validateIdentifier(identifier: string, registryType: string): void {
+  const patterns: Record<string, RegExp> = {
+    npm: NPM_IDENTIFIER_RE,
+    pypi: PYPI_IDENTIFIER_RE,
+    oci: OCI_IDENTIFIER_RE,
+  };
+  const re = patterns[registryType];
+  if (re && !re.test(identifier)) {
+    throw new Error(
+      `Rejected potentially malicious ${registryType} identifier: "${identifier}"`
+    );
+  }
+}
+
+const DANGEROUS_FLAGS = ["--eval", "--require", "--inspect", "-e", "--import"];
+
+/**
+ * Validate runtime arguments from the registry.
+ * Rejects flags that could cause arbitrary code execution.
+ */
+export function validateRuntimeArgs(args: string[]): void {
+  for (const arg of args) {
+    if (DANGEROUS_FLAGS.some((f) => arg.startsWith(f)) || arg.includes("..")) {
+      throw new Error(`Rejected potentially dangerous runtime argument: "${arg}"`);
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Public types
 // ---------------------------------------------------------------------------
 
@@ -92,6 +133,8 @@ export function resolveInstallEntry(
   const ociPkg = server.packages.find((p) => p.registryType === "oci");
 
   if (npmPkg) {
+    validateIdentifier(npmPkg.identifier, "npm");
+    validateRuntimeArgs(npmPkg.runtimeArguments ?? []);
     return {
       command: "npx",
       args: ["-y", npmPkg.identifier, ...(npmPkg.runtimeArguments ?? [])],
@@ -99,6 +142,8 @@ export function resolveInstallEntry(
   }
 
   if (pypiPkg) {
+    validateIdentifier(pypiPkg.identifier, "pypi");
+    validateRuntimeArgs(pypiPkg.runtimeArguments ?? []);
     return {
       command: "uvx",
       args: [pypiPkg.identifier, ...(pypiPkg.runtimeArguments ?? [])],
@@ -106,6 +151,8 @@ export function resolveInstallEntry(
   }
 
   if (ociPkg) {
+    validateIdentifier(ociPkg.identifier, "oci");
+    validateRuntimeArgs(ociPkg.runtimeArguments ?? []);
     return {
       command: "docker",
       args: ["run", "--rm", "-i", ociPkg.identifier, ...(ociPkg.runtimeArguments ?? [])],

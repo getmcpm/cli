@@ -9,6 +9,29 @@
 import type { Finding } from "./tier1.js";
 
 // ---------------------------------------------------------------------------
+// Server name validation
+// ---------------------------------------------------------------------------
+
+/**
+ * Allowlist pattern for MCP server names passed to mcp-scan.
+ * Matches patterns like "io.github.owner/repo-name".
+ */
+const SERVER_NAME_RE =
+  /^[a-zA-Z0-9][a-zA-Z0-9._-]*\/[a-zA-Z0-9][a-zA-Z0-9._-]*$/;
+
+/**
+ * Validate a server name before passing it to the external scanner.
+ * Throws if the name doesn't match the expected pattern.
+ */
+export function validateServerName(serverName: string): void {
+  if (!SERVER_NAME_RE.test(serverName)) {
+    throw new Error(
+      `Rejected potentially malicious server name for scanner: "${serverName}"`
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
 
@@ -103,11 +126,14 @@ export async function checkScannerAvailable(options?: Tier2Options): Promise<boo
 export async function scanTier2(serverName: string, options?: Tier2Options): Promise<Finding[]> {
   const exec = options?.execImpl ?? defaultExec;
 
-  // Step 1: verify scanner is available
+  // Step 1: validate server name to prevent injection
+  validateServerName(serverName);
+
+  // Step 2: verify scanner is available
   const available = await checkScannerAvailable(options);
   if (!available) return [];
 
-  // Step 2: run the scan
+  // Step 3: run the scan
   let stdout: string;
   try {
     const result = await exec("npx", ["@invariantlabs/mcp-scan", "--json", serverName]);
@@ -117,7 +143,7 @@ export async function scanTier2(serverName: string, options?: Tier2Options): Pro
     return [];
   }
 
-  // Step 3: parse output
+  // Step 4: parse output
   if (!stdout || !stdout.trim()) return [];
 
   let parsed: McpScanOutput;
@@ -129,7 +155,7 @@ export async function scanTier2(serverName: string, options?: Tier2Options): Pro
 
   if (!Array.isArray(parsed.findings)) return [];
 
-  // Step 4: map to Finding[] immutably
+  // Step 5: map to Finding[] immutably
   return parsed.findings.map((f): Finding => ({
     severity: normaliseSeverity(f.severity),
     type: "prompt-injection", // mcp-scan focuses on prompt injection / tool poisoning

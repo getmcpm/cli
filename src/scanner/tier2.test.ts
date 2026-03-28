@@ -8,7 +8,7 @@
  */
 
 import { describe, it, expect, vi } from "vitest";
-import { checkScannerAvailable, scanTier2 } from "./tier2.js";
+import { checkScannerAvailable, scanTier2, validateServerName } from "./tier2.js";
 
 // ---------------------------------------------------------------------------
 // checkScannerAvailable
@@ -194,5 +194,53 @@ describe("scanTier2 — immutability", () => {
     execImpl.mockResolvedValue({ stdout: "mcp-scan 0.1.0", exitCode: 0 });
     const b = await scanTier2("io.github.acme/server", { execImpl });
     expect(a).not.toBe(b);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// validateServerName — security: reject malicious server names
+// ---------------------------------------------------------------------------
+
+describe("validateServerName", () => {
+  it("accepts valid server name with owner/repo pattern", () => {
+    expect(() => validateServerName("io.github.acme/my-server")).not.toThrow();
+  });
+
+  it("accepts server name with dots and dashes", () => {
+    expect(() => validateServerName("io.github.owner/repo-name.v2")).not.toThrow();
+  });
+
+  it("rejects server names with shell metacharacters", () => {
+    expect(() => validateServerName("owner/repo; rm -rf /")).toThrow(/malicious/i);
+  });
+
+  it("rejects server names with backticks", () => {
+    expect(() => validateServerName("owner/`whoami`")).toThrow(/malicious/i);
+  });
+
+  it("rejects server names with no slash", () => {
+    expect(() => validateServerName("no-slash-at-all")).toThrow(/malicious/i);
+  });
+
+  it("rejects server names starting with a dot", () => {
+    expect(() => validateServerName(".hidden/repo")).toThrow(/malicious/i);
+  });
+
+  it("rejects empty string", () => {
+    expect(() => validateServerName("")).toThrow(/malicious/i);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// scanTier2 — server name validation is called before exec
+// ---------------------------------------------------------------------------
+
+describe("scanTier2 — server name validation", () => {
+  it("throws for a malicious server name without calling exec", async () => {
+    const execImpl = vi.fn();
+    await expect(
+      scanTier2("owner/repo; rm -rf /", { execImpl })
+    ).rejects.toThrow(/malicious/i);
+    expect(execImpl).not.toHaveBeenCalled();
   });
 });
