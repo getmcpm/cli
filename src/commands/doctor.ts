@@ -186,7 +186,7 @@ export async function doctorHandler(deps: DoctorDeps): Promise<number> {
 import { Command } from "commander";
 import chalk from "chalk";
 import { access } from "fs/promises";
-import { exec } from "child_process";
+import { execFile } from "child_process";
 import { detectInstalledClients as _detectClients } from "../config/detector.js";
 import { getConfigPath as _getConfigPath, CLIENT_IDS } from "../config/paths.js";
 import {
@@ -225,7 +225,7 @@ async function checkConfigExistsDefault(clientId: ClientId): Promise<boolean> {
 function execCheckDefault(cmd: string): Promise<boolean> {
   return new Promise((resolve) => {
     const which = process.platform === "win32" ? "where" : "which";
-    exec(`${which} ${cmd}`, (err) => {
+    execFile(which, [cmd], (err) => {
       resolve(err === null);
     });
   });
