@@ -154,3 +154,45 @@ describe("writeJson", () => {
     expect(data).toEqual(copy);
   });
 });
+
+describe("readJson — path traversal protection", () => {
+  beforeEach(() => {
+    vi.resetAllMocks();
+    mockMkdir.mockResolvedValue(undefined);
+  });
+
+  it("throws when filename traverses outside the store directory", async () => {
+    mockHomedir.mockReturnValue("/home/alice");
+    await expect(readJson("../../etc/passwd")).rejects.toThrow(/path traversal/i);
+  });
+
+  it("throws for absolute path that escapes store", async () => {
+    mockHomedir.mockReturnValue("/home/alice");
+    await expect(readJson("../sibling/file.json")).rejects.toThrow(/path traversal/i);
+  });
+
+  it("allows normal relative filenames within the store", async () => {
+    mockHomedir.mockReturnValue("/home/alice");
+    mockReadFile.mockResolvedValue(JSON.stringify({}));
+    await expect(readJson("servers.json")).resolves.not.toThrow();
+  });
+});
+
+describe("writeJson — path traversal protection", () => {
+  beforeEach(() => {
+    vi.resetAllMocks();
+    mockMkdir.mockResolvedValue(undefined);
+    mockWriteFile.mockResolvedValue(undefined);
+    mockRename.mockResolvedValue(undefined);
+  });
+
+  it("throws when filename traverses outside the store directory", async () => {
+    mockHomedir.mockReturnValue("/home/alice");
+    await expect(writeJson("../../etc/crontab", {})).rejects.toThrow(/path traversal/i);
+  });
+
+  it("allows normal relative filenames within the store", async () => {
+    mockHomedir.mockReturnValue("/home/alice");
+    await expect(writeJson("servers.json", {})).resolves.not.toThrow();
+  });
+});

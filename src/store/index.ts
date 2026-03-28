@@ -43,7 +43,12 @@ export async function getStorePath(): Promise<string> {
  */
 export async function readJson<T>(filename: string): Promise<T | null> {
   const storePath = await getStorePath();
-  const filePath = path.join(storePath, filename);
+  const resolved = path.resolve(storePath, filename);
+  const storeResolved = path.resolve(storePath);
+  if (!resolved.startsWith(storeResolved + path.sep)) {
+    throw new Error(`Path traversal attempt blocked: "${filename}"`);
+  }
+  const filePath = resolved;
 
   let raw: string;
   try {
@@ -69,7 +74,12 @@ export async function writeJson(
   data: unknown
 ): Promise<void> {
   const storePath = await getStorePath();
-  const filePath = path.join(storePath, filename);
+  const resolved = path.resolve(storePath, filename);
+  const storeResolved = path.resolve(storePath);
+  if (!resolved.startsWith(storeResolved + path.sep)) {
+    throw new Error(`Path traversal attempt blocked: "${filename}"`);
+  }
+  const filePath = resolved;
   const tmpPath = `${filePath}.tmp`;
 
   await writeFile(tmpPath, JSON.stringify(data, null, 2), "utf-8");

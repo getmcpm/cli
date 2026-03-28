@@ -24,7 +24,7 @@ interface CacheEntry<T> {
  * Colons and slashes are replaced so the string is a valid filename.
  */
 function keyToFilename(key: string): string {
-  const safe = key.replace(/[:/\\]/g, "_");
+  const safe = key.replace(/[:/\\.]/g, "_").replace(/\.\./g, "_");
   return `cache/${safe}.json`;
 }
 
