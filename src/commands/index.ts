@@ -11,12 +11,14 @@ import { registerInfo } from "./info.js";
 import { registerList } from "./list.js";
 import { registerRemoveCommand } from "./remove.js";
 import { registerDoctorCommand } from "./doctor.js";
+import { registerAuditCommand } from "./audit.js";
 
 export { registerSearch } from "./search.js";
 export { registerInfo } from "./info.js";
 export { registerList } from "./list.js";
 export { registerRemoveCommand } from "./remove.js";
 export { registerDoctorCommand } from "./doctor.js";
+export { registerAuditCommand } from "./audit.js";
 
 export function registerCommands(program: Command): void {
   registerSearch(program);
@@ -24,4 +26,5 @@ export function registerCommands(program: Command): void {
   registerList(program);
   registerRemoveCommand(program);
   registerDoctorCommand(program);
+  registerAuditCommand(program);
 }
