@@ -202,7 +202,6 @@ export function registerInitCommand(program: Command): void {
             detectClients: detectInstalledClients,
             getAdapter,
             getConfigPath,
-            resolveEntry: resolveInstallEntry,
             addToStore: addInstalledServer,
             promptEnvVars: async () => ({}),
             confirm: async () => true,
