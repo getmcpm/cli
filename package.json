@@ -1,5 +1,5 @@
 {
-  "name": "mcpm-cli",
+  "name": "@getmcpm/cli",
   "version": "0.1.0",
   "description": "MCP package manager — search, install, and audit MCP servers across Claude Desktop, Cursor, VS Code, and Windsurf",
   "type": "module",
@@ -34,9 +34,12 @@
   ],
   "author": "",
   "license": "MIT",
+  "publishConfig": {
+    "access": "public"
+  },
   "repository": {
     "type": "git",
-    "url": "https://github.com/m1ngshum/mcpm"
+    "url": "https://github.com/getmcpm/cli"
   },
   "engines": {
     "node": ">=20.0.0"

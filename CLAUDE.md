@@ -12,7 +12,7 @@ An open-source, CLI-first MCP package manager — **"npm for MCP servers"**.
 A registry where developers can search, install, audit, publish, and update MCP servers
 across all major clients (Claude Desktop, Cursor, VS Code, Windsurf) from a single tool.
 
-**npm package**: `mcpm-cli` | **bin command**: `mcpm` | **web UI**: deferred to V1+
+**npm package**: `@getmcpm/cli` | **bin command**: `mcpm` | **repo**: github.com/getmcpm/cli | **web UI**: deferred to V1+
 
 ---
 
@@ -121,7 +121,7 @@ Build the **open-source, community-owned npm+npm_audit** for MCP:
 ### CLI (`mcpm`) — V1 / MVP
 
 - **Runtime**: Node.js (>=20.0.0), TypeScript, ESM
-- **npm package**: `mcpm-cli` (bin command: `mcpm`)
+- **npm package**: `@getmcpm/cli` (bin command: `mcpm`)
 - **CLI framework**: Commander.js
 - **Schema validation**: Zod (single source of truth for all types)
 - **Prompts**: @inquirer/prompts (trust score UX, multi-select, confirmations)
@@ -190,7 +190,7 @@ When community quality signals require a backend (user reviews, aggregated telem
 - [ ] Config backup-before-write for safety
 - [ ] Cross-platform paths (macOS, Linux, Windows)
 - [ ] Automated demo GIF generation (VHS/asciinema)
-- [ ] Published to npm as `mcpm-cli`, bin command `mcpm`
+- [ ] Published to npm as `@getmcpm/cli`, bin command `mcpm`
 
 ### V1.5 (community trust)
 
@@ -267,7 +267,7 @@ the registry concept end-to-end before we launch publicly.
   Developer
      │
      ▼
-  mcpm CLI (Node.js, npm: mcpm-cli, bin: mcpm)
+  mcpm CLI (Node.js, npm: @getmcpm/cli, bin: mcpm)
      │
      ├── mcpm search ──────► Official MCP Registry API (v0.1)
      │                        registry.modelcontextprotocol.io
@@ -303,7 +303,7 @@ the registry concept end-to-end before we launch publicly.
 | 2026-03    | OSS community-owned, not VC-backed          | Differentiation vs Smithery; trust signal for security tool            |
 | 2026-03    | Build on top of official MCP Registry       | They explicitly invite subregistries; no competition                   |
 | 2026-03    | Node.js CLI (not Python)                    | TypeScript SDK has 3x more dependents; aligns with npm distribution    |
-| 2026-03-28 | npm package: `mcpm-cli`, bin: `mcpm`        | `mcpm`, `mcpx`, `mcp-pm`, `mcpman` all taken on npm                   |
+| 2026-03-28 | npm package: `@getmcpm/cli`, bin: `mcpm`        | `mcpm`, `mcpx`, `mcp-pm`, `mcpman` all taken on npm                   |
 | 2026-03-28 | Single package (not monorepo)               | Only one consumer (CLI); extract registry client later if needed       |
 | 2026-03-28 | Registry API v0.1 (not v0)                  | v0.1 has `search` param and `version` filter                          |
 | 2026-03-28 | JSON files, not SQLite for MVP              | Zero native deps; better-sqlite3 needs node-gyp on some systems       |
@@ -320,7 +320,7 @@ the registry concept end-to-end before we launch publicly.
 
 When helping with this project:
 
-- We are building `mcpm` — an open-source MCP package manager (npm: `mcpm-cli`)
+- We are building `mcpm` — an open-source MCP package manager (npm: `@getmcpm/cli`)
 - Trust assessment is a core feature, not an afterthought
 - We are OSS-first — avoid design decisions that require proprietary lock-in
 - Check `docs/PLAN.md` for the detailed implementation plan

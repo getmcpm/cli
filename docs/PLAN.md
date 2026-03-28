@@ -8,7 +8,7 @@ The repo is a greenfield project (only `CLAUDE.md` exists). We are building "npm
 - Build the CLI first (not web UI or backend)
 - Back it with the official MCP Registry API v0.1 (registry.modelcontextprotocol.io)
 - Single package (not monorepo) — registry client as internal module
-- npm package: `mcpm-cli`, bin command: `mcpm`
+- npm package: `@getmcpm/cli`, bin command: `mcpm`
 
 **Registry API findings (verified 2026-03-28):**
 - Use `/v0.1/servers` (not v0) — v0.1 has `search` and `version` params

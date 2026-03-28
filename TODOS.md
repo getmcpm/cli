@@ -12,10 +12,10 @@
 - `_meta` has `status`, `publishedAt`, `updatedAt`, `isLatest`
 
 ### 2. ~~Resolve npm Package Name~~ DONE (2026-03-28)
-**Resolution:** npm package name = `mcpm-cli`, bin command = `mcpm`.
+**Resolution:** npm package name = `@getmcpm/cli`, bin command = `mcpm`.
 - `mcpm` taken (Minecraft Package Manager)
 - `mcpx`, `mcp-pm`, `mcp-registry`, `mcpman` all taken
-- `mcpm-cli` is available and follows `{tool}-cli` convention
+- `@getmcpm/cli` is available and follows `{tool}-cli` convention
 
 ## Pre-launch
 
