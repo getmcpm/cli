@@ -363,6 +363,17 @@ export async function handleInstall(
   }
 
   // -------------------------------------------------------------------------
+  // Step 8b: Warn about plaintext secret storage
+  // -------------------------------------------------------------------------
+  const hasSecrets = envVarDefs.some((ev) => ev.isSecret && resolvedEnvVars[ev.name]);
+  if (hasSecrets && !options.json) {
+    output(
+      "\x1b[33mNote: API keys are stored as plaintext in client config files. " +
+      "Ensure config files have appropriate permissions (chmod 600).\x1b[0m"
+    );
+  }
+
+  // -------------------------------------------------------------------------
   // Step 9: Record in store
   // -------------------------------------------------------------------------
   const storeEntry: InstalledServer = {

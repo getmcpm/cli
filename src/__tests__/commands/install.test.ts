@@ -1152,3 +1152,70 @@ describe("formatTrustScore — edge cases", () => {
     expect(stripped).toMatch(/failed|skipped/i);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Plaintext secret warning (FINDING-08)
+// ---------------------------------------------------------------------------
+
+describe("handleInstall — plaintext secret warning", () => {
+  beforeEach(() => {
+    vi.resetAllMocks();
+  });
+
+  it("emits a plaintext storage warning when a secret env var is written", async () => {
+    const serverEntry = makeServerEntry({
+      packages: [
+        {
+          registryType: "npm",
+          identifier: "@test/my-server",
+          runtimeArguments: [],
+          environmentVariables: [
+            { name: "API_KEY", description: "The API key", isRequired: true, isSecret: true },
+          ],
+        },
+      ],
+    });
+    const lines: string[] = [];
+    const deps = makeDeps({
+      registryClient: { getServer: vi.fn().mockResolvedValue(serverEntry) },
+      promptEnvVars: vi.fn().mockResolvedValue({ API_KEY: "sk-supersecret" }),
+      output: (t) => lines.push(t),
+    });
+    await handleInstall("io.github.test/my-server", {}, deps);
+    const out = lines.join("\n");
+    expect(out).toMatch(/plaintext|chmod|permissions/i);
+  });
+
+  it("does not emit plaintext warning when no secret env vars are present", async () => {
+    const lines: string[] = [];
+    const deps = makeDeps({ output: (t) => lines.push(t) });
+    await handleInstall("io.github.test/my-server", {}, deps);
+    const out = lines.join("\n");
+    expect(out).not.toMatch(/plaintext/i);
+  });
+
+  it("does not emit plaintext warning in --json mode", async () => {
+    const serverEntry = makeServerEntry({
+      packages: [
+        {
+          registryType: "npm",
+          identifier: "@test/my-server",
+          runtimeArguments: [],
+          environmentVariables: [
+            { name: "API_KEY", description: "The API key", isRequired: true, isSecret: true },
+          ],
+        },
+      ],
+    });
+    const lines: string[] = [];
+    const deps = makeDeps({
+      registryClient: { getServer: vi.fn().mockResolvedValue(serverEntry) },
+      promptEnvVars: vi.fn().mockResolvedValue({ API_KEY: "sk-supersecret" }),
+      output: (t) => lines.push(t),
+    });
+    await handleInstall("io.github.test/my-server", { yes: true, json: true }, deps);
+    // In JSON mode, all lines should be parseable JSON (no warning text)
+    const out = lines.join("\n");
+    expect(out).not.toMatch(/plaintext/i);
+  });
+});
