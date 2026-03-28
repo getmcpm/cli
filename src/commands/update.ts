@@ -191,6 +191,9 @@ export async function handleUpdate(
     }
   }
 
+  // Track update outcomes immutably (name → { updated, trustScore })
+  const updateOutcomes = new Map<string, { updated: boolean; trustScore: TrustScore }>();
+
   // Perform updates
   for (const r of withUpdates) {
     const resultWithEntry = r as UpdateResult & { _entry?: ServerEntry };
@@ -200,14 +203,14 @@ export async function handleUpdate(
 
     // Run trust assessment on new version
     const tier1Findings = scanTier1(entry);
-    const official = entry._meta["io.modelcontextprotocol.registry/official"];
+    const official = entry._meta?.["io.modelcontextprotocol.registry/official"] ?? {};
     const trustScore = computeTrustScore({
       findings: tier1Findings,
       healthCheckPassed: null,
       hasExternalScanner: false,
       registryMeta: {
-        isVerifiedPublisher: official.status === "active",
-        publishedAt: official.publishedAt,
+        isVerifiedPublisher: official?.status === "active",
+        publishedAt: official?.publishedAt,
         downloadCount: undefined,
       },
     });
@@ -231,8 +234,8 @@ export async function handleUpdate(
 
     await addInstalledServer(finalRecord);
 
-    r.updated = true;
-    r.trustScore = trustScore;
+    // Record outcome immutably instead of mutating the result object
+    updateOutcomes.set(r.name, { updated: true, trustScore });
 
     if (!isJson) {
       const levelStr = trustScore.level === "safe"
@@ -249,14 +252,17 @@ export async function handleUpdate(
   if (isJson) {
     output(
       JSON.stringify(
-        results.map((r) => ({
-          name: r.name,
-          oldVersion: r.oldVersion,
-          newVersion: r.newVersion,
-          updated: r.updated,
-          trustScore: r.trustScore ?? null,
-          error: r.error ?? null,
-        })),
+        results.map((r) => {
+          const outcome = updateOutcomes.get(r.name);
+          return {
+            name: r.name,
+            oldVersion: r.oldVersion,
+            newVersion: r.newVersion,
+            updated: outcome?.updated ?? r.updated,
+            trustScore: outcome?.trustScore ?? r.trustScore ?? null,
+            error: r.error ?? null,
+          };
+        }),
         null,
         2
       )

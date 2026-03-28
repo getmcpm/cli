@@ -114,14 +114,14 @@ export async function handleAudit(
 
     const allFindings = [...tier1Findings, ...tier2Findings];
 
-    const official = entry._meta["io.modelcontextprotocol.registry/official"];
+    const official = entry._meta?.["io.modelcontextprotocol.registry/official"] ?? {};
     const trustScore = computeTrustScore({
       findings: allFindings,
       healthCheckPassed: null,
       hasExternalScanner,
       registryMeta: {
-        isVerifiedPublisher: official.status === "active",
-        publishedAt: official.publishedAt,
+        isVerifiedPublisher: official?.status === "active",
+        publishedAt: official?.publishedAt,
         downloadCount: undefined,
       },
     });

@@ -299,14 +299,14 @@ export async function handleInstall(
     allFindings = [...allFindings, ...tier2Findings];
   }
 
-  const official = serverEntry._meta["io.modelcontextprotocol.registry/official"];
+  const official = serverEntry._meta?.["io.modelcontextprotocol.registry/official"] ?? {};
   const trustScoreInput: TrustScoreInput = {
     findings: allFindings,
     healthCheckPassed: null, // health check not yet run at this point
     hasExternalScanner: scannerAvailable,
     registryMeta: {
-      isVerifiedPublisher: official.status === "active",
-      publishedAt: official.publishedAt,
+      isVerifiedPublisher: official?.status === "active",
+      publishedAt: official?.publishedAt,
     },
   };
 
@@ -431,6 +431,17 @@ export async function handleInstall(
 
     await adapter.addServer(configPath, name, entry);
     installedClients.push(clientId);
+  }
+
+  // -------------------------------------------------------------------------
+  // Step 8b: Warn about plaintext secret storage
+  // -------------------------------------------------------------------------
+  const hasSecrets = envVarDefs.some((ev) => ev.isSecret && resolvedEnvVars[ev.name]);
+  if (hasSecrets && !options.json) {
+    output(
+      "\x1b[33mNote: API keys are stored as plaintext in client config files. " +
+      "Ensure config files have appropriate permissions (chmod 600).\x1b[0m"
+    );
   }
 
   // -------------------------------------------------------------------------

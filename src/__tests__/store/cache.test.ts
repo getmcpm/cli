@@ -59,6 +59,15 @@ describe("setCachedResponse", () => {
     expect(filename).toMatch(/my/);
   });
 
+  it("produces a safe filename when key contains path traversal characters", async () => {
+    await setCachedResponse("../evil", {});
+    const [filename] = mockWriteJson.mock.calls[0] as [string, unknown];
+    // Must not contain ".." segments
+    expect(filename).not.toContain("..");
+    // Must be under cache/ prefix
+    expect(filename).toMatch(/^cache\//);
+  });
+
   it("does not mutate data passed in", async () => {
     const data = { nested: { value: 42 } };
     const copy = structuredClone(data);
