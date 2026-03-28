@@ -200,14 +200,14 @@ export async function handleUpdate(
 
     // Run trust assessment on new version
     const tier1Findings = scanTier1(entry);
-    const official = entry._meta["io.modelcontextprotocol.registry/official"];
+    const official = entry._meta?.["io.modelcontextprotocol.registry/official"] ?? {};
     const trustScore = computeTrustScore({
       findings: tier1Findings,
       healthCheckPassed: null,
       hasExternalScanner: false,
       registryMeta: {
-        isVerifiedPublisher: official.status === "active",
-        publishedAt: official.publishedAt,
+        isVerifiedPublisher: official?.status === "active",
+        publishedAt: official?.publishedAt,
         downloadCount: undefined,
       },
     });

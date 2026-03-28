@@ -228,14 +228,14 @@ export async function handleInstall(
     allFindings = [...allFindings, ...tier2Findings];
   }
 
-  const official = serverEntry._meta["io.modelcontextprotocol.registry/official"];
+  const official = serverEntry._meta?.["io.modelcontextprotocol.registry/official"] ?? {};
   const trustScoreInput: TrustScoreInput = {
     findings: allFindings,
     healthCheckPassed: null, // health check not yet run at this point
     hasExternalScanner: scannerAvailable,
     registryMeta: {
-      isVerifiedPublisher: official.status === "active",
-      publishedAt: official.publishedAt,
+      isVerifiedPublisher: official?.status === "active",
+      publishedAt: official?.publishedAt,
     },
   };
 
