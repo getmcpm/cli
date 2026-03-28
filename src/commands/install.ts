@@ -24,6 +24,28 @@ import type { InstalledServer } from "../store/servers.js";
 // Identifier validation — guard against command injection
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// URL validation — guard against malicious remote URLs
+// ---------------------------------------------------------------------------
+
+/**
+ * Validate a remote URL before it is written to any IDE config file.
+ * Only http: and https: protocols are permitted.
+ */
+export function validateRemoteUrl(url: string): void {
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    throw new Error(`Invalid remote URL: "${url}"`);
+  }
+  if (parsed.protocol !== "https:" && parsed.protocol !== "http:") {
+    throw new Error(
+      `Remote URL must use http or https protocol, got: "${parsed.protocol}"`
+    );
+  }
+}
+
 const NPM_IDENTIFIER_RE = /^(@[a-z0-9-~][a-z0-9-._~]*\/)?[a-z0-9-~][a-z0-9-._~]*$/;
 const PYPI_IDENTIFIER_RE = /^[A-Za-z0-9]([A-Za-z0-9._-]*[A-Za-z0-9])?$/;
 const OCI_IDENTIFIER_RE =
@@ -115,6 +137,7 @@ export function resolveInstallEntry(
       (r) => r.type === "streamable-http" || r.type === "sse"
     );
     if (httpRemote) {
+      validateRemoteUrl(httpRemote.url);
       // Build headers record if any
       const headers: Record<string, string> = {};
       for (const h of httpRemote.headers) {
@@ -162,6 +185,7 @@ export function resolveInstallEntry(
   // Rule 3: Cursor-only path — HTTP remote with no packages
   if (clientId === "cursor" && server.remotes && server.remotes.length > 0) {
     const remote = server.remotes[0];
+    validateRemoteUrl(remote.url);
     return { url: remote.url };
   }
 

@@ -56,7 +56,7 @@ export const RemoteHeaderSchema = z.object({
 
 export const RemoteSchema = z.object({
   type: z.string(),
-  url: z.string(),
+  url: z.string().url(),
   headers: z.array(RemoteHeaderSchema).default([]),
 });
 

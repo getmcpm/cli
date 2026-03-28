@@ -25,6 +25,7 @@ import {
   formatTrustScore,
   validateIdentifier,
   validateRuntimeArgs,
+  validateRemoteUrl,
   type InstallDeps,
   type InstallOptions,
 } from "../../commands/install.js";
@@ -1160,6 +1161,84 @@ describe("validateRuntimeArgs", () => {
 // ---------------------------------------------------------------------------
 // resolveInstallEntry — injection validation is called
 // ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// validateRemoteUrl — security: reject non-http/https URLs
+// ---------------------------------------------------------------------------
+
+describe("validateRemoteUrl", () => {
+  it("accepts https URLs", () => {
+    expect(() => validateRemoteUrl("https://api.example.com/mcp")).not.toThrow();
+  });
+
+  it("accepts http URLs", () => {
+    expect(() => validateRemoteUrl("http://localhost:3000/mcp")).not.toThrow();
+  });
+
+  it("rejects file:// URLs", () => {
+    expect(() => validateRemoteUrl("file:///etc/passwd")).toThrow(/http or https/i);
+  });
+
+  it("rejects javascript: URLs", () => {
+    expect(() => validateRemoteUrl("javascript:alert(1)")).toThrow(/http or https/i);
+  });
+
+  it("rejects data: URLs", () => {
+    expect(() => validateRemoteUrl("data:text/html,<script>alert(1)</script>")).toThrow(/http or https/i);
+  });
+
+  it("rejects totally invalid URLs", () => {
+    expect(() => validateRemoteUrl("not a url at all")).toThrow(/invalid remote url/i);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// resolveInstallEntry — URL validation is called for HTTP remotes
+// ---------------------------------------------------------------------------
+
+describe("resolveInstallEntry — remote URL validation", () => {
+  it("accepts a valid https remote URL for Cursor", () => {
+    const server = makeServerEntry({
+      packages: [],
+      remotes: [
+        {
+          type: "streamable-http",
+          url: "https://api.example.com/mcp",
+          headers: [],
+        },
+      ],
+    });
+    expect(() => resolveInstallEntry(server, "cursor")).not.toThrow();
+  });
+
+  it("throws for a file:// remote URL for Cursor", () => {
+    const server = makeServerEntry({
+      packages: [],
+      remotes: [
+        {
+          type: "streamable-http",
+          url: "file:///etc/passwd",
+          headers: [],
+        },
+      ],
+    });
+    expect(() => resolveInstallEntry(server, "cursor")).toThrow(/http or https/i);
+  });
+
+  it("throws for a javascript: remote URL for Cursor", () => {
+    const server = makeServerEntry({
+      packages: [],
+      remotes: [
+        {
+          type: "streamable-http",
+          url: "javascript:alert(1)",
+          headers: [],
+        },
+      ],
+    });
+    expect(() => resolveInstallEntry(server, "cursor")).toThrow(/http or https/i);
+  });
+});
 
 describe("resolveInstallEntry — identifier validation", () => {
   it("throws for a malicious npm identifier", () => {
