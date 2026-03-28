@@ -15,6 +15,7 @@ import { registerDoctorCommand } from "./doctor.js";
 import { registerAuditCommand } from "./audit.js";
 import { registerUpdateCommand } from "./update.js";
 import { registerInitCommand } from "./init.js";
+import { registerImportCommand } from "./import.js";
 
 export { registerSearch } from "./search.js";
 export { registerInstallCommand, handleInstall, resolveInstallEntry, formatTrustScore } from "./install.js";
@@ -28,6 +29,8 @@ export { registerUpdateCommand } from "./update.js";
 export { registerInitCommand } from "./init.js";
 export { PACKS } from "./init.js";
 export type { PackDefinition, InitDeps, InitOptions } from "./init.js";
+export { registerImportCommand, handleImport, checkFirstRun } from "./import.js";
+export type { ImportDeps, ImportOptions } from "./import.js";
 
 export function registerCommands(program: Command): void {
   registerSearch(program);
@@ -39,4 +42,5 @@ export function registerCommands(program: Command): void {
   registerAuditCommand(program);
   registerUpdateCommand(program);
   registerInitCommand(program);
+  registerImportCommand(program);
 }
