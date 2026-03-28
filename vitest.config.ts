@@ -16,6 +16,8 @@ export default defineConfig({
         "**/*.d.ts",
         // Barrel re-export files have no executable statements
         "**/registry/index.ts",
+        "**/config/index.ts",
+        "**/config/adapters/index.ts",
         // Type-only files have no runtime code
         "**/registry/types.ts",
       ],
