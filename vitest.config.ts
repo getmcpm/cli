@@ -18,6 +18,7 @@ export default defineConfig({
         "**/registry/index.ts",
         "**/config/index.ts",
         "**/config/adapters/index.ts",
+        "**/scanner/index.ts",
         // Type-only files have no runtime code
         "**/registry/types.ts",
       ],
