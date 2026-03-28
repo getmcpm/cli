@@ -391,6 +391,17 @@ describe("handleImport — --yes flag", () => {
 // handleImport — --client filter
 // ---------------------------------------------------------------------------
 
+describe("handleImport — --client filter invalid client", () => {
+  it("throws when the specified --client is not installed", async () => {
+    const deps = makeDeps({
+      detectClients: vi.fn().mockResolvedValue(["claude-desktop", "cursor"] as ClientId[]),
+    });
+    await expect(
+      handleImport({ client: "vscode" }, deps)
+    ).rejects.toThrow(/vscode.*not.*install/i);
+  });
+});
+
 describe("handleImport — --client filter", () => {
   it("only reads from the specified client when --client is provided", async () => {
     const getAdapterMock = vi.fn().mockReturnValue(makeAdapter("cursor", {

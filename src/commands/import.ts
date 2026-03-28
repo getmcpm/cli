@@ -137,8 +137,12 @@ export async function handleImport(
   // Determine which clients to scan
   const allClients = await deps.detectClients();
   const clientsToScan: ClientId[] = options.client
-    ? ([options.client] as ClientId[]).filter((c) => allClients.includes(c) || true)
+    ? ([options.client] as ClientId[]).filter((c) => allClients.includes(c))
     : allClients;
+
+  if (options.client && clientsToScan.length === 0) {
+    throw new Error(`Client "${options.client}" is not installed on this machine.`);
+  }
 
   // Read servers from each client
   const discovered: DiscoveredServer[] = [];
