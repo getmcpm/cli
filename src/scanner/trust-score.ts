@@ -120,17 +120,31 @@ function computeLevel(score: number, maxPossible: number): TrustScore["level"] {
 // ---------------------------------------------------------------------------
 
 /**
+ * Returns true if any finding has critical or high severity.
+ */
+function hasCriticalOrHighFindings(findings: Finding[]): boolean {
+  return findings.some((f) => f.severity === "critical" || f.severity === "high");
+}
+
+/**
  * Compute a trust score from findings and server metadata.
  * Returns a new TrustScore object — never mutates input.
  */
 export function computeTrustScore(input: TrustScoreInput): TrustScore {
   const maxPossible = input.hasExternalScanner ? 100 : 80;
 
+  // Cap registryMeta to 0 when critical/high findings are present.
+  // Attacker-controlled metadata (publishedAt, downloads) must not inflate
+  // the score when the scan found serious issues.
+  const registryMetaScore = hasCriticalOrHighFindings(input.findings)
+    ? 0
+    : scoreRegistryMeta(input.registryMeta);
+
   const breakdown: TrustScoreBreakdown = {
     healthCheck: scoreHealthCheck(input.healthCheckPassed),
     staticScan: scoreStaticScan(input.findings),
     externalScan: scoreExternalScan(input.hasExternalScanner, input.findings),
-    registryMeta: scoreRegistryMeta(input.registryMeta),
+    registryMeta: registryMetaScore,
   };
 
   const score =

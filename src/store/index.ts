@@ -34,7 +34,7 @@ export async function getStorePath(): Promise<string> {
   // exists. Any other error (e.g. EACCES) is caught and silently ignored so
   // that read operations still work even if we cannot create the directory.
   try {
-    await mkdir(storePath, { recursive: true });
+    await mkdir(storePath, { recursive: true, mode: 0o700 });
   } catch {
     // Ignore — directory may already exist or we may not need to write.
   }
@@ -102,6 +102,9 @@ export async function writeJson(
   const filePath = resolved;
   const tmpPath = `${filePath}.tmp`;
 
-  await writeFile(tmpPath, JSON.stringify(data, null, 2), "utf-8");
+  await writeFile(tmpPath, JSON.stringify(data, null, 2), {
+    encoding: "utf-8",
+    mode: 0o600,
+  });
   await rename(tmpPath, filePath);
 }

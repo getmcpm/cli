@@ -52,6 +52,7 @@ describe("getStorePath", () => {
     await getStorePath();
     expect(mockMkdir).toHaveBeenCalledWith("/home/alice/.mcpm", {
       recursive: true,
+      mode: 0o700,
     });
   });
 
@@ -146,6 +147,7 @@ describe("writeJson", () => {
     await writeJson("data.json", {});
     expect(mockMkdir).toHaveBeenCalledWith("/home/alice/.mcpm", {
       recursive: true,
+      mode: 0o700,
     });
   });
 

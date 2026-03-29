@@ -50,10 +50,13 @@ export abstract class BaseAdapter implements ConfigAdapter {
     data: Record<string, unknown>
   ): Promise<void> {
     const dir = path.dirname(configPath);
-    await mkdir(dir, { recursive: true });
+    await mkdir(dir, { recursive: true, mode: 0o700 });
 
     const tmpPath = `${configPath}.tmp`;
-    await writeFile(tmpPath, JSON.stringify(data, null, 2), "utf-8");
+    await writeFile(tmpPath, JSON.stringify(data, null, 2), {
+      encoding: "utf-8",
+      mode: 0o600,
+    });
     await rename(tmpPath, configPath);
   }
 

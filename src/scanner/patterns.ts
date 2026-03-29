@@ -89,10 +89,12 @@ const SECRET_PATTERNS: ReadonlyArray<{ label: string; pattern: RegExp }> = [
 
 /**
  * Detect hardcoded secrets in a text string.
+ * Applies NFKC normalization to defeat Unicode homoglyph evasion.
  * Returns a new Finding[] (never mutates input).
  */
 export function detectSecrets(text: string): Finding[] {
   if (!text) return [];
+  text = text.normalize("NFKC");
 
   const findings: Finding[] = [];
 
@@ -123,8 +125,8 @@ const PROMPT_INJECTION_PATTERNS: ReadonlyArray<{ label: string; pattern: RegExp;
   { label: "act as persona", pattern: /act\s+as\s+(an?\s+)?(?:unrestricted|different|new|alternate)/i, severity: "high" },
   // Base64-encoded content in descriptions — threshold raised to 40 chars to reduce false positives
   { label: "base64-encoded content", pattern: /[A-Za-z0-9+/]{40,}={1,2}/, severity: "high" },
-  // Zero-width / invisible characters used for obfuscation
-  { label: "zero-width characters (obfuscation)", pattern: /[\u200B\u200C\u200D\uFEFF\u00AD]/, severity: "high" },
+  // Zero-width / invisible characters and bidirectional overrides used for obfuscation
+  { label: "zero-width characters (obfuscation)", pattern: /[\u200B\u200C\u200D\uFEFF\u00AD\u202A-\u202F\u2028\u2029]/, severity: "high" },
   // Exfil patterns — sending data to external URLs
   { label: "exfiltration to URL", pattern: /(?:sends?|posts?|transmits?|uploads?)\s+(?:all\s+)?(?:data|content|files?|information|secrets?|credentials?)\s+to\s+https?:\/\//i, severity: "critical" },
   { label: "exfiltration URL destination", pattern: /to\s+https?:\/\/[^\s]+(?:collect|steal|exfil|harvest)/i, severity: "critical" },
@@ -132,10 +134,12 @@ const PROMPT_INJECTION_PATTERNS: ReadonlyArray<{ label: string; pattern: RegExp;
 
 /**
  * Detect prompt injection and exfiltration patterns in a text string.
+ * Applies NFKC normalization to defeat Unicode homoglyph evasion.
  * Returns a new Finding[] (never mutates input).
  */
 export function detectPromptInjection(text: string): Finding[] {
   if (!text) return [];
+  text = text.normalize("NFKC");
 
   const findings: Finding[] = [];
 

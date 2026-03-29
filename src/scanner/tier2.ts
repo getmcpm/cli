@@ -17,7 +17,7 @@ import type { Finding } from "./tier1.js";
  * Matches patterns like "io.github.owner/repo-name".
  */
 const SERVER_NAME_RE =
-  /^[a-zA-Z0-9][a-zA-Z0-9._-]*\/[a-zA-Z0-9][a-zA-Z0-9._-]*$/;
+  /^[a-zA-Z0-9][a-zA-Z0-9._-]*[a-zA-Z0-9]\/[a-zA-Z0-9][a-zA-Z0-9._-]*[a-zA-Z0-9]$/;
 
 /**
  * Validate a server name before passing it to the external scanner.
@@ -68,7 +68,10 @@ async function defaultExec(cmd: string, args: string[]): Promise<ExecResult> {
   const execFileAsync = promisify(execFile);
 
   try {
-    const { stdout } = await execFileAsync(cmd, args, { encoding: "utf8" });
+    const { stdout } = await execFileAsync(cmd, args, {
+      encoding: "utf8",
+      timeout: 30_000,
+    });
     return { stdout: stdout ?? "", exitCode: 0 };
   } catch (err: unknown) {
     const execErr = err as { stdout?: string; code?: number | string };

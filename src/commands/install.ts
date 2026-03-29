@@ -70,16 +70,44 @@ export function validateIdentifier(identifier: string, registryType: string): vo
   }
 }
 
-const DANGEROUS_FLAGS = ["--eval", "--require", "--inspect", "-e", "--import"];
+/**
+ * Allowlist of safe runtime argument patterns.
+ * Only arguments matching one of these patterns are permitted.
+ * This is an allowlist (not a blocklist) because new Node.js flags like
+ * --loader, --experimental-loader, etc. can enable arbitrary code execution.
+ */
+const SAFE_ARG_PATTERNS: readonly RegExp[] = [
+  /^--port=\d+$/,
+  /^--host=[\w.-]+$/,
+  /^--transport=(stdio|sse|streamable-http)$/,
+  /^--log-level=(debug|info|warn|error|silent)$/,
+  /^--config=[\w./-]+$/,
+  /^--dir=[\w./-]+$/,
+  /^--directory=[\w./-]+$/,
+  /^--path=[\w./-]+$/,
+  /^--verbose$/,
+  /^--quiet$/,
+  /^--debug$/,
+  /^--stdio$/,
+  /^--json$/,
+  /^--yes$/,
+  /^--no-color$/,
+  /^--version$/,
+  /^--help$/,
+  // Bare positional arguments (no dashes, no path traversal)
+  /^[a-zA-Z0-9][\w.@/-]*$/,
+];
 
 /**
- * Validate runtime arguments from the registry.
- * Rejects flags that could cause arbitrary code execution.
+ * Validate runtime arguments from the registry using an allowlist approach.
+ * Only arguments matching known-safe patterns are permitted.
+ * Rejects everything else, including unknown flags that could enable code execution.
  */
 export function validateRuntimeArgs(args: string[]): void {
   for (const arg of args) {
-    if (DANGEROUS_FLAGS.some((f) => arg.startsWith(f)) || arg.includes("..")) {
-      throw new Error(`Rejected potentially dangerous runtime argument: "${arg}"`);
+    const isSafe = SAFE_ARG_PATTERNS.some((pattern) => pattern.test(arg));
+    if (!isSafe) {
+      throw new Error(`Rejected unrecognized runtime argument: "${arg}"`);
     }
   }
 }

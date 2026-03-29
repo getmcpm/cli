@@ -59,10 +59,26 @@ export function scanTier1(entry: ServerEntry): Finding[] {
   const { server } = entry;
   const allFindings: Finding[] = [];
 
-  // --- 1. Scan server description for secrets and prompt injection ---
-  if (server.description) {
-    allFindings.push(...detectSecrets(server.description));
-    allFindings.push(...detectPromptInjection(server.description));
+  // --- 1. Scan server description and title for secrets and prompt injection ---
+  for (const text of [server.description, server.title].filter(Boolean)) {
+    allFindings.push(...detectSecrets(text!));
+    allFindings.push(...detectPromptInjection(text!));
+  }
+
+  // --- 1b. Scan remote header descriptions for injection ---
+  for (const remote of server.remotes ?? []) {
+    for (const header of remote.headers ?? []) {
+      if (header.description) {
+        allFindings.push(...detectPromptInjection(header.description));
+      }
+    }
+  }
+
+  // --- 1c. Scan runtimeArguments for injection ---
+  for (const pkg of server.packages) {
+    for (const arg of pkg.runtimeArguments ?? []) {
+      allFindings.push(...detectPromptInjection(arg));
+    }
   }
 
   // --- 2. Scan package env vars for secrets and exfil args ---
