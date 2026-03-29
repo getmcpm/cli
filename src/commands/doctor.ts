@@ -189,29 +189,7 @@ import { access } from "fs/promises";
 import { execFile } from "child_process";
 import { detectInstalledClients as _detectClients } from "../config/detector.js";
 import { getConfigPath as _getConfigPath, CLIENT_IDS } from "../config/paths.js";
-import {
-  ClaudeDesktopAdapter,
-  CursorAdapter,
-  VSCodeAdapter,
-  WindsurfAdapter,
-} from "../config/index.js";
-
-function getAdapterDefault(clientId: ClientId): ConfigAdapter {
-  switch (clientId) {
-    case "claude-desktop":
-      return new ClaudeDesktopAdapter();
-    case "cursor":
-      return new CursorAdapter();
-    case "vscode":
-      return new VSCodeAdapter();
-    case "windsurf":
-      return new WindsurfAdapter();
-    default: {
-      const _never: never = clientId;
-      throw new Error(`Unknown clientId: ${String(_never)}`);
-    }
-  }
-}
+import { getAdapter as getAdapterDefault } from "../config/index.js";
 
 async function checkConfigExistsDefault(clientId: ClientId): Promise<boolean> {
   try {

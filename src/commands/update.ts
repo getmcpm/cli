@@ -286,36 +286,10 @@ export function registerUpdateCommand(program: Command): void {
       const { RegistryClient } = await import("../registry/client.js");
       const { scanTier1 } = await import("../scanner/tier1.js");
       const { computeTrustScore } = await import("../scanner/trust-score.js");
-      const {
-        ClaudeDesktopAdapter,
-        CursorAdapter,
-        VSCodeAdapter,
-        WindsurfAdapter,
-        getConfigPath,
-      } = await import("../config/index.js");
-      const readline = await import("readline");
+      const { getAdapter: getAdapterDefault, getConfigPath } = await import("../config/index.js");
+      const { createConfirm } = await import("../utils/confirm.js");
 
       const client = new RegistryClient();
-
-      function getAdapterDefault(clientId: ClientId): ConfigAdapter {
-        switch (clientId) {
-          case "claude-desktop": return new ClaudeDesktopAdapter();
-          case "cursor": return new CursorAdapter();
-          case "vscode": return new VSCodeAdapter();
-          case "windsurf": return new WindsurfAdapter();
-          default: throw new Error(`Unknown clientId: ${String(clientId)}`);
-        }
-      }
-
-      function createConfirm(message: string): Promise<boolean> {
-        return new Promise((resolve) => {
-          const rl = readline.default.createInterface({ input: process.stdin, output: process.stdout });
-          rl.question(`${message} [y/N] `, (answer) => {
-            rl.close();
-            resolve(answer.trim().toLowerCase() === "y");
-          });
-        });
-      }
 
       const deps: UpdateDeps = {
         getInstalledServers,
@@ -326,7 +300,7 @@ export function registerUpdateCommand(program: Command): void {
         getConfigPath,
         scanTier1,
         computeTrustScore,
-        confirm: createConfirm,
+        confirm: createConfirm(),
         output: (text) => process.stdout.write(text + "\n"),
       };
 

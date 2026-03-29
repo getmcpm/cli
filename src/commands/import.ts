@@ -270,27 +270,12 @@ export function registerImportCommand(program: Command): void {
     .action(async (opts: { yes?: boolean; client?: string }) => {
       const { detectInstalledClients } = await import("../config/detector.js");
       const { getConfigPath } = await import("../config/paths.js");
-      const {
-        ClaudeDesktopAdapter,
-        CursorAdapter,
-        VSCodeAdapter,
-        WindsurfAdapter,
-      } = await import("../config/index.js");
+      const { getAdapter } = await import("../config/index.js");
       const { getInstalledServers, addInstalledServer } = await import("../store/servers.js");
       const { readJson } = await import("../store/index.js");
       const { confirm } = await import("@inquirer/prompts");
       const path = await import("path");
       const os = await import("os");
-
-      function getAdapter(clientId: ClientId): ConfigAdapter {
-        switch (clientId) {
-          case "claude-desktop": return new ClaudeDesktopAdapter();
-          case "cursor": return new CursorAdapter();
-          case "vscode": return new VSCodeAdapter();
-          case "windsurf": return new WindsurfAdapter();
-          default: throw new Error(`Unknown clientId: ${String(clientId)}`);
-        }
-      }
 
       async function storeExists(): Promise<boolean> {
         const storePath = path.join(os.homedir(), ".mcpm", "servers.json");

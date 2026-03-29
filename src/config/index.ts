@@ -10,3 +10,4 @@ export { ClaudeDesktopAdapter } from "./adapters/claude-desktop.js";
 export { CursorAdapter } from "./adapters/cursor.js";
 export { VSCodeAdapter } from "./adapters/vscode.js";
 export { WindsurfAdapter } from "./adapters/windsurf.js";
+export { getAdapter } from "./adapters/factory.js";

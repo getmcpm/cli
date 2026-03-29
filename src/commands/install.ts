@@ -490,43 +490,8 @@ import { addInstalledServer as _addToStore } from "../store/servers.js";
 import { scanTier1 as _scanTier1 } from "../scanner/tier1.js";
 import { checkScannerAvailable as _checkScannerAvailable, scanTier2 as _scanTier2 } from "../scanner/tier2.js";
 import { computeTrustScore as _computeTrustScore } from "../scanner/trust-score.js";
-import {
-  ClaudeDesktopAdapter,
-  CursorAdapter,
-  VSCodeAdapter,
-  WindsurfAdapter,
-} from "../config/index.js";
-import readline from "readline";
-
-function getAdapterDefault(clientId: ClientId): ConfigAdapter {
-  switch (clientId) {
-    case "claude-desktop":
-      return new ClaudeDesktopAdapter();
-    case "cursor":
-      return new CursorAdapter();
-    case "vscode":
-      return new VSCodeAdapter();
-    case "windsurf":
-      return new WindsurfAdapter();
-    default: {
-      const _never: never = clientId;
-      throw new Error(`Unknown clientId: ${String(_never)}`);
-    }
-  }
-}
-
-function createConfirm(message: string): Promise<boolean> {
-  return new Promise((resolve) => {
-    const rl = readline.createInterface({
-      input: process.stdin,
-      output: process.stdout,
-    });
-    rl.question(`${message} [y/N] `, (answer) => {
-      rl.close();
-      resolve(answer.trim().toLowerCase() === "y");
-    });
-  });
-}
+import { getAdapter as getAdapterDefault } from "../config/index.js";
+import { createConfirm } from "../utils/confirm.js";
 
 async function promptEnvVarsDefault(
   vars: EnvVar[]
@@ -591,7 +556,7 @@ export function registerInstallCommand(program: Command): void {
         scanTier2: (serverName: string) => _scanTier2(serverName),
         computeTrustScore: _computeTrustScore,
         addToStore: _addToStore,
-        confirm: createConfirm,
+        confirm: createConfirm(),
         promptEnvVars: promptEnvVarsDefault,
         output: (text: string) => process.stdout.write(text + "\n"),
       };
