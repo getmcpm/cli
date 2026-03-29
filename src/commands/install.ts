@@ -340,7 +340,7 @@ export async function handleInstall(
     for (const clientId of targetClients) {
       const adapter = getAdapter(clientId);
       const configPath = getConfigPath(clientId);
-      const existing = await adapter.listServers(configPath);
+      const existing = await adapter.read(configPath);
       if (Object.prototype.hasOwnProperty.call(existing, name)) {
         throw new Error(
           `Server '${name}' is already installed in ${clientId}. Use --force to overwrite.`
