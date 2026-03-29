@@ -144,12 +144,11 @@ export async function handleImport(
     throw new Error(`Client "${options.client}" is not installed on this machine.`);
   }
 
-  // Read servers from each client
-  const discovered: DiscoveredServer[] = [];
-  for (const clientId of clientsToScan) {
-    const servers = await readClientServers(clientId, deps);
-    discovered.push(...servers);
-  }
+  // Read servers from each client — in parallel
+  const perClientResults = await Promise.all(
+    clientsToScan.map((clientId) => readClientServers(clientId, deps))
+  );
+  const discovered: DiscoveredServer[] = perClientResults.flat();
 
   // De-duplicate by server name
   const uniqueServers = deduplicateServers(discovered);
@@ -237,11 +236,10 @@ export async function checkFirstRun(deps: ImportDeps): Promise<void> {
     return;
   }
 
-  const discovered: DiscoveredServer[] = [];
-  for (const clientId of clients) {
-    const servers = await readClientServers(clientId, deps);
-    discovered.push(...servers);
-  }
+  const perClientResults = await Promise.all(
+    clients.map((clientId) => readClientServers(clientId, deps))
+  );
+  const discovered: DiscoveredServer[] = perClientResults.flat();
 
   const uniqueServers = deduplicateServers(discovered);
   if (uniqueServers.length === 0) {

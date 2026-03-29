@@ -90,44 +90,56 @@ export async function handleAudit(
   // Check Tier 2 scanner availability once
   const hasExternalScanner = await checkScannerAvailable();
 
-  const results: AuditResult[] = [];
+  const auditSettled = await Promise.allSettled(
+    servers.map(async (installedServer): Promise<AuditResult> => {
+      let entry: ServerEntry;
+      try {
+        entry = await getServer(installedServer.name);
+      } catch {
+        return {
+          name: installedServer.name,
+          score: { score: 0, maxPossible: 80, level: "risky", breakdown: { healthCheck: 0, staticScan: 0, externalScan: 0, registryMeta: 0 } },
+          findings: [],
+          error: "Registry unavailable — could not fetch metadata",
+        };
+      }
 
-  for (const installedServer of servers) {
-    let entry: ServerEntry;
-    try {
-      entry = await getServer(installedServer.name);
-    } catch {
-      results.push({
-        name: installedServer.name,
-        score: { score: 0, maxPossible: 80, level: "risky", breakdown: { healthCheck: 0, staticScan: 0, externalScan: 0, registryMeta: 0 } },
-        findings: [],
-        error: "Registry unavailable — could not fetch metadata",
+      // Run Tier 1 scan
+      const tier1Findings = scanTier1(entry);
+
+      // Run Tier 2 scan if available
+      const tier2Findings = hasExternalScanner ? await scanTier2(installedServer.name) : [];
+
+      const allFindings = [...tier1Findings, ...tier2Findings];
+
+      const official = entry._meta?.["io.modelcontextprotocol.registry/official"] ?? {};
+      const trustScore = computeTrustScore({
+        findings: allFindings,
+        healthCheckPassed: null,
+        hasExternalScanner,
+        registryMeta: {
+          isVerifiedPublisher: official?.status === "active",
+          publishedAt: official?.publishedAt,
+          downloadCount: undefined,
+        },
       });
-      continue;
+
+      return { name: installedServer.name, score: trustScore, findings: allFindings };
+    })
+  );
+
+  const results: AuditResult[] = auditSettled.map((settled, i) => {
+    if (settled.status === "fulfilled") {
+      return settled.value;
     }
-
-    // Run Tier 1 scan
-    const tier1Findings = scanTier1(entry);
-
-    // Run Tier 2 scan if available
-    const tier2Findings = hasExternalScanner ? await scanTier2(installedServer.name) : [];
-
-    const allFindings = [...tier1Findings, ...tier2Findings];
-
-    const official = entry._meta?.["io.modelcontextprotocol.registry/official"] ?? {};
-    const trustScore = computeTrustScore({
-      findings: allFindings,
-      healthCheckPassed: null,
-      hasExternalScanner,
-      registryMeta: {
-        isVerifiedPublisher: official?.status === "active",
-        publishedAt: official?.publishedAt,
-        downloadCount: undefined,
-      },
-    });
-
-    results.push({ name: installedServer.name, score: trustScore, findings: allFindings });
-  }
+    // Unexpected rejection (e.g. computeTrustScore threw) — treat as risky
+    return {
+      name: servers[i]!.name,
+      score: { score: 0, maxPossible: 80, level: "risky" as const, breakdown: { healthCheck: 0, staticScan: 0, externalScan: 0, registryMeta: 0 } },
+      findings: [],
+      error: `Unexpected error: ${String(settled.reason)}`,
+    };
+  });
 
   spinner.stop();
 

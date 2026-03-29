@@ -85,44 +85,49 @@ export async function handleUpdate(
 
   const spinner = ora({ text: "Checking for updates...", isSilent: !process.stdout.isTTY }).start();
 
-  // Fetch current metadata from registry for all servers
-  const results: UpdateResult[] = [];
+  // Fetch current metadata from registry for all servers — in parallel
+  type FetchOutcome =
+    | { kind: "ok"; installed: InstalledServer; entry: ServerEntry }
+    | { kind: "error"; installed: InstalledServer; error: string };
 
-  for (const installed of servers) {
-    let entry: ServerEntry;
-    try {
-      entry = await getServer(installed.name);
-    } catch {
-      results.push({
-        name: installed.name,
-        oldVersion: installed.version,
-        newVersion: installed.version,
-        updated: false,
-        error: "Registry unavailable — could not fetch metadata",
-      });
-      continue;
+  const fetchSettled = await Promise.allSettled(
+    servers.map(async (installed): Promise<FetchOutcome> => {
+      try {
+        const entry = await getServer(installed.name);
+        return { kind: "ok", installed, entry };
+      } catch {
+        return { kind: "error", installed, error: "Registry unavailable — could not fetch metadata" };
+      }
+    })
+  );
+
+  // Build the entry map and initial results list from settled outcomes
+  const entryMap = new Map<string, ServerEntry>();
+  const results: UpdateResult[] = fetchSettled.map((settled) => {
+    if (settled.status === "rejected") {
+      // Should not happen — the async fn above never rejects — but guard anyway
+      return { name: "unknown", oldVersion: "", newVersion: "", updated: false, error: String(settled.reason) };
     }
-
-    const newVersion = entry.server.version;
-    const hasUpdate = newVersion !== installed.version;
-
-    results.push({
+    const outcome = settled.value;
+    if (outcome.kind === "error") {
+      return {
+        name: outcome.installed.name,
+        oldVersion: outcome.installed.version,
+        newVersion: outcome.installed.version,
+        updated: false,
+        error: outcome.error,
+      };
+    }
+    const { installed, entry } = outcome;
+    entryMap.set(installed.name, entry);
+    return {
       name: installed.name,
       oldVersion: installed.version,
-      newVersion,
+      newVersion: entry.server.version,
       updated: false,
-      trustScore: hasUpdate ? undefined : undefined,
       error: undefined,
-    });
-
-    // Store the entry for later reference (used in update flow)
-    const lastResult = results[results.length - 1];
-    // Attach entry reference using a closure capture below
-    if (hasUpdate) {
-      // Tag this result so we know it has an update
-      (lastResult as UpdateResult & { _entry?: ServerEntry })._entry = entry;
-    }
-  }
+    };
+  });
 
   spinner.stop();
 
@@ -196,8 +201,7 @@ export async function handleUpdate(
 
   // Perform updates
   for (const r of withUpdates) {
-    const resultWithEntry = r as UpdateResult & { _entry?: ServerEntry };
-    const entry = resultWithEntry._entry;
+    const entry = entryMap.get(r.name);
 
     if (!entry) continue;
 

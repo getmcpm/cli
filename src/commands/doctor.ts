@@ -86,29 +86,38 @@ export async function doctorHandler(deps: DoctorDeps): Promise<number> {
     { exists: boolean; servers?: Record<string, McpServerEntry>; malformed?: boolean }
   > = {} as Record<ClientId, { exists: boolean; servers?: Record<string, McpServerEntry>; malformed?: boolean }>;
 
-  for (const clientId of ALL_CLIENTS) {
-    const exists = await checkConfigExists(clientId);
-    clientResults[clientId] = { exists };
+  const clientChecks = await Promise.all(
+    ALL_CLIENTS.map(async (clientId) => {
+      const exists = await checkConfigExists(clientId);
+      if (!exists) {
+        return { clientId, result: { exists: false } as { exists: boolean; servers?: Record<string, McpServerEntry>; malformed?: boolean }, issue: null as string | null };
+      }
+      const adapter = getAdapter(clientId);
+      const configPath = getConfigPath(clientId);
+      try {
+        const servers = await adapter.listServers(configPath);
+        return { clientId, result: { exists: true, servers }, issue: null as string | null };
+      } catch {
+        return {
+          clientId,
+          result: { exists: true, malformed: true } as { exists: boolean; servers?: Record<string, McpServerEntry>; malformed?: boolean },
+          issue: `Config file for ${CLIENT_LABELS[clientId]} is malformed — fix the JSON syntax.`,
+        };
+      }
+    })
+  );
 
-    if (!exists) {
+  for (const { clientId, result, issue } of clientChecks) {
+    clientResults[clientId] = result;
+    if (!result.exists) {
       output(`  ✗ ${CLIENT_LABELS[clientId]} — config not found`);
-      continue;
-    }
-
-    // Try to read/parse the config.
-    const adapter = getAdapter(clientId);
-    const configPath = getConfigPath(clientId);
-
-    try {
-      const servers = await adapter.listServers(configPath);
-      const count = Object.keys(servers).length;
+    } else if (result.malformed) {
+      output(`  ✗ ${CLIENT_LABELS[clientId]} — config malformed (JSON parse error)`);
+      if (issue) issues.push(issue);
+    } else {
+      const count = Object.keys(result.servers ?? {}).length;
       const serverWord = count === 1 ? "server" : "servers";
       output(`  ✓ ${CLIENT_LABELS[clientId]} — config found, ${count} ${serverWord}`);
-      clientResults[clientId] = { exists: true, servers };
-    } catch {
-      output(`  ✗ ${CLIENT_LABELS[clientId]} — config malformed (JSON parse error)`);
-      clientResults[clientId] = { exists: true, malformed: true };
-      issues.push(`Config file for ${CLIENT_LABELS[clientId]} is malformed — fix the JSON syntax.`);
     }
   }
 
@@ -119,12 +128,16 @@ export async function doctorHandler(deps: DoctorDeps): Promise<number> {
   output("");
   output("Runtimes:");
 
+  const runtimeChecks = await Promise.all(
+    RUNTIMES.map(async (runtime) => {
+      const available = await execCheck(runtime);
+      return { runtime, available };
+    })
+  );
+
   const runtimeAvailable: Record<string, boolean> = {};
-
-  for (const runtime of RUNTIMES) {
-    const available = await execCheck(runtime);
+  for (const { runtime, available } of runtimeChecks) {
     runtimeAvailable[runtime] = available;
-
     if (available) {
       output(`  ✓ ${runtime} available`);
     } else {
