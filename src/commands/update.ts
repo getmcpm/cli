@@ -22,6 +22,8 @@ import type { Finding } from "../scanner/tier1.js";
 import type { TrustScore, TrustScoreInput } from "../scanner/trust-score.js";
 import type { ClientId } from "../config/paths.js";
 import type { ConfigAdapter } from "../config/adapters/index.js";
+import { levelColor, extractRegistryMeta } from "../utils/format-trust.js";
+import { stdoutOutput } from "../utils/output.js";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -207,14 +209,12 @@ export async function handleUpdate(
 
     // Run trust assessment on new version
     const tier1Findings = scanTier1(entry);
-    const official = entry._meta?.["io.modelcontextprotocol.registry/official"] ?? {};
     const trustScore = computeTrustScore({
       findings: tier1Findings,
       healthCheckPassed: null,
       hasExternalScanner: false,
       registryMeta: {
-        isVerifiedPublisher: official?.status === "active",
-        publishedAt: official?.publishedAt,
+        ...extractRegistryMeta(entry),
         downloadCount: undefined,
       },
     });
@@ -241,13 +241,8 @@ export async function handleUpdate(
     updateOutcomes.set(r.name, { updated: true, trustScore });
 
     if (!isJson) {
-      const levelStr = trustScore.level === "safe"
-        ? chalk.green(trustScore.level)
-        : trustScore.level === "caution"
-          ? chalk.yellow(trustScore.level)
-          : chalk.red(trustScore.level);
       output(
-        `  ${chalk.green("✓")} Updated ${chalk.white(r.name)} to ${chalk.green(r.newVersion)} [${levelStr}]`
+        `  ${chalk.green("✓")} Updated ${chalk.white(r.name)} to ${chalk.green(r.newVersion)} [${levelColor(trustScore.level)}]`
       );
     }
   }
@@ -289,36 +284,10 @@ export function registerUpdateCommand(program: Command): void {
       const { RegistryClient } = await import("../registry/client.js");
       const { scanTier1 } = await import("../scanner/tier1.js");
       const { computeTrustScore } = await import("../scanner/trust-score.js");
-      const {
-        ClaudeDesktopAdapter,
-        CursorAdapter,
-        VSCodeAdapter,
-        WindsurfAdapter,
-        getConfigPath,
-      } = await import("../config/index.js");
-      const readline = await import("readline");
+      const { getAdapter: getAdapterDefault, getConfigPath } = await import("../config/index.js");
+      const { createConfirm } = await import("../utils/confirm.js");
 
       const client = new RegistryClient();
-
-      function getAdapterDefault(clientId: ClientId): ConfigAdapter {
-        switch (clientId) {
-          case "claude-desktop": return new ClaudeDesktopAdapter();
-          case "cursor": return new CursorAdapter();
-          case "vscode": return new VSCodeAdapter();
-          case "windsurf": return new WindsurfAdapter();
-          default: throw new Error(`Unknown clientId: ${String(clientId)}`);
-        }
-      }
-
-      function createConfirm(message: string): Promise<boolean> {
-        return new Promise((resolve) => {
-          const rl = readline.default.createInterface({ input: process.stdin, output: process.stdout });
-          rl.question(`${message} [y/N] `, (answer) => {
-            rl.close();
-            resolve(answer.trim().toLowerCase() === "y");
-          });
-        });
-      }
 
       const deps: UpdateDeps = {
         getInstalledServers,
@@ -329,8 +298,8 @@ export function registerUpdateCommand(program: Command): void {
         getConfigPath,
         scanTier1,
         computeTrustScore,
-        confirm: createConfirm,
-        output: (text) => process.stdout.write(text + "\n"),
+        confirm: createConfirm(),
+        output: stdoutOutput,
       };
 
       await handleUpdate({ yes: opts.yes, json: opts.json }, deps).catch((err: Error) => {

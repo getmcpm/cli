@@ -18,6 +18,8 @@ import type { RegistryClient } from "../registry/client.js";
 import type { ServerEntry } from "../registry/types.js";
 import type { EnvVar, Package, Remote } from "../registry/types.js";
 import { NotFoundError } from "../registry/errors.js";
+import { OFFICIAL_META_KEY } from "../utils/format-trust.js";
+import { stdoutOutput } from "../utils/output.js";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -112,7 +114,7 @@ export async function handleInfo(
   spinner.stop();
 
   const { server, _meta } = entry;
-  const official = _meta["io.modelcontextprotocol.registry/official"];
+  const official = _meta[OFFICIAL_META_KEY];
 
   // --json flag: output the full ServerEntry as JSON.
   if (options.json === true) {
@@ -196,7 +198,7 @@ export function registerInfo(program: Command): void {
       await handleInfo(
         name,
         { json: opts.json },
-        { registryClient: client, output: (text) => process.stdout.write(text + "\n") }
+        { registryClient: client, output: stdoutOutput }
       );
     });
 }

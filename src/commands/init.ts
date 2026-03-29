@@ -14,8 +14,7 @@
 
 import { Command } from "commander";
 import chalk from "chalk";
-import type { ClientId } from "../config/paths.js";
-
+import { stdoutOutput } from "../utils/output.js";
 // ---------------------------------------------------------------------------
 // Pack definitions
 // ---------------------------------------------------------------------------
@@ -165,32 +164,17 @@ export function registerInitCommand(program: Command): void {
     .option("-c, --client <id>", "Install only for this specific client")
     .action(async (pack: string | undefined, opts: { yes?: boolean; client?: string }) => {
       // Lazy import of install command to avoid circular dependency
-      const { handleInstall, resolveInstallEntry } = await import("./install.js");
+      const { handleInstall } = await import("./install.js");
       const { RegistryClient } = await import("../registry/client.js");
       const { detectInstalledClients } = await import("../config/detector.js");
       const { getConfigPath } = await import("../config/paths.js");
-      const {
-        ClaudeDesktopAdapter,
-        CursorAdapter,
-        VSCodeAdapter,
-        WindsurfAdapter,
-      } = await import("../config/index.js");
+      const { getAdapter } = await import("../config/index.js");
       const { addInstalledServer } = await import("../store/servers.js");
       const { scanTier1 } = await import("../scanner/tier1.js");
       const { checkScannerAvailable, scanTier2 } = await import("../scanner/tier2.js");
       const { computeTrustScore } = await import("../scanner/trust-score.js");
 
       const registryClient = new RegistryClient();
-
-      function getAdapter(clientId: ClientId) {
-        switch (clientId) {
-          case "claude-desktop": return new ClaudeDesktopAdapter();
-          case "cursor": return new CursorAdapter();
-          case "vscode": return new VSCodeAdapter();
-          case "windsurf": return new WindsurfAdapter();
-          default: throw new Error(`Unknown clientId: ${String(clientId)}`);
-        }
-      }
 
       async function installServer(
         name: string,
@@ -209,7 +193,7 @@ export function registerInitCommand(program: Command): void {
             checkScannerAvailable,
             scanTier2,
             computeTrustScore,
-            output: (text) => process.stdout.write(text + "\n"),
+            output: stdoutOutput,
           });
           return { success: true };
         } catch (err) {

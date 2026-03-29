@@ -19,6 +19,8 @@ import Table from "cli-table3";
 import type { ClientId } from "../config/paths.js";
 import type { ConfigAdapter, McpServerEntry } from "../config/adapters/index.js";
 import type { InstalledServer } from "../store/servers.js";
+import { formatMcpEntryCommand } from "../utils/format-entry.js";
+import { stdoutOutput } from "../utils/output.js";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -107,20 +109,6 @@ function deduplicateServers(discovered: DiscoveredServer[]): Array<{
   }));
 }
 
-/**
- * Returns the display string for a server entry's command/URL column.
- */
-function formatCommandOrUrl(entry: McpServerEntry): string {
-  if (entry.url) {
-    return entry.url;
-  }
-  if (entry.command) {
-    const argsStr = entry.args && entry.args.length > 0 ? ` ${entry.args.join(" ")}` : "";
-    return `${entry.command}${argsStr}`;
-  }
-  return "(no command)";
-}
-
 // ---------------------------------------------------------------------------
 // Core handler
 // ---------------------------------------------------------------------------
@@ -165,7 +153,7 @@ export async function handleImport(
   });
 
   for (const { name, clients, entry } of uniqueServers) {
-    table.push([clients.join(", "), name, formatCommandOrUrl(entry)]);
+    table.push([clients.join(", "), name, formatMcpEntryCommand(entry, "(no command)")]);
   }
 
   output(table.toString());
@@ -268,27 +256,12 @@ export function registerImportCommand(program: Command): void {
     .action(async (opts: { yes?: boolean; client?: string }) => {
       const { detectInstalledClients } = await import("../config/detector.js");
       const { getConfigPath } = await import("../config/paths.js");
-      const {
-        ClaudeDesktopAdapter,
-        CursorAdapter,
-        VSCodeAdapter,
-        WindsurfAdapter,
-      } = await import("../config/index.js");
+      const { getAdapter } = await import("../config/index.js");
       const { getInstalledServers, addInstalledServer } = await import("../store/servers.js");
       const { readJson } = await import("../store/index.js");
       const { confirm } = await import("@inquirer/prompts");
       const path = await import("path");
       const os = await import("os");
-
-      function getAdapter(clientId: ClientId): ConfigAdapter {
-        switch (clientId) {
-          case "claude-desktop": return new ClaudeDesktopAdapter();
-          case "cursor": return new CursorAdapter();
-          case "vscode": return new VSCodeAdapter();
-          case "windsurf": return new WindsurfAdapter();
-          default: throw new Error(`Unknown clientId: ${String(clientId)}`);
-        }
-      }
 
       async function storeExists(): Promise<boolean> {
         const storePath = path.join(os.homedir(), ".mcpm", "servers.json");
@@ -305,7 +278,7 @@ export function registerImportCommand(program: Command): void {
         addToStore: addInstalledServer,
         storeExists,
         confirm: (message: string) => confirm({ message }),
-        output: (text: string) => process.stdout.write(text + "\n"),
+        output: stdoutOutput,
       };
 
       await handleImport({ yes: opts.yes, client: opts.client }, deps).catch(

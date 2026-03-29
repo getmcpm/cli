@@ -20,6 +20,8 @@ import type { InstalledServer } from "../store/servers.js";
 import type { ServerEntry } from "../registry/types.js";
 import type { Finding } from "../scanner/tier1.js";
 import type { TrustScore, TrustScoreInput } from "../scanner/trust-score.js";
+import { levelColor, scoreBar, extractRegistryMeta } from "../utils/format-trust.js";
+import { stdoutOutput } from "../utils/output.js";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -44,24 +46,6 @@ interface AuditResult {
   score: TrustScore;
   findings: Finding[];
   error?: string;
-}
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-function levelColor(level: TrustScore["level"]): string {
-  if (level === "safe") return chalk.green(level);
-  if (level === "caution") return chalk.yellow(level);
-  return chalk.red(level);
-}
-
-function scoreBar(score: number, maxPossible: number): string {
-  const ratio = score / maxPossible;
-  const filled = Math.round(ratio * 10);
-  const bar = "█".repeat(filled) + "░".repeat(10 - filled);
-  const color = ratio >= 0.8 ? chalk.green : ratio >= 0.5 ? chalk.yellow : chalk.red;
-  return `${color(bar)} ${score}/${maxPossible}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -90,56 +74,42 @@ export async function handleAudit(
   // Check Tier 2 scanner availability once
   const hasExternalScanner = await checkScannerAvailable();
 
-  const auditSettled = await Promise.allSettled(
-    servers.map(async (installedServer): Promise<AuditResult> => {
-      let entry: ServerEntry;
-      try {
-        entry = await getServer(installedServer.name);
-      } catch {
-        return {
-          name: installedServer.name,
-          score: { score: 0, maxPossible: 80, level: "risky", breakdown: { healthCheck: 0, staticScan: 0, externalScan: 0, registryMeta: 0 } },
-          findings: [],
-          error: "Registry unavailable — could not fetch metadata",
-        };
-      }
+  const results: AuditResult[] = [];
 
-      // Run Tier 1 scan
-      const tier1Findings = scanTier1(entry);
-
-      // Run Tier 2 scan if available
-      const tier2Findings = hasExternalScanner ? await scanTier2(installedServer.name) : [];
-
-      const allFindings = [...tier1Findings, ...tier2Findings];
-
-      const official = entry._meta?.["io.modelcontextprotocol.registry/official"] ?? {};
-      const trustScore = computeTrustScore({
-        findings: allFindings,
-        healthCheckPassed: null,
-        hasExternalScanner,
-        registryMeta: {
-          isVerifiedPublisher: official?.status === "active",
-          publishedAt: official?.publishedAt,
-          downloadCount: undefined,
-        },
+  for (const installedServer of servers) {
+    let entry: ServerEntry;
+    try {
+      entry = await getServer(installedServer.name);
+    } catch {
+      results.push({
+        name: installedServer.name,
+        score: { score: 0, maxPossible: 80, level: "risky", breakdown: { healthCheck: 0, staticScan: 0, externalScan: 0, registryMeta: 0 } },
+        findings: [],
+        error: "Registry unavailable — could not fetch metadata",
       });
-
-      return { name: installedServer.name, score: trustScore, findings: allFindings };
-    })
-  );
-
-  const results: AuditResult[] = auditSettled.map((settled, i) => {
-    if (settled.status === "fulfilled") {
-      return settled.value;
+      continue;
     }
-    // Unexpected rejection (e.g. computeTrustScore threw) — treat as risky
-    return {
-      name: servers[i]!.name,
-      score: { score: 0, maxPossible: 80, level: "risky" as const, breakdown: { healthCheck: 0, staticScan: 0, externalScan: 0, registryMeta: 0 } },
-      findings: [],
-      error: `Unexpected error: ${String(settled.reason)}`,
-    };
-  });
+
+    // Run Tier 1 scan
+    const tier1Findings = scanTier1(entry);
+
+    // Run Tier 2 scan if available
+    const tier2Findings = hasExternalScanner ? await scanTier2(installedServer.name) : [];
+
+    const allFindings = [...tier1Findings, ...tier2Findings];
+
+    const trustScore = computeTrustScore({
+      findings: allFindings,
+      healthCheckPassed: null,
+      hasExternalScanner,
+      registryMeta: {
+        ...extractRegistryMeta(entry),
+        downloadCount: undefined,
+      },
+    });
+
+    results.push({ name: installedServer.name, score: trustScore, findings: allFindings });
+  }
 
   spinner.stop();
 
@@ -181,7 +151,7 @@ export async function handleAudit(
     } else {
       table.push([
         chalk.white(result.name),
-        scoreBar(result.score.score, result.score.maxPossible),
+        `${scoreBar(result.score.score, result.score.maxPossible, 10)} ${result.score.score}/${result.score.maxPossible}`,
         levelColor(result.score.level),
         String(result.findings.length),
       ]);
@@ -239,7 +209,7 @@ export function registerAuditCommand(program: Command): void {
         checkScannerAvailable,
         scanTier2,
         computeTrustScore,
-        output: (text) => process.stdout.write(text + "\n"),
+        output: stdoutOutput,
       };
 
       const exitCode = await handleAudit({ json: opts.json }, deps).catch((err: Error) => {

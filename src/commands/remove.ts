@@ -67,7 +67,7 @@ export async function removeHandler(
   for (const clientId of installedClients) {
     const adapter = getAdapter(clientId);
     const configPath = getConfigPath(clientId);
-    const servers = await adapter.read(configPath);
+    const servers = await adapter.listServers(configPath);
 
     if (Object.prototype.hasOwnProperty.call(servers, name)) {
       clientsWithServer.push(clientId);
@@ -123,43 +123,9 @@ import chalk from "chalk";
 import { detectInstalledClients as _detectClients } from "../config/detector.js";
 import { getConfigPath as _getConfigPath } from "../config/paths.js";
 import { removeInstalledServer as _removeFromStore } from "../store/servers.js";
-import {
-  ClaudeDesktopAdapter,
-  CursorAdapter,
-  VSCodeAdapter,
-  WindsurfAdapter,
-} from "../config/index.js";
-import readline from "readline";
-
-function getAdapterDefault(clientId: ClientId): ConfigAdapter {
-  switch (clientId) {
-    case "claude-desktop":
-      return new ClaudeDesktopAdapter();
-    case "cursor":
-      return new CursorAdapter();
-    case "vscode":
-      return new VSCodeAdapter();
-    case "windsurf":
-      return new WindsurfAdapter();
-    default: {
-      const _never: never = clientId;
-      throw new Error(`Unknown clientId: ${String(_never)}`);
-    }
-  }
-}
-
-function createConfirm(message: string): Promise<boolean> {
-  return new Promise((resolve) => {
-    const rl = readline.createInterface({
-      input: process.stdin,
-      output: process.stdout,
-    });
-    rl.question(`${message} [y/N] `, (answer) => {
-      rl.close();
-      resolve(answer.trim().toLowerCase() === "y");
-    });
-  });
-}
+import { getAdapter as getAdapterDefault } from "../config/index.js";
+import { createConfirm } from "../utils/confirm.js";
+import { stdoutOutput } from "../utils/output.js";
 
 export function registerRemoveCommand(program: Command): void {
   program
@@ -173,8 +139,8 @@ export function registerRemoveCommand(program: Command): void {
         getAdapter: getAdapterDefault,
         getConfigPath: _getConfigPath,
         removeFromStore: _removeFromStore,
-        confirm: createConfirm,
-        output: (text) => process.stdout.write(text + "\n"),
+        confirm: createConfirm(),
+        output: stdoutOutput,
       };
 
       try {

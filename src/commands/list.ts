@@ -16,6 +16,8 @@ import chalk from "chalk";
 import Table from "cli-table3";
 import type { ClientId } from "../config/paths.js";
 import type { ConfigAdapter, McpServerEntry } from "../config/adapters/index.js";
+import { formatMcpEntryCommand } from "../utils/format-entry.js";
+import { stdoutOutput } from "../utils/output.js";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -37,21 +39,6 @@ interface ServerRow {
   client: ClientId;
   serverName: string;
   entry: McpServerEntry;
-}
-
-// ---------------------------------------------------------------------------
-// Command/URL formatter — pure function
-// ---------------------------------------------------------------------------
-
-function formatCommandUrl(entry: McpServerEntry): string {
-  if (entry.url) {
-    return entry.url;
-  }
-  if (entry.command) {
-    const args = entry.args ? ` ${entry.args.join(" ")}` : "";
-    return `${entry.command}${args}`;
-  }
-  return "—";
 }
 
 // ---------------------------------------------------------------------------
@@ -122,7 +109,7 @@ export async function handleList(
     table.push([
       chalk.yellow(client),
       chalk.white(serverName),
-      chalk.dim(formatCommandUrl(entry)),
+      chalk.dim(formatMcpEntryCommand(entry)),
     ]);
   }
 
@@ -163,7 +150,7 @@ export function registerList(program: Command): void {
           detectClients: detectInstalledClients,
           getAdapter: (clientId) => adapterMap.get(clientId) as ConfigAdapter,
           getPath: getConfigPath,
-          output: (text) => process.stdout.write(text + "\n"),
+          output: stdoutOutput,
         }
       );
     });

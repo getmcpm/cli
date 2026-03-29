@@ -19,6 +19,7 @@ import type { ServerEntry, EnvVar } from "../registry/types.js";
 import type { Finding } from "../scanner/tier1.js";
 import type { TrustScore, TrustScoreInput } from "../scanner/trust-score.js";
 import type { InstalledServer } from "../store/servers.js";
+import { scoreBar, levelColor, extractRegistryMeta } from "../utils/format-trust.js";
 
 // ---------------------------------------------------------------------------
 // Identifier validation — guard against command injection
@@ -198,36 +199,17 @@ export function resolveInstallEntry(
 // formatTrustScore — pure function, rich display
 // ---------------------------------------------------------------------------
 
-const BAR_LENGTH = 20;
-const BAR_FULL = "█";
-const BAR_EMPTY = "░";
-
 /**
  * Format a trust score as a visual progress bar with breakdown details.
- * Uses chalk for colours — ANSI codes stripped in tests via regex.
  */
 export function formatTrustScore(trustScore: TrustScore): string {
   const { score, maxPossible, level, breakdown } = trustScore;
-  const ratio = score / maxPossible;
-  const filled = Math.round(ratio * BAR_LENGTH);
-  const bar = BAR_FULL.repeat(filled) + BAR_EMPTY.repeat(BAR_LENGTH - filled);
 
-  let levelLabel: string;
-  let barColour: (s: string) => string;
-
-  if (level === "safe") {
-    levelLabel = chalk.green("SAFE");
-    barColour = chalk.green;
-  } else if (level === "caution") {
-    levelLabel = chalk.yellow("CAUTION");
-    barColour = chalk.yellow;
-  } else {
-    levelLabel = chalk.red("RISKY");
-    barColour = chalk.red;
-  }
+  const levelLabel = levelColor(level.toUpperCase());
+  const bar = scoreBar(score, maxPossible);
 
   const lines: string[] = [
-    `${barColour(bar)} ${score}/${maxPossible} ${levelLabel}`,
+    `${bar} ${score}/${maxPossible} ${levelLabel}`,
     `  \u251C\u2500 Health check: ${breakdown.healthCheck > 0 ? "not yet run" : "failed or skipped"}`,
     `  \u251C\u2500 Tool descriptions: ${breakdown.staticScan === 40 ? "CLEAN (no injection patterns)" : `score ${breakdown.staticScan}/40`}`,
     `  \u251C\u2500 Package: publisher verification ${breakdown.registryMeta > 0 ? "passed" : "unverified"}`,
@@ -282,15 +264,11 @@ export async function handleInstall(
     allFindings = [...allFindings, ...tier2Findings];
   }
 
-  const official = serverEntry._meta?.["io.modelcontextprotocol.registry/official"] ?? {};
   const trustScoreInput: TrustScoreInput = {
     findings: allFindings,
     healthCheckPassed: null, // health check not yet run at this point
     hasExternalScanner: scannerAvailable,
-    registryMeta: {
-      isVerifiedPublisher: official?.status === "active",
-      publishedAt: official?.publishedAt,
-    },
+    registryMeta: extractRegistryMeta(serverEntry),
   };
 
   const trustScore = computeTrustScore(trustScoreInput);
@@ -358,14 +336,11 @@ export async function handleInstall(
   // -------------------------------------------------------------------------
   // Step 5: Check for already-installed (unless --force)
   // -------------------------------------------------------------------------
-  // When --force is not set, addServer (Step 7) will throw if the server already
-  // exists. We do an explicit pre-check here only to give a friendlier error
-  // message with the --force hint before reaching the write step.
   if (options.force !== true) {
     for (const clientId of targetClients) {
       const adapter = getAdapter(clientId);
       const configPath = getConfigPath(clientId);
-      const existing = await adapter.read(configPath);
+      const existing = await adapter.listServers(configPath);
       if (Object.prototype.hasOwnProperty.call(existing, name)) {
         throw new Error(
           `Server '${name}' is already installed in ${clientId}. Use --force to overwrite.`
@@ -389,7 +364,16 @@ export async function handleInstall(
   const resolvedEnvVars = await promptEnvVars(envVarDefs);
 
   // -------------------------------------------------------------------------
-  // Step 7: Write config to each client and record in store
+  // Step 7: Validate install path exists
+  // -------------------------------------------------------------------------
+  // This validates before writing any config
+  for (const clientId of targetClients) {
+    const entry = resolveInstallEntry(serverEntry, clientId);
+    void entry; // used in step 8 below
+  }
+
+  // -------------------------------------------------------------------------
+  // Step 8: Write config to each client and record in store
   // -------------------------------------------------------------------------
   const installedClients: ClientId[] = [];
 
@@ -467,43 +451,9 @@ import { addInstalledServer as _addToStore } from "../store/servers.js";
 import { scanTier1 as _scanTier1 } from "../scanner/tier1.js";
 import { checkScannerAvailable as _checkScannerAvailable, scanTier2 as _scanTier2 } from "../scanner/tier2.js";
 import { computeTrustScore as _computeTrustScore } from "../scanner/trust-score.js";
-import {
-  ClaudeDesktopAdapter,
-  CursorAdapter,
-  VSCodeAdapter,
-  WindsurfAdapter,
-} from "../config/index.js";
-import readline from "readline";
-
-function getAdapterDefault(clientId: ClientId): ConfigAdapter {
-  switch (clientId) {
-    case "claude-desktop":
-      return new ClaudeDesktopAdapter();
-    case "cursor":
-      return new CursorAdapter();
-    case "vscode":
-      return new VSCodeAdapter();
-    case "windsurf":
-      return new WindsurfAdapter();
-    default: {
-      const _never: never = clientId;
-      throw new Error(`Unknown clientId: ${String(_never)}`);
-    }
-  }
-}
-
-function createConfirm(message: string): Promise<boolean> {
-  return new Promise((resolve) => {
-    const rl = readline.createInterface({
-      input: process.stdin,
-      output: process.stdout,
-    });
-    rl.question(`${message} [y/N] `, (answer) => {
-      rl.close();
-      resolve(answer.trim().toLowerCase() === "y");
-    });
-  });
-}
+import { getAdapter as getAdapterDefault } from "../config/index.js";
+import { createConfirm } from "../utils/confirm.js";
+import { stdoutOutput } from "../utils/output.js";
 
 async function promptEnvVarsDefault(
   vars: EnvVar[]
@@ -568,9 +518,9 @@ export function registerInstallCommand(program: Command): void {
         scanTier2: (serverName: string) => _scanTier2(serverName),
         computeTrustScore: _computeTrustScore,
         addToStore: _addToStore,
-        confirm: createConfirm,
+        confirm: createConfirm(),
         promptEnvVars: promptEnvVarsDefault,
-        output: (text: string) => process.stdout.write(text + "\n"),
+        output: stdoutOutput,
       };
 
       try {
