@@ -192,6 +192,14 @@ When community quality signals require a backend (user reviews, aggregated telem
 - [ ] Automated demo GIF generation (VHS/asciinema)
 - [x] Published to npm as `@getmcpm/cli`, bin command `mcpm`
 
+### V1.1 (agent-native)
+
+- [ ] `mcpm serve` — run mcpm itself as an MCP server, exposing search/install/audit/list
+      as structured tool calls. Any AI agent can manage MCP servers programmatically.
+- [ ] Tools: `mcpm_search`, `mcpm_install`, `mcpm_info`, `mcpm_audit`, `mcpm_list`, `mcpm_doctor`
+- [ ] Publish mcpm's own MCP server to the registry (dogfood the ecosystem)
+- [ ] "I need to do X" → agent searches, evaluates trust, installs the right server
+
 ### V1.5 (community trust)
 
 - [ ] `mcpm publish` — submit to official registry with mandatory security scan gate
@@ -208,11 +216,6 @@ When community quality signals require a backend (user reviews, aggregated telem
 - [ ] AI-generated docs (Claude reads source → writes human-friendly tool docs)
 - [ ] Compatibility matrix (auto-tested)
 - [ ] Semver-aware version resolution + lock files
-
-### V3 (AI-powered discovery)
-
-- [ ] "I need to do X" → mcpm recommends servers, configures them, tests they work
-- [ ] AI agent that assembles your MCP toolchain from natural language
 
 ---
 
