@@ -375,11 +375,14 @@ export async function handleInstall(
   // -------------------------------------------------------------------------
   // Step 5: Check for already-installed (unless --force)
   // -------------------------------------------------------------------------
+  // When --force is not set, addServer (Step 7) will throw if the server already
+  // exists. We do an explicit pre-check here only to give a friendlier error
+  // message with the --force hint before reaching the write step.
   if (options.force !== true) {
     for (const clientId of targetClients) {
       const adapter = getAdapter(clientId);
       const configPath = getConfigPath(clientId);
-      const existing = await adapter.listServers(configPath);
+      const existing = await adapter.read(configPath);
       if (Object.prototype.hasOwnProperty.call(existing, name)) {
         throw new Error(
           `Server '${name}' is already installed in ${clientId}. Use --force to overwrite.`
@@ -403,16 +406,7 @@ export async function handleInstall(
   const resolvedEnvVars = await promptEnvVars(envVarDefs);
 
   // -------------------------------------------------------------------------
-  // Step 7: Validate install path exists
-  // -------------------------------------------------------------------------
-  // This validates before writing any config
-  for (const clientId of targetClients) {
-    const entry = resolveInstallEntry(serverEntry, clientId);
-    void entry; // used in step 8 below
-  }
-
-  // -------------------------------------------------------------------------
-  // Step 8: Write config to each client and record in store
+  // Step 7: Write config to each client and record in store
   // -------------------------------------------------------------------------
   const installedClients: ClientId[] = [];
 

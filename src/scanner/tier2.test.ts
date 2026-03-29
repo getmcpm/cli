@@ -3,8 +3,10 @@
  *
  * Strategy:
  * - execImpl is always a vi.fn() — NO real child processes.
- * - Tests cover: scanner available, scanner not available, parse failure,
- *   partial output, empty output, findings returned, graceful degradation.
+ * - Tests cover: parse failure, partial output, empty output, findings returned,
+ *   graceful degradation.
+ * - Callers are responsible for calling checkScannerAvailable() before scanTier2().
+ *   scanTier2() no longer calls checkScannerAvailable() internally.
  */
 
 import { describe, it, expect, vi } from "vitest";
@@ -45,18 +47,18 @@ describe("checkScannerAvailable", () => {
 });
 
 // ---------------------------------------------------------------------------
-// scanTier2 — scanner not available
+// scanTier2 — graceful degradation when scan call itself fails
+// (callers are responsible for checking availability before calling scanTier2)
 // ---------------------------------------------------------------------------
 
-describe("scanTier2 — scanner not available", () => {
-  it("returns empty findings when exec rejects (not installed)", async () => {
+describe("scanTier2 — scan call fails gracefully", () => {
+  it("returns empty findings when the scan exec rejects (e.g. process killed)", async () => {
     const execImpl = vi.fn().mockRejectedValue(new Error("command not found"));
     const findings = await scanTier2("io.github.acme/server", { execImpl });
     expect(findings).toEqual([]);
   });
 
-  it("returns empty findings when --version returns non-zero", async () => {
-    // First call is --version check (fails), should short-circuit
+  it("returns empty findings when scan exits non-zero on first call", async () => {
     const execImpl = vi.fn().mockResolvedValue({ stdout: "", exitCode: 1 });
     const findings = await scanTier2("io.github.acme/server", { execImpl });
     expect(findings).toEqual([]);
@@ -71,7 +73,6 @@ describe("scanTier2 — scanner available, clean server", () => {
   it("returns empty findings when mcp-scan reports no issues", async () => {
     const execImpl = vi
       .fn()
-      .mockResolvedValueOnce({ stdout: "mcp-scan 0.1.0", exitCode: 0 }) // --version
       .mockResolvedValueOnce({ stdout: JSON.stringify({ findings: [] }), exitCode: 0 }); // scan
     const findings = await scanTier2("io.github.acme/clean-server", { execImpl });
     expect(findings).toEqual([]);
@@ -80,11 +81,10 @@ describe("scanTier2 — scanner available, clean server", () => {
   it("calls mcp-scan with the server name", async () => {
     const execImpl = vi
       .fn()
-      .mockResolvedValueOnce({ stdout: "mcp-scan 0.1.0", exitCode: 0 })
       .mockResolvedValueOnce({ stdout: JSON.stringify({ findings: [] }), exitCode: 0 });
     await scanTier2("io.github.acme/my-server", { execImpl });
-    expect(execImpl).toHaveBeenCalledTimes(2);
-    const [, args] = execImpl.mock.calls[1] as [string, string[]];
+    expect(execImpl).toHaveBeenCalledTimes(1);
+    const [, args] = execImpl.mock.calls[0] as [string, string[]];
     expect(args.join(" ")).toContain("io.github.acme/my-server");
   });
 });
@@ -108,7 +108,6 @@ describe("scanTier2 — scanner available, findings returned", () => {
   it("returns findings mapped to Finding objects", async () => {
     const execImpl = vi
       .fn()
-      .mockResolvedValueOnce({ stdout: "mcp-scan 0.1.0", exitCode: 0 })
       .mockResolvedValueOnce({ stdout: mcpScanOutput, exitCode: 0 });
     const findings = await scanTier2("io.github.acme/bad-server", { execImpl });
     expect(findings.length).toBeGreaterThan(0);
@@ -117,7 +116,6 @@ describe("scanTier2 — scanner available, findings returned", () => {
   it("each finding has required fields", async () => {
     const execImpl = vi
       .fn()
-      .mockResolvedValueOnce({ stdout: "mcp-scan 0.1.0", exitCode: 0 })
       .mockResolvedValueOnce({ stdout: mcpScanOutput, exitCode: 0 });
     const findings = await scanTier2("io.github.acme/bad-server", { execImpl });
     for (const f of findings) {
@@ -137,7 +135,6 @@ describe("scanTier2 — unparseable output", () => {
   it("returns empty findings when output is not valid JSON", async () => {
     const execImpl = vi
       .fn()
-      .mockResolvedValueOnce({ stdout: "mcp-scan 0.1.0", exitCode: 0 })
       .mockResolvedValueOnce({ stdout: "not json at all!!!", exitCode: 0 });
     const findings = await scanTier2("io.github.acme/server", { execImpl });
     expect(findings).toEqual([]);
@@ -146,7 +143,6 @@ describe("scanTier2 — unparseable output", () => {
   it("returns empty findings when output is empty string", async () => {
     const execImpl = vi
       .fn()
-      .mockResolvedValueOnce({ stdout: "mcp-scan 0.1.0", exitCode: 0 })
       .mockResolvedValueOnce({ stdout: "", exitCode: 0 });
     const findings = await scanTier2("io.github.acme/server", { execImpl });
     expect(findings).toEqual([]);
@@ -155,7 +151,6 @@ describe("scanTier2 — unparseable output", () => {
   it("returns empty findings when JSON has no findings field", async () => {
     const execImpl = vi
       .fn()
-      .mockResolvedValueOnce({ stdout: "mcp-scan 0.1.0", exitCode: 0 })
       .mockResolvedValueOnce({ stdout: JSON.stringify({ results: [] }), exitCode: 0 });
     const findings = await scanTier2("io.github.acme/server", { execImpl });
     expect(findings).toEqual([]);
@@ -164,7 +159,6 @@ describe("scanTier2 — unparseable output", () => {
   it("returns empty findings when scan exits non-zero", async () => {
     const execImpl = vi
       .fn()
-      .mockResolvedValueOnce({ stdout: "mcp-scan 0.1.0", exitCode: 0 })
       .mockResolvedValueOnce({ stdout: "error: something failed", exitCode: 2 });
     const findings = await scanTier2("io.github.acme/server", { execImpl });
     expect(findings).toEqual([]);
@@ -173,7 +167,6 @@ describe("scanTier2 — unparseable output", () => {
   it("returns empty findings when scan call itself throws", async () => {
     const execImpl = vi
       .fn()
-      .mockResolvedValueOnce({ stdout: "mcp-scan 0.1.0", exitCode: 0 })
       .mockRejectedValueOnce(new Error("process killed"));
     const findings = await scanTier2("io.github.acme/server", { execImpl });
     expect(findings).toEqual([]);
@@ -188,10 +181,8 @@ describe("scanTier2 — immutability", () => {
   it("returns a new array on each call", async () => {
     const execImpl = vi
       .fn()
-      .mockResolvedValue({ stdout: "mcp-scan 0.1.0", exitCode: 0 });
+      .mockResolvedValue({ stdout: JSON.stringify({ findings: [] }), exitCode: 0 });
     const a = await scanTier2("io.github.acme/server", { execImpl });
-    // New mock for second call
-    execImpl.mockResolvedValue({ stdout: "mcp-scan 0.1.0", exitCode: 0 });
     const b = await scanTier2("io.github.acme/server", { execImpl });
     expect(a).not.toBe(b);
   });

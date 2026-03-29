@@ -129,11 +129,11 @@ export async function scanTier2(serverName: string, options?: Tier2Options): Pro
   // Step 1: validate server name to prevent injection
   validateServerName(serverName);
 
-  // Step 2: verify scanner is available
-  const available = await checkScannerAvailable(options);
-  if (!available) return [];
+  // NOTE: Callers are responsible for checking availability via checkScannerAvailable()
+  // before calling this function. The internal availability check was removed to avoid
+  // redundant npx --version calls on every scan.
 
-  // Step 3: run the scan
+  // Step 2: run the scan
   let stdout: string;
   try {
     const result = await exec("npx", ["@invariantlabs/mcp-scan", "--json", serverName]);

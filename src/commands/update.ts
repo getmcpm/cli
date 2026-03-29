@@ -226,9 +226,8 @@ export async function handleUpdate(
       // Server may not be in store — non-fatal
     }
 
-    // Preserve original clients from installed server list
-    const originalInstalled = (await deps.getInstalledServers().catch(() => [])) as InstalledServer[];
-    const original = originalInstalled.find((s) => s.name === r.name);
+    // Preserve original clients from installed server list (servers fetched once before this loop)
+    const original = servers.find((s) => s.name === r.name);
     const finalRecord: InstalledServer = {
       name: r.name,
       version: r.newVersion,
