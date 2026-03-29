@@ -9,3 +9,4 @@ export {
   levelColor,
   scoreBar,
 } from "./format-trust.js";
+export { formatMcpEntryCommand } from "./format-entry.js";

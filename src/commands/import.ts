@@ -19,6 +19,7 @@ import Table from "cli-table3";
 import type { ClientId } from "../config/paths.js";
 import type { ConfigAdapter, McpServerEntry } from "../config/adapters/index.js";
 import type { InstalledServer } from "../store/servers.js";
+import { formatMcpEntryCommand } from "../utils/format-entry.js";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -107,20 +108,6 @@ function deduplicateServers(discovered: DiscoveredServer[]): Array<{
   }));
 }
 
-/**
- * Returns the display string for a server entry's command/URL column.
- */
-function formatCommandOrUrl(entry: McpServerEntry): string {
-  if (entry.url) {
-    return entry.url;
-  }
-  if (entry.command) {
-    const argsStr = entry.args && entry.args.length > 0 ? ` ${entry.args.join(" ")}` : "";
-    return `${entry.command}${argsStr}`;
-  }
-  return "(no command)";
-}
-
 // ---------------------------------------------------------------------------
 // Core handler
 // ---------------------------------------------------------------------------
@@ -166,7 +153,7 @@ export async function handleImport(
   });
 
   for (const { name, clients, entry } of uniqueServers) {
-    table.push([clients.join(", "), name, formatCommandOrUrl(entry)]);
+    table.push([clients.join(", "), name, formatMcpEntryCommand(entry, "(no command)")]);
   }
 
   output(table.toString());
