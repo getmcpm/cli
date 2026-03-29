@@ -125,6 +125,7 @@ import { getConfigPath as _getConfigPath } from "../config/paths.js";
 import { removeInstalledServer as _removeFromStore } from "../store/servers.js";
 import { getAdapter as getAdapterDefault } from "../config/index.js";
 import { createConfirm } from "../utils/confirm.js";
+import { stdoutOutput } from "../utils/output.js";
 
 export function registerRemoveCommand(program: Command): void {
   program
@@ -139,7 +140,7 @@ export function registerRemoveCommand(program: Command): void {
         getConfigPath: _getConfigPath,
         removeFromStore: _removeFromStore,
         confirm: createConfirm(),
-        output: (text) => process.stdout.write(text + "\n"),
+        output: stdoutOutput,
       };
 
       try {

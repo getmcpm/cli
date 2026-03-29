@@ -23,6 +23,7 @@ import type { TrustScore, TrustScoreInput } from "../scanner/trust-score.js";
 import type { ClientId } from "../config/paths.js";
 import type { ConfigAdapter } from "../config/adapters/index.js";
 import { levelColor, extractRegistryMeta } from "../utils/format-trust.js";
+import { stdoutOutput } from "../utils/output.js";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -295,7 +296,7 @@ export function registerUpdateCommand(program: Command): void {
         scanTier1,
         computeTrustScore,
         confirm: createConfirm(),
-        output: (text) => process.stdout.write(text + "\n"),
+        output: stdoutOutput,
       };
 
       await handleUpdate({ yes: opts.yes, json: opts.json }, deps).catch((err: Error) => {

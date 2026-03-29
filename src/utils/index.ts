@@ -10,3 +10,4 @@ export {
   scoreBar,
 } from "./format-trust.js";
 export { formatMcpEntryCommand } from "./format-entry.js";
+export { stdoutOutput } from "./output.js";

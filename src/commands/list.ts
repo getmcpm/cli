@@ -17,6 +17,7 @@ import Table from "cli-table3";
 import type { ClientId } from "../config/paths.js";
 import type { ConfigAdapter, McpServerEntry } from "../config/adapters/index.js";
 import { formatMcpEntryCommand } from "../utils/format-entry.js";
+import { stdoutOutput } from "../utils/output.js";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -149,7 +150,7 @@ export function registerList(program: Command): void {
           detectClients: detectInstalledClients,
           getAdapter: (clientId) => adapterMap.get(clientId) as ConfigAdapter,
           getPath: getConfigPath,
-          output: (text) => process.stdout.write(text + "\n"),
+          output: stdoutOutput,
         }
       );
     });

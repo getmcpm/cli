@@ -14,6 +14,7 @@
 
 import { Command } from "commander";
 import chalk from "chalk";
+import { stdoutOutput } from "../utils/output.js";
 // ---------------------------------------------------------------------------
 // Pack definitions
 // ---------------------------------------------------------------------------
@@ -192,7 +193,7 @@ export function registerInitCommand(program: Command): void {
             checkScannerAvailable,
             scanTier2,
             computeTrustScore,
-            output: (text) => process.stdout.write(text + "\n"),
+            output: stdoutOutput,
           });
           return { success: true };
         } catch (err) {

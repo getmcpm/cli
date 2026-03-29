@@ -18,6 +18,7 @@ import ora from "ora";
 import type { RegistryClient } from "../registry/client.js";
 import type { ServerEntry } from "../registry/types.js";
 import { OFFICIAL_META_KEY } from "../utils/format-trust.js";
+import { stdoutOutput } from "../utils/output.js";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -160,7 +161,7 @@ export function registerSearch(program: Command): void {
       await handleSearch(
         query,
         { limit: parseInt(opts.limit, 10), json: opts.json },
-        { registryClient: client, output: (text) => process.stdout.write(text + "\n") }
+        { registryClient: client, output: stdoutOutput }
       );
     });
 }

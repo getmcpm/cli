@@ -453,6 +453,7 @@ import { checkScannerAvailable as _checkScannerAvailable, scanTier2 as _scanTier
 import { computeTrustScore as _computeTrustScore } from "../scanner/trust-score.js";
 import { getAdapter as getAdapterDefault } from "../config/index.js";
 import { createConfirm } from "../utils/confirm.js";
+import { stdoutOutput } from "../utils/output.js";
 
 async function promptEnvVarsDefault(
   vars: EnvVar[]
@@ -519,7 +520,7 @@ export function registerInstallCommand(program: Command): void {
         addToStore: _addToStore,
         confirm: createConfirm(),
         promptEnvVars: promptEnvVarsDefault,
-        output: (text: string) => process.stdout.write(text + "\n"),
+        output: stdoutOutput,
       };
 
       try {

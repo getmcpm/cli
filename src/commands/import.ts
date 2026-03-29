@@ -20,6 +20,7 @@ import type { ClientId } from "../config/paths.js";
 import type { ConfigAdapter, McpServerEntry } from "../config/adapters/index.js";
 import type { InstalledServer } from "../store/servers.js";
 import { formatMcpEntryCommand } from "../utils/format-entry.js";
+import { stdoutOutput } from "../utils/output.js";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -279,7 +280,7 @@ export function registerImportCommand(program: Command): void {
         addToStore: addInstalledServer,
         storeExists,
         confirm: (message: string) => confirm({ message }),
-        output: (text: string) => process.stdout.write(text + "\n"),
+        output: stdoutOutput,
       };
 
       await handleImport({ yes: opts.yes, client: opts.client }, deps).catch(

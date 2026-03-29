@@ -19,6 +19,7 @@ import type { ServerEntry } from "../registry/types.js";
 import type { EnvVar, Package, Remote } from "../registry/types.js";
 import { NotFoundError } from "../registry/errors.js";
 import { OFFICIAL_META_KEY } from "../utils/format-trust.js";
+import { stdoutOutput } from "../utils/output.js";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -197,7 +198,7 @@ export function registerInfo(program: Command): void {
       await handleInfo(
         name,
         { json: opts.json },
-        { registryClient: client, output: (text) => process.stdout.write(text + "\n") }
+        { registryClient: client, output: stdoutOutput }
       );
     });
 }

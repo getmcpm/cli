@@ -21,6 +21,7 @@ import type { ServerEntry } from "../registry/types.js";
 import type { Finding } from "../scanner/tier1.js";
 import type { TrustScore, TrustScoreInput } from "../scanner/trust-score.js";
 import { levelColor, scoreBar, extractRegistryMeta } from "../utils/format-trust.js";
+import { stdoutOutput } from "../utils/output.js";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -208,7 +209,7 @@ export function registerAuditCommand(program: Command): void {
         checkScannerAvailable,
         scanTier2,
         computeTrustScore,
-        output: (text) => process.stdout.write(text + "\n"),
+        output: stdoutOutput,
       };
 
       const exitCode = await handleAudit({ json: opts.json }, deps).catch((err: Error) => {
