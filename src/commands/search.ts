@@ -17,6 +17,7 @@ import Table from "cli-table3";
 import ora from "ora";
 import type { RegistryClient } from "../registry/client.js";
 import type { ServerEntry } from "../registry/types.js";
+import { OFFICIAL_META_KEY } from "../utils/format-trust.js";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -93,7 +94,7 @@ export async function handleSearch(
       description: e.server.description ?? null,
       version: e.server.version,
       transport: resolveTransport(e),
-      status: e._meta["io.modelcontextprotocol.registry/official"].status ?? null,
+      status: e._meta[OFFICIAL_META_KEY].status ?? null,
     }));
     output(JSON.stringify(jsonData, null, 2));
     return;
@@ -121,7 +122,7 @@ export async function handleSearch(
 
   for (const entry of entries) {
     const { server, _meta } = entry;
-    const official = _meta["io.modelcontextprotocol.registry/official"];
+    const official = _meta[OFFICIAL_META_KEY];
     const transport = resolveTransport(entry);
     const trustScore = official.status === "active" ? chalk.green("active") : (official.status ?? "-");
     const description = server.description ?? "";

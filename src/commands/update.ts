@@ -22,6 +22,7 @@ import type { Finding } from "../scanner/tier1.js";
 import type { TrustScore, TrustScoreInput } from "../scanner/trust-score.js";
 import type { ClientId } from "../config/paths.js";
 import type { ConfigAdapter } from "../config/adapters/index.js";
+import { levelColor, extractRegistryMeta } from "../utils/format-trust.js";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -203,14 +204,12 @@ export async function handleUpdate(
 
     // Run trust assessment on new version
     const tier1Findings = scanTier1(entry);
-    const official = entry._meta?.["io.modelcontextprotocol.registry/official"] ?? {};
     const trustScore = computeTrustScore({
       findings: tier1Findings,
       healthCheckPassed: null,
       hasExternalScanner: false,
       registryMeta: {
-        isVerifiedPublisher: official?.status === "active",
-        publishedAt: official?.publishedAt,
+        ...extractRegistryMeta(entry),
         downloadCount: undefined,
       },
     });
@@ -238,13 +237,8 @@ export async function handleUpdate(
     updateOutcomes.set(r.name, { updated: true, trustScore });
 
     if (!isJson) {
-      const levelStr = trustScore.level === "safe"
-        ? chalk.green(trustScore.level)
-        : trustScore.level === "caution"
-          ? chalk.yellow(trustScore.level)
-          : chalk.red(trustScore.level);
       output(
-        `  ${chalk.green("✓")} Updated ${chalk.white(r.name)} to ${chalk.green(r.newVersion)} [${levelStr}]`
+        `  ${chalk.green("✓")} Updated ${chalk.white(r.name)} to ${chalk.green(r.newVersion)} [${levelColor(trustScore.level)}]`
       );
     }
   }
