@@ -173,24 +173,24 @@ When community quality signals require a backend (user reviews, aggregated telem
 
 ### MVP / V1 (ship first, validate — IN PROGRESS)
 
-- [ ] `mcpm search <query>` — search official MCP Registry, display with trust scores
-- [ ] `mcpm install <name>` — resolve server, trust assessment, write config for Claude Desktop + Cursor + VS Code
-- [ ] `mcpm list` — show installed servers across all clients
-- [ ] `mcpm remove <name>` — remove from client configs
-- [ ] `mcpm info <name>` — full server details
-- [ ] `mcpm audit` — scan all installed servers, tabular trust report
-- [ ] `mcpm update` — check for newer versions, re-scan
-- [ ] `mcpm doctor` — check MCP setup health (clients, configs, runtimes)
-- [ ] `mcpm init <pack>` — curated starter packs (developer, data, web)
-- [ ] Auto-detect and import existing MCP configs on first run
-- [ ] Metadata-based trust assessment on every install (Tier 1 built-in + Tier 2 MCP-Scan)
-- [ ] Rich trust score visualization (color bar, breakdown)
+- [x] `mcpm search <query>` — search official MCP Registry, display with trust scores
+- [x] `mcpm install <name>` — resolve server, trust assessment, write config for Claude Desktop + Cursor + VS Code
+- [x] `mcpm list` — show installed servers across all clients
+- [x] `mcpm remove <name>` — remove from client configs
+- [x] `mcpm info <name>` — full server details
+- [x] `mcpm audit` — scan all installed servers, tabular trust report
+- [x] `mcpm update` — check for newer versions, re-scan
+- [x] `mcpm doctor` — check MCP setup health (clients, configs, runtimes)
+- [x] `mcpm init <pack>` — curated starter packs (developer, data, web)
+- [x] Auto-detect and import existing MCP configs on first run
+- [x] Metadata-based trust assessment on every install (Tier 1 built-in + Tier 2 MCP-Scan)
+- [x] Rich trust score visualization (color bar, breakdown)
 - [ ] Health check tiers (config validation → list_tools → full validation)
-- [ ] Cross-IDE config management (Claude Desktop, Cursor, VS Code, Windsurf experimental)
+- [x] Cross-IDE config management (Claude Desktop, Cursor, VS Code, Windsurf experimental)
 - [ ] Config backup-before-write for safety
 - [ ] Cross-platform paths (macOS, Linux, Windows)
 - [ ] Automated demo GIF generation (VHS/asciinema)
-- [ ] Published to npm as `@getmcpm/cli`, bin command `mcpm`
+- [x] Published to npm as `@getmcpm/cli`, bin command `mcpm`
 
 ### V1.5 (community trust)
 
