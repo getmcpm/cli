@@ -199,7 +199,7 @@ This project is MIT licensed. See [LICENSE](./LICENSE).
 
 ## Security
 
-If you discover a security vulnerability, please email **security@getmcpm.com** instead of opening a public issue. We will respond within 48 hours.
+If you discover a security vulnerability, please use [GitHub's private vulnerability reporting](https://github.com/getmcpm/cli/security/advisories/new) instead of opening a public issue. We will respond within 48 hours.
 
 For trust assessment issues (false positives/negatives in the scanner), regular GitHub issues are fine.
 
