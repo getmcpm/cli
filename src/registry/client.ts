@@ -97,8 +97,8 @@ export class RegistryClient {
     if (version !== undefined) {
       params.set("version", version);
     }
-    const qs = params.size > 0 ? `?${params.toString()}` : "";
-    const url = `${this.baseUrl}/v0.1/servers/${encodedName}${qs}`;
+    const versionSegment = version ?? "latest";
+    const url = `${this.baseUrl}/v0.1/servers/${encodedName}/versions/${versionSegment}`;
 
     const raw = await this.get(url, name);
     const parsed = ServerEntrySchema.safeParse(raw);

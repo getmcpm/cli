@@ -11,6 +11,7 @@ program
 registerCommands(program);
 
 program.parseAsync(process.argv).catch((error: unknown) => {
-  console.error(error);
+  const message = error instanceof Error ? error.message : String(error);
+  process.stderr.write(`Error: ${message}\n`);
   process.exit(1);
 });

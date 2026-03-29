@@ -418,14 +418,14 @@ describe("RegistryClient.getServer — happy path", () => {
     );
   });
 
-  it("appends version query param when provided", async () => {
+  it("appends version as path segment when provided", async () => {
     const fetchImpl = mockFetch({ server: BASE_SERVER, _meta: BASE_META });
     const client = new RegistryClient({ fetchImpl });
 
     await client.getServer("io.github.test/server-basic", "1.0.0");
 
     const [url] = fetchImpl.mock.calls[0] as [string, ...unknown[]];
-    expect(url).toContain("version=1.0.0");
+    expect(url).toContain("/versions/1.0.0");
   });
 });
 

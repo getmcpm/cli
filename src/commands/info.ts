@@ -114,7 +114,7 @@ export async function handleInfo(
   spinner.stop();
 
   const { server, _meta } = entry;
-  const official = _meta[OFFICIAL_META_KEY];
+  const official = _meta?.[OFFICIAL_META_KEY] ?? {};
 
   // --json flag: output the full ServerEntry as JSON.
   if (options.json === true) {
@@ -127,10 +127,10 @@ export async function handleInfo(
       websiteUrl: server.websiteUrl ?? null,
       packages: server.packages,
       remotes: server.remotes ?? [],
-      status: official.status ?? null,
-      publishedAt: official.publishedAt ?? null,
-      updatedAt: official.updatedAt ?? null,
-      isLatest: official.isLatest ?? null,
+      status: official?.status ?? null,
+      publishedAt: official?.publishedAt ?? null,
+      updatedAt: official?.updatedAt ?? null,
+      isLatest: official?.isLatest ?? null,
     };
     output(JSON.stringify(jsonData, null, 2));
     return;
@@ -155,11 +155,11 @@ export async function handleInfo(
   lines.push("");
 
   // Metadata row
-  lines.push(chalk.cyan("Status:       ") + (official.status ?? "—"));
-  lines.push(chalk.cyan("Published:    ") + formatDate(official.publishedAt));
+  lines.push(chalk.cyan("Status:       ") + (official?.status ?? "—"));
+  lines.push(chalk.cyan("Published:    ") + formatDate(official?.publishedAt));
 
   if (server.repository) {
-    lines.push(chalk.cyan("Repository:   ") + server.repository.url);
+    lines.push(chalk.cyan("Repository:   ") + (server.repository.url ?? "—"));
   }
 
   if (server.websiteUrl) {

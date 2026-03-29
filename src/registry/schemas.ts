@@ -12,8 +12,10 @@ import { z } from "zod";
 // ---------------------------------------------------------------------------
 
 export const RepositorySchema = z.object({
-  url: z.string(),
+  url: z.string().optional(),
   source: z.string().optional(),
+  id: z.union([z.string(), z.number()]).optional(),
+  subfolder: z.string().optional(),
 });
 
 export const IconSchema = z.object({
@@ -68,8 +70,8 @@ export const OfficialMetaSchema = z.object({
 });
 
 export const MetaSchema = z.object({
-  "io.modelcontextprotocol.registry/official": OfficialMetaSchema,
-});
+  "io.modelcontextprotocol.registry/official": OfficialMetaSchema.optional(),
+}).passthrough();
 
 // ---------------------------------------------------------------------------
 // Server schemas
@@ -86,12 +88,12 @@ export const ServerSchema = z.object({
   icons: z.array(IconSchema).optional(),
   packages: z.array(PackageSchema).default([]),
   remotes: z.array(RemoteSchema).optional(),
-});
+}).passthrough();
 
 export const ServerEntrySchema = z.object({
   server: ServerSchema,
-  _meta: MetaSchema,
-});
+  _meta: MetaSchema.optional(),
+}).passthrough();
 
 // ---------------------------------------------------------------------------
 // Search / list response schemas

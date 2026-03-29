@@ -95,7 +95,7 @@ export async function handleSearch(
       description: e.server.description ?? null,
       version: e.server.version,
       transport: resolveTransport(e),
-      status: e._meta[OFFICIAL_META_KEY].status ?? null,
+      status: e._meta?.[OFFICIAL_META_KEY]?.status ?? null,
     }));
     output(JSON.stringify(jsonData, null, 2));
     return;
@@ -123,9 +123,9 @@ export async function handleSearch(
 
   for (const entry of entries) {
     const { server, _meta } = entry;
-    const official = _meta[OFFICIAL_META_KEY];
+    const official = _meta?.[OFFICIAL_META_KEY] ?? {};
     const transport = resolveTransport(entry);
-    const trustScore = official.status === "active" ? chalk.green("active") : (official.status ?? "-");
+    const trustScore = official?.status === "active" ? chalk.green("active") : (official?.status ?? "-");
     const description = server.description ?? "";
 
     table.push([

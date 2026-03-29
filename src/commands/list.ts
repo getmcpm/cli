@@ -67,12 +67,16 @@ export async function handleList(
   const rows: ServerRow[] = [];
 
   for (const clientId of clients) {
-    const adapter = getAdapter(clientId);
-    const configPath = getPath(clientId);
-    const servers = await adapter.read(configPath);
+    try {
+      const adapter = getAdapter(clientId);
+      const configPath = getPath(clientId);
+      const servers = await adapter.read(configPath);
 
-    for (const [serverName, entry] of Object.entries(servers)) {
-      rows.push({ client: clientId, serverName, entry: { ...entry } });
+      for (const [serverName, entry] of Object.entries(servers)) {
+        rows.push({ client: clientId, serverName, entry: { ...entry } });
+      }
+    } catch {
+      // Skip clients with malformed or unreadable configs
     }
   }
 
