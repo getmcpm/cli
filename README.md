@@ -18,8 +18,8 @@
 npm install -g @getmcpm/cli
 
 mcpm search filesystem
-mcpm install io.github.modelcontextprotocol/servers-filesystem
-mcpm audit
+mcpm info io.github.domdomegg/filesystem-mcp
+mcpm install io.github.domdomegg/filesystem-mcp
 ```
 
 ## Features
@@ -32,8 +32,8 @@ Query the official MCP Registry and see results with trust indicators.
 $ mcpm search filesystem
 
   Name                                              Description                    Score
-  io.github.modelcontextprotocol/servers-filesystem  File system access via MCP     82/100
-  io.github.Digital-Defiance/mcp-filesystem          Read-only filesystem server    67/100
+  io.github.domdomegg/filesystem-mcp                 File system access via MCP     82/100
+  io.github.Digital-Defiance/mcp-filesystem           Read-only filesystem server    67/100
   ...
 ```
 
@@ -42,7 +42,7 @@ $ mcpm search filesystem
 Every install runs a metadata-based trust assessment before writing config.
 
 ```
-$ mcpm install io.github.modelcontextprotocol/servers-filesystem
+$ mcpm install io.github.domdomegg/filesystem-mcp
 
   Trust Score: 82/100 (safe)
     Health check:    30/30
@@ -141,6 +141,7 @@ Without an external scanner installed, the maximum possible score is 80/100. The
 | `mcpm update` | Check for newer versions and update installed servers |
 | `mcpm doctor` | Check MCP setup health and report issues |
 | `mcpm init <pack>` | Install a curated starter pack of MCP servers |
+| `mcpm import` | Import existing MCP servers from client config files |
 
 Run `mcpm <command> --help` for options and flags.
 

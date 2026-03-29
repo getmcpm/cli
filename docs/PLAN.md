@@ -1,250 +1,175 @@
-# mcpm MVP — CLI Implementation Plan
+# mcpm — Architecture
 
-## Context
-
-The repo is a greenfield project (only `CLAUDE.md` exists). We are building "npm for MCP servers" — an open-source CLI tool that lets developers search, install, and manage MCP servers across Claude Desktop, Cursor, VS Code, and Windsurf from a single command.
-
-**Decisions confirmed by user:**
-- Build the CLI first (not web UI or backend)
-- Back it with the official MCP Registry API v0.1 (registry.modelcontextprotocol.io)
-- Single package (not monorepo) — registry client as internal module
-- npm package: `@getmcpm/cli`, bin command: `mcpm`
-
-**Registry API findings (verified 2026-03-28):**
-- Use `/v0.1/servers` (not v0) — v0.1 has `search` and `version` params
-- Search: `?search=<name>` — substring match on server name only, NOT full-text
-- Pagination: `?cursor=<token>&limit=<n>` (max 100), response has `metadata.nextCursor`
-- `environmentVariables` is inside `packages[]`, not top-level
-- `_meta.io.modelcontextprotocol.registry/official` has `status`, `publishedAt`, `isLatest`
-
----
-
-## Repository Structure
+## Project Structure
 
 ```
 mcpm/
-├── packages/
-│   ├── registry-client/   — typed API client for registry.modelcontextprotocol.io
-│   │   └── src/
-│   │       ├── index.ts
-│   │       ├── client.ts        — RegistryClient class
-│   │       ├── schemas.ts       — Zod schemas (foundation for all types)
-│   │       ├── types.ts         — z.infer'd TypeScript types
-│   │       ├── pagination.ts    — async cursor iterator
-│   │       └── errors.ts        — RegistryError, NotFoundError, NetworkError
-│   └── cli/
-│       └── src/
-│           ├── index.ts              — Commander entry point, bin: mcpm
-│           ├── commands/
-│           │   ├── search.ts
-│           │   ├── install.ts        — most complex command
-│           │   ├── list.ts
-│           │   ├── remove.ts
-│           │   └── info.ts
-│           ├── config/
-│           │   ├── paths.ts          — OS-aware config file paths
-│           │   ├── detector.ts       — detect installed AI clients
-│           │   └── adapters/
-│           │       ├── index.ts      — ConfigAdapter interface
-│           │       ├── claude-desktop.ts
-│           │       ├── cursor.ts
-│           │       ├── vscode.ts
-│           │       └── windsurf.ts   — behind --experimental flag
-│           ├── install/
-│           │   ├── resolver.ts       — server → McpServerEntry for client
-│           │   ├── npm.ts
-│           │   ├── pypi.ts
-│           │   ├── docker.ts
-│           │   └── http.ts
-│           ├── prompt/
-│           │   └── env-vars.ts       — readline prompts for required env vars
-│           ├── output/
-│           │   ├── formatter.ts      — chalk + cli-table3, all formatting here
-│           │   ├── spinner.ts        — ora wrapper (respects --quiet)
-│           │   └── logger.ts         — leveled output, no console.log elsewhere
-│           └── errors/
-│               └── handler.ts        — top-level error → exit code mapping
-├── package.json          — pnpm workspace root (private: true)
-├── pnpm-workspace.yaml
-├── tsconfig.base.json    — strict, moduleResolution: bundler, target: ES2022
-└── .github/workflows/
-    ├── ci.yml
-    └── publish.yml
+├── src/
+│   ├── index.ts                    — CLI entry point (Commander)
+│   ├── commands/
+│   │   ├── index.ts                — command registration
+│   │   ├── search.ts               — search the MCP registry
+│   │   ├── install.ts              — install a server to client configs
+│   │   ├── info.ts                 — show server details
+│   │   ├── list.ts                 — list installed servers
+│   │   ├── remove.ts               — remove a server from configs
+│   │   ├── audit.ts                — trust-scan installed servers
+│   │   ├── update.ts               — update installed servers
+│   │   ├── doctor.ts               — check MCP setup health
+│   │   ├── init.ts                 — install a curated starter pack
+│   │   └── import.ts               — import servers from client config
+│   ├── registry/
+│   │   ├── client.ts               — RegistryClient (HTTP, injectable fetch)
+│   │   ├── schemas.ts              — Zod schemas for API responses
+│   │   ├── types.ts                — inferred TypeScript types
+│   │   ├── pagination.ts           — async cursor-based pagination
+│   │   └── errors.ts               — RegistryError, NotFoundError, NetworkError
+│   ├── config/
+│   │   ├── paths.ts                — OS-aware config file paths
+│   │   ├── detector.ts             — detect installed AI clients
+│   │   └── adapters/
+│   │       ├── base.ts             — shared adapter logic
+│   │       ├── claude-desktop.ts
+│   │       ├── cursor.ts
+│   │       ├── vscode.ts
+│   │       ├── windsurf.ts
+│   │       └── factory.ts          — adapter factory by client ID
+│   ├── scanner/
+│   │   ├── trust-score.ts          — 0-100 composite trust score
+│   │   ├── tier1.ts                — metadata-based checks (registry meta)
+│   │   ├── tier2.ts                — static pattern scanning
+│   │   └── patterns.ts             — regex patterns for secrets, injection, typosquatting
+│   ├── store/
+│   │   ├── index.ts                — local state manager (~/.mcpm/)
+│   │   ├── servers.ts              — installed server registry
+│   │   └── cache.ts                — HTTP response cache
+│   └── utils/
+│       ├── output.ts               — leveled output helpers
+│       ├── confirm.ts              — confirmation prompts
+│       ├── format-entry.ts         — format MCP server config entries
+│       └── format-trust.ts         — format trust score display
+├── src/__tests__/
+│   ├── commands/                    — 10 command test files
+│   ├── config/                      — adapter + detector + paths tests
+│   └── store/                       — cache + servers + store tests
+├── scripts/
+│   └── demo.sh                     — asciinema demo recording script
+├── .github/workflows/
+│   ├── ci.yml                      — build + test on push/PR (Node 20, 22)
+│   └── publish.yml                 — npm publish on v* tags
+├── package.json                    — @getmcpm/cli, bin: mcpm
+├── tsconfig.json
+├── tsup.config.ts                  — bundler config
+└── vitest.config.ts                — test config with coverage thresholds
 ```
 
----
+## Modules
 
-## Phase 0 — Workspace Scaffolding
+| Module | Purpose |
+|---|---|
+| `commands/` | 10 CLI commands, each a self-contained Commander action |
+| `registry/` | Typed HTTP client for the official MCP Registry API (v0.1 at registry.modelcontextprotocol.io) |
+| `config/` | OS-aware config paths, client detection, and per-client config adapters with atomic writes |
+| `scanner/` | Trust scoring engine: tier 1 (metadata), tier 2 (static pattern analysis), composite score |
+| `store/` | Local state in `~/.mcpm/` — installed server registry, HTTP response cache |
+| `utils/` | Output formatting, confirmation prompts, trust display helpers |
 
-Root `package.json`: pnpm workspace, `engines: { node: ">=20.0.0" }`, scripts: `build`, `test`, `lint`, `typecheck`.
+## Commands
 
-`tsconfig.base.json`: strict mode, `moduleResolution: bundler`, `target: ES2022`, `module: NodeNext`.
+| Command | Description |
+|---|---|
+| `mcpm search <query>` | Search the MCP registry for servers |
+| `mcpm install <name>` | Install an MCP server to detected client configs |
+| `mcpm info <name>` | Show full details for an MCP server |
+| `mcpm list` | List all installed servers across detected AI clients |
+| `mcpm remove <name>` | Remove a server from client config(s) |
+| `mcpm audit` | Scan all installed servers and produce a trust report |
+| `mcpm update` | Check for newer versions and update installed servers |
+| `mcpm doctor` | Check MCP setup health (runtimes, configs, servers) |
+| `mcpm init <pack>` | Install a curated starter pack of MCP servers |
+| `mcpm import` | Import existing servers from client config files |
 
-Both packages: `"type": "module"`, extend base tsconfig, own `vitest.config.ts` with `coverage.thresholds: { lines: 80, branches: 75 }`.
+## Data Flow
 
-CLI `package.json`: `bin: { mcpm: "./dist/index.js" }`, postbuild script to prepend shebang.
-
----
-
-## Phase 1 — Registry Client Package
-
-**Foundation**: Zod schemas in `schemas.ts` are the single source of truth for all types.
-
-Key schemas:
-- `ServerSchema` — `name` (namespace/server), `description`, `version`, `packages[]`, `remotes[]`, `_meta`
-- `PackageSchema` — discriminated union on `registryType`: `npm | pypi | oci`
-- `EnvVarSchema` — `name`, `description`, `required`, `default`
-- `RemoteSchema` — `type` (streamable-http | sse), `url`, `headers[]`, `variables`
-- `SearchResponseSchema` — `servers[]`, `metadata.nextCursor`
-
-`RegistryClient` constructor accepts `{ baseUrl?, fetchImpl?, timeout? }` — `fetchImpl` is injectable for tests (no network calls in tests).
-
-Public methods:
-```typescript
-searchServers(query: string, limit?: number): Promise<Server[]>
-listServers(cursor?: string): Promise<PageResult<Server>>
-getServer(name: string): Promise<Server>
-getServerVersions(name: string): Promise<ServerVersion[]>
+```
+mcpm install io.github.domdomegg/filesystem-mcp
+  │
+  ▼
+RegistryClient.getServer(name)
+  │  GET https://registry.modelcontextprotocol.io/v0.1/servers/{name}
+  │  Response → Zod parse → typed Server object
+  ▼
+detectInstalledClients()
+  │  Check config file existence for each client on current OS
+  ▼
+resolveInstallEntry(server, client)
+  │  Pick transport: HTTP remote (if client supports) or stdio
+  │  stdio: npm → npx, pypi → uvx, oci → docker run
+  ▼
+scanner.computeTrustScore(server)
+  │  Tier 1: registry metadata (verified publisher, age, downloads)
+  │  Tier 2: static patterns (secrets, injection, typosquatting)
+  │  Optional: MCP-Scan external scanner
+  ▼
+Prompt for env vars + confirmation
+  ▼
+adapter.addServer(configPath, name, entry)
+  │  Read config → merge → write to .tmp → atomic rename
+  ▼
+store.recordInstall(name, clients, version)
+  │  Write to ~/.mcpm/servers.json
 ```
 
-Error hierarchy: `RegistryError` → `NetworkError`, `NotFoundError`, `ValidationError`.
+## Configuration
 
-`pagination.ts`: `async function* paginate(client, limit)` — wraps cursor loop.
+### Local state directory
 
-**Tests** (`90%+ coverage`): inject `vi.fn()` as `fetchImpl`, test all error branches, pagination stop condition, Zod parse of all discriminated union variants.
+```
+~/.mcpm/
+├── servers.json       — installed server registry (name, version, clients, install date)
+└── cache/             — HTTP response cache (TTL-based)
+```
 
----
+### Client config paths (macOS)
 
-## Phase 2 — CLI Config Infrastructure
-
-### Config paths (`config/paths.ts`)
-One function per client, platform-aware via `process.platform` + `os.homedir()`:
-
-| Client | macOS path |
-|--------|-----------|
+| Client | Config path |
+|---|---|
 | Claude Desktop | `~/Library/Application Support/Claude/claude_desktop_config.json` |
 | Cursor | `~/.cursor/mcp.json` |
 | VS Code | `~/Library/Application Support/Code/User/mcp.json` |
 | Windsurf | `~/.codeium/windsurf/mcp_config.json` |
 
-### `ConfigAdapter` interface
-```typescript
-interface ConfigAdapter {
-  clientId: ClientId;
-  read(configPath: string): Promise<Record<string, McpServerEntry>>;
-  addServer(configPath: string, name: string, entry: McpServerEntry): Promise<void>;
-  removeServer(configPath: string, name: string): Promise<void>;
-  listServers(configPath: string): Promise<Record<string, McpServerEntry>>;
-}
+Linux and Windows paths are also supported. Config key: `mcpServers` (Claude Desktop, Cursor) or `servers` (VS Code).
+
+All config writes use atomic file operations (write to `.tmp`, then `fs.rename`).
+
+## Testing
+
+- **Framework**: vitest with `@vitest/coverage-v8`
+- **Test count**: 648+ tests
+- **Coverage thresholds**: lines 80%, branches 75%
+- **Test locations**: `src/__tests__/` (command, config, store tests) + colocated `*.test.ts` (registry, scanner)
+- **Approach**: injectable `fetchImpl` for registry tests (no network calls), temp directories for config adapter tests
+
+Run tests:
+
+```bash
+pnpm test              # run all tests
+pnpm test:coverage     # run with coverage report
+pnpm test:watch        # watch mode
 ```
 
-All adapters use **atomic writes** (write to `.tmp`, then `fs.rename`). Root key differs: Claude Desktop + Cursor use `mcpServers`, VS Code uses `servers`.
+## CI/CD
 
-`McpServerEntry`: `{ command?, args?, env?, url?, headers? }` — stdio format or HTTP format.
+### CI (`ci.yml`)
 
-### Install resolver (`install/resolver.ts`)
-Decision tree (pure function, no I/O):
-1. Cursor + server has HTTP remote → produce `{ url, headers }` entry
-2. Otherwise pick from `packages[]`: npm → pypi → oci
-3. npm: `{ command: 'npx', args: ['-y', packageName, ...runtimeArgs], env }`
-4. pypi: `{ command: 'uvx', args: [packageName, ...runtimeArgs], env }`
-5. docker: `{ command: 'docker', args: ['run', '--rm', '-i', image], env }`
+Runs on push to `main` and pull requests. Matrix: Node 20 + 22.
 
-Tooling availability (`npx`, `uvx`, `docker`) checked via `which` once per process, cached.
+Steps: `pnpm install --frozen-lockfile` → `typecheck` → `build` → `test:coverage`
 
----
+### Publish (`publish.yml`)
 
-## Phase 3 — Five Commands
-
-### `mcpm search <query>`
-Spinner → `RegistryClient.searchServers()` → cli-table3 table (Name | Description | Version | Transport | Status). Options: `--limit <n>`, `--json`.
-
-### `mcpm info <name>`
-Fetch server → display full details: name, version, repo URL, packages, env vars (required flag, description), transport. Footer: `mcpm install <name>`.
-
-### `mcpm install <name>` ← most complex
-1. Fetch server from registry
-2. Detect installed clients (`detectInstalledClients()`)
-3. If multiple clients: checkbox prompt (all selected by default); skip with `--client <id>`
-4. Per client: `resolveInstallEntry()` → prompt for required env vars → show preview JSON → confirm
-5. Check if already installed → error unless `--force`
-6. `adapter.addServer()` atomically
-7. Options: `--client <id>`, `--yes`, `--force`
-
-### `mcpm list`
-Read-only — never calls registry. Detect clients → read each config → unified table (Client | Server Name | Command/URL). Options: `--client <id>`, `--json`.
-
-### `mcpm remove <name>`
-Find in which clients → checkbox to pick which → confirm → `adapter.removeServer()`. Options: `--yes`.
-
----
-
-## Phase 4 — Entry Point
-
-`index.ts`: ~30 lines. Commander program, `registerSearch/Install/List/Remove/Info(program)`, `.parseAsync().catch(handleError)`.
-
-`errors/handler.ts`: `NotFoundError` → exit 1, `NetworkError` → exit 2, `ValidationError` → exit 3, unknown → exit 99 (stack only with `--verbose`).
-
----
-
-## Phase 5 — Tests
-
-**registry-client**: inject `fetchImpl: vi.fn()`, fixture JSON per test. Cover all error branches, pagination, Zod parse of all package type variants. Target: 90%.
-
-**cli unit tests**: mock `fs.access` (detector), mock `fs.readFile/writeFile` (adapters), mock `process.platform` (paths), pure function tests on resolver's 5 branches. Use `memfs` for adapter tests.
-
-**cli command tests**: inject mock `RegistryClient`, use `os.tmpdir()` real temp files for integration. Assert stdout content, exit codes, config file mutations.
-
-Coverage gate: `{ lines: 80, branches: 75 }` enforced in vitest config.
-
----
-
-## Phase 6 — Packaging & CI
-
-`postbuild`: prepend `#!/usr/bin/env node` to `dist/index.js`.
-
-CI: push/PR → `pnpm install` → `build` → `test` → `lint`.
-
-Publish: tag `v*` → build → test → `pnpm publish` (both packages).
-
----
-
-## Key Dependencies
-
-| Package | Package | Purpose |
-|---------|---------|---------|
-| `zod` | registry-client | API schema validation |
-| `commander` | cli | CLI framework |
-| `chalk` | cli | Terminal colors |
-| `ora` | cli | Spinners |
-| `cli-table3` | cli | Tables |
-| `vitest` + `@vitest/coverage-v8` | both (dev) | Tests |
-
-No `inquirer` — use Node `readline` stdlib for env-var prompts. No bundler — Node 20 native ESM is sufficient for MVP.
-
----
-
-## Risks
-
-| Risk | Mitigation |
-|------|-----------|
-| `@mcpm/cli` npm name taken | Publish as `mcp-registry` initially; approach mcp-club for collaboration |
-| Windsurf config format unconfirmed | Ship behind `--experimental` flag |
-| Official registry schema changes | `zod.safeParse` surfaces errors explicitly; graceful degradation |
-| User has no supported runtime (no npx/uvx/docker) | Detect before install, print clear install instructions |
-
----
-
-## Verification Plan
-
-1. `pnpm install && pnpm build` — clean build, no TypeScript errors
-2. `pnpm test` — all tests pass, coverage thresholds met
-3. `node packages/cli/dist/index.js search filesystem` — returns table of results
-4. `node packages/cli/dist/index.js info io.github.modelcontextprotocol/servers-filesystem` — shows details
-5. `node packages/cli/dist/index.js install io.github.modelcontextprotocol/servers-filesystem --yes` — writes correct entry to Claude Desktop config, verify with `cat ~/Library/Application\ Support/Claude/claude_desktop_config.json`
-6. `node packages/cli/dist/index.js list` — shows the installed server
-7. `node packages/cli/dist/index.js remove servers-filesystem --yes` — removes it, verify config is clean
-8. `npm pack` in `packages/cli/` — verify tarball contents, test local install with `npm install -g ./mcp-registry-0.1.0.tgz`
+Runs on `v*` tag push. Builds, tests, and publishes to npm as `@getmcpm/cli` with provenance.
 
 ## GSTACK REVIEW REPORT
 

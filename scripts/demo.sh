@@ -19,7 +19,7 @@ echo ""
 sleep 1
 
 type_cmd "mcpm search filesystem"
-type_cmd "mcpm info io.github.modelcontextprotocol/servers-filesystem"
+type_cmd "mcpm info io.github.domdomegg/filesystem-mcp"
 type_cmd "mcpm doctor"
 type_cmd "mcpm init --help"
 
