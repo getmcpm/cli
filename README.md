@@ -1,3 +1,11 @@
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="./assets/banner-dark.svg">
+    <source media="(prefers-color-scheme: light)" srcset="./assets/banner-light.svg">
+    <img alt="mcpm - the MCP package manager" src="./assets/banner-light.svg" width="680">
+  </picture>
+</p>
+
 # mcpm
 
 **MCP package manager -- search, install, and audit MCP servers from your terminal.**
