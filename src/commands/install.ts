@@ -71,40 +71,60 @@ export function validateIdentifier(identifier: string, registryType: string): vo
 }
 
 /**
- * Allowlist of safe runtime argument patterns.
- * Only arguments matching one of these patterns are permitted.
- * This is an allowlist (not a blocklist) because new Node.js flags like
- * --loader, --experimental-loader, etc. can enable arbitrary code execution.
+ * Node.js flags that enable arbitrary code execution.
+ * These are rejected regardless of format (bare or with value).
+ * This blocklist catches known-dangerous flags; the allowlist below
+ * catches unknown/malformed arguments.
+ */
+const DANGEROUS_FLAG_PREFIXES: readonly string[] = [
+  "--eval", "-e",
+  "--require", "-r",
+  "--import",
+  "--loader",
+  "--experimental-loader",
+  "--inspect",
+  "--inspect-brk",
+  "--experimental-policy",
+  "--experimental-network-imports",
+  "--input-type",
+];
+
+/**
+ * Allowlist of safe runtime argument shapes.
+ * After dangerous flags are rejected, arguments must match one of these
+ * patterns. This blocks shell metacharacters and path traversal while
+ * allowing the wide range of flags real MCP servers use.
  */
 const SAFE_ARG_PATTERNS: readonly RegExp[] = [
-  /^--port=\d+$/,
-  /^--host=[\w.-]+$/,
-  /^--transport=(stdio|sse|streamable-http)$/,
-  /^--log-level=(debug|info|warn|error|silent)$/,
-  /^--config=[\w./-]+$/,
-  /^--dir=[\w./-]+$/,
-  /^--directory=[\w./-]+$/,
-  /^--path=[\w./-]+$/,
-  /^--verbose$/,
-  /^--quiet$/,
-  /^--debug$/,
-  /^--stdio$/,
-  /^--json$/,
-  /^--yes$/,
-  /^--no-color$/,
-  /^--version$/,
-  /^--help$/,
+  // Generic boolean flags (--allow-write, --read-only, --no-sandbox, etc.)
+  /^--[a-zA-Z][\w-]*$/,
+  // Generic --key=value flags with safe value characters
+  // Blocks shell metacharacters: ; | $ ` & ( ) { } < > ! ' "
+  /^--[a-zA-Z][\w-]+=[\w./@:, -]+$/,
+  // Bare absolute paths (Unix: /path/to/dir)
+  /^\/[\w.@/ -]+$/,
+  // Home-relative paths (~/Documents)
+  /^~[\w.@/ -]*$/,
   // Bare positional arguments (no dashes, no path traversal)
   /^[a-zA-Z0-9][\w.@/-]*$/,
 ];
 
 /**
- * Validate runtime arguments from the registry using an allowlist approach.
- * Only arguments matching known-safe patterns are permitted.
- * Rejects everything else, including unknown flags that could enable code execution.
+ * Validate runtime arguments from the registry.
+ * Two-layer defense: reject known-dangerous Node.js flags first,
+ * then require remaining args to match safe structural patterns.
  */
 export function validateRuntimeArgs(args: string[]): void {
   for (const arg of args) {
+    // Layer 1: reject dangerous Node.js flags
+    const isDangerous = DANGEROUS_FLAG_PREFIXES.some(
+      (prefix) => arg === prefix || arg.startsWith(`${prefix}=`)
+    );
+    if (isDangerous) {
+      throw new Error(`Rejected dangerous runtime argument: "${arg}"`);
+    }
+
+    // Layer 2: require safe structural pattern
     const isSafe = SAFE_ARG_PATTERNS.some((pattern) => pattern.test(arg));
     if (!isSafe) {
       throw new Error(`Rejected unrecognized runtime argument: "${arg}"`);

