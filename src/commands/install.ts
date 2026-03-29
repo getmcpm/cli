@@ -207,9 +207,6 @@ const BAR_EMPTY = "░";
  * Uses chalk for colours — ANSI codes stripped in tests via regex.
  */
 export function formatTrustScore(trustScore: TrustScore): string {
-  // Lazy-import chalk to keep this module testable without chalk side-effects
-  // We use a synchronous approach via the chalk module that is already loaded.
-  // Since ESM top-level imports must be static, we access chalk at runtime.
   const { score, maxPossible, level, breakdown } = trustScore;
   const ratio = score / maxPossible;
   const filled = Math.round(ratio * BAR_LENGTH);
@@ -217,30 +214,16 @@ export function formatTrustScore(trustScore: TrustScore): string {
 
   let levelLabel: string;
   let barColour: (s: string) => string;
-  let labelColour: (s: string) => string;
 
-  // We use a runtime-safe colour helper that wraps chalk.
-  // chalk is already a dependency — no new imports needed.
-  try {
-    // Dynamic require not available in ESM — chalk is already in scope if imported at top.
-    // We use ANSI escape sequences directly to avoid circular import issues.
-    if (level === "safe") {
-      levelLabel = "\u001b[32mSAFE\u001b[0m"; // green
-      barColour = (s) => `\u001b[32m${s}\u001b[0m`;
-      labelColour = (s) => `\u001b[32m${s}\u001b[0m`;
-    } else if (level === "caution") {
-      levelLabel = "\u001b[33mCAUTION\u001b[0m"; // yellow
-      barColour = (s) => `\u001b[33m${s}\u001b[0m`;
-      labelColour = (s) => `\u001b[33m${s}\u001b[0m`;
-    } else {
-      levelLabel = "\u001b[31mRISKY\u001b[0m"; // red
-      barColour = (s) => `\u001b[31m${s}\u001b[0m`;
-      labelColour = (s) => `\u001b[31m${s}\u001b[0m`;
-    }
-    void labelColour;
-  } catch {
-    barColour = (s) => s;
-    levelLabel = level.toUpperCase();
+  if (level === "safe") {
+    levelLabel = chalk.green("SAFE");
+    barColour = chalk.green;
+  } else if (level === "caution") {
+    levelLabel = chalk.yellow("CAUTION");
+    barColour = chalk.yellow;
+  } else {
+    levelLabel = chalk.red("RISKY");
+    barColour = chalk.red;
   }
 
   const lines: string[] = [

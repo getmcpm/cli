@@ -91,11 +91,11 @@ describe("ClaudeDesktopAdapter", () => {
   // listServers — delegates to read
   // -------------------------------------------------------------------------
 
-  describe("listServers", () => {
+  describe("read", () => {
     it("returns same result as read", async () => {
       const entry: McpServerEntry = { command: "npx", args: ["-y", "srv"] };
       mockReadFile.mockResolvedValue(makeConfig({ srv: entry }));
-      const result = await adapter.listServers(CONFIG_PATH);
+      const result = await adapter.read(CONFIG_PATH);
       expect(result).toEqual({ srv: entry });
     });
   });

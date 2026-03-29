@@ -35,7 +35,7 @@ export interface DoctorDeps {
 // Constants
 // ---------------------------------------------------------------------------
 
-const ALL_CLIENTS: ClientId[] = ["claude-desktop", "cursor", "vscode", "windsurf"];
+// CLIENT_IDS is already imported from "../config/paths.js" and contains the same values.
 const RUNTIMES = ["npx", "uvx", "docker"] as const;
 
 type Runtime = (typeof RUNTIMES)[number];
@@ -87,7 +87,7 @@ export async function doctorHandler(deps: DoctorDeps): Promise<number> {
   > = {} as Record<ClientId, { exists: boolean; servers?: Record<string, McpServerEntry>; malformed?: boolean }>;
 
   const clientChecks = await Promise.all(
-    ALL_CLIENTS.map(async (clientId) => {
+    CLIENT_IDS.map(async (clientId) => {
       const exists = await checkConfigExists(clientId);
       if (!exists) {
         return { clientId, result: { exists: false } as { exists: boolean; servers?: Record<string, McpServerEntry>; malformed?: boolean }, issue: null as string | null };
@@ -95,7 +95,7 @@ export async function doctorHandler(deps: DoctorDeps): Promise<number> {
       const adapter = getAdapter(clientId);
       const configPath = getConfigPath(clientId);
       try {
-        const servers = await adapter.listServers(configPath);
+        const servers = await adapter.read(configPath);
         return { clientId, result: { exists: true, servers }, issue: null as string | null };
       } catch {
         return {
@@ -150,7 +150,7 @@ export async function doctorHandler(deps: DoctorDeps): Promise<number> {
   // 3. Cross-check: servers that require an unavailable runtime.
   // -------------------------------------------------------------------------
 
-  for (const clientId of ALL_CLIENTS) {
+  for (const clientId of CLIENT_IDS) {
     const result = clientResults[clientId];
     if (!result?.exists || result.malformed || !result.servers) {
       continue;

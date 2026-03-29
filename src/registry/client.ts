@@ -150,7 +150,6 @@ export class RegistryClient {
     try {
       response = await this.fetchImpl(url, { signal: controller.signal });
     } catch (err) {
-      clearTimeout(timerId);
       throw new NetworkError(
         `Network request failed: ${url}`,
         err instanceof Error ? err : new Error(String(err))

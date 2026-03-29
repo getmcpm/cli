@@ -71,7 +71,7 @@ function makeAdapter(clientId: ClientId): ConfigAdapter {
   return {
     clientId,
     read: vi.fn().mockResolvedValue({}),
-    listServers: vi.fn().mockResolvedValue({}),
+    read: vi.fn().mockResolvedValue({}),
     addServer: vi.fn().mockResolvedValue(undefined),
     removeServer: vi.fn().mockResolvedValue(undefined),
   };

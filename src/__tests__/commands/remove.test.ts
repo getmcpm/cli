@@ -38,7 +38,7 @@ function makeAdapter(
   return {
     clientId,
     read: vi.fn().mockResolvedValue(servers),
-    listServers: vi.fn().mockResolvedValue(servers),
+    read: vi.fn().mockResolvedValue(servers),
     addServer: vi.fn().mockResolvedValue(undefined),
     removeServer: vi.fn().mockResolvedValue(undefined),
   };
@@ -87,7 +87,7 @@ describe("removeHandler — server found in one client", () => {
       getAdapter: vi.fn().mockReturnValue(adapter),
     });
     await removeHandler("my-server", {}, deps);
-    expect(adapter.listServers).toHaveBeenCalledWith("/fake/claude-desktop/config.json");
+    expect(adapter.read).toHaveBeenCalledWith("/fake/claude-desktop/config.json");
   });
 
   it("asks for confirmation before removing", async () => {

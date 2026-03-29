@@ -47,7 +47,4 @@ export interface ConfigAdapter {
 
   /** Remove a server entry. Throws if the server name is not found. */
   removeServer(configPath: string, name: string): Promise<void>;
-
-  /** Convenience alias — returns same result as read(). */
-  listServers(configPath: string): Promise<Record<string, McpServerEntry>>;
 }

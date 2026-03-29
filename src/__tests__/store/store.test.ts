@@ -25,6 +25,7 @@ import {
   getStorePath,
   readJson,
   writeJson,
+  _resetCachedStorePath,
 } from "../../store/index.js";
 
 const mockHomedir = os.homedir as ReturnType<typeof vi.fn>;
@@ -36,6 +37,7 @@ const mockMkdir = mkdir as ReturnType<typeof vi.fn>;
 describe("getStorePath", () => {
   beforeEach(() => {
     vi.resetAllMocks();
+    _resetCachedStorePath();
     mockMkdir.mockResolvedValue(undefined);
   });
 
@@ -113,6 +115,7 @@ describe("readJson", () => {
 describe("writeJson", () => {
   beforeEach(() => {
     vi.resetAllMocks();
+    _resetCachedStorePath();
     mockMkdir.mockResolvedValue(undefined);
     mockWriteFile.mockResolvedValue(undefined);
     mockRename.mockResolvedValue(undefined);

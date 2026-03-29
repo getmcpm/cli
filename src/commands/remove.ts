@@ -67,7 +67,7 @@ export async function removeHandler(
   for (const clientId of installedClients) {
     const adapter = getAdapter(clientId);
     const configPath = getConfigPath(clientId);
-    const servers = await adapter.listServers(configPath);
+    const servers = await adapter.read(configPath);
 
     if (Object.prototype.hasOwnProperty.call(servers, name)) {
       clientsWithServer.push(clientId);
@@ -174,7 +174,7 @@ export function registerRemoveCommand(program: Command): void {
         getConfigPath: _getConfigPath,
         removeFromStore: _removeFromStore,
         confirm: createConfirm,
-        output: (text) => console.log(chalk.green(text)),
+        output: (text) => process.stdout.write(text + "\n"),
       };
 
       try {

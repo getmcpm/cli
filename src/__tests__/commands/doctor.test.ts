@@ -38,7 +38,7 @@ function makeAdapter(
     read: vi.fn().mockImplementation(() =>
       shouldThrow ? Promise.reject(new SyntaxError("Unexpected token")) : Promise.resolve(servers)
     ),
-    listServers: vi.fn().mockImplementation(() =>
+    read: vi.fn().mockImplementation(() =>
       shouldThrow ? Promise.reject(new SyntaxError("Unexpected token")) : Promise.resolve(servers)
     ),
     addServer: vi.fn().mockResolvedValue(undefined),
@@ -168,7 +168,7 @@ describe("doctorHandler — config validity", () => {
     });
     await doctorHandler(deps);
     // listServers should only be called for found clients
-    expect(adapter.listServers).not.toHaveBeenCalledWith("/fake/vscode/config.json");
+    expect(adapter.read).not.toHaveBeenCalledWith("/fake/vscode/config.json");
   });
 });
 

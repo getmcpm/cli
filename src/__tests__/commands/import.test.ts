@@ -48,7 +48,7 @@ function makeAdapter(
     read: vi.fn().mockResolvedValue(servers),
     addServer: vi.fn(),
     removeServer: vi.fn(),
-    listServers: vi.fn().mockResolvedValue(servers),
+    read: vi.fn().mockResolvedValue(servers),
   };
 }
 
@@ -498,7 +498,7 @@ describe("handleImport — adapter errors", () => {
       read: vi.fn().mockRejectedValue(new Error("Permission denied")),
       addServer: vi.fn(),
       removeServer: vi.fn(),
-      listServers: vi.fn().mockRejectedValue(new Error("Permission denied")),
+      read: vi.fn().mockRejectedValue(new Error("Permission denied")),
     };
     const deps = makeDeps({
       detectClients: vi.fn().mockResolvedValue(["claude-desktop", "cursor"]),

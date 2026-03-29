@@ -71,12 +71,6 @@ export abstract class BaseAdapter implements ConfigAdapter {
     return { ...(servers as Record<string, McpServerEntry>) };
   }
 
-  async listServers(
-    configPath: string
-  ): Promise<Record<string, McpServerEntry>> {
-    return this.read(configPath);
-  }
-
   async addServer(
     configPath: string,
     name: string,

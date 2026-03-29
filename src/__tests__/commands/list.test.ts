@@ -31,7 +31,7 @@ const VSCODE_SERVERS: Record<string, McpServerEntry> = {
 
 function makeMockAdapter(servers: Record<string, McpServerEntry> = {}) {
   return {
-    listServers: vi.fn().mockResolvedValue(servers),
+    read: vi.fn().mockResolvedValue(servers),
     read: vi.fn().mockResolvedValue(servers),
     addServer: vi.fn(),
     removeServer: vi.fn(),
@@ -64,8 +64,8 @@ describe("handleList — multiple clients", () => {
     const deps: ListDeps = { detectClients, getAdapter, getPath, output };
     await handleList({}, deps);
 
-    expect(claudeAdapter.listServers).toHaveBeenCalledWith("/fake/path/config.json");
-    expect(cursorAdapter.listServers).toHaveBeenCalledWith("/fake/path/config.json");
+    expect(claudeAdapter.read).toHaveBeenCalledWith("/fake/path/config.json");
+    expect(cursorAdapter.read).toHaveBeenCalledWith("/fake/path/config.json");
   });
 
   it("displays Client and Server Name columns", async () => {
@@ -239,8 +239,8 @@ describe("handleList — --client filter", () => {
 
     await handleList({ client: "claude-desktop" }, { detectClients, getAdapter, getPath, output });
 
-    expect(claudeAdapter.listServers).toHaveBeenCalled();
-    expect(cursorAdapter.listServers).not.toHaveBeenCalled();
+    expect(claudeAdapter.read).toHaveBeenCalled();
+    expect(cursorAdapter.read).not.toHaveBeenCalled();
   });
 
   it("only shows servers from the specified client", async () => {

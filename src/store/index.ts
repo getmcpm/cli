@@ -13,11 +13,22 @@ import path from "path";
 // Store path
 // ---------------------------------------------------------------------------
 
+// Module-level cache so mkdir is only called once per process lifetime.
+// getStorePath() is called on every readJson/writeJson — this avoids redundant
+// async syscalls when the directory already exists.
+let _cachedStorePath: string | null = null;
+
 /**
  * Returns the absolute path to the mcpm store directory (~/.mcpm).
  * Creates the directory if it does not already exist.
+ *
+ * Cached per-process: mkdir is only called once. Subsequent calls return the
+ * cached path synchronously-via-resolved-promise.
  */
 export async function getStorePath(): Promise<string> {
+  if (_cachedStorePath !== null) {
+    return _cachedStorePath;
+  }
   const storePath = path.join(os.homedir(), ".mcpm");
   // { recursive: true } means mkdir will not throw if the directory already
   // exists. Any other error (e.g. EACCES) is caught and silently ignored so
@@ -27,7 +38,16 @@ export async function getStorePath(): Promise<string> {
   } catch {
     // Ignore — directory may already exist or we may not need to write.
   }
+  _cachedStorePath = storePath;
   return storePath;
+}
+
+/**
+ * Reset the cached store path. Only for use in tests.
+ * @internal
+ */
+export function _resetCachedStorePath(): void {
+  _cachedStorePath = null;
 }
 
 // ---------------------------------------------------------------------------

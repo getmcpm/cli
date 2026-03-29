@@ -28,7 +28,7 @@ export interface ListOptions {
 
 export interface ListDeps {
   detectClients: () => Promise<ClientId[]>;
-  getAdapter: (clientId: ClientId) => Pick<ConfigAdapter, "listServers" | "addServer" | "removeServer">;
+  getAdapter: (clientId: ClientId) => Pick<ConfigAdapter, "read" | "addServer" | "removeServer">;
   getPath: (clientId: ClientId) => string;
   output: (text: string) => void;
 }
@@ -82,7 +82,7 @@ export async function handleList(
   for (const clientId of clients) {
     const adapter = getAdapter(clientId);
     const configPath = getPath(clientId);
-    const servers = await adapter.listServers(configPath);
+    const servers = await adapter.read(configPath);
 
     for (const [serverName, entry] of Object.entries(servers)) {
       rows.push({ client: clientId, serverName, entry: { ...entry } });
