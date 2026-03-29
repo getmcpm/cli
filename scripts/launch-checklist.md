@@ -6,7 +6,7 @@
 - [ ] Build succeeds: `pnpm build`
 - [ ] Local install works: `npm install -g .` then `mcpm --help`
 - [ ] `mcpm search filesystem` returns real results from the registry
-- [ ] `mcpm install io.github.modelcontextprotocol/servers-filesystem` completes with trust score
+- [ ] `mcpm install <server-name>` completes with trust score (e.g. `io.github.domdomegg/filesystem-mcp`)
 - [ ] `mcpm doctor` runs without errors
 - [ ] `mcpm audit` produces a trust report (install a server first)
 - [ ] `mcpm init developer` installs all three servers

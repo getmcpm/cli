@@ -122,7 +122,7 @@ What it checks:
 | Health check | 0-30 | Can the server start and respond to `list_tools`? |
 | Static scan | 0-40 | Regex-based detection of hardcoded secrets, prompt injection patterns in tool descriptions, typosquatting in package names, suspicious argument schemas |
 | External scanner | 0-20 | Results from [MCP-Scan](https://github.com/invariantlabs-ai/mcp-scan) if installed (optional) |
-| Registry metadata | 0-10 | Verified publisher, publish date, download count |
+| Registry metadata | 0-10 | Verified publisher, publish date, download count (capped to 0 when critical findings present) |
 
 Levels: **safe** (80+), **caution** (50-79), **risky** (below 50).
 
@@ -162,7 +162,7 @@ mcpm is a local-first CLI. There is no mcpm backend or account system.
 
 1. **Search and install** query the [official MCP Registry API](https://registry.modelcontextprotocol.io) (v0.1) maintained by the Model Context Protocol project.
 2. **Trust assessment** runs locally using built-in scanners (regex-based pattern detection) and optionally wraps [MCP-Scan](https://github.com/invariantlabs-ai/mcp-scan) for deeper analysis.
-3. **Config management** reads and writes the native config file for each AI client. All writes use atomic file operations with backup-before-write.
+3. **Config management** reads and writes the native config file for each AI client. All writes use atomic file operations with restricted permissions (0o600 files, 0o700 directories).
 4. **Local state** lives in `~/.mcpm/` (installed server registry, scan results, response cache).
 
 No telemetry. No analytics. No account required.

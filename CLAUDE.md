@@ -143,12 +143,12 @@ Build the **open-source, community-owned npm+npm_audit** for MCP:
 
 ### Security / Trust Assessment (V1)
 
-- **Tier 1 (built-in, zero deps)**: Regex-based secrets detection, prompt injection patterns
-  in tool descriptions, typosquatting detection, exfil-shaped argument schemas, npm package
-  verification (existence, download count, age)
+- **Tier 1 (built-in, zero deps)**: Regex-based secrets detection (with NFKC normalization),
+  prompt injection patterns in descriptions/titles/headers/runtimeArgs, typosquatting detection,
+  exfil-shaped argument schemas, runtime arg allowlist validation
 - **Tier 2 (optional)**: Wraps MCP-Scan if installed (`npx @invariantlabs/mcp-scan`)
 - **Trust score**: 0-100 (health check 30pts, static scan 40pts, external scanner 20pts,
-  registry metadata 10pts). Green ≥80, Yellow 50-79, Red <50
+  registry metadata 10pts, capped to 0 on critical/high findings). Green ≥80, Yellow 50-79, Red <50
 
 ### Backend / Registry API (V1+ / deferred)
 

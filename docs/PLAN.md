@@ -55,8 +55,8 @@ mcpm/
 ├── scripts/
 │   └── demo.sh                     — asciinema demo recording script
 ├── .github/workflows/
-│   ├── ci.yml                      — build + test on push/PR (Node 20, 22)
-│   └── publish.yml                 — npm publish on v* tags
+│   ├── ci.yml                      — build + test on push/PR (Node 20, 22, 24)
+│   └── publish.yml                 — npm publish on v* tags (Node 24)
 ├── package.json                    — @getmcpm/cli, bin: mcpm
 ├── tsconfig.json
 ├── tsup.config.ts                  — bundler config
@@ -141,12 +141,12 @@ store.recordInstall(name, clients, version)
 
 Linux and Windows paths are also supported. Config key: `mcpServers` (Claude Desktop, Cursor) or `servers` (VS Code).
 
-All config writes use atomic file operations (write to `.tmp`, then `fs.rename`).
+All config writes use atomic file operations (write to `.tmp`, then `fs.rename`). Files are written with `mode: 0o600` and directories with `mode: 0o700` to restrict access.
 
 ## Testing
 
 - **Framework**: vitest with `@vitest/coverage-v8`
-- **Test count**: 648+ tests
+- **Test count**: 650+ tests
 - **Coverage thresholds**: lines 80%, branches 75%
 - **Test locations**: `src/__tests__/` (command, config, store tests) + colocated `*.test.ts` (registry, scanner)
 - **Approach**: injectable `fetchImpl` for registry tests (no network calls), temp directories for config adapter tests
@@ -163,7 +163,7 @@ pnpm test:watch        # watch mode
 
 ### CI (`ci.yml`)
 
-Runs on push to `main` and pull requests. Matrix: Node 20 + 22.
+Runs on push to `main` and pull requests. Matrix: Node 20, 22, 24. All GitHub Actions are SHA-pinned.
 
 Steps: `pnpm install --frozen-lockfile` → `typecheck` → `build` → `test:coverage`
 
