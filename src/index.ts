@@ -1,3 +1,10 @@
+// Suppress cli-table3 "padLevels" circular dependency warning
+process.removeAllListeners("warning");
+process.on("warning", (w) => {
+  if (w.message?.includes("padLevels")) return;
+  console.error(w);
+});
+
 import { Command } from "commander";
 import { registerCommands } from "./commands/index.js";
 

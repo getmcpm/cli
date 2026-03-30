@@ -32,3 +32,6 @@ pnpm-debug.log*
 tmp/
 *.tmp
 .gstack/
+
+# MCP Registry publisher
+server.json
