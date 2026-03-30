@@ -174,6 +174,10 @@ This exposes 8 tools: `mcpm_search`, `mcpm_install`, `mcpm_info`, `mcpm_list`, `
 
 The `mcpm_setup` tool takes a natural language description like "filesystem and GitHub" and handles everything: search, trust scoring, install. One tool call to assemble a working MCP toolchain.
 
+**Try it** -- add the config above to your MCP client, restart, then ask your agent:
+
+> You have mcpm tools available (from @getmcpm/cli, the MCP package manager, not the Minecraft one). Use them to find MCP servers for filesystem access and GitHub. Check their trust scores and install anything above 60.
+
 ## Supported clients
 
 | Client | Config path (macOS) |
