@@ -11,10 +11,9 @@ vi.mock("fs/promises", () => ({
   writeFile: vi.fn(),
   rename: vi.fn(),
   mkdir: vi.fn(),
-  copyFile: vi.fn(),
 }));
 
-import { readFile, writeFile, rename, copyFile } from "fs/promises";
+import { readFile, writeFile, rename } from "fs/promises";
 import { VSCodeAdapter } from "../../../config/adapters/vscode.js";
 import type { McpServerEntry } from "../../../config/adapters/index.js";
 
@@ -62,7 +61,7 @@ describe("VSCodeAdapter", () => {
     const entry: McpServerEntry = { command: "uvx", args: ["some-py-server"] };
     await adapter.addServer(CONFIG_PATH, "py-srv", entry);
 
-    const written = JSON.parse(mockWriteFile.mock.calls[0][1] as string);
+    const written = JSON.parse(mockWriteFile.mock.calls[1][1] as string);
     expect(written.servers["py-srv"]).toEqual(entry);
     expect(written.mcpServers).toBeUndefined();
   });
@@ -72,7 +71,7 @@ describe("VSCodeAdapter", () => {
       JSON.stringify({ servers: {}, inputs: [], version: 2 })
     );
     await adapter.addServer(CONFIG_PATH, "srv", { command: "npx", args: [] });
-    const written = JSON.parse(mockWriteFile.mock.calls[0][1] as string);
+    const written = JSON.parse(mockWriteFile.mock.calls[1][1] as string);
     expect(written.inputs).toEqual([]);
     expect(written.version).toBe(2);
   });
@@ -101,7 +100,7 @@ describe("VSCodeAdapter", () => {
     );
     await adapter.removeServer(CONFIG_PATH, "rm");
 
-    const written = JSON.parse(mockWriteFile.mock.calls[0][1] as string);
+    const written = JSON.parse(mockWriteFile.mock.calls[1][1] as string);
     expect(written.servers["rm"]).toBeUndefined();
     expect(written.servers["keep"]).toBeDefined();
     expect(mockRename).toHaveBeenCalledOnce();

@@ -12,10 +12,9 @@ vi.mock("fs/promises", () => ({
   writeFile: vi.fn(),
   rename: vi.fn(),
   mkdir: vi.fn(),
-  copyFile: vi.fn(),
 }));
 
-import { readFile, writeFile, rename, copyFile } from "fs/promises";
+import { readFile, writeFile, rename } from "fs/promises";
 import { CursorAdapter } from "../../../config/adapters/cursor.js";
 import type { McpServerEntry } from "../../../config/adapters/index.js";
 
@@ -54,7 +53,7 @@ describe("CursorAdapter", () => {
     const entry: McpServerEntry = { url: "http://localhost:4000" };
     await adapter.addServer(CONFIG_PATH, "remote-srv", entry);
 
-    const written = JSON.parse(mockWriteFile.mock.calls[0][1] as string);
+    const written = JSON.parse(mockWriteFile.mock.calls[1][1] as string);
     expect(written.mcpServers["remote-srv"]).toEqual(entry);
   });
 
@@ -66,7 +65,7 @@ describe("CursorAdapter", () => {
     };
     await adapter.addServer(CONFIG_PATH, "api-srv", entry);
 
-    const written = JSON.parse(mockWriteFile.mock.calls[0][1] as string);
+    const written = JSON.parse(mockWriteFile.mock.calls[1][1] as string);
     expect(written.mcpServers["api-srv"].url).toBe(
       "https://api.example.com/mcp"
     );
@@ -90,7 +89,7 @@ describe("CursorAdapter", () => {
     );
     await adapter.removeServer(CONFIG_PATH, "rm-me");
 
-    const written = JSON.parse(mockWriteFile.mock.calls[0][1] as string);
+    const written = JSON.parse(mockWriteFile.mock.calls[1][1] as string);
     expect(written.mcpServers["rm-me"]).toBeUndefined();
     expect(written.mcpServers["keep"]).toEqual(entry);
   });

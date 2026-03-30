@@ -11,10 +11,9 @@ vi.mock("fs/promises", () => ({
   writeFile: vi.fn(),
   rename: vi.fn(),
   mkdir: vi.fn(),
-  copyFile: vi.fn(),
 }));
 
-import { readFile, writeFile, rename, copyFile } from "fs/promises";
+import { readFile, writeFile, rename } from "fs/promises";
 import { WindsurfAdapter } from "../../../config/adapters/windsurf.js";
 import type { McpServerEntry } from "../../../config/adapters/index.js";
 
@@ -63,7 +62,7 @@ describe("WindsurfAdapter", () => {
     };
     await adapter.addServer(CONFIG_PATH, "ws-srv", entry);
 
-    const written = JSON.parse(mockWriteFile.mock.calls[0][1] as string);
+    const written = JSON.parse(mockWriteFile.mock.calls[1][1] as string);
     expect(written.mcpServers["ws-srv"]).toEqual(entry);
   });
 
@@ -81,7 +80,7 @@ describe("WindsurfAdapter", () => {
     mockReadFile.mockResolvedValue(makeConfig({ del: entry, stay: entry }));
     await adapter.removeServer(CONFIG_PATH, "del");
 
-    const written = JSON.parse(mockWriteFile.mock.calls[0][1] as string);
+    const written = JSON.parse(mockWriteFile.mock.calls[1][1] as string);
     expect(written.mcpServers["del"]).toBeUndefined();
     expect(written.mcpServers["stay"]).toEqual(entry);
     expect(mockRename).toHaveBeenCalledOnce();
@@ -99,7 +98,7 @@ describe("WindsurfAdapter", () => {
       JSON.stringify({ mcpServers: {}, extraSetting: true })
     );
     await adapter.addServer(CONFIG_PATH, "srv", { command: "npx", args: [] });
-    const written = JSON.parse(mockWriteFile.mock.calls[0][1] as string);
+    const written = JSON.parse(mockWriteFile.mock.calls[1][1] as string);
     expect(written.extraSetting).toBe(true);
   });
 

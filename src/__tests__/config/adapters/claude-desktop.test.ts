@@ -12,10 +12,9 @@ vi.mock("fs/promises", () => ({
   writeFile: vi.fn(),
   rename: vi.fn(),
   mkdir: vi.fn(),
-  copyFile: vi.fn(),
 }));
 
-import { readFile, writeFile, rename, mkdir, copyFile } from "fs/promises";
+import { readFile, writeFile, rename, mkdir } from "fs/promises";
 import { ClaudeDesktopAdapter } from "../../../config/adapters/claude-desktop.js";
 import type { McpServerEntry } from "../../../config/adapters/index.js";
 
@@ -23,7 +22,6 @@ const mockReadFile = readFile as ReturnType<typeof vi.fn>;
 const mockWriteFile = writeFile as ReturnType<typeof vi.fn>;
 const mockRename = rename as ReturnType<typeof vi.fn>;
 const mockMkdir = mkdir as ReturnType<typeof vi.fn>;
-const mockCopyFile = copyFile as ReturnType<typeof vi.fn>;
 
 const CONFIG_PATH = "/fake/claude_desktop_config.json";
 
@@ -39,7 +37,6 @@ describe("ClaudeDesktopAdapter", () => {
     mockWriteFile.mockResolvedValue(undefined);
     mockRename.mockResolvedValue(undefined);
     mockMkdir.mockResolvedValue(undefined);
-    mockCopyFile.mockResolvedValue(undefined);
   });
 
   // -------------------------------------------------------------------------
@@ -113,13 +110,13 @@ describe("ClaudeDesktopAdapter", () => {
       const entry: McpServerEntry = { command: "npx", args: ["-y", "new-srv"] };
       await adapter.addServer(CONFIG_PATH, "new-srv", entry);
 
-      expect(mockWriteFile).toHaveBeenCalledOnce();
-      const writtenContent = JSON.parse(
-        mockWriteFile.mock.calls[0][1] as string
+      // Two writes: .bak backup + .tmp atomic write
+      expect(mockWriteFile).toHaveBeenCalledTimes(2);
+      const tmpContent = JSON.parse(
+        mockWriteFile.mock.calls[1][1] as string
       );
-      expect(writtenContent.mcpServers["new-srv"]).toEqual(entry);
+      expect(tmpContent.mcpServers["new-srv"]).toEqual(entry);
 
-      // Atomic: rename from .tmp path to real path
       expect(mockRename).toHaveBeenCalledOnce();
       const [tmpPath, finalPath] = mockRename.mock.calls[0] as [string, string];
       expect(tmpPath).toMatch(/\.tmp$/);
@@ -132,7 +129,8 @@ describe("ClaudeDesktopAdapter", () => {
       const newEntry: McpServerEntry = { command: "npx", args: ["-y", "new"] };
       await adapter.addServer(CONFIG_PATH, "new-srv", newEntry);
 
-      const written = JSON.parse(mockWriteFile.mock.calls[0][1] as string);
+      // .bak is calls[0], .tmp is calls[1]
+      const written = JSON.parse(mockWriteFile.mock.calls[1][1] as string);
       expect(written.mcpServers["existing"]).toEqual(existing);
       expect(written.mcpServers["new-srv"]).toEqual(newEntry);
     });
@@ -143,7 +141,7 @@ describe("ClaudeDesktopAdapter", () => {
       );
       const entry: McpServerEntry = { command: "npx", args: [] };
       await adapter.addServer(CONFIG_PATH, "srv", entry);
-      const written = JSON.parse(mockWriteFile.mock.calls[0][1] as string);
+      const written = JSON.parse(mockWriteFile.mock.calls[1][1] as string);
       expect(written.someOtherKey).toBe("preserve-me");
     });
 
@@ -190,7 +188,8 @@ describe("ClaudeDesktopAdapter", () => {
       );
       await adapter.removeServer(CONFIG_PATH, "to-remove");
 
-      const written = JSON.parse(mockWriteFile.mock.calls[0][1] as string);
+      // .bak is calls[0], .tmp is calls[1]
+      const written = JSON.parse(mockWriteFile.mock.calls[1][1] as string);
       expect(written.mcpServers["to-remove"]).toBeUndefined();
       expect(written.mcpServers["keep-me"]).toEqual(entry);
 
@@ -218,57 +217,42 @@ describe("ClaudeDesktopAdapter", () => {
   // -------------------------------------------------------------------------
 
   describe("backup-before-write", () => {
-    it("creates a .bak copy before addServer writes", async () => {
-      mockReadFile.mockResolvedValue(makeConfig({}));
+    it("writes .bak from in-memory content before addServer modifies config", async () => {
+      const existing: McpServerEntry = { command: "uvx", args: ["old"] };
+      mockReadFile.mockResolvedValue(makeConfig({ old: existing }));
       const entry: McpServerEntry = { command: "npx", args: [] };
       await adapter.addServer(CONFIG_PATH, "srv", entry);
 
-      expect(mockCopyFile).toHaveBeenCalledOnce();
-      expect(mockCopyFile).toHaveBeenCalledWith(
-        CONFIG_PATH,
-        `${CONFIG_PATH}.bak`
-      );
-      // copyFile must be called BEFORE writeFile
-      const copyOrder = mockCopyFile.mock.invocationCallOrder[0];
-      const writeOrder = mockWriteFile.mock.invocationCallOrder[0];
-      expect(copyOrder).toBeLessThan(writeOrder!);
+      // Two writeFile calls: first is .bak, second is .tmp
+      expect(mockWriteFile).toHaveBeenCalledTimes(2);
+      const [bakPath, bakContent] = mockWriteFile.mock.calls[0] as [string, string, unknown];
+      expect(bakPath).toBe(`${CONFIG_PATH}.bak`);
+      const parsed = JSON.parse(bakContent);
+      expect(parsed.mcpServers.old).toEqual(existing);
+      expect(parsed.mcpServers.srv).toBeUndefined();
     });
 
-    it("creates a .bak copy before removeServer writes", async () => {
+    it("writes .bak before removeServer modifies config", async () => {
       const entry: McpServerEntry = { command: "npx", args: [] };
       mockReadFile.mockResolvedValue(makeConfig({ srv: entry }));
       await adapter.removeServer(CONFIG_PATH, "srv");
 
-      expect(mockCopyFile).toHaveBeenCalledOnce();
-      expect(mockCopyFile).toHaveBeenCalledWith(
-        CONFIG_PATH,
-        `${CONFIG_PATH}.bak`
-      );
+      expect(mockWriteFile).toHaveBeenCalledTimes(2);
+      const [bakPath] = mockWriteFile.mock.calls[0] as [string, string, unknown];
+      expect(bakPath).toBe(`${CONFIG_PATH}.bak`);
     });
 
-    it("skips backup silently when config does not exist yet", async () => {
+    it("skips .bak when config does not exist yet (first-time creation)", async () => {
       const enoent = Object.assign(new Error("ENOENT"), { code: "ENOENT" });
       mockReadFile.mockRejectedValue(enoent);
-      mockCopyFile.mockRejectedValue(enoent);
 
       const entry: McpServerEntry = { command: "npx", args: [] };
       await adapter.addServer(CONFIG_PATH, "srv", entry);
 
-      // copyFile was attempted but ENOENT was swallowed
-      expect(mockCopyFile).toHaveBeenCalledOnce();
-      // writeFile still proceeded
+      // Only one writeFile call (the .tmp), no .bak
       expect(mockWriteFile).toHaveBeenCalledOnce();
-    });
-
-    it("throws if backup fails with non-ENOENT error", async () => {
-      mockReadFile.mockResolvedValue(makeConfig({}));
-      const eacces = Object.assign(new Error("EACCES"), { code: "EACCES" });
-      mockCopyFile.mockRejectedValue(eacces);
-
-      const entry: McpServerEntry = { command: "npx", args: [] };
-      await expect(
-        adapter.addServer(CONFIG_PATH, "srv", entry)
-      ).rejects.toThrow();
+      const [writtenPath] = mockWriteFile.mock.calls[0] as [string, string, unknown];
+      expect(writtenPath).toMatch(/\.tmp$/);
     });
   });
 });
