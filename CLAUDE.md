@@ -129,8 +129,9 @@ Build the **open-source, community-owned npm+npm_audit** for MCP:
 - **Local storage**: JSON files in `~/.mcpm/` (servers.json, scans.json, cache/)
 - **Testing**: Vitest + @vitest/coverage-v8 (80% line, 75% branch thresholds)
 - **Build**: tsup (TypeScript → JS)
+- **MCP server**: `mcpm serve` exposes 8 tools via `@modelcontextprotocol/sdk` (stdio transport)
 - **Commands**: `mcpm search`, `mcpm install`, `mcpm list`, `mcpm remove`, `mcpm info`,
-  `mcpm audit`, `mcpm update`, `mcpm doctor`, `mcpm init`
+  `mcpm audit`, `mcpm update`, `mcpm doctor`, `mcpm init`, `mcpm import`, `mcpm serve`
 
 ### Registry API (upstream, not ours)
 
@@ -192,13 +193,14 @@ When community quality signals require a backend (user reviews, aggregated telem
 - [x] CI/CD: Node 20/22/24, SHA-pinned actions, npm provenance, Snyk integration
 - [x] Security: NFKC normalization, runtime arg allowlist, file permissions, CODEOWNERS
 
-### V1.1 (agent-native + polish)
+### V1.1 (agent-native — SHIPPED v0.1.1)
 
-- [ ] `mcpm serve` — run mcpm itself as an MCP server, exposing search/install/audit/list
-      as structured tool calls. Any AI agent can manage MCP servers programmatically.
-- [ ] Tools: `mcpm_search`, `mcpm_install`, `mcpm_info`, `mcpm_audit`, `mcpm_list`, `mcpm_doctor`
-- [ ] Publish mcpm's own MCP server to the registry (dogfood the ecosystem)
-- [ ] "I need to do X" → agent searches, evaluates trust, installs the right server
+- [x] `mcpm serve` — mcpm as an MCP server over stdio, 8 tools with `registerTool` API
+- [x] Tools: `mcpm_search`, `mcpm_install`, `mcpm_info`, `mcpm_list`, `mcpm_remove`,
+      `mcpm_audit`, `mcpm_doctor`, `mcpm_setup` (composite NL-to-install)
+- [x] MCP tool annotations: `readOnlyHint` on read tools, `destructiveHint` on write tools
+- [x] `mcpm_setup` keyword extraction + parallel search + trust-gated install
+- [ ] Publish mcpm's own MCP server to the official registry
 - [ ] Health check tiers (config validation → list_tools → full validation)
 - [ ] Automated demo GIF generation (VHS/asciinema)
 
@@ -266,35 +268,32 @@ the registry concept end-to-end before we launch publicly.
 
 ---
 
-## Architecture Diagram (V1 — local-first)
+## Architecture Diagram
 
 ```
-  Developer
+  Developer / AI Agent
      │
-     ▼
-  mcpm CLI (Node.js, npm: @getmcpm/cli, bin: mcpm)
+     ├── CLI (terminal)              ├── MCP Server (stdio)
+     │   mcpm search/install/...     │   mcpm serve
+     │                               │   8 tools via JSON-RPC
+     ▼                               ▼
+  mcpm core (Node.js, npm: @getmcpm/cli, bin: mcpm)
      │
-     ├── mcpm search ──────► Official MCP Registry API (v0.1)
+     ├── Registry ─────────► Official MCP Registry API (v0.1)
      │                        registry.modelcontextprotocol.io
      │
-     ├── mcpm install ─────► Registry API → Trust Assessment → Config Write
-     │                        │                │
-     │                        │                ├── Tier 1 (built-in JS scanner)
-     │                        │                └── Tier 2 (MCP-Scan, optional)
-     │                        │
-     │                        └──► Config Adapters
-     │                              ├── Claude Desktop
-     │                              ├── Cursor
-     │                              ├── VS Code
-     │                              └── Windsurf (experimental)
+     ├── Scanner ──────────► Trust Assessment (0-100)
+     │                        ├── Tier 1 (built-in: secrets, injection, typosquatting)
+     │                        └── Tier 2 (MCP-Scan, optional)
      │
-     ├── mcpm audit ───────► Scan all installed servers → Trust Report
-     │
-     ├── mcpm doctor ──────► Check clients, configs, runtimes
+     ├── Config Adapters ──► Read/write per-client config (atomic + backup)
+     │                        ├── Claude Desktop
+     │                        ├── Cursor
+     │                        ├── VS Code
+     │                        └── Windsurf
      │
      └── ~/.mcpm/
            ├── servers.json    (installed server registry)
-           ├── scans.json      (trust assessment results)
            └── cache/          (registry response cache, 1hr TTL)
 ```
 
@@ -318,6 +317,11 @@ the registry concept end-to-end before we launch publicly.
 | 2026-03-28 | @inquirer/prompts (not readline)            | Security UX needs multi-select, confirm, styled trust score warnings   |
 | 2026-03-28 | No telemetry in V1                          | Trust paradox: security tool shouldn't track users at launch           |
 | 2026-03-28 | Deferred Typesense/Fastify/PostgreSQL to V1+| MVP is local-first; backend needed only when user reviews require it   |
+| 2026-03-30 | `mcpm serve` over stdio (not HTTP)          | Matches how Claude Desktop/Cursor/Claude Code consume MCP servers      |
+| 2026-03-30 | `registerTool` API with annotations         | `destructiveHint` on install/remove/setup, `readOnlyHint` on read ops  |
+| 2026-03-30 | No LLM in mcpm for `mcpm_setup`             | Calling agent handles NL understanding; mcpm does keyword extraction   |
+| 2026-03-30 | CI derives version from git tag             | Single source of truth; no manual package.json version bumps           |
+| 2026-03-30 | Auto GitHub Release on publish              | `--generate-notes` from commit history; grouped by label               |
 
 ---
 

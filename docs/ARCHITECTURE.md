@@ -17,7 +17,12 @@ mcpm/
 │   │   ├── update.ts               — update installed servers
 │   │   ├── doctor.ts               — check MCP setup health
 │   │   ├── init.ts                 — install a curated starter pack
-│   │   └── import.ts               — import servers from client config
+│   │   ├── import.ts               — import servers from client config
+│   │   └── serve.ts                — start mcpm as an MCP server
+│   ├── server/
+│   │   ├── index.ts                — MCP server setup (registerTool, stdio transport)
+│   │   ├── tools.ts                — Zod input schemas for each tool
+│   │   └── handlers.ts             — tool handlers (wraps existing CLI logic)
 │   ├── registry/
 │   │   ├── client.ts               — RegistryClient (HTTP, injectable fetch)
 │   │   ├── schemas.ts              — Zod schemas for API responses
@@ -49,14 +54,14 @@ mcpm/
 │       ├── format-entry.ts         — format MCP server config entries
 │       └── format-trust.ts         — format trust score display
 ├── src/__tests__/
-│   ├── commands/                    — 10 command test files
+│   ├── commands/                    — 11 command test files
 │   ├── config/                      — adapter + detector + paths tests
 │   └── store/                       — cache + servers + store tests
 ├── scripts/
 │   └── demo.sh                     — asciinema demo recording script
 ├── .github/workflows/
 │   ├── ci.yml                      — build + test on push/PR (Node 20, 22, 24)
-│   └── publish.yml                 — npm publish on v* tags (Node 24)
+│   └── publish.yml                 — npm publish + GitHub Release on v* tags (Node 24)
 ├── package.json                    — @getmcpm/cli, bin: mcpm
 ├── tsconfig.json
 ├── tsup.config.ts                  — bundler config
@@ -67,7 +72,8 @@ mcpm/
 
 | Module | Purpose |
 |---|---|
-| `commands/` | 10 CLI commands, each a self-contained Commander action |
+| `commands/` | 11 CLI commands, each a self-contained Commander action |
+| `server/` | MCP server (stdio): 8 tools wrapping CLI logic via injectable handlers |
 | `registry/` | Typed HTTP client for the official MCP Registry API (v0.1 at registry.modelcontextprotocol.io) |
 | `config/` | OS-aware config paths, client detection, and per-client config adapters with atomic writes |
 | `scanner/` | Trust scoring engine: tier 1 (metadata), tier 2 (static pattern analysis), composite score |
@@ -146,7 +152,7 @@ All config writes use atomic file operations (write to `.tmp`, then `fs.rename`)
 ## Testing
 
 - **Framework**: vitest with `@vitest/coverage-v8`
-- **Test count**: 664+ tests
+- **Test count**: 687+ tests
 - **Coverage thresholds**: lines 80%, branches 75%
 - **Test locations**: `src/__tests__/` (command, config, store tests) + colocated `*.test.ts` (registry, scanner)
 - **Approach**: injectable `fetchImpl` for registry tests (no network calls), temp directories for config adapter tests

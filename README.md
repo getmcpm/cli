@@ -151,8 +151,28 @@ Without an external scanner installed, the maximum possible score is 80/100. The
 | `mcpm doctor` | Check MCP setup health and report issues |
 | `mcpm init <pack>` | Install a curated starter pack of MCP servers |
 | `mcpm import` | Import existing MCP servers from client config files |
+| `mcpm serve` | Start mcpm as an MCP server (stdio transport) |
 
 Run `mcpm <command> --help` for options and flags.
+
+## Agent mode
+
+mcpm can run as an MCP server itself, letting AI agents search, install, and audit MCP servers programmatically.
+
+```json
+{
+  "mcpServers": {
+    "mcpm": {
+      "command": "npx",
+      "args": ["-y", "@getmcpm/cli", "serve"]
+    }
+  }
+}
+```
+
+This exposes 8 tools: `mcpm_search`, `mcpm_install`, `mcpm_info`, `mcpm_list`, `mcpm_remove`, `mcpm_audit`, `mcpm_doctor`, and `mcpm_setup`.
+
+The `mcpm_setup` tool takes a natural language description like "filesystem and GitHub" and handles everything: search, trust scoring, install. One tool call to assemble a working MCP toolchain.
 
 ## Supported clients
 
