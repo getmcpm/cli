@@ -202,7 +202,7 @@ When community quality signals require a backend (user reviews, aggregated telem
 - [x] `mcpm_setup` keyword extraction + parallel search + trust-gated install
 - [ ] Publish mcpm's own MCP server to the official registry (entry ready: docs/registry-entry.json)
 - [x] Health check tiers (config validation → process start → list_tools verification)
-- [ ] Demo GIF recording (script ready: scripts/demo.sh, needs asciinema or VHS)
+- [x] Demo recording (asciinema: https://asciinema.org/a/Oua80yhXkjz071MP)
 
 ### V1.5 (community trust)
 

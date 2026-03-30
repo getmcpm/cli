@@ -19,7 +19,7 @@
 
 66% of MCP servers have security findings ([AgentSeal scan](https://agentseal.com)). Most registries don't tell you that. mcpm runs a trust assessment on every install -- checking for hardcoded secrets, prompt injection patterns, typosquatting, and suspicious argument schemas -- so you know what you're adding to your AI tools before it runs.
 
-<!-- ![mcpm demo](./assets/demo.gif) -->
+[![demo](https://asciinema.org/a/Oua80yhXkjz071MP.svg)](https://asciinema.org/a/Oua80yhXkjz071MP)
 
 ## Quick start
 
