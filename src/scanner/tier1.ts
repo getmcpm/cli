@@ -77,7 +77,8 @@ export function scanTier1(entry: ServerEntry): Finding[] {
   // --- 1c. Scan runtimeArguments for injection ---
   for (const pkg of server.packages) {
     for (const arg of pkg.runtimeArguments ?? []) {
-      allFindings.push(...detectPromptInjection(arg));
+      const value = typeof arg === "string" ? arg : arg.value;
+      allFindings.push(...detectPromptInjection(value));
     }
   }
 

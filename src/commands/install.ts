@@ -71,6 +71,18 @@ export function validateIdentifier(identifier: string, registryType: string): vo
 }
 
 /**
+ * Normalize runtimeArguments from the registry.
+ * The registry may return plain strings or {type, value} objects.
+ */
+function normalizeRuntimeArgs(
+  args: ReadonlyArray<string | { type: string; value: string }>
+): string[] {
+  return args.map((arg) =>
+    typeof arg === "string" ? arg : arg.value
+  );
+}
+
+/**
  * Node.js flags that enable arbitrary code execution.
  * These are rejected regardless of format (bare or with value).
  * This blocklist catches known-dangerous flags; the allowlist below
@@ -206,28 +218,31 @@ export function resolveInstallEntry(
 
   if (npmPkg) {
     validateIdentifier(npmPkg.identifier, "npm");
-    validateRuntimeArgs(npmPkg.runtimeArguments ?? []);
+    const rtArgs = normalizeRuntimeArgs(npmPkg.runtimeArguments ?? []);
+    validateRuntimeArgs(rtArgs);
     return {
       command: "npx",
-      args: ["-y", npmPkg.identifier, ...(npmPkg.runtimeArguments ?? [])],
+      args: ["-y", npmPkg.identifier, ...rtArgs],
     };
   }
 
   if (pypiPkg) {
     validateIdentifier(pypiPkg.identifier, "pypi");
-    validateRuntimeArgs(pypiPkg.runtimeArguments ?? []);
+    const rtArgs = normalizeRuntimeArgs(pypiPkg.runtimeArguments ?? []);
+    validateRuntimeArgs(rtArgs);
     return {
       command: "uvx",
-      args: [pypiPkg.identifier, ...(pypiPkg.runtimeArguments ?? [])],
+      args: [pypiPkg.identifier, ...rtArgs],
     };
   }
 
   if (ociPkg) {
     validateIdentifier(ociPkg.identifier, "oci");
-    validateRuntimeArgs(ociPkg.runtimeArguments ?? []);
+    const rtArgs = normalizeRuntimeArgs(ociPkg.runtimeArguments ?? []);
+    validateRuntimeArgs(rtArgs);
     return {
       command: "docker",
-      args: ["run", "--rm", "-i", ociPkg.identifier, ...(ociPkg.runtimeArguments ?? [])],
+      args: ["run", "--rm", "-i", ociPkg.identifier, ...rtArgs],
     };
   }
 

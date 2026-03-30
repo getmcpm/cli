@@ -46,7 +46,12 @@ export const PackageSchema = z.object({
   version: z.string().optional(),
   transport: TransportSchema.optional(),
   environmentVariables: z.array(EnvVarSchema).default([]),
-  runtimeArguments: z.array(z.string()).optional(),
+  runtimeArguments: z.array(
+    z.union([
+      z.string(),
+      z.object({ type: z.string(), value: z.string() }).passthrough(),
+    ])
+  ).optional(),
 });
 
 export const RemoteHeaderSchema = z.object({
