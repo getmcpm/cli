@@ -70,43 +70,72 @@ export async function startServer(): Promise<void> {
     version: "0.1.0",
   });
 
-  // Register tools
-  server.tool("mcpm_search", "Search the MCP registry for servers with trust scores", SearchInput.shape, async (args) => {
+  // Register tools using registerTool API
+  server.registerTool("mcpm_search", {
+    description: "Search the MCP registry for servers with trust scores",
+    inputSchema: SearchInput.shape,
+  }, async (args) => {
     const result = await handleSearch(args, deps);
     return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
   });
 
-  server.tool("mcpm_install", "Install an MCP server with trust assessment", InstallInput.shape, async (args) => {
+  server.registerTool("mcpm_install", {
+    description: "Install an MCP server with trust assessment",
+    inputSchema: InstallInput.shape,
+    annotations: { destructiveHint: true },
+  }, async (args) => {
     const result = await handleInstall(args, deps);
     return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
   });
 
-  server.tool("mcpm_info", "Show full details and trust score for an MCP server", InfoInput.shape, async (args) => {
+  server.registerTool("mcpm_info", {
+    description: "Show full details and trust score for an MCP server",
+    inputSchema: InfoInput.shape,
+    annotations: { readOnlyHint: true },
+  }, async (args) => {
     const result = await handleInfo(args, deps);
     return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
   });
 
-  server.tool("mcpm_list", "List installed MCP servers across AI clients", ListInput.shape, async (args) => {
+  server.registerTool("mcpm_list", {
+    description: "List installed MCP servers across AI clients",
+    inputSchema: ListInput.shape,
+    annotations: { readOnlyHint: true },
+  }, async (args) => {
     const result = await handleList(args, deps);
     return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
   });
 
-  server.tool("mcpm_remove", "Remove an MCP server from client configs", RemoveInput.shape, async (args) => {
+  server.registerTool("mcpm_remove", {
+    description: "Remove an MCP server from client configs",
+    inputSchema: RemoveInput.shape,
+    annotations: { destructiveHint: true },
+  }, async (args) => {
     const result = await handleRemove(args, deps);
     return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
   });
 
-  server.tool("mcpm_audit", "Scan all installed servers and produce trust report", {}, async () => {
+  server.registerTool("mcpm_audit", {
+    description: "Scan all installed servers and produce trust report",
+    annotations: { readOnlyHint: true },
+  }, async () => {
     const result = await handleAudit(deps);
     return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
   });
 
-  server.tool("mcpm_doctor", "Check MCP setup health", {}, async () => {
+  server.registerTool("mcpm_doctor", {
+    description: "Check MCP setup health",
+    annotations: { readOnlyHint: true },
+  }, async () => {
     const result = await handleDoctor(deps);
     return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
   });
 
-  server.tool("mcpm_setup", "Install MCP servers from a natural language description", SetupInput.shape, async (args) => {
+  server.registerTool("mcpm_setup", {
+    description: "Install MCP servers from a natural language description",
+    inputSchema: SetupInput.shape,
+    annotations: { destructiveHint: true },
+  }, async (args) => {
     const result = await handleSetup(args, deps);
     return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
   });
