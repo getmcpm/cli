@@ -21,6 +21,9 @@ export default defineConfig({
         "**/scanner/index.ts",
         // Type-only files have no runtime code
         "**/registry/types.ts",
+        // MCP server wiring (tool registration + transport setup) — logic tested via handlers.test.ts
+        "**/server/index.ts",
+        "**/server/tools.ts",
       ],
     },
   },
