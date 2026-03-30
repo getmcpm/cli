@@ -187,8 +187,8 @@ When community quality signals require a backend (user reviews, aggregated telem
 - [x] Rich trust score visualization (color bar, breakdown)
 - [ ] Health check tiers (config validation → list_tools → full validation)
 - [x] Cross-IDE config management (Claude Desktop, Cursor, VS Code, Windsurf experimental)
-- [ ] Config backup-before-write for safety
-- [ ] Cross-platform paths (macOS, Linux, Windows)
+- [x] Config backup-before-write for safety
+- [x] Cross-platform paths (macOS, Linux, Windows)
 - [ ] Automated demo GIF generation (VHS/asciinema)
 - [x] Published to npm as `@getmcpm/cli`, bin command `mcpm`
 

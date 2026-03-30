@@ -12,9 +12,10 @@ vi.mock("fs/promises", () => ({
   writeFile: vi.fn(),
   rename: vi.fn(),
   mkdir: vi.fn(),
+  copyFile: vi.fn(),
 }));
 
-import { readFile, writeFile, rename } from "fs/promises";
+import { readFile, writeFile, rename, copyFile } from "fs/promises";
 import { CursorAdapter } from "../../../config/adapters/cursor.js";
 import type { McpServerEntry } from "../../../config/adapters/index.js";
 

@@ -11,9 +11,10 @@ vi.mock("fs/promises", () => ({
   writeFile: vi.fn(),
   rename: vi.fn(),
   mkdir: vi.fn(),
+  copyFile: vi.fn(),
 }));
 
-import { readFile, writeFile, rename } from "fs/promises";
+import { readFile, writeFile, rename, copyFile } from "fs/promises";
 import { VSCodeAdapter } from "../../../config/adapters/vscode.js";
 import type { McpServerEntry } from "../../../config/adapters/index.js";
 

@@ -8,7 +8,7 @@
  * then fs.rename() moves it into place.
  */
 
-import { readFile, writeFile, rename, mkdir } from "fs/promises";
+import { readFile, writeFile, rename, mkdir, copyFile } from "fs/promises";
 import path from "path";
 import type { ClientId } from "../paths.js";
 import type { ConfigAdapter, McpServerEntry } from "./index.js";
@@ -42,7 +42,24 @@ export abstract class BaseAdapter implements ConfigAdapter {
   }
 
   /**
+   * Create a backup of the config file before writing.
+   * Copies to `configPath.bak`. Silently skips if the source does not exist
+   * (first-time config creation needs no backup).
+   */
+  private async backupConfig(configPath: string): Promise<void> {
+    try {
+      await copyFile(configPath, `${configPath}.bak`);
+    } catch (err) {
+      if (!isEnoent(err)) {
+        throw err;
+      }
+      // No existing file to back up — first-time config creation.
+    }
+  }
+
+  /**
    * Write `data` to `configPath` atomically via a .tmp sibling.
+   * Creates a .bak backup of the existing file before overwriting.
    * Creates parent directories if they do not exist.
    */
   private async writeAtomic(
@@ -51,6 +68,9 @@ export abstract class BaseAdapter implements ConfigAdapter {
   ): Promise<void> {
     const dir = path.dirname(configPath);
     await mkdir(dir, { recursive: true, mode: 0o700 });
+
+    // Backup existing config before any modification.
+    await this.backupConfig(configPath);
 
     const tmpPath = `${configPath}.tmp`;
     await writeFile(tmpPath, JSON.stringify(data, null, 2), {
