@@ -5,12 +5,18 @@
  * All dependencies are injectable for testability.
  */
 
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 import type { ClientId } from "../config/paths.js";
-import type { ConfigAdapter, McpServerEntry } from "../config/adapters/index.js";
+import type { ConfigAdapter } from "../config/adapters/index.js";
 import type { ServerEntry } from "../registry/types.js";
 import type { Finding } from "../scanner/tier1.js";
 import type { TrustScore, TrustScoreInput } from "../scanner/trust-score.js";
 import { extractRegistryMeta } from "../utils/format-trust.js";
+import { formatMcpEntryCommand } from "../utils/format-entry.js";
+import { resolveInstallEntry } from "../commands/install.js";
+
+const execFileAsync = promisify(execFile);
 
 // ---------------------------------------------------------------------------
 // Dependency injection types
@@ -83,13 +89,12 @@ export async function handleSearch(
 
 export async function handleInstall(
   args: { name: string; client?: string },
-  deps: ServerDeps
+  deps: ServerDeps,
+  preResolved?: { entry: ServerEntry; trust: TrustScore }
 ): Promise<object> {
-  const entry = await deps.registryGetServer(args.name);
-  const trust = computeTrust(entry, deps);
+  const entry = preResolved?.entry ?? await deps.registryGetServer(args.name);
+  const trust = preResolved?.trust ?? computeTrust(entry, deps);
   const clients = await resolveClients(args.client, deps);
-
-  const { resolveInstallEntry } = await import("../commands/install.js");
 
   const installedClients: ClientId[] = [];
   for (const clientId of clients) {
@@ -147,7 +152,7 @@ export async function handleList(
     const installed = await adapter.read(configPath);
 
     for (const [name, entry] of Object.entries(installed)) {
-      const command = formatCommand(entry);
+      const command = formatMcpEntryCommand(entry, "unknown");
       servers.push({ name, client: clientId, command });
     }
   }
@@ -217,20 +222,14 @@ export async function handleDoctor(deps: ServerDeps): Promise<object> {
   const detected = await deps.detectClients();
   const clients = detected.map((id) => ({ id, detected: true }));
 
-  // Check runtimes
-  const { execFile } = await import("node:child_process");
-  const { promisify } = await import("node:util");
-  const execFileAsync = promisify(execFile);
-
-  const runtimes: Array<{ name: string; available: boolean }> = [];
-  for (const cmd of ["npx", "uvx", "docker"]) {
-    try {
-      await execFileAsync(cmd, ["--version"], { timeout: 5000 });
-      runtimes.push({ name: cmd, available: true });
-    } catch {
-      runtimes.push({ name: cmd, available: false });
-    }
-  }
+  const cmds = ["npx", "uvx", "docker"] as const;
+  const results = await Promise.allSettled(
+    cmds.map((cmd) => execFileAsync(cmd, ["--version"], { timeout: 5000 }))
+  );
+  const runtimes = cmds.map((name, i) => ({
+    name,
+    available: results[i].status === "fulfilled",
+  }));
 
   return { clients, runtimes, issues: [] };
 }
@@ -247,16 +246,23 @@ export async function handleSetup(
   const installed: Array<{ name: string; trustScore: TrustScore }> = [];
   const skipped: Array<{ name: string; reason: string }> = [];
 
+  // Parallel search pass — all keywords searched concurrently
+  const searchResults = await Promise.all(
+    keywords.map((kw) => deps.registrySearch(kw, 5).catch(() => [] as ServerEntry[]))
+  );
+
   const seenNames = new Set<string>();
 
-  for (const keyword of keywords) {
-    const entries = await deps.registrySearch(keyword, 5);
+  // Sequential evaluate/install pass (installs depend on previous state)
+  for (let i = 0; i < keywords.length; i++) {
+    const keyword = keywords[i];
+    const entries = searchResults[i];
+
     if (entries.length === 0) {
       skipped.push({ name: keyword, reason: `No servers found for "${keyword}"` });
       continue;
     }
 
-    // Pick best by trust score, skip duplicates
     let bestEntry: ServerEntry | null = null;
     let bestTrust: TrustScore | null = null;
 
@@ -282,9 +288,12 @@ export async function handleSetup(
       continue;
     }
 
-    // Install
     try {
-      await handleInstall({ name: bestEntry.server.name, client: args.client }, deps);
+      await handleInstall(
+        { name: bestEntry.server.name, client: args.client },
+        deps,
+        { entry: bestEntry, trust: bestTrust }
+      );
       seenNames.add(bestEntry.server.name);
       installed.push({ name: bestEntry.server.name, trustScore: bestTrust });
     } catch (err) {
@@ -327,15 +336,3 @@ export function extractKeywords(description: string): string[] {
   return tokens.length > 0 ? tokens : [description.trim()];
 }
 
-// ---------------------------------------------------------------------------
-// Format helper
-// ---------------------------------------------------------------------------
-
-function formatCommand(entry: McpServerEntry): string {
-  if ("url" in entry && typeof entry.url === "string") return entry.url;
-  if ("command" in entry && typeof entry.command === "string") {
-    const args = "args" in entry && Array.isArray(entry.args) ? entry.args : [];
-    return `${entry.command} ${args.join(" ")}`.trim();
-  }
-  return "unknown";
-}
