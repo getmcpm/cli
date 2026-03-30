@@ -200,7 +200,7 @@ When community quality signals require a backend (user reviews, aggregated telem
       `mcpm_audit`, `mcpm_doctor`, `mcpm_setup` (composite NL-to-install)
 - [x] MCP tool annotations: `readOnlyHint` on read tools, `destructiveHint` on write tools
 - [x] `mcpm_setup` keyword extraction + parallel search + trust-gated install
-- [ ] Publish mcpm's own MCP server to the official registry (entry ready: docs/registry-entry.json)
+- [x] Publish mcpm's own MCP server to the official registry (live: io.github.getmcpm/cli)
 - [x] Health check tiers (config validation → process start → list_tools verification)
 - [x] Demo recording (asciinema: https://asciinema.org/a/Oua80yhXkjz071MP)
 
