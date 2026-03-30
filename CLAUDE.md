@@ -200,9 +200,9 @@ When community quality signals require a backend (user reviews, aggregated telem
       `mcpm_audit`, `mcpm_doctor`, `mcpm_setup` (composite NL-to-install)
 - [x] MCP tool annotations: `readOnlyHint` on read tools, `destructiveHint` on write tools
 - [x] `mcpm_setup` keyword extraction + parallel search + trust-gated install
-- [ ] Publish mcpm's own MCP server to the official registry
-- [ ] Health check tiers (config validation → list_tools → full validation)
-- [ ] Automated demo GIF generation (VHS/asciinema)
+- [ ] Publish mcpm's own MCP server to the official registry (entry ready: docs/registry-entry.json)
+- [x] Health check tiers (config validation → process start → list_tools verification)
+- [ ] Demo GIF recording (script ready: scripts/demo.sh, needs asciinema or VHS)
 
 ### V1.5 (community trust)
 
