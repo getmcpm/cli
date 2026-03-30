@@ -23,6 +23,12 @@ jobs:
           cache: pnpm
           registry-url: https://registry.npmjs.org
 
+      - name: Set version from git tag
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          echo "Publishing version: $VERSION"
+          npm pkg set version="$VERSION"
+
       - run: pnpm install --frozen-lockfile
       - run: pnpm run typecheck
       - run: pnpm run build
