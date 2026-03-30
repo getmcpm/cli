@@ -12,6 +12,88 @@
 import { spawn } from "node:child_process";
 import type { McpServerEntry } from "../config/adapters/index.js";
 
+// ---------------------------------------------------------------------------
+// Environment sanitization for health checks
+// ---------------------------------------------------------------------------
+
+/**
+ * Environment variables that should NOT be passed to untrusted MCP servers
+ * during health checks. The health check only needs the server to start and
+ * respond to tools/list — it does not need access to the user's secrets.
+ *
+ * Pattern: known secret variable names from major cloud providers, AI APIs,
+ * CI systems, and databases. Uses exact matches (case-insensitive compare).
+ */
+const SENSITIVE_ENV_PREFIXES: readonly string[] = [
+  "AWS_SECRET",
+  "AWS_SESSION",
+  "AZURE_CLIENT_SECRET",
+  "AZURE_TENANT",
+  "GCP_SERVICE_ACCOUNT",
+  "GOOGLE_APPLICATION_CREDENTIALS",
+];
+
+const SENSITIVE_ENV_NAMES: ReadonlySet<string> = new Set([
+  // Cloud provider secrets
+  "AWS_SECRET_ACCESS_KEY",
+  "AWS_SESSION_TOKEN",
+  // AI API keys
+  "ANTHROPIC_API_KEY",
+  "OPENAI_API_KEY",
+  "GOOGLE_API_KEY",
+  // VCS tokens
+  "GITHUB_TOKEN",
+  "GH_TOKEN",
+  "GITLAB_TOKEN",
+  "BITBUCKET_TOKEN",
+  // Package registry tokens
+  "NPM_TOKEN",
+  "NODE_AUTH_TOKEN",
+  "PYPI_TOKEN",
+  // Database
+  "DATABASE_URL",
+  "DB_PASSWORD",
+  "PGPASSWORD",
+  "MYSQL_PWD",
+  "REDIS_PASSWORD",
+  // CI/CD
+  "CI_JOB_TOKEN",
+  "CIRCLE_TOKEN",
+  "TRAVIS_TOKEN",
+  // Generic
+  "SECRET_KEY",
+  "PRIVATE_KEY",
+  "ENCRYPTION_KEY",
+  "API_SECRET",
+  "AUTH_TOKEN",
+]);
+
+/**
+ * Build a sanitized environment for health check subprocesses.
+ * Strips known sensitive variables from process.env before merging
+ * the server's declared env vars (which may legitimately need API keys
+ * the user provided during install).
+ */
+function buildHealthCheckEnv(
+  serverEnv?: Record<string, string>,
+  extraEnv?: Record<string, string>
+): Record<string, string> {
+  const base: Record<string, string> = {};
+
+  for (const [key, value] of Object.entries(process.env)) {
+    if (value === undefined) continue;
+    const upper = key.toUpperCase();
+    if (SENSITIVE_ENV_NAMES.has(upper)) continue;
+    if (SENSITIVE_ENV_PREFIXES.some((p) => upper.startsWith(p))) continue;
+    base[key] = value;
+  }
+
+  // Merge caller-provided env and server-declared env on top.
+  // Server env vars (e.g. API keys the user typed during install) are
+  // intentionally NOT filtered — the user explicitly provided them.
+  return { ...base, ...(extraEnv ?? {}), ...(serverEnv ?? {}) };
+}
+
 export interface HealthCheckResult {
   tier: 1 | 2 | 3;
   passed: boolean;
@@ -86,7 +168,7 @@ export async function runHealthCheck(
 
   const input = `${initRequest}\n${initializedNotification}\n${toolsRequest}\n`;
 
-  const mergedEnv = { ...process.env, ...(env ?? {}), ...(entry.env ?? {}) };
+  const mergedEnv = buildHealthCheckEnv(entry.env, env);
 
   return new Promise<HealthCheckResult>((resolve) => {
     const child = spawn(command, [...args], {

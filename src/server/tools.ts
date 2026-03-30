@@ -22,12 +22,13 @@ export const TOOL_DEFINITIONS = [
   },
   {
     name: "mcpm_install",
-    description: "Install an MCP server from the registry into detected AI client configs. Runs trust assessment automatically.",
+    description: "Install an MCP server from the registry into detected AI client configs. Runs trust assessment automatically. Rejects servers below the minimum trust score (default 50).",
     inputSchema: {
       type: "object" as const,
       properties: {
         name: { type: "string", description: "Server name (e.g. io.github.domdomegg/filesystem-mcp)" },
         client: { type: "string", description: "Install to specific client only (claude-desktop, cursor, vscode, windsurf)" },
+        minTrustScore: { type: "number", description: "Minimum trust score to allow install (default 50, range 0-100)" },
       },
       required: ["name"],
     },
@@ -107,6 +108,7 @@ export const SearchInput = z.object({
 export const InstallInput = z.object({
   name: z.string(),
   client: z.string().optional(),
+  minTrustScore: z.number().min(0).max(100).optional().default(50),
 });
 
 export const InfoInput = z.object({

@@ -453,7 +453,7 @@ export async function handleInstall(
         : {}),
     };
 
-    await adapter.addServer(configPath, name, entry);
+    await adapter.addServer(configPath, name, entry, { force: options.force });
     installedClients.push(clientId);
   }
 

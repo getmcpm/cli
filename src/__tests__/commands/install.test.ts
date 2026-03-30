@@ -214,7 +214,8 @@ describe("handleInstall — happy path (GREEN trust score)", () => {
     expect(adapter.addServer).toHaveBeenCalledWith(
       "/fake/claude-desktop/config.json",
       "io.github.test/my-server",
-      expect.objectContaining({ command: "npx" })
+      expect.objectContaining({ command: "npx" }),
+      expect.objectContaining({})
     );
   });
 
@@ -506,7 +507,8 @@ describe("handleInstall — env var prompting", () => {
     expect(adapter.addServer).toHaveBeenCalledWith(
       expect.any(String),
       expect.any(String),
-      expect.objectContaining({ env: { API_KEY: "secret-value" } })
+      expect.objectContaining({ env: { API_KEY: "secret-value" } }),
+      expect.objectContaining({})
     );
   });
 
@@ -1343,7 +1345,8 @@ describe("handleInstall — no env vars on server", () => {
     expect(adapter.addServer).toHaveBeenCalledWith(
       expect.any(String),
       expect.any(String),
-      expect.not.objectContaining({ env: expect.anything() })
+      expect.not.objectContaining({ env: expect.anything() }),
+      expect.objectContaining({})
     );
   });
 });
