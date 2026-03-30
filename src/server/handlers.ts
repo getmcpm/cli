@@ -16,6 +16,36 @@ import { extractRegistryMeta } from "../utils/format-trust.js";
 import { formatMcpEntryCommand } from "../utils/format-entry.js";
 import { resolveInstallEntry } from "../commands/install.js";
 
+// ---------------------------------------------------------------------------
+// Input validation for MCP server tool arguments
+// ---------------------------------------------------------------------------
+
+/**
+ * Server name pattern for MCP registry names.
+ * Format: "namespace/server-name" — alphanumeric with dots, hyphens, underscores.
+ * Max length 256 to prevent abuse. Must not contain shell metacharacters,
+ * path traversal sequences, or control characters.
+ */
+const SERVER_NAME_RE =
+  /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,126}\/[a-zA-Z0-9][a-zA-Z0-9._-]{0,126}$/;
+
+/**
+ * Validate a server name received from an MCP tool call.
+ * This is the trust boundary — AI agents provide these strings, and they
+ * could be influenced by prompt injection or adversarial inputs.
+ */
+function validateMcpServerName(name: string): void {
+  if (typeof name !== "string" || name.length === 0 || name.length > 256) {
+    throw new Error(`Invalid server name: must be a non-empty string under 256 characters.`);
+  }
+  if (!SERVER_NAME_RE.test(name)) {
+    throw new Error(
+      `Invalid server name format: "${name}". Expected format: "namespace/server-name" ` +
+      `(alphanumeric, dots, hyphens, underscores only).`
+    );
+  }
+}
+
 const execFileAsync = promisify(execFile);
 
 // ---------------------------------------------------------------------------
@@ -87,13 +117,32 @@ export async function handleSearch(
   return { servers };
 }
 
+/** Default minimum trust score for MCP server tool installs (no human in the loop). */
+const DEFAULT_MIN_TRUST_SCORE = 50;
+
 export async function handleInstall(
-  args: { name: string; client?: string },
+  args: { name: string; client?: string; minTrustScore?: number },
   deps: ServerDeps,
   preResolved?: { entry: ServerEntry; trust: TrustScore }
 ): Promise<object> {
+  if (!preResolved) validateMcpServerName(args.name);
   const entry = preResolved?.entry ?? await deps.registryGetServer(args.name);
   const trust = preResolved?.trust ?? computeTrust(entry, deps);
+
+  // Security gate: reject servers below the minimum trust score.
+  // Unlike the CLI path which has a human confirmation prompt, the MCP server
+  // path is driven by AI agents with no human in the loop. A malicious prompt
+  // could trick an agent into installing a dangerous server, so we enforce a
+  // hard trust floor here.
+  const minScore = args.minTrustScore ?? DEFAULT_MIN_TRUST_SCORE;
+  if (trust.score < minScore) {
+    throw new Error(
+      `Server "${args.name}" has trust score ${trust.score}/${trust.maxPossible} ` +
+      `(level: ${trust.level}), which is below the minimum threshold of ${minScore}. ` +
+      `Install rejected for safety. Use mcpm CLI with --yes to override after manual review.`
+    );
+  }
+
   const clients = await resolveClients(args.client, deps);
 
   const installedClients: ClientId[] = [];
@@ -125,6 +174,7 @@ export async function handleInfo(
   args: { name: string },
   deps: ServerDeps
 ): Promise<object> {
+  validateMcpServerName(args.name);
   const entry = await deps.registryGetServer(args.name);
   const trust = computeTrust(entry, deps);
   return {
@@ -164,6 +214,7 @@ export async function handleRemove(
   args: { name: string; client?: string },
   deps: ServerDeps
 ): Promise<object> {
+  validateMcpServerName(args.name);
   const clients = await resolveClients(args.client, deps);
   const removedClients: ClientId[] = [];
 

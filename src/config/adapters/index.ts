@@ -36,13 +36,15 @@ export interface ConfigAdapter {
   read(configPath: string): Promise<Record<string, McpServerEntry>>;
 
   /**
-   * Add a new server entry. Throws if the server name already exists.
+   * Add a new server entry. Throws if the server name already exists
+   * (unless options.force is true, in which case it overwrites).
    * Creates the file (with correct structure) if it does not exist.
    */
   addServer(
     configPath: string,
     name: string,
-    entry: McpServerEntry
+    entry: McpServerEntry,
+    options?: { force?: boolean }
   ): Promise<void>;
 
   /** Remove a server entry. Throws if the server name is not found. */

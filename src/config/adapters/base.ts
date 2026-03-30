@@ -86,7 +86,8 @@ export abstract class BaseAdapter implements ConfigAdapter {
   async addServer(
     configPath: string,
     name: string,
-    entry: McpServerEntry
+    entry: McpServerEntry,
+    options?: { force?: boolean }
   ): Promise<void> {
     // readRaw returns {} for ENOENT and re-throws all other errors,
     // so we can call it directly here.
@@ -94,7 +95,7 @@ export abstract class BaseAdapter implements ConfigAdapter {
 
     const existing = (raw[this.rootKey] ?? {}) as Record<string, McpServerEntry>;
 
-    if (Object.prototype.hasOwnProperty.call(existing, name)) {
+    if (Object.prototype.hasOwnProperty.call(existing, name) && !options?.force) {
       throw new Error(
         `Server "${name}" already exists in ${this.clientId} config. Use --force to overwrite.`
       );

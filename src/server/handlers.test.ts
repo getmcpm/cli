@@ -195,7 +195,7 @@ describe("handleRemove", () => {
     };
     const deps = makeDeps({ getAdapter: vi.fn().mockReturnValue(adapter) });
 
-    const result = await handleRemove({ name: "my-server" }, deps);
+    const result = await handleRemove({ name: "io.github.test/my-server" }, deps);
     const r = result as { removed: boolean; clients: string[] };
     expect(r.removed).toBe(true);
     expect(r.clients).toContain("cursor");
@@ -210,7 +210,7 @@ describe("handleRemove", () => {
     };
     const deps = makeDeps({ getAdapter: vi.fn().mockReturnValue(adapter) });
 
-    await expect(handleRemove({ name: "nonexistent" }, deps)).rejects.toThrow(/not found/i);
+    await expect(handleRemove({ name: "io.github.test/nonexistent" }, deps)).rejects.toThrow(/not found/i);
   });
 });
 
