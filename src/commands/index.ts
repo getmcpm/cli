@@ -16,6 +16,7 @@ import { registerAuditCommand } from "./audit.js";
 import { registerUpdateCommand } from "./update.js";
 import { registerInitCommand } from "./init.js";
 import { registerImportCommand } from "./import.js";
+import { registerServeCommand } from "./serve.js";
 
 export { registerSearch } from "./search.js";
 export { registerInstallCommand, handleInstall, resolveInstallEntry, formatTrustScore } from "./install.js";
@@ -31,6 +32,7 @@ export { PACKS } from "./init.js";
 export type { PackDefinition, InitDeps, InitOptions } from "./init.js";
 export { registerImportCommand, handleImport, checkFirstRun } from "./import.js";
 export type { ImportDeps, ImportOptions } from "./import.js";
+export { registerServeCommand } from "./serve.js";
 
 export function registerCommands(program: Command): void {
   registerSearch(program);
@@ -43,4 +45,5 @@ export function registerCommands(program: Command): void {
   registerUpdateCommand(program);
   registerInitCommand(program);
   registerImportCommand(program);
+  registerServeCommand(program);
 }
