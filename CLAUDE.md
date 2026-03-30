@@ -171,7 +171,7 @@ When community quality signals require a backend (user reviews, aggregated telem
 
 ## Product Roadmap
 
-### MVP / V1 (ship first, validate — IN PROGRESS)
+### MVP / V1 (SHIPPED — v0.1.0)
 
 - [x] `mcpm search <query>` — search official MCP Registry, display with trust scores
 - [x] `mcpm install <name>` — resolve server, trust assessment, write config for Claude Desktop + Cursor + VS Code
@@ -185,20 +185,22 @@ When community quality signals require a backend (user reviews, aggregated telem
 - [x] Auto-detect and import existing MCP configs on first run
 - [x] Metadata-based trust assessment on every install (Tier 1 built-in + Tier 2 MCP-Scan)
 - [x] Rich trust score visualization (color bar, breakdown)
-- [ ] Health check tiers (config validation → list_tools → full validation)
 - [x] Cross-IDE config management (Claude Desktop, Cursor, VS Code, Windsurf experimental)
 - [x] Config backup-before-write for safety
 - [x] Cross-platform paths (macOS, Linux, Windows)
-- [ ] Automated demo GIF generation (VHS/asciinema)
 - [x] Published to npm as `@getmcpm/cli`, bin command `mcpm`
+- [x] CI/CD: Node 20/22/24, SHA-pinned actions, npm provenance, Snyk integration
+- [x] Security: NFKC normalization, runtime arg allowlist, file permissions, CODEOWNERS
 
-### V1.1 (agent-native)
+### V1.1 (agent-native + polish)
 
 - [ ] `mcpm serve` — run mcpm itself as an MCP server, exposing search/install/audit/list
       as structured tool calls. Any AI agent can manage MCP servers programmatically.
 - [ ] Tools: `mcpm_search`, `mcpm_install`, `mcpm_info`, `mcpm_audit`, `mcpm_list`, `mcpm_doctor`
 - [ ] Publish mcpm's own MCP server to the registry (dogfood the ecosystem)
 - [ ] "I need to do X" → agent searches, evaluates trust, installs the right server
+- [ ] Health check tiers (config validation → list_tools → full validation)
+- [ ] Automated demo GIF generation (VHS/asciinema)
 
 ### V1.5 (community trust)
 
@@ -326,7 +328,7 @@ When helping with this project:
 - We are building `mcpm` — an open-source MCP package manager (npm: `@getmcpm/cli`)
 - Trust assessment is a core feature, not an afterthought
 - We are OSS-first — avoid design decisions that require proprietary lock-in
-- Check `docs/PLAN.md` for the detailed implementation plan
+- Check `docs/ARCHITECTURE.md` for the detailed implementation plan
 - Check `TODOS.md` for blockers and deferred work
 - The official MCP Registry API v0.1 is at `registry.modelcontextprotocol.io`
 - V1 is local-first: no server infrastructure, JSON files in `~/.mcpm/`

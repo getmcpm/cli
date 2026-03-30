@@ -146,7 +146,7 @@ All config writes use atomic file operations (write to `.tmp`, then `fs.rename`)
 ## Testing
 
 - **Framework**: vitest with `@vitest/coverage-v8`
-- **Test count**: 650+ tests
+- **Test count**: 664+ tests
 - **Coverage thresholds**: lines 80%, branches 75%
 - **Test locations**: `src/__tests__/` (command, config, store tests) + colocated `*.test.ts` (registry, scanner)
 - **Approach**: injectable `fetchImpl` for registry tests (no network calls), temp directories for config adapter tests
@@ -171,14 +171,3 @@ Steps: `pnpm install --frozen-lockfile` → `typecheck` → `build` → `test:co
 
 Runs on `v*` tag push. Builds, tests, and publishes to npm as `@getmcpm/cli` with provenance.
 
-## GSTACK REVIEW REPORT
-
-| Review | Trigger | Why | Runs | Status | Findings |
-|--------|---------|-----|------|--------|----------|
-| CEO Review | `/plan-ceo-review` | Scope & strategy | 1 | CLEAR | 5 proposals, 5 accepted, 0 deferred |
-| Codex Review | `/codex review` | Independent 2nd opinion | 0 | — | — |
-| Eng Review | `/plan-eng-review` | Architecture & tests (required) | 1 | CLEAR (PLAN) | 7 issues, 1 critical gap |
-| Design Review | `/plan-design-review` | UI/UX gaps | 0 | — | — |
-
-- **UNRESOLVED:** 0
-- **VERDICT:** CEO + ENG CLEARED — ready to implement. Resolve P0 blockers in TODOS.md first (API verification, npm name).
