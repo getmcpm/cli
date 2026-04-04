@@ -17,6 +17,10 @@ import { registerUpdateCommand } from "./update.js";
 import { registerInitCommand } from "./init.js";
 import { registerImportCommand } from "./import.js";
 import { registerServeCommand } from "./serve.js";
+import { registerDisableCommand } from "./disable.js";
+import { registerEnableCommand } from "./enable.js";
+import { registerCompletionsCommand } from "./completions.js";
+import { registerAliasCommand } from "./alias.js";
 
 export { registerSearch } from "./search.js";
 export { registerInstallCommand, handleInstall, resolveInstallEntry, formatTrustScore } from "./install.js";
@@ -33,6 +37,14 @@ export type { PackDefinition, InitDeps, InitOptions } from "./init.js";
 export { registerImportCommand, handleImport, checkFirstRun } from "./import.js";
 export type { ImportDeps, ImportOptions } from "./import.js";
 export { registerServeCommand } from "./serve.js";
+export { registerDisableCommand, handleDisable } from "./disable.js";
+export type { DisableDeps, DisableOptions } from "./disable.js";
+export { registerEnableCommand, handleEnable } from "./enable.js";
+export type { EnableDeps, EnableOptions } from "./enable.js";
+export { registerCompletionsCommand, handleCompletions } from "./completions.js";
+export type { ShellType, CompletionsDeps } from "./completions.js";
+export { registerAliasCommand, handleAlias } from "./alias.js";
+export type { AliasDeps, AliasOptions } from "./alias.js";
 
 export function registerCommands(program: Command): void {
   registerSearch(program);
@@ -46,4 +58,8 @@ export function registerCommands(program: Command): void {
   registerInitCommand(program);
   registerImportCommand(program);
   registerServeCommand(program);
+  registerDisableCommand(program);
+  registerEnableCommand(program);
+  registerCompletionsCommand(program);
+  registerAliasCommand(program);
 }

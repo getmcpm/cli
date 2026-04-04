@@ -102,17 +102,20 @@ export async function handleList(
     head: [
       chalk.cyan("Client"),
       chalk.cyan("Server Name"),
+      chalk.cyan("Status"),
       chalk.cyan("Command/URL"),
     ],
     style: { head: [], border: [] },
     wordWrap: true,
-    colWidths: [18, 30, 50],
+    colWidths: [18, 28, 10, 42],
   });
 
   for (const { client, serverName, entry } of rows) {
+    const status = entry.disabled ? chalk.yellow("disabled") : chalk.green("active");
     table.push([
       chalk.yellow(client),
       chalk.white(serverName),
+      status,
       chalk.dim(formatMcpEntryCommand(entry)),
     ]);
   }
