@@ -24,6 +24,16 @@ export default defineConfig({
         // MCP server wiring (tool registration + transport setup) — logic tested via handlers.test.ts
         "**/server/index.ts",
         "**/server/tools.ts",
+        // Barrel re-export files (no executable logic)
+        "**/commands/index.ts",
+        "**/stack/index.ts",
+        "**/utils/index.ts",
+        // CLI entry point (Commander wiring, no testable logic)
+        "**/commands/serve.ts",
+        // Thin wrappers with no branching logic
+        "**/utils/confirm.ts",
+        "**/utils/output.ts",
+        "**/config/adapters/factory.ts",
       ],
     },
   },

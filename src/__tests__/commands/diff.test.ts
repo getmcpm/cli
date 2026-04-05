@@ -134,6 +134,53 @@ describe("handleDiff", () => {
     expect(parsed[0].status).toBe("match");
   });
 
+  it("shows missing URL server with url detail", async () => {
+    const urlStack = `
+version: "1"
+servers:
+  my-remote:
+    url: "https://internal.company.com/mcp"
+`;
+    const urlLock = `
+lockfileVersion: 1
+lockedAt: "2026-04-05T10:00:00Z"
+servers:
+  my-remote:
+    url: "https://internal.company.com/mcp"
+`;
+    const stackPath = await writeStackAndLock(urlStack, urlLock);
+    const deps = makeDeps(); // empty installed
+
+    await handleDiff({ stackFile: stackPath }, deps);
+
+    const outputCalls = (deps.output as ReturnType<typeof vi.fn>).mock.calls
+      .map((c) => c[0])
+      .join("\n");
+    expect(outputCalls).toContain("Missing");
+    expect(outputCalls).toContain("internal.company.com");
+  });
+
+  it("shows 'no servers to compare' when stack file and clients are empty", async () => {
+    const emptyStack = `
+version: "1"
+servers: {}
+`;
+    const emptyLock = `
+lockfileVersion: 1
+lockedAt: "2026-04-05T10:00:00Z"
+servers: {}
+`;
+    const stackPath = await writeStackAndLock(emptyStack, emptyLock);
+    const deps = makeDeps();
+
+    await handleDiff({ stackFile: stackPath }, deps);
+
+    const outputCalls = (deps.output as ReturnType<typeof vi.fn>).mock.calls
+      .map((c) => c[0])
+      .join("\n");
+    expect(outputCalls).toContain("No servers to compare");
+  });
+
   it("throws when no lock file exists", async () => {
     const dir = await mkdtemp(path.join(os.tmpdir(), "mcpm-diff-nolock-"));
     const stackPath = path.join(dir, "mcpm.yaml");

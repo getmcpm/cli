@@ -174,4 +174,37 @@ describe("handleExport", () => {
     expect(env.DB_PASSWORD.secret).toBe(true);
     expect(env.SIMPLE_VAR.secret).toBe(false);
   });
+
+  it("exports URL-based servers with url field instead of version", async () => {
+    const servers: Record<string, McpServerEntry> = {
+      "my-remote": {
+        url: "https://internal.company.com/mcp",
+      },
+    };
+
+    const deps = makeDeps({
+      getAdapter: vi.fn().mockReturnValue(makeAdapter(servers)),
+    });
+
+    await handleExport({}, deps);
+
+    const outputCall = (deps.output as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    const parsed = parseYaml(outputCall);
+    expect(parsed.servers["my-remote"].url).toBe("https://internal.company.com/mcp");
+    expect(parsed.servers["my-remote"].version).toBeUndefined();
+  });
+
+  it("skips clients with unreadable configs", async () => {
+    const deps = makeDeps({
+      getAdapter: vi.fn().mockReturnValue({
+        read: vi.fn().mockRejectedValue(new Error("Permission denied")),
+      }),
+    });
+
+    await handleExport({}, deps);
+
+    const outputCall = (deps.output as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    const parsed = parseYaml(outputCall);
+    expect(parsed.servers).toEqual({});
+  });
 });
