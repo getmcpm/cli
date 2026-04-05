@@ -13,7 +13,7 @@ const program = new Command();
 program
   .name("mcpm")
   .description("MCP package manager — search, install, and audit MCP servers")
-  .version("0.1.0");
+  .version(__PKG_VERSION__);
 
 registerCommands(program);
 
