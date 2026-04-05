@@ -382,8 +382,11 @@ export async function handleMcpUp(
   skipped: string[];
   note?: string;
 }> {
-  // Validate stackFile path if provided
+  // Validate stackFile path: reject traversal and absolute paths (AI agent trust boundary)
   if (args.stackFile !== undefined) {
+    if (args.stackFile.includes("..") || args.stackFile.startsWith("/")) {
+      throw new Error(`Invalid stack file path: must be relative to CWD with no ".." segments.`);
+    }
     const PATH_RE = /^[a-zA-Z0-9._\-/]+\.yaml$/;
     if (!PATH_RE.test(args.stackFile)) {
       throw new Error(`Invalid stack file path: "${args.stackFile}"`);
