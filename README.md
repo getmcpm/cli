@@ -104,6 +104,33 @@ $ mcpm doctor
   [pass] 3 servers installed, 0 with errors
 ```
 
+### Stack files: docker-compose for MCP
+
+Declare your project's MCP servers in `mcpm.yaml`, lock versions with trust snapshots, and let every team member replicate the setup with one command.
+
+```bash
+mcpm export > mcpm.yaml          # dump current setup
+mcpm lock                        # resolve versions + trust snapshot
+mcpm up                          # install everything from mcpm.yaml
+mcpm diff                        # compare installed vs declared state
+```
+
+Stack files include a trust policy. If a server's trust score drops below the threshold, `mcpm up` blocks it.
+
+```yaml
+version: "1"
+policy:
+  minTrustScore: 60
+  blockOnScoreDrop: true
+servers:
+  io.github.domdomegg/filesystem-mcp:
+    version: "^1.0.0"
+  io.github.modelcontextprotocol/servers-github:
+    version: "1.2.3"
+    env:
+      GITHUB_TOKEN: { required: true, secret: true }
+```
+
 ### Starter packs
 
 Get a working MCP setup in one command.
@@ -154,6 +181,10 @@ Without an external scanner installed, the maximum possible score is 80/100. The
 | `mcpm enable <name>` | Re-enable a previously disabled MCP server |
 | `mcpm import` | Import existing MCP servers from client config files |
 | `mcpm alias` | Create short aliases for long MCP server names |
+| `mcpm export` | Export installed servers as an mcpm.yaml stack file |
+| `mcpm lock` | Resolve versions and create mcpm-lock.yaml with trust snapshots |
+| `mcpm up` | Install all servers from mcpm.yaml with trust verification |
+| `mcpm diff` | Compare installed servers against mcpm.yaml and lock file |
 | `mcpm completions <shell>` | Generate shell completion scripts (bash, zsh, fish) |
 | `mcpm serve` | Start mcpm as an MCP server (stdio transport) |
 
@@ -174,7 +205,7 @@ mcpm can run as an MCP server itself, letting AI agents search, install, and aud
 }
 ```
 
-This exposes 8 tools: `mcpm_search`, `mcpm_install`, `mcpm_info`, `mcpm_list`, `mcpm_remove`, `mcpm_audit`, `mcpm_doctor`, and `mcpm_setup`.
+This exposes 9 tools: `mcpm_search`, `mcpm_install`, `mcpm_info`, `mcpm_list`, `mcpm_remove`, `mcpm_audit`, `mcpm_doctor`, `mcpm_setup`, and `mcpm_up`.
 
 The `mcpm_setup` tool takes a natural language description like "filesystem and GitHub" and handles everything: search, trust scoring, install. One tool call to assemble a working MCP toolchain.
 

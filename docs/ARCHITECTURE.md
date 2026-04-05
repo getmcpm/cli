@@ -23,7 +23,11 @@ mcpm/
 │   │   ├── enable.ts               — re-enable a disabled server
 │   │   ├── toggle.ts               — shared disable/enable logic
 │   │   ├── completions.ts          — shell completion scripts (bash/zsh/fish)
-│   │   └── alias.ts                — short aliases for server names
+│   │   ├── alias.ts                — short aliases for server names
+│   │   ├── export.ts               — export installed servers as mcpm.yaml
+│   │   ├── lock.ts                 — resolve versions + trust → mcpm-lock.yaml
+│   │   ├── up.ts                   — batch install from mcpm.yaml with trust policy
+│   │   └── diff.ts                 — compare installed vs declared state
 │   ├── server/
 │   │   ├── index.ts                — MCP server setup (registerTool, stdio transport)
 │   │   ├── tools.ts                — Zod input schemas for each tool
@@ -54,11 +58,18 @@ mcpm/
 │   │   ├── servers.ts              — installed server registry
 │   │   ├── cache.ts                — HTTP response cache
 │   │   └── aliases.ts              — server name aliases (~/.mcpm/aliases.json)
+│   ├── stack/
+│   │   ├── schema.ts               — Zod schemas for mcpm.yaml + mcpm-lock.yaml
+│   │   ├── resolve.ts              — semver range resolution
+│   │   ├── policy.ts               — trust policy enforcement
+│   │   ├── env.ts                  — .env file parser
+│   │   └── index.ts                — public API surface
 │   └── utils/
 │       ├── output.ts               — leveled output helpers
 │       ├── confirm.ts              — confirmation prompts
 │       ├── format-entry.ts         — format MCP server config entries
-│       └── format-trust.ts         — format trust score display
+│       ├── format-trust.ts         — format trust score display
+│       └── fs.ts                   — shared filesystem helpers (isEnoent)
 ├── src/__tests__/
 │   ├── commands/                    — 16 command test files
 │   ├── config/                      — adapter + detector + paths tests
@@ -78,8 +89,9 @@ mcpm/
 
 | Module | Purpose |
 |---|---|
-| `commands/` | 15 CLI commands, each a self-contained Commander action |
-| `server/` | MCP server (stdio): 8 tools wrapping CLI logic via injectable handlers |
+| `commands/` | 19 CLI commands, each a self-contained Commander action |
+| `server/` | MCP server (stdio): 9 tools wrapping CLI logic via injectable handlers |
+| `stack/` | Stack file schemas (mcpm.yaml/mcpm-lock.yaml), semver resolution, trust policy, .env parsing |
 | `registry/` | Typed HTTP client for the official MCP Registry API (v0.1 at registry.modelcontextprotocol.io) |
 | `config/` | OS-aware config paths, client detection, and per-client config adapters with atomic writes |
 | `scanner/` | Trust scoring engine: tier 1 (metadata), tier 2 (static pattern analysis), composite score |
@@ -103,6 +115,10 @@ mcpm/
 | `mcpm enable <name>` | Re-enable a previously disabled server |
 | `mcpm import` | Import existing servers from client config files |
 | `mcpm alias` | Create short aliases for long server names |
+| `mcpm export` | Export installed servers as an mcpm.yaml stack file |
+| `mcpm lock` | Resolve versions and create mcpm-lock.yaml with trust snapshots |
+| `mcpm up` | Install all servers from mcpm.yaml with trust verification |
+| `mcpm diff` | Compare installed servers against mcpm.yaml and lock file |
 | `mcpm completions <shell>` | Generate shell completion scripts (bash, zsh, fish) |
 | `mcpm serve` | Start mcpm as an MCP server (stdio transport) |
 
@@ -164,7 +180,7 @@ All config writes use atomic file operations (write to `.tmp`, then `fs.rename`)
 ## Testing
 
 - **Framework**: vitest with `@vitest/coverage-v8`
-- **Test count**: 739+ tests
+- **Test count**: 812+ tests
 - **Coverage thresholds**: lines 80%, branches 75%
 - **Test locations**: `src/__tests__/` (command, config, store tests) + colocated `*.test.ts` (registry, scanner)
 - **Approach**: injectable `fetchImpl` for registry tests (no network calls), temp directories for config adapter tests

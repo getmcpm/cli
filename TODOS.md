@@ -19,11 +19,8 @@
 
 ## Pre-launch
 
-### 3. Config Backup-Before-Write
-**Priority:** P1
-**What:** Before atomic config write, copy existing config to ~/.mcpm/backups/{client}.{timestamp}.json. Keep last 5 backups.
-**Why:** If a config write produces malformed JSON, Claude Desktop/Cursor may fail to parse and lose all MCP server configs. Backup enables recovery.
-**Depends on:** Config adapter implementation.
+### 3. ~~Config Backup-Before-Write~~ DONE (2026-04-06)
+**Resolution:** Implemented in BaseAdapter.writeAtomic (base.ts:49). Writes .bak file before every atomic write. mcpm up takes a single .bak snapshot before batch starts (up.ts:223).
 
 ### 4. Cross-Platform Config Paths
 **Priority:** P1
@@ -62,6 +59,13 @@
 **Resolution:** Updated SERVER_NAME_RE to require alphanumeric chars at both start and end of each segment (no leading/trailing hyphens or dots).
 
 ## Post-V1
+
+### 15. Encrypted Secret Storage for Stack Files
+**Priority:** P2
+**What:** Investigate alternatives to plaintext env var storage in client config files. Options: OS keychain integration, encrypted .env files, reference-only storage (pointer to secret manager).
+**Why:** Stack files scale team-wide. Every `mcpm up` writes secrets as plaintext JSON to client configs. With 5+ servers each needing API keys, that's 5+ plaintext secrets per developer per IDE.
+**Context:** Current approach (plaintext + chmod 600) is the npm/pip norm. But mcpm positions as a security tool. Plaintext secrets in 4 config files per machine is inconsistent with that positioning. Not blocking for V1.3 but matters for enterprise adoption.
+**Depends on:** V1.3 stack files (shipped).
 
 ### 14. Optional Anonymous Telemetry
 **Priority:** P2

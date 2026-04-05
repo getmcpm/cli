@@ -129,10 +129,11 @@ Build the **open-source, community-owned npm+npm_audit** for MCP:
 - **Local storage**: JSON files in `~/.mcpm/` (servers.json, scans.json, cache/)
 - **Testing**: Vitest + @vitest/coverage-v8 (80% line, 75% branch thresholds)
 - **Build**: tsup (TypeScript → JS)
-- **MCP server**: `mcpm serve` exposes 8 tools via `@modelcontextprotocol/sdk` (stdio transport)
+- **MCP server**: `mcpm serve` exposes 9 tools via `@modelcontextprotocol/sdk` (stdio transport)
 - **Commands**: `mcpm search`, `mcpm install`, `mcpm list`, `mcpm remove`, `mcpm info`,
   `mcpm audit`, `mcpm update`, `mcpm doctor`, `mcpm init`, `mcpm import`, `mcpm serve`,
-  `mcpm disable`, `mcpm enable`, `mcpm alias`, `mcpm completions`
+  `mcpm disable`, `mcpm enable`, `mcpm alias`, `mcpm completions`,
+  `mcpm export`, `mcpm lock`, `mcpm up`, `mcpm diff`
 
 ### Registry API (upstream, not ours)
 
@@ -218,6 +219,27 @@ When community quality signals require a backend (user reviews, aggregated telem
 - [x] Client ID validation before unsafe casts
 - [x] Security hardening: tool path allowlist, health check sandboxing
 
+### V1.3 (stack files — SHIPPED v0.3.0)
+
+- [x] `mcpm export` — dump installed servers to mcpm.yaml stack file format
+- [x] `mcpm lock` — resolve semver ranges from registry, trust assess, write mcpm-lock.yaml
+- [x] `mcpm up` — batch install from mcpm.yaml with trust policy enforcement
+- [x] `mcpm diff` — compare installed state vs declared state (colored output + --json)
+- [x] `mcpm_up` MCP server tool (destructiveHint: true)
+- [x] Stack file Zod schemas (mcpm.yaml + mcpm-lock.yaml) with YAML parse/serialize
+- [x] Semver version resolution (caret + tilde ranges via `semver` package)
+- [x] Trust policy enforcement with normalized percentage comparison
+- [x] .env file parser for env var resolution (process.env → .env → default → prompt)
+- [x] Parallel registry resolution, sequential config writes
+- [x] Single .bak snapshot before batch writes
+- [x] Per-server error isolation (failures collected, others continue)
+- [x] URL server support (Cursor-only, warn for other clients)
+- [x] --dry-run, --ci, --profile, --strict, --yes flags on `mcpm up`
+- [x] --strict --ci requires --yes for unattended server removal
+- [x] Path traversal protection on mcpm_up MCP tool input
+- [x] Prototype poisoning protection in .env parser
+- [x] Shared isEnoent() utility extracted to src/utils/fs.ts
+
 ### V1.5 (community trust)
 
 - [ ] `mcpm publish` — submit to official registry with mandatory security scan gate
@@ -233,7 +255,6 @@ When community quality signals require a backend (user reviews, aggregated telem
 - [ ] Dependency graph (which servers compose well together)
 - [ ] AI-generated docs (Claude reads source → writes human-friendly tool docs)
 - [ ] Compatibility matrix (auto-tested)
-- [ ] Semver-aware version resolution + lock files
 
 ---
 
@@ -289,7 +310,7 @@ the registry concept end-to-end before we launch publicly.
      │
      ├── CLI (terminal)              ├── MCP Server (stdio)
      │   mcpm search/install/...     │   mcpm serve
-     │                               │   8 tools via JSON-RPC
+     │                               │   9 tools via JSON-RPC
      ▼                               ▼
   mcpm core (Node.js, npm: @getmcpm/cli, bin: mcpm)
      │
