@@ -1,5 +1,5 @@
-// Suppress cli-table3 "padLevels" circular dependency warning
-process.removeAllListeners("warning");
+// Suppress cli-table3 "padLevels" circular dependency warning.
+// Only filter the known noisy warning; let all others propagate normally.
 process.on("warning", (w) => {
   if (w.message?.includes("padLevels")) return;
   console.error(w);

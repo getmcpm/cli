@@ -101,8 +101,8 @@ export const TOOL_DEFINITIONS = [
 ] as const;
 
 export const SearchInput = z.object({
-  query: z.string(),
-  limit: z.number().optional().default(20),
+  query: z.string().min(1).max(200),
+  limit: z.number().int().min(1).max(100).optional().default(20),
 });
 
 export const InstallInput = z.object({
@@ -125,7 +125,7 @@ export const RemoveInput = z.object({
 });
 
 export const SetupInput = z.object({
-  description: z.string(),
+  description: z.string().min(1).max(1000),
   client: z.string().optional(),
-  minTrustScore: z.number().optional().default(50),
+  minTrustScore: z.number().min(0).max(100).optional().default(50),
 });

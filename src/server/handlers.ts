@@ -8,6 +8,7 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import type { ClientId } from "../config/paths.js";
+import { CLIENT_IDS } from "../config/paths.js";
 import type { ConfigAdapter } from "../config/adapters/index.js";
 import type { ServerEntry } from "../registry/types.js";
 import type { Finding } from "../scanner/tier1.js";
@@ -87,6 +88,11 @@ async function resolveClients(
     throw new Error("No supported AI clients found.");
   }
   if (requestedClient !== undefined) {
+    if (!CLIENT_IDS.includes(requestedClient as ClientId)) {
+      throw new Error(
+        `Unknown client "${requestedClient}". Valid values: ${CLIENT_IDS.join(", ")}.`
+      );
+    }
     const id = requestedClient as ClientId;
     if (!detected.includes(id)) {
       throw new Error(`Client "${requestedClient}" is not installed.`);
@@ -125,7 +131,7 @@ export async function handleInstall(
   deps: ServerDeps,
   preResolved?: { entry: ServerEntry; trust: TrustScore }
 ): Promise<object> {
-  if (!preResolved) validateMcpServerName(args.name);
+  validateMcpServerName(args.name);
   const entry = preResolved?.entry ?? await deps.registryGetServer(args.name);
   const trust = preResolved?.trust ?? computeTrust(entry, deps);
 

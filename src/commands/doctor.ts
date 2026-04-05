@@ -213,7 +213,10 @@ async function checkConfigExistsDefault(clientId: ClientId): Promise<boolean> {
   }
 }
 
+const ALLOWED_RUNTIME_CMDS = new Set<string>(["npx", "uvx", "docker"]);
+
 function execCheckDefault(cmd: string): Promise<boolean> {
+  if (!ALLOWED_RUNTIME_CMDS.has(cmd)) return Promise.resolve(false);
   return new Promise((resolve) => {
     const which = process.platform === "win32" ? "where" : "which";
     execFile(which, [cmd], (err) => {

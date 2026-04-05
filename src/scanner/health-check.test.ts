@@ -85,9 +85,17 @@ describe("runHealthCheck", () => {
     expect(result.error).toContain("no output");
   });
 
-  it("returns tier 2 fail when process emits error", async () => {
-    mockSpawn.mockReturnValue(createMockChild("", 1, new Error("ENOENT: command not found")));
+  it("returns tier 2 fail when command is not in allowlist", async () => {
     const entry: McpServerEntry = { command: "nonexistent", args: [] };
+    const result = await runHealthCheck(entry);
+    expect(result.tier).toBe(2);
+    expect(result.passed).toBe(false);
+    expect(result.error).toContain("not in health-check allowlist");
+  });
+
+  it("returns tier 2 fail when allowed process emits error", async () => {
+    mockSpawn.mockReturnValue(createMockChild("", 1, new Error("ENOENT: command not found")));
+    const entry: McpServerEntry = { command: "npx", args: ["-y", "nonexistent-server"] };
     const result = await runHealthCheck(entry);
     expect(result.tier).toBe(2);
     expect(result.passed).toBe(false);

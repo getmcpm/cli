@@ -142,6 +142,20 @@ export async function runHealthCheck(
 
   // Tier 2+3: spawn the server, send initialize + tools/list
   const command = entry.command;
+
+  // Re-validate command at spawn time (defense-in-depth: config may have been
+  // manually edited after install, bypassing the install-time validators).
+  const ALLOWED_COMMANDS = new Set(["npx", "uvx", "docker", "node", "python", "python3"]);
+  if (!ALLOWED_COMMANDS.has(command)) {
+    return {
+      tier: 2,
+      passed: false,
+      toolCount: null,
+      error: `Rejected command "${command}" — not in health-check allowlist`,
+      durationMs: Date.now() - start,
+    };
+  }
+
   const args = ("args" in entry && Array.isArray(entry.args)) ? entry.args : [];
 
   const initRequest = JSON.stringify({
