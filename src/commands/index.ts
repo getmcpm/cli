@@ -22,6 +22,7 @@ import { registerEnableCommand } from "./enable.js";
 import { registerCompletionsCommand } from "./completions.js";
 import { registerAliasCommand } from "./alias.js";
 import { registerExportCommand } from "./export.js";
+import { registerLockCommand } from "./lock.js";
 
 export { registerSearch } from "./search.js";
 export { registerInstallCommand, handleInstall, resolveInstallEntry, formatTrustScore } from "./install.js";
@@ -50,6 +51,8 @@ export { registerAliasCommand, handleAlias } from "./alias.js";
 export type { AliasDeps, AliasOptions } from "./alias.js";
 export { registerExportCommand, handleExport } from "./export.js";
 export type { ExportDeps, ExportOptions } from "./export.js";
+export { registerLockCommand, handleLock } from "./lock.js";
+export type { LockDeps, LockOptions } from "./lock.js";
 
 export function registerCommands(program: Command): void {
   registerSearch(program);
@@ -68,4 +71,5 @@ export function registerCommands(program: Command): void {
   registerCompletionsCommand(program);
   registerAliasCommand(program);
   registerExportCommand(program);
+  registerLockCommand(program);
 }
