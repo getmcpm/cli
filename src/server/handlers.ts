@@ -369,6 +369,106 @@ export async function handleSetup(
 }
 
 // ---------------------------------------------------------------------------
+// mcpm_up — batch install from stack file
+// ---------------------------------------------------------------------------
+
+export async function handleMcpUp(
+  args: { stackFile?: string; profile?: string; dryRun?: boolean },
+  deps: ServerDeps
+): Promise<{
+  installed: string[];
+  blocked: string[];
+  failed: string[];
+  skipped: string[];
+  note?: string;
+}> {
+  // Validate stackFile path if provided
+  if (args.stackFile !== undefined) {
+    const PATH_RE = /^[a-zA-Z0-9._\-/]+\.yaml$/;
+    if (!PATH_RE.test(args.stackFile)) {
+      throw new Error(`Invalid stack file path: "${args.stackFile}"`);
+    }
+  }
+
+  const { handleUp } = await import("../commands/up.js");
+  const { writeFile } = await import("fs/promises");
+  const { handleLock } = await import("../commands/lock.js");
+  const { RegistryClient } = await import("../registry/client.js");
+  const { scanTier1: st1 } = await import("../scanner/tier1.js");
+  const { checkScannerAvailable: csa, scanTier2: st2 } = await import("../scanner/tier2.js");
+  const { computeTrustScore: cts } = await import("../scanner/trust-score.js");
+
+  const client = new RegistryClient();
+  const outputLines: string[] = [];
+
+  try {
+    await handleUp(
+      {
+        stackFile: args.stackFile,
+        profile: args.profile,
+        dryRun: args.dryRun,
+        ci: true,
+        yes: false,
+      },
+      {
+        detectClients: deps.detectClients,
+        getAdapter: deps.getAdapter,
+        getPath: deps.getConfigPath,
+        getServer: (name, version?) => client.getServer(name, version),
+        scanTier1: st1,
+        checkScannerAvailable: csa,
+        scanTier2: (name) => st2(name),
+        computeTrustScore: cts,
+        runLock: async (stackFile) => {
+          await handleLock(
+            { stackFile },
+            {
+              getServerVersions: (name) => client.getServerVersions(name),
+              getServer: (name, v?) => client.getServer(name, v),
+              scanTier1: st1,
+              checkScannerAvailable: csa,
+              scanTier2: (name) => st2(name),
+              computeTrustScore: cts,
+              writeLockFile: (path, content) =>
+                writeFile(path, content, { encoding: "utf-8", mode: 0o600 }),
+              output: (text) => outputLines.push(text),
+            }
+          );
+        },
+        confirm: async () => true,
+        promptEnvVar: async () => "",
+        output: (text) => outputLines.push(text),
+      }
+    );
+  } catch {
+    // handleUp throws on failures — we capture via output
+  }
+
+  // Parse output lines to categorize results
+  const installed: string[] = [];
+  const blocked: string[] = [];
+  const failed: string[] = [];
+  const skipped: string[] = [];
+
+  for (const line of outputLines) {
+    if (line.includes("\u2713")) installed.push(line.trim());
+    else if (line.includes("\u2717") && line.includes("blocked")) blocked.push(line.trim());
+    else if (line.includes("\u2717")) failed.push(line.trim());
+    else if (line.includes("\u2022")) skipped.push(line.trim());
+  }
+
+  return {
+    installed,
+    blocked,
+    failed,
+    skipped,
+    ...(installed.length > 0
+      ? { note: "Restart your AI client to use the newly installed servers." }
+      : {}),
+  };
+}
+
+// ---------------------------------------------------------------------------
 // Keyword extraction
 // ---------------------------------------------------------------------------
 

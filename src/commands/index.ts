@@ -24,6 +24,7 @@ import { registerAliasCommand } from "./alias.js";
 import { registerExportCommand } from "./export.js";
 import { registerLockCommand } from "./lock.js";
 import { registerUpCommand } from "./up.js";
+import { registerDiffCommand } from "./diff.js";
 
 export { registerSearch } from "./search.js";
 export { registerInstallCommand, handleInstall, resolveInstallEntry, formatTrustScore } from "./install.js";
@@ -56,6 +57,8 @@ export { registerLockCommand, handleLock } from "./lock.js";
 export type { LockDeps, LockOptions } from "./lock.js";
 export { registerUpCommand, handleUp } from "./up.js";
 export type { UpDeps, UpOptions } from "./up.js";
+export { registerDiffCommand, handleDiff } from "./diff.js";
+export type { DiffDeps, DiffOptions } from "./diff.js";
 
 export function registerCommands(program: Command): void {
   registerSearch(program);
@@ -76,4 +79,5 @@ export function registerCommands(program: Command): void {
   registerExportCommand(program);
   registerLockCommand(program);
   registerUpCommand(program);
+  registerDiffCommand(program);
 }

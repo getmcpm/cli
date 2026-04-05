@@ -98,6 +98,19 @@ export const TOOL_DEFINITIONS = [
       required: ["description"],
     },
   },
+  {
+    name: "mcpm_up",
+    description: "Install all servers from an mcpm.yaml stack file with trust verification. Equivalent to docker-compose up for MCP servers. Runs trust re-assessment and blocks servers that violate the trust policy.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        stackFile: { type: "string", description: "Path to mcpm.yaml (default: mcpm.yaml in CWD)" },
+        profile: { type: "string", description: "Install only servers matching this profile" },
+        dryRun: { type: "boolean", description: "Show what would be installed without making changes" },
+      },
+      required: [],
+    },
+  },
 ] as const;
 
 export const SearchInput = z.object({
@@ -128,4 +141,10 @@ export const SetupInput = z.object({
   description: z.string().min(1).max(1000),
   client: z.string().optional(),
   minTrustScore: z.number().min(0).max(100).optional().default(50),
+});
+
+export const UpInput = z.object({
+  stackFile: z.string().optional().default("mcpm.yaml"),
+  profile: z.string().optional(),
+  dryRun: z.boolean().optional().default(false),
 });
