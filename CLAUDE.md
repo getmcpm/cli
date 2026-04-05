@@ -12,7 +12,7 @@ An open-source, CLI-first MCP package manager — **"npm for MCP servers"**.
 A registry where developers can search, install, audit, publish, and update MCP servers
 across all major clients (Claude Desktop, Cursor, VS Code, Windsurf) from a single tool.
 
-**npm package**: `@getmcpm/cli` | **bin command**: `mcpm` | **repo**: github.com/getmcpm/cli | **web UI**: deferred to V1+
+**npm package**: `@getmcpm/cli` (v0.2.0) | **bin command**: `mcpm` | **repo**: github.com/getmcpm/cli | **web UI**: deferred to V1+
 
 ---
 
@@ -204,6 +204,19 @@ When community quality signals require a backend (user reviews, aggregated telem
 - [x] Publish mcpm's own MCP server to the official registry (live: io.github.getmcpm/cli)
 - [x] Health check tiers (config validation → process start → list_tools verification)
 - [x] Demo recording (asciinema: https://asciinema.org/a/Oua80yhXkjz071MP)
+
+### V1.2 (usability — SHIPPED v0.2.0)
+
+- [x] `mcpm disable <name>` — disable a server without removing it from config
+- [x] `mcpm enable <name>` — re-enable a previously disabled server
+- [x] `mcpm alias` — short aliases for long server names (stored in ~/.mcpm/aliases.json)
+- [x] `mcpm completions <shell>` — shell completion scripts for bash, zsh, fish
+- [x] `mcpm list` now shows disabled/active status column
+- [x] `disabled` field in McpServerEntry + `setServerDisabled` in ConfigAdapter
+- [x] Shared toggle handler (deduplicated disable/enable logic)
+- [x] Strict alias validation (alphanumeric + hyphens, max 64 chars, prototype pollution guard)
+- [x] Client ID validation before unsafe casts
+- [x] Security hardening: tool path allowlist, health check sandboxing
 
 ### V1.5 (community trust)
 
