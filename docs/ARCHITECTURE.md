@@ -18,7 +18,12 @@ mcpm/
 │   │   ├── doctor.ts               — check MCP setup health
 │   │   ├── init.ts                 — install a curated starter pack
 │   │   ├── import.ts               — import servers from client config
-│   │   └── serve.ts                — start mcpm as an MCP server
+│   │   ├── serve.ts                — start mcpm as an MCP server
+│   │   ├── disable.ts              — disable a server (thin wrapper over toggle)
+│   │   ├── enable.ts               — re-enable a disabled server
+│   │   ├── toggle.ts               — shared disable/enable logic
+│   │   ├── completions.ts          — shell completion scripts (bash/zsh/fish)
+│   │   └── alias.ts                — short aliases for server names
 │   ├── server/
 │   │   ├── index.ts                — MCP server setup (registerTool, stdio transport)
 │   │   ├── tools.ts                — Zod input schemas for each tool
@@ -47,14 +52,15 @@ mcpm/
 │   ├── store/
 │   │   ├── index.ts                — local state manager (~/.mcpm/)
 │   │   ├── servers.ts              — installed server registry
-│   │   └── cache.ts                — HTTP response cache
+│   │   ├── cache.ts                — HTTP response cache
+│   │   └── aliases.ts              — server name aliases (~/.mcpm/aliases.json)
 │   └── utils/
 │       ├── output.ts               — leveled output helpers
 │       ├── confirm.ts              — confirmation prompts
 │       ├── format-entry.ts         — format MCP server config entries
 │       └── format-trust.ts         — format trust score display
 ├── src/__tests__/
-│   ├── commands/                    — 11 command test files
+│   ├── commands/                    — 16 command test files
 │   ├── config/                      — adapter + detector + paths tests
 │   └── store/                       — cache + servers + store tests
 ├── scripts/
@@ -72,12 +78,12 @@ mcpm/
 
 | Module | Purpose |
 |---|---|
-| `commands/` | 11 CLI commands, each a self-contained Commander action |
+| `commands/` | 15 CLI commands, each a self-contained Commander action |
 | `server/` | MCP server (stdio): 8 tools wrapping CLI logic via injectable handlers |
 | `registry/` | Typed HTTP client for the official MCP Registry API (v0.1 at registry.modelcontextprotocol.io) |
 | `config/` | OS-aware config paths, client detection, and per-client config adapters with atomic writes |
 | `scanner/` | Trust scoring engine: tier 1 (metadata), tier 2 (static pattern analysis), composite score |
-| `store/` | Local state in `~/.mcpm/` — installed server registry, HTTP response cache |
+| `store/` | Local state in `~/.mcpm/` — installed server registry, HTTP response cache, server name aliases |
 | `utils/` | Output formatting, confirmation prompts, trust display helpers |
 
 ## Commands
@@ -93,7 +99,12 @@ mcpm/
 | `mcpm update` | Check for newer versions and update installed servers |
 | `mcpm doctor` | Check MCP setup health (runtimes, configs, servers) |
 | `mcpm init <pack>` | Install a curated starter pack of MCP servers |
+| `mcpm disable <name>` | Disable a server without removing it from config |
+| `mcpm enable <name>` | Re-enable a previously disabled server |
 | `mcpm import` | Import existing servers from client config files |
+| `mcpm alias` | Create short aliases for long server names |
+| `mcpm completions <shell>` | Generate shell completion scripts (bash, zsh, fish) |
+| `mcpm serve` | Start mcpm as an MCP server (stdio transport) |
 
 ## Data Flow
 
@@ -133,6 +144,7 @@ store.recordInstall(name, clients, version)
 ```
 ~/.mcpm/
 ├── servers.json       — installed server registry (name, version, clients, install date)
+├── aliases.json       — short aliases for server names
 └── cache/             — HTTP response cache (TTL-based)
 ```
 
@@ -152,7 +164,7 @@ All config writes use atomic file operations (write to `.tmp`, then `fs.rename`)
 ## Testing
 
 - **Framework**: vitest with `@vitest/coverage-v8`
-- **Test count**: 687+ tests
+- **Test count**: 739+ tests
 - **Coverage thresholds**: lines 80%, branches 75%
 - **Test locations**: `src/__tests__/` (command, config, store tests) + colocated `*.test.ts` (registry, scanner)
 - **Approach**: injectable `fetchImpl` for registry tests (no network calls), temp directories for config adapter tests

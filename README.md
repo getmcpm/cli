@@ -84,12 +84,10 @@ One tool for all your AI clients. mcpm reads and writes the correct config forma
 ```
 $ mcpm list
 
-  Claude Desktop (2 servers)
-    servers-filesystem
-    servers-github
-
-  Cursor (1 server)
-    servers-fetch
+  Client            Server Name                  Status     Command/URL
+  Claude Desktop    servers-filesystem           active     npx -y servers-filesystem
+  Claude Desktop    servers-github               active     npx -y servers-github
+  Cursor            servers-fetch                disabled   npx -y servers-fetch
 ```
 
 ### Doctor: check your MCP setup health
@@ -152,7 +150,11 @@ Without an external scanner installed, the maximum possible score is 80/100. The
 | `mcpm update` | Check for newer versions and update installed servers |
 | `mcpm doctor` | Check MCP setup health and report issues |
 | `mcpm init <pack>` | Install a curated starter pack of MCP servers |
+| `mcpm disable <name>` | Disable an MCP server without removing it from config |
+| `mcpm enable <name>` | Re-enable a previously disabled MCP server |
 | `mcpm import` | Import existing MCP servers from client config files |
+| `mcpm alias` | Create short aliases for long MCP server names |
+| `mcpm completions <shell>` | Generate shell completion scripts (bash, zsh, fish) |
 | `mcpm serve` | Start mcpm as an MCP server (stdio transport) |
 
 Run `mcpm <command> --help` for options and flags.

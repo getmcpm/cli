@@ -131,7 +131,8 @@ Build the **open-source, community-owned npm+npm_audit** for MCP:
 - **Build**: tsup (TypeScript → JS)
 - **MCP server**: `mcpm serve` exposes 8 tools via `@modelcontextprotocol/sdk` (stdio transport)
 - **Commands**: `mcpm search`, `mcpm install`, `mcpm list`, `mcpm remove`, `mcpm info`,
-  `mcpm audit`, `mcpm update`, `mcpm doctor`, `mcpm init`, `mcpm import`, `mcpm serve`
+  `mcpm audit`, `mcpm update`, `mcpm doctor`, `mcpm init`, `mcpm import`, `mcpm serve`,
+  `mcpm disable`, `mcpm enable`, `mcpm alias`, `mcpm completions`
 
 ### Registry API (upstream, not ours)
 
@@ -294,6 +295,7 @@ the registry concept end-to-end before we launch publicly.
      │
      └── ~/.mcpm/
            ├── servers.json    (installed server registry)
+           ├── aliases.json    (short aliases for server names)
            └── cache/          (registry response cache, 1hr TTL)
 ```
 
