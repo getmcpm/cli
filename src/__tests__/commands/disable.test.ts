@@ -116,6 +116,35 @@ describe("handleDisable", () => {
     ).rejects.toThrow(/vscode.*not.*installed/i);
   });
 
+  it("throws when --client is an invalid client id", async () => {
+    const deps = makeDeps();
+    await expect(
+      handleDisable("my-server", { client: "invalid-client" }, deps)
+    ).rejects.toThrow(/Unknown client.*invalid-client/);
+  });
+
+  it("only disables the enabled client when mixed state", async () => {
+    const claudeAdapter = makeAdapter("claude-desktop", {
+      "my-server": { command: "npx", disabled: true },
+    });
+    const cursorAdapter = makeAdapter("cursor", {
+      "my-server": { command: "npx" },
+    });
+    const deps = makeDeps({
+      detectClients: vi.fn().mockResolvedValue(["claude-desktop", "cursor"] as ClientId[]),
+      getAdapter: vi.fn().mockImplementation((id: ClientId) =>
+        id === "claude-desktop" ? claudeAdapter : cursorAdapter
+      ),
+    });
+    await handleDisable("my-server", {}, deps);
+    expect(claudeAdapter.setServerDisabled).not.toHaveBeenCalled();
+    expect(cursorAdapter.setServerDisabled).toHaveBeenCalledWith(
+      "/fake/cursor/config.json",
+      "my-server",
+      true
+    );
+  });
+
   it("disables across multiple clients", async () => {
     const claudeAdapter = makeAdapter("claude-desktop", {
       "my-server": { command: "npx" },

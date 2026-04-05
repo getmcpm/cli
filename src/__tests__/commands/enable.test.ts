@@ -115,4 +115,11 @@ describe("handleEnable", () => {
       handleEnable("my-server", { client: "vscode" }, deps)
     ).rejects.toThrow(/vscode.*not.*installed/i);
   });
+
+  it("throws when --client is an invalid client id", async () => {
+    const deps = makeDeps();
+    await expect(
+      handleEnable("my-server", { client: "invalid-client" }, deps)
+    ).rejects.toThrow(/Unknown client.*invalid-client/);
+  });
 });

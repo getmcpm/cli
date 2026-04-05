@@ -37,6 +37,8 @@ export type { PackDefinition, InitDeps, InitOptions } from "./init.js";
 export { registerImportCommand, handleImport, checkFirstRun } from "./import.js";
 export type { ImportDeps, ImportOptions } from "./import.js";
 export { registerServeCommand } from "./serve.js";
+export { handleToggleServer } from "./toggle.js";
+export type { ToggleDeps, ToggleOptions } from "./toggle.js";
 export { registerDisableCommand, handleDisable } from "./disable.js";
 export type { DisableDeps, DisableOptions } from "./disable.js";
 export { registerEnableCommand, handleEnable } from "./enable.js";

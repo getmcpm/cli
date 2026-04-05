@@ -35,6 +35,28 @@ export interface AliasOptions {
 }
 
 // ---------------------------------------------------------------------------
+// Validation
+// ---------------------------------------------------------------------------
+
+/** Alias names must be short, alphanumeric identifiers (letters, digits, hyphens, underscores). */
+const ALIAS_NAME_RE = /^[\w-]+$/;
+const ALIAS_MAX_LENGTH = 64;
+
+function validateAliasName(alias: string): void {
+  if (alias.length === 0) {
+    throw new Error("Alias name must not be empty.");
+  }
+  if (alias.length > ALIAS_MAX_LENGTH) {
+    throw new Error(`Alias name must be at most ${ALIAS_MAX_LENGTH} characters.`);
+  }
+  if (!ALIAS_NAME_RE.test(alias)) {
+    throw new Error(
+      "Alias names must contain only letters, digits, hyphens, and underscores."
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Handler
 // ---------------------------------------------------------------------------
 
@@ -69,6 +91,7 @@ export async function handleAlias(
 
   // --remove: delete an alias
   if (options.remove) {
+    validateAliasName(options.remove);
     await removeAlias(options.remove);
     output(`Removed alias '${options.remove}'.`);
     return;
@@ -80,8 +103,13 @@ export async function handleAlias(
   }
 
   const [alias, serverName] = args;
-  if (alias.includes("/") || alias.includes(".")) {
-    throw new Error("Alias names should be short and simple (no '/' or '.' characters).");
+  validateAliasName(alias);
+
+  if (serverName.length === 0) {
+    throw new Error("Server name must not be empty.");
+  }
+  if (serverName === "__proto__" || serverName === "constructor" || serverName === "prototype") {
+    throw new Error("Server name is not allowed.");
   }
 
   await setAlias(alias, serverName);

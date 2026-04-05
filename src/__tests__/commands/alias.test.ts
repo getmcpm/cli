@@ -90,14 +90,60 @@ describe("handleAlias", () => {
       const deps = makeDeps();
       await expect(
         handleAlias(["bad/name", "some-server"], {}, deps)
-      ).rejects.toThrow(/simple/);
+      ).rejects.toThrow(/letters.*digits.*hyphens.*underscores/);
     });
 
     it("throws when alias contains .", async () => {
       const deps = makeDeps();
       await expect(
         handleAlias(["bad.name", "some-server"], {}, deps)
-      ).rejects.toThrow(/simple/);
+      ).rejects.toThrow(/letters.*digits.*hyphens.*underscores/);
+    });
+
+    it("throws when alias is empty", async () => {
+      const deps = makeDeps();
+      await expect(
+        handleAlias(["", "some-server"], {}, deps)
+      ).rejects.toThrow(/must not be empty/);
+    });
+
+    it("throws when alias contains shell metacharacters", async () => {
+      const deps = makeDeps();
+      await expect(
+        handleAlias(["bad$name", "some-server"], {}, deps)
+      ).rejects.toThrow(/letters.*digits.*hyphens.*underscores/);
+    });
+
+    it("throws when alias exceeds max length", async () => {
+      const deps = makeDeps();
+      const longName = "a".repeat(65);
+      await expect(
+        handleAlias([longName, "some-server"], {}, deps)
+      ).rejects.toThrow(/at most 64/);
+    });
+
+    it("throws when server name is empty", async () => {
+      const deps = makeDeps();
+      await expect(
+        handleAlias(["fs", ""], {}, deps)
+      ).rejects.toThrow(/must not be empty/);
+    });
+
+    it("throws when server name is __proto__", async () => {
+      const deps = makeDeps();
+      await expect(
+        handleAlias(["fs", "__proto__"], {}, deps)
+      ).rejects.toThrow(/not allowed/);
+    });
+  });
+
+  describe("--remove validation", () => {
+    it("validates alias name before removing", async () => {
+      const deps = makeDeps();
+      await expect(
+        handleAlias([], { remove: "bad$name" }, deps)
+      ).rejects.toThrow(/letters.*digits.*hyphens.*underscores/);
+      expect(deps.removeAlias).not.toHaveBeenCalled();
     });
   });
 });
