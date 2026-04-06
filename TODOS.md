@@ -22,12 +22,10 @@
 ### 3. ~~Config Backup-Before-Write~~ DONE (2026-04-06)
 **Resolution:** Implemented in BaseAdapter.writeAtomic (base.ts:49). Writes .bak file before every atomic write. mcpm up takes a single .bak snapshot before batch starts (up.ts:223).
 
-### 4. Cross-Platform Config Paths
-**Priority:** P1
-**What:** Add Linux and Windows paths to config/paths.ts for all supported clients.
-**Why:** Plan only specifies macOS paths. Linux devs (large HN audience) will hit errors on launch.
-**How:** Linux: `~/.config/Claude/`, `~/.config/Code/User/`. Windows: `%APPDATA%/Claude/`, `%APPDATA%/Code/User/`. Verify Cursor and Windsurf paths on each platform.
-**Depends on:** Config adapter implementation.
+### 4. ~~Cross-Platform Config Paths~~ DONE (2026-04-06)
+**Resolution:** All three platforms (macOS, Linux, Windows) handled in config/paths.ts.
+Claude Desktop + VS Code use `appDataDir()` which resolves to `~/Library/Application Support` (macOS), `~/.config` (Linux), `%APPDATA%` (Windows).
+Cursor and Windsurf are home-relative on ALL platforms (`~/.cursor/mcp.json`, `~/.codeium/windsurf/mcp_config.json`) — they do NOT use APPDATA on Windows. Previous code incorrectly routed them through APPDATA on Windows; fixed.
 
 ## Security (from CSO audit 2026-03-29)
 

@@ -52,22 +52,16 @@ export function getConfigPath(
     case "claude-desktop":
       return path.join(appData, "Claude", "claude_desktop_config.json");
 
-    case "cursor": {
-      if (platform === "win32") {
-        return path.join(appData, ".cursor", "mcp.json");
-      }
+    case "cursor":
+      // ~/.cursor/mcp.json on all platforms — home-relative, NOT under appData
       return path.join(home, ".cursor", "mcp.json");
-    }
 
     case "vscode":
       return path.join(appData, "Code", "User", "mcp.json");
 
-    case "windsurf": {
-      if (platform === "win32") {
-        return path.join(appData, ".codeium", "windsurf", "mcp_config.json");
-      }
+    case "windsurf":
+      // ~/.codeium/windsurf/mcp_config.json on all platforms — home-relative, NOT under appData
       return path.join(home, ".codeium", "windsurf", "mcp_config.json");
-    }
 
     default: {
       // TypeScript exhaustiveness — this branch is reached only with a bad cast.
