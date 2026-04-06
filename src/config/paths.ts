@@ -29,7 +29,13 @@ function appDataDir(platform: string, home: string): string {
     return path.join(home, "Library", "Application Support");
   }
   if (platform === "win32") {
-    return process.env["APPDATA"] ?? home;
+    const appdata = process.env["APPDATA"];
+    // path.win32.isAbsolute works correctly on all host platforms (unlike path.isAbsolute
+    // which uses POSIX rules on macOS/Linux and would reject "C:\..." paths).
+    if (appdata && path.win32.isAbsolute(appdata)) {
+      return appdata;
+    }
+    return home;
   }
   // linux and everything else
   return path.join(home, ".config");

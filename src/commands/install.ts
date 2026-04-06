@@ -13,6 +13,7 @@
  * - registerInstallCommand() — Commander registration
  */
 
+import { CLIENT_IDS } from "../config/paths.js";
 import type { ClientId } from "../config/paths.js";
 import type { ConfigAdapter, McpServerEntry } from "../config/adapters/index.js";
 import type { ServerEntry, EnvVar } from "../registry/types.js";
@@ -387,6 +388,11 @@ export async function handleInstall(
   }
 
   if (options.client !== undefined) {
+    if (!CLIENT_IDS.includes(options.client as ClientId)) {
+      throw new Error(
+        `Unknown client "${options.client}". Valid values: ${CLIENT_IDS.join(", ")}.`
+      );
+    }
     const requestedId = options.client as ClientId;
     if (!targetClients.includes(requestedId)) {
       throw new Error(

@@ -84,6 +84,16 @@ describe("getConfigPath", () => {
       const result = getConfigPath("claude-desktop");
       expect(result).toContain("claude_desktop_config.json");
     });
+
+    it("falls back to homedir when APPDATA is a relative path (traversal guard)", () => {
+      setPlatform("win32");
+      mockHomedir.mockReturnValue("C:\\Users\\alice");
+      process.env["APPDATA"] = "../../etc";
+      const result = getConfigPath("claude-desktop");
+      // Must not contain the traversal value; must be anchored to homedir
+      expect(result).not.toContain("../../etc");
+      expect(result).toContain("claude_desktop_config.json");
+    });
   });
 
   // -------------------------------------------------------------------------
