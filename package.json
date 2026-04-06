@@ -1,6 +1,6 @@
 {
   "name": "@getmcpm/cli",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "mcpName": "io.github.getmcpm/cli",
   "description": "MCP package manager — search, install, and audit MCP servers across Claude Desktop, Cursor, VS Code, and Windsurf",
   "type": "module",
