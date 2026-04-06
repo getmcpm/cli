@@ -582,8 +582,15 @@ async function promptEnvVarsDefault(
 }
 
 export function parseMinTrust(raw: string): number {
+  // Reject anything that isn't plain decimal digits (blocks hex "0x50", scientific
+  // notation "1e2", spaces, empty string, and negative sign before range check).
+  if (!/^\d+$/.test(raw)) {
+    throw new InvalidArgumentError(
+      `--min-trust must be an integer between 0 and 100, got: "${raw}"`
+    );
+  }
   const n = Number(raw);
-  if (raw.trim() === "" || !Number.isInteger(n) || n < 0 || n > 100) {
+  if (n < 0 || n > 100) {
     throw new InvalidArgumentError(
       `--min-trust must be an integer between 0 and 100, got: "${raw}"`
     );
@@ -600,7 +607,7 @@ export function registerInstallCommand(program: Command): void {
     .option("-f, --force", "overwrite if server already installed")
     .option("--skip-health-check", "skip post-install health check")
     .option("--json", "output result as JSON")
-    .option("--min-trust <n>", "abort install if trust score is below this threshold (0-100)", parseMinTrust)
+    .option("--min-trust <n>", "abort install if pre-install trust score is below this threshold (0-100; health check runs after install)", parseMinTrust)
     .action(async (name: string, opts: { client?: string; yes?: boolean; force?: boolean; skipHealthCheck?: boolean; json?: boolean; minTrust?: number }) => {
       const { RegistryClient } = await import("../registry/client.js");
       const client = new RegistryClient();

@@ -1468,6 +1468,18 @@ describe("parseMinTrust — invalid inputs", () => {
   it("throws InvalidArgumentError for empty string", () => {
     expect(() => parseMinTrust("")).toThrow(InvalidArgumentError);
   });
+
+  it("throws InvalidArgumentError for hex '0x50' (would silently become 80)", () => {
+    expect(() => parseMinTrust("0x50")).toThrow(InvalidArgumentError);
+  });
+
+  it("throws InvalidArgumentError for scientific notation '1e2' (would silently become 100)", () => {
+    expect(() => parseMinTrust("1e2")).toThrow(InvalidArgumentError);
+  });
+
+  it("throws InvalidArgumentError for string with leading space ' 50'", () => {
+    expect(() => parseMinTrust(" 50")).toThrow(InvalidArgumentError);
+  });
 });
 
 describe("handleInstall — --min-trust gate", () => {
