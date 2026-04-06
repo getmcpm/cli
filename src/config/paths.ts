@@ -46,18 +46,17 @@ export function getConfigPath(
   platform: string = process.platform
 ): string {
   const home = os.homedir();
-  const appData = appDataDir(platform, home);
 
   switch (clientId) {
     case "claude-desktop":
-      return path.join(appData, "Claude", "claude_desktop_config.json");
+      return path.join(appDataDir(platform, home), "Claude", "claude_desktop_config.json");
 
     case "cursor":
       // ~/.cursor/mcp.json on all platforms — home-relative, NOT under appData
       return path.join(home, ".cursor", "mcp.json");
 
     case "vscode":
-      return path.join(appData, "Code", "User", "mcp.json");
+      return path.join(appDataDir(platform, home), "Code", "User", "mcp.json");
 
     case "windsurf":
       // ~/.codeium/windsurf/mcp_config.json on all platforms — home-relative, NOT under appData

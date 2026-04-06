@@ -21,10 +21,20 @@ const mockHomedir = os.homedir as ReturnType<typeof vi.fn>;
 
 describe("getConfigPath", () => {
   const originalPlatform = process.platform;
+  let savedAppData: string | undefined;
+
+  beforeEach(() => {
+    savedAppData = process.env["APPDATA"];
+  });
 
   afterEach(() => {
     vi.resetAllMocks();
     Object.defineProperty(process, "platform", { value: originalPlatform });
+    if (savedAppData === undefined) {
+      delete process.env["APPDATA"];
+    } else {
+      process.env["APPDATA"] = savedAppData;
+    }
   });
 
   function setPlatform(platform: string) {
@@ -60,25 +70,19 @@ describe("getConfigPath", () => {
     it("returns Windows path on win32", () => {
       setPlatform("win32");
       mockHomedir.mockReturnValue("C:\\Users\\alice");
-      // APPDATA env var is used on Windows
       process.env["APPDATA"] = "C:\\Users\\alice\\AppData\\Roaming";
       const result = getConfigPath("claude-desktop");
       expect(result).toBe(
         "C:\\Users\\alice\\AppData\\Roaming/Claude/claude_desktop_config.json"
       );
-      delete process.env["APPDATA"];
     });
 
     it("falls back to homedir when APPDATA is not set on win32", () => {
       setPlatform("win32");
       mockHomedir.mockReturnValue("C:\\Users\\alice");
-      const savedAppData = process.env["APPDATA"];
       delete process.env["APPDATA"];
       const result = getConfigPath("claude-desktop");
       expect(result).toContain("claude_desktop_config.json");
-      if (savedAppData !== undefined) {
-        process.env["APPDATA"] = savedAppData;
-      }
     });
   });
 
@@ -106,11 +110,10 @@ describe("getConfigPath", () => {
       mockHomedir.mockReturnValue("C:\\Users\\alice");
       process.env["APPDATA"] = "C:\\Users\\alice\\AppData\\Roaming";
       const result = getConfigPath("cursor");
-      // path.join separator is platform-specific; assert content not APPDATA
+      // path.join separator is platform-specific (host OS); assert content not APPDATA
       expect(result).toContain(".cursor");
       expect(result).toContain("mcp.json");
       expect(result).not.toContain("AppData");
-      delete process.env["APPDATA"];
     });
   });
 
@@ -143,7 +146,6 @@ describe("getConfigPath", () => {
       expect(result).toBe(
         "C:\\Users\\alice\\AppData\\Roaming/Code/User/mcp.json"
       );
-      delete process.env["APPDATA"];
     });
   });
 
@@ -175,12 +177,11 @@ describe("getConfigPath", () => {
       mockHomedir.mockReturnValue("C:\\Users\\alice");
       process.env["APPDATA"] = "C:\\Users\\alice\\AppData\\Roaming";
       const result = getConfigPath("windsurf");
-      // path.join separator is platform-specific; assert content not APPDATA
+      // path.join separator is platform-specific (host OS); assert content not APPDATA
       expect(result).toContain(".codeium");
       expect(result).toContain("windsurf");
       expect(result).toContain("mcp_config.json");
       expect(result).not.toContain("AppData");
-      delete process.env["APPDATA"];
     });
   });
 
