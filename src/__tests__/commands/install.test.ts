@@ -1428,6 +1428,161 @@ describe("formatTrustScore — edge cases", () => {
 });
 
 // ---------------------------------------------------------------------------
+// --min-trust flag
+// ---------------------------------------------------------------------------
+
+import { InvalidArgumentError } from "commander";
+import { parseMinTrust } from "../../commands/install.js";
+
+describe("parseMinTrust — valid inputs", () => {
+  it("accepts '0' and returns 0", () => {
+    expect(parseMinTrust("0")).toBe(0);
+  });
+
+  it("accepts '50' and returns 50", () => {
+    expect(parseMinTrust("50")).toBe(50);
+  });
+
+  it("accepts '100' and returns 100", () => {
+    expect(parseMinTrust("100")).toBe(100);
+  });
+});
+
+describe("parseMinTrust — invalid inputs", () => {
+  it("throws InvalidArgumentError for '-1'", () => {
+    expect(() => parseMinTrust("-1")).toThrow(InvalidArgumentError);
+  });
+
+  it("throws InvalidArgumentError for '101'", () => {
+    expect(() => parseMinTrust("101")).toThrow(InvalidArgumentError);
+  });
+
+  it("throws InvalidArgumentError for 'abc'", () => {
+    expect(() => parseMinTrust("abc")).toThrow(InvalidArgumentError);
+  });
+
+  it("throws InvalidArgumentError for '50.5' (non-integer)", () => {
+    expect(() => parseMinTrust("50.5")).toThrow(InvalidArgumentError);
+  });
+
+  it("throws InvalidArgumentError for empty string", () => {
+    expect(() => parseMinTrust("")).toThrow(InvalidArgumentError);
+  });
+});
+
+describe("handleInstall — --min-trust gate", () => {
+  beforeEach(() => {
+    vi.resetAllMocks();
+  });
+
+  function makeLowTrustScore(): TrustScore {
+    return {
+      score: 40,
+      maxPossible: 100,
+      level: "risky",
+      breakdown: { healthCheck: 0, staticScan: 30, externalScan: 0, registryMeta: 10 },
+    };
+  }
+
+  it("blocks install when score is below minTrust threshold", async () => {
+    const adapter = makeAdapter("claude-desktop");
+    const deps = makeDeps({
+      getAdapter: vi.fn().mockReturnValue(adapter),
+      computeTrustScore: vi.fn().mockReturnValue(makeLowTrustScore()),
+    });
+    await expect(
+      handleInstall("io.github.test/my-server", { minTrust: 80 }, deps)
+    ).rejects.toThrow(/below.*required|minimum.*80|trust score.*40/i);
+    expect(deps.addToStore).not.toHaveBeenCalled();
+    expect(adapter.addServer).not.toHaveBeenCalled();
+  });
+
+  it("blocks install even with --yes flag when score is below minTrust", async () => {
+    const adapter = makeAdapter("claude-desktop");
+    const deps = makeDeps({
+      getAdapter: vi.fn().mockReturnValue(adapter),
+      computeTrustScore: vi.fn().mockReturnValue(makeLowTrustScore()),
+    });
+    await expect(
+      handleInstall("io.github.test/my-server", { yes: true, minTrust: 80 }, deps)
+    ).rejects.toThrow(/below.*required|minimum.*80|trust score.*40/i);
+    expect(deps.confirm).not.toHaveBeenCalled();
+    expect(deps.addToStore).not.toHaveBeenCalled();
+    expect(adapter.addServer).not.toHaveBeenCalled();
+  });
+
+  it("allows install when score exactly equals minTrust threshold", async () => {
+    const adapter = makeAdapter("claude-desktop");
+    const exactScore: TrustScore = {
+      score: 80,
+      maxPossible: 100,
+      level: "safe",
+      breakdown: { healthCheck: 20, staticScan: 40, externalScan: 10, registryMeta: 10 },
+    };
+    const deps = makeDeps({
+      getAdapter: vi.fn().mockReturnValue(adapter),
+      computeTrustScore: vi.fn().mockReturnValue(exactScore),
+    });
+    await handleInstall("io.github.test/my-server", { minTrust: 80 }, deps);
+    expect(adapter.addServer).toHaveBeenCalled();
+    expect(deps.addToStore).toHaveBeenCalled();
+  });
+
+  it("allows install when score is above minTrust threshold", async () => {
+    const adapter = makeAdapter("claude-desktop");
+    const highScore: TrustScore = {
+      score: 90,
+      maxPossible: 100,
+      level: "safe",
+      breakdown: { healthCheck: 30, staticScan: 40, externalScan: 10, registryMeta: 10 },
+    };
+    const deps = makeDeps({
+      getAdapter: vi.fn().mockReturnValue(adapter),
+      computeTrustScore: vi.fn().mockReturnValue(highScore),
+    });
+    await handleInstall("io.github.test/my-server", { minTrust: 50 }, deps);
+    expect(adapter.addServer).toHaveBeenCalled();
+    expect(deps.addToStore).toHaveBeenCalled();
+  });
+
+  it("outputs structured JSON error when --json and score is below minTrust", async () => {
+    const capturedOutput: string[] = [];
+    const lowScore: TrustScore = {
+      score: 30,
+      maxPossible: 100,
+      level: "risky",
+      breakdown: { healthCheck: 0, staticScan: 20, externalScan: 0, registryMeta: 10 },
+    };
+    const deps = makeDeps({
+      computeTrustScore: vi.fn().mockReturnValue(lowScore),
+      output: (text: string) => capturedOutput.push(text),
+    });
+    await expect(
+      handleInstall("io.github.test/my-server", { json: true, minTrust: 70 }, deps)
+    ).rejects.toThrow();
+    const jsonOutput = JSON.parse(capturedOutput.join("\n")) as Record<string, unknown>;
+    expect(jsonOutput).toMatchObject({
+      name: "io.github.test/my-server",
+      error: "min_trust_not_met",
+      score: 30,
+      required: 70,
+    });
+    expect(jsonOutput).toHaveProperty("level");
+  });
+
+  it("no behavior change when minTrust option is absent", async () => {
+    const adapter = makeAdapter("claude-desktop");
+    const deps = makeDeps({
+      getAdapter: vi.fn().mockReturnValue(adapter),
+      computeTrustScore: vi.fn().mockReturnValue(makeGreenTrustScore()),
+    });
+    await handleInstall("io.github.test/my-server", {}, deps);
+    expect(adapter.addServer).toHaveBeenCalled();
+    expect(deps.addToStore).toHaveBeenCalled();
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Plaintext secret warning (FINDING-08)
 // ---------------------------------------------------------------------------
 

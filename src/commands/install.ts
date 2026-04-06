@@ -155,6 +155,7 @@ export interface InstallOptions {
   force?: boolean;
   skipHealthCheck?: boolean;
   json?: boolean;
+  minTrust?: number;
 }
 
 export interface InstallDeps {
@@ -338,6 +339,30 @@ export async function handleInstall(
   const trustScore = computeTrustScore(trustScoreInput);
 
   // -------------------------------------------------------------------------
+  // Step 2b: --min-trust gate (checked before any output or confirmation)
+  // -------------------------------------------------------------------------
+  if (options.minTrust !== undefined && trustScore.score < options.minTrust) {
+    if (options.json === true) {
+      output(
+        JSON.stringify(
+          {
+            name,
+            error: "min_trust_not_met",
+            score: trustScore.score,
+            required: options.minTrust,
+            level: trustScore.level,
+          },
+          null,
+          2
+        )
+      );
+    }
+    throw new Error(
+      `Trust score ${trustScore.score}/100 is below the required minimum of ${options.minTrust}. Installation aborted.`
+    );
+  }
+
+  // -------------------------------------------------------------------------
   // Step 3: Display trust score and confirm
   // -------------------------------------------------------------------------
   // In --json mode suppress all human-readable output; only the final JSON
@@ -511,7 +536,7 @@ export async function handleInstall(
 // Commander registration
 // ---------------------------------------------------------------------------
 
-import { Command } from "commander";
+import { Command, InvalidArgumentError } from "commander";
 import chalk from "chalk";
 import { input, password } from "@inquirer/prompts";
 import { detectInstalledClients as _detectClients } from "../config/detector.js";
@@ -556,6 +581,16 @@ async function promptEnvVarsDefault(
   return result;
 }
 
+export function parseMinTrust(raw: string): number {
+  const n = Number(raw);
+  if (raw.trim() === "" || !Number.isInteger(n) || n < 0 || n > 100) {
+    throw new InvalidArgumentError(
+      `--min-trust must be an integer between 0 and 100, got: "${raw}"`
+    );
+  }
+  return n;
+}
+
 export function registerInstallCommand(program: Command): void {
   program
     .command("install <name>")
@@ -565,7 +600,8 @@ export function registerInstallCommand(program: Command): void {
     .option("-f, --force", "overwrite if server already installed")
     .option("--skip-health-check", "skip post-install health check")
     .option("--json", "output result as JSON")
-    .action(async (name: string, opts: { client?: string; yes?: boolean; force?: boolean; skipHealthCheck?: boolean; json?: boolean }) => {
+    .option("--min-trust <n>", "abort install if trust score is below this threshold (0-100)", parseMinTrust)
+    .action(async (name: string, opts: { client?: string; yes?: boolean; force?: boolean; skipHealthCheck?: boolean; json?: boolean; minTrust?: number }) => {
       const { RegistryClient } = await import("../registry/client.js");
       const client = new RegistryClient();
 
@@ -575,6 +611,7 @@ export function registerInstallCommand(program: Command): void {
         force: opts.force,
         skipHealthCheck: opts.skipHealthCheck,
         json: opts.json,
+        minTrust: opts.minTrust,
       };
 
       const installDeps: InstallDeps = {
@@ -595,7 +632,9 @@ export function registerInstallCommand(program: Command): void {
       try {
         await handleInstall(name, installOptions, installDeps);
       } catch (err) {
-        console.error(chalk.red((err as Error).message));
+        if (installOptions.json !== true) {
+          console.error(chalk.red((err as Error).message));
+        }
         process.exit(1);
       }
     });
