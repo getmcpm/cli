@@ -75,6 +75,18 @@ describe("ClaudeDesktopAdapter", () => {
       expect(result).toEqual({});
     });
 
+    it("returns empty object when file is empty (zero bytes)", async () => {
+      mockReadFile.mockResolvedValue("");
+      const result = await adapter.read(CONFIG_PATH);
+      expect(result).toEqual({});
+    });
+
+    it("returns empty object when file is whitespace only", async () => {
+      mockReadFile.mockResolvedValue("   \n  \n");
+      const result = await adapter.read(CONFIG_PATH);
+      expect(result).toEqual({});
+    });
+
     it("throws on malformed JSON", async () => {
       mockReadFile.mockResolvedValue("{ bad json ]");
       await expect(adapter.read(CONFIG_PATH)).rejects.toThrow();

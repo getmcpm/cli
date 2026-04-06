@@ -32,6 +32,17 @@ describe("resolveVersion", () => {
     );
   });
 
+  it("resolves 'latest' alias to highest available version", () => {
+    const result = resolveVersion("test-server", "latest", available);
+    expect(result.resolved).toBe("2.0.0");
+  });
+
+  it("throws when 'latest' is requested but no versions available", () => {
+    expect(() => resolveVersion("test-server", "latest", [])).toThrow(
+      "No versions available"
+    );
+  });
+
   it("filters out non-semver version strings", () => {
     const mixed = ["1.0.0", "latest", "1.2.0", "beta", "2.0.0"];
     const result = resolveVersion("test-server", "^1.0.0", mixed);
@@ -58,6 +69,11 @@ describe("resolveWithSingleVersion", () => {
   it("matches caret range against single version", () => {
     const result = resolveWithSingleVersion("test-server", "^1.0.0", "1.5.0");
     expect(result.resolved).toBe("1.5.0");
+  });
+
+  it("accepts 'latest' alias with single version", () => {
+    const result = resolveWithSingleVersion("test-server", "latest", "1.0.0");
+    expect(result.resolved).toBe("1.0.0");
   });
 
   it("throws when single version does not satisfy range", () => {

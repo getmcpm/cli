@@ -37,6 +37,12 @@ export abstract class BaseAdapter implements ConfigAdapter {
       throw err;
     }
 
+    // Empty files are treated as empty configs (common when an IDE creates
+    // the file but hasn't written content yet).
+    if (raw.trim() === "") {
+      return {};
+    }
+
     // JSON.parse throws on malformed input — let it propagate.
     return JSON.parse(raw) as Record<string, unknown>;
   }

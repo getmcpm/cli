@@ -25,7 +25,7 @@ export interface ResolveResult {
  * Resolve a version range against a list of available versions.
  *
  * Supports exact versions ("1.2.3"), caret ranges ("^1.0.0"),
- * and tilde ranges ("~1.2.0").
+ * tilde ranges ("~1.2.0"), and the "latest" alias (highest available).
  *
  * @param serverName — used only for error messages
  * @param range — the version range from mcpm.yaml
@@ -40,6 +40,15 @@ export function resolveVersion(
 ): ResolveResult {
   // Filter to valid semver strings only (registry may return non-semver)
   const validVersions = available.filter((v) => semver.valid(v) !== null);
+
+  // "latest" alias — highest available version
+  if (range === "latest") {
+    if (validVersions.length === 0) {
+      throw new Error(`No versions available for "${serverName}".`);
+    }
+    const sorted = [...validVersions].sort(semver.rcompare);
+    return { resolved: sorted[0], range, available: validVersions };
+  }
 
   // Exact version match — skip range resolution
   if (semver.valid(range) !== null) {
@@ -76,6 +85,11 @@ export function resolveWithSingleVersion(
   range: string,
   singleVersion: string
 ): ResolveResult {
+  // "latest" alias always accepts the single available version
+  if (range === "latest") {
+    return { resolved: singleVersion, range, available: [singleVersion] };
+  }
+
   if (semver.valid(range) !== null) {
     // Exact match required
     if (semver.eq(singleVersion, range)) {
