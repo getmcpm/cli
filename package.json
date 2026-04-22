@@ -1,6 +1,6 @@
 {
   "name": "@getmcpm/cli",
-  "version": "0.3.2",
+  "version": "0.3.3",
   "mcpName": "io.github.getmcpm/cli",
   "description": "MCP package manager — search, install, and audit MCP servers across Claude Desktop, Cursor, VS Code, and Windsurf",
   "type": "module",
@@ -53,12 +53,12 @@
     }
   },
   "dependencies": {
-    "@inquirer/prompts": "^8.3.2",
+    "@inquirer/prompts": "^8.4.2",
     "@modelcontextprotocol/sdk": "^1.29.0",
     "chalk": "^5.4.0",
     "cli-table3": "^0.6.5",
     "commander": "^14.0.3",
-    "ora": "^9.3.0",
+    "ora": "^9.4.0",
     "semver": "^7.7.4",
     "yaml": "^2.8.3",
     "zod": "^3.25.0"
