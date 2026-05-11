@@ -25,6 +25,8 @@ import { registerExportCommand } from "./export.js";
 import { registerLockCommand } from "./lock.js";
 import { registerUpCommand } from "./up.js";
 import { registerDiffCommand } from "./diff.js";
+import { registerPublishCommand } from "./publish/index.js";
+import { registerOutdatedCommand } from "./outdated.js";
 
 export { registerSearch } from "./search.js";
 export { registerInstallCommand, handleInstall, resolveInstallEntry, formatTrustScore } from "./install.js";
@@ -80,4 +82,6 @@ export function registerCommands(program: Command): void {
   registerLockCommand(program);
   registerUpCommand(program);
   registerDiffCommand(program);
+  registerOutdatedCommand(program);
+  registerPublishCommand(program);
 }
