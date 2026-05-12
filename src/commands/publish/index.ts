@@ -49,8 +49,8 @@ export function registerPublishCommand(program: Command): void {
 
       const manifestPath = resolve(process.cwd(), ".mcpm-publish.yaml");
       await writeFile(manifestPath, stringify(manifest), "utf-8");
-      console.log(chalk.green(`\nCreated .mcpm-publish.yaml`));
-      console.log(`Run ${chalk.cyan("mcpm publish check")} to validate before submitting.`);
+      stdoutOutput(chalk.green(`\nCreated .mcpm-publish.yaml`));
+      stdoutOutput(`Run ${chalk.cyan("mcpm publish check")} to validate before submitting.`);
     });
 
   pub

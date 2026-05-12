@@ -83,7 +83,9 @@ export async function checkVersionDrift(
       const rawDiff = semver.valid(s.version) && semver.valid(latest)
         ? (semver.diff(s.version, latest) ?? "none")
         : "unknown";
-      const versionChange = rawDiff.replace(/^pre/, "") as DriftRow["versionChange"];
+      const VALID_CHANGES = new Set(["none", "patch", "minor", "major"]);
+      const stripped = rawDiff.replace(/^pre/, "");
+      const versionChange = (VALID_CHANGES.has(stripped) ? stripped : "unknown") as DriftRow["versionChange"];
 
       let findings: Finding[] = [];
       let latestScore: TrustScore;
