@@ -175,6 +175,9 @@ Without an external scanner installed, the maximum possible score is 80/100. The
 | `mcpm remove <name>` | Remove an MCP server from client config(s) |
 | `mcpm audit` | Scan all installed servers and produce a trust report |
 | `mcpm update` | Check for newer versions and update installed servers |
+| `mcpm outdated` | Show version drift and trust regression for installed servers |
+| `mcpm secrets` | Manage encrypted credentials for MCP servers |
+| `mcpm publish` | Publish an MCP server to the registry |
 | `mcpm doctor` | Check MCP setup health and report issues |
 | `mcpm init <pack>` | Install a curated starter pack of MCP servers |
 | `mcpm disable <name>` | Disable an MCP server without removing it from config |

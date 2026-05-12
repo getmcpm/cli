@@ -1,8 +1,8 @@
 /**
  * Tests for src/store/servers.ts
  *
- * TDD — RED phase.
- * Mocks the store/index.js module entirely.
+ * writeJson now receives a ServersFile ({ mcpmSchemaVersion, servers }) instead
+ * of a bare array. Assertions updated to check data.servers.
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
@@ -18,6 +18,7 @@ import {
   getInstalledServers,
   addInstalledServer,
   removeInstalledServer,
+  SERVERS_SCHEMA_VERSION,
 } from "../../store/servers.js";
 import type { InstalledServer } from "../../store/servers.js";
 
@@ -31,6 +32,13 @@ const SAMPLE_SERVER: InstalledServer = {
   installedAt: "2026-03-28T00:00:00.000Z",
 };
 
+type ServersFile = { mcpmSchemaVersion: number; servers: InstalledServer[] };
+
+function writtenServers(): InstalledServer[] {
+  const [, file] = mockWriteJson.mock.calls[0] as [string, ServersFile];
+  return file.servers;
+}
+
 describe("getInstalledServers", () => {
   beforeEach(() => {
     vi.resetAllMocks();
@@ -39,21 +47,22 @@ describe("getInstalledServers", () => {
 
   it("returns empty array when no file exists", async () => {
     mockReadJson.mockResolvedValue(null);
-    const result = await getInstalledServers();
-    expect(result).toEqual([]);
+    expect(await getInstalledServers()).toEqual([]);
   });
 
-  it("returns persisted server list", async () => {
+  it("reads legacy bare-array format (schema v1 migration)", async () => {
     mockReadJson.mockResolvedValue([SAMPLE_SERVER]);
-    const result = await getInstalledServers();
-    expect(result).toEqual([SAMPLE_SERVER]);
+    expect(await getInstalledServers()).toEqual([SAMPLE_SERVER]);
+  });
+
+  it("reads new ServersFile format (schema v2)", async () => {
+    mockReadJson.mockResolvedValue({ mcpmSchemaVersion: 2, servers: [SAMPLE_SERVER] });
+    expect(await getInstalledServers()).toEqual([SAMPLE_SERVER]);
   });
 
   it("returns a new array each call (not the cached reference)", async () => {
-    mockReadJson.mockResolvedValue([SAMPLE_SERVER]);
-    const first = await getInstalledServers();
-    const second = await getInstalledServers();
-    expect(first).not.toBe(second);
+    mockReadJson.mockResolvedValue({ mcpmSchemaVersion: 2, servers: [SAMPLE_SERVER] });
+    expect(await getInstalledServers()).not.toBe(await getInstalledServers());
   });
 
   it("reads from the correct filename", async () => {
@@ -69,31 +78,24 @@ describe("addInstalledServer", () => {
     mockWriteJson.mockResolvedValue(undefined);
   });
 
-  it("appends a server to the list", async () => {
+  it("appends a server and writes ServersFile format", async () => {
     mockReadJson.mockResolvedValue([]);
     await addInstalledServer(SAMPLE_SERVER);
     expect(mockWriteJson).toHaveBeenCalledOnce();
-    const [filename, data] = mockWriteJson.mock.calls[0] as [
-      string,
-      InstalledServer[],
-    ];
+    const [filename, file] = mockWriteJson.mock.calls[0] as [string, ServersFile];
     expect(filename).toBe("servers.json");
-    expect(data).toContainEqual(SAMPLE_SERVER);
+    expect(file.mcpmSchemaVersion).toBe(SERVERS_SCHEMA_VERSION);
+    expect(file.servers).toContainEqual(SAMPLE_SERVER);
   });
 
   it("preserves existing servers when adding new", async () => {
-    const existing: InstalledServer = {
-      name: "existing-srv",
-      version: "0.1.0",
-      clients: ["vscode"],
-      installedAt: "2026-01-01T00:00:00.000Z",
-    };
+    const existing: InstalledServer = { name: "existing-srv", version: "0.1.0", clients: ["vscode"], installedAt: "2026-01-01T00:00:00.000Z" };
     mockReadJson.mockResolvedValue([existing]);
     await addInstalledServer(SAMPLE_SERVER);
-    const [, data] = mockWriteJson.mock.calls[0] as [string, InstalledServer[]];
-    expect(data).toHaveLength(2);
-    expect(data).toContainEqual(existing);
-    expect(data).toContainEqual(SAMPLE_SERVER);
+    const servers = writtenServers();
+    expect(servers).toHaveLength(2);
+    expect(servers).toContainEqual(existing);
+    expect(servers).toContainEqual(SAMPLE_SERVER);
   });
 
   it("does not mutate the server object passed in", async () => {
@@ -107,8 +109,7 @@ describe("addInstalledServer", () => {
   it("handles null file (first install) by starting fresh", async () => {
     mockReadJson.mockResolvedValue(null);
     await addInstalledServer(SAMPLE_SERVER);
-    const [, data] = mockWriteJson.mock.calls[0] as [string, InstalledServer[]];
-    expect(data).toEqual([SAMPLE_SERVER]);
+    expect(writtenServers()).toEqual([SAMPLE_SERVER]);
   });
 });
 
@@ -119,17 +120,12 @@ describe("removeInstalledServer", () => {
   });
 
   it("removes the named server from the list", async () => {
-    const other: InstalledServer = {
-      name: "other-srv",
-      version: "2.0.0",
-      clients: ["windsurf"],
-      installedAt: "2026-02-01T00:00:00.000Z",
-    };
+    const other: InstalledServer = { name: "other-srv", version: "2.0.0", clients: ["windsurf"], installedAt: "2026-02-01T00:00:00.000Z" };
     mockReadJson.mockResolvedValue([SAMPLE_SERVER, other]);
     await removeInstalledServer("my-mcp-server");
-    const [, data] = mockWriteJson.mock.calls[0] as [string, InstalledServer[]];
-    expect(data).not.toContainEqual(SAMPLE_SERVER);
-    expect(data).toContainEqual(other);
+    const servers = writtenServers();
+    expect(servers).not.toContainEqual(SAMPLE_SERVER);
+    expect(servers).toContainEqual(other);
   });
 
   it("throws if the server is not found", async () => {
@@ -140,8 +136,7 @@ describe("removeInstalledServer", () => {
   it("writes the updated list (not original reference)", async () => {
     mockReadJson.mockResolvedValue([SAMPLE_SERVER]);
     await removeInstalledServer("my-mcp-server");
-    const [, data] = mockWriteJson.mock.calls[0] as [string, InstalledServer[]];
-    expect(data).toEqual([]);
+    expect(writtenServers()).toEqual([]);
   });
 
   it("handles empty list and throws", async () => {
