@@ -71,6 +71,66 @@ export function registerGuardCommand(program: Command): void {
     });
 
   guard
+    .command("accept-drift <server>")
+    .description("Re-pin a server's tool schemas after a legitimate upgrade")
+    .option("--tool <name>", "scope to a single tool (default: all tools on the server)")
+    .option("--new-hash <hash>", "exact sha256:... to pin (copy from block-message remediation)")
+    .option("--remove", "delete the pin entry entirely instead of re-pinning")
+    .option("--yes", "skip interactive confirm (for CI)")
+    .action(async (
+      server: string,
+      opts: { tool?: string; newHash?: string; remove?: boolean; yes?: boolean },
+    ) => {
+      // SECURITY F7: enforce --yes by gating the destructive operation on
+      // user input when no flag is supplied. CI gets --yes; humans get a
+      // one-line confirmation showing exactly what will change.
+      if (opts.yes !== true) {
+        const target = opts.tool !== undefined ? `tool "${opts.tool}"` : "all tools";
+        const verb = opts.remove === true ? "drop the pin entries for" : "re-pin";
+        const what = opts.remove === true ? "" : ` to ${opts.newHash ?? "(missing --new-hash)"}`;
+        process.stdout.write(
+          `About to ${verb} "${server}" ${target}${what}.\n` +
+            `Re-run with --yes to confirm.\n`,
+        );
+        process.exit(1);
+      }
+      const { acceptDriftCommand } = await import("../guard/drift.js");
+      try {
+        await acceptDriftCommand(server, {
+          toolName: opts.tool,
+          remove: opts.remove === true,
+          newHash: opts.newHash,
+        });
+      } catch (err) {
+        process.stderr.write(`${err instanceof Error ? err.message : String(err)}\n`);
+        process.exit(1);
+      }
+      const action = opts.remove === true ? "removed" : `re-pinned to ${opts.newHash}`;
+      const scope = opts.tool !== undefined ? ` tool "${opts.tool}"` : " (all tools)";
+      process.stdout.write(`mcpm guard accept-drift: ${server}${scope} ${action}.\n`);
+    });
+
+  guard
+    .command("reset-integrity")
+    .description("Regenerate the pins.json integrity sidecar (use after manually editing pins.json)")
+    .option("--yes", "skip the safety warning (for CI / automation)")
+    .action(async (opts: { yes?: boolean }) => {
+      if (opts.yes !== true) {
+        process.stdout.write(
+          "WARNING: This command trusts whatever is currently in ~/.mcpm/pins.json.\n" +
+            "If pins.json was modified by an untrusted process, this will bypass drift\n" +
+            "detection for every pinned tool. Review the file first:\n\n" +
+            "  cat ~/.mcpm/pins.json\n\n" +
+            "Then re-run with --yes to confirm.\n",
+        );
+        process.exit(1);
+      }
+      const { resetIntegrity } = await import("../guard/pins.js");
+      await resetIntegrity();
+      process.stdout.write("mcpm guard reset-integrity: pins.json.integrity refreshed.\n");
+    });
+
+  guard
     .command("run")
     .description("Internal: relay entry point invoked by wrapped configs (semver-exempt)")
     .option("--inner", "required marker; this command is not for direct user use")

@@ -120,3 +120,23 @@ These came out of the security-reviewer agent's audit of the v0.5.0 guard subsys
 **Priority:** P2 — v0.5.1
 **What:** `BaseAdapter.read()` does an unchecked cast: `servers as Record<string, McpServerEntry>`. A malformed config (e.g., `args: "bad"` instead of `args: ["bad"]`) silently corrupts the wrap transform (spreading a string produces single-character args). Validate each entry through a Zod schema before returning; skip-with-warning on malformed entries.
 **Effort:** ~1 hr (schema + tests).
+
+### 24. Single-atomic-write for pins.json + integrity (security F8, Step 6 audit)
+**Priority:** P2 — v0.5.1
+**What:** `writePins` currently does two atomic renames (pins.json then pins.json.integrity). A concurrent reader between the two sees new content + old hash and fires `PinsIntegrityError`. With Step 6's fail-closed F1 fix, that brief window blocks all traffic transiently. Reformat to a single file where the integrity hash is embedded as the first line, or retry once on read-side mismatch before raising.
+**Effort:** ~1.5 hrs (refactor + tests for race).
+
+### 25. Zod-validate PinsFile shape on read (security F10, Step 6 audit)
+**Priority:** P2 — v0.5.1
+**What:** `readPins` does `JSON.parse(content) as PinsFile`. A tampered or hand-corrupted pins.json with `current_hash: 42` slips past type-only validation and causes weird downstream behavior (always-drift or always-pass depending on shape). Add a Zod schema with strict hash regex (sha256:[0-9a-f]{64}) and reject malformed entries with a clear message.
+**Effort:** ~45 min.
+
+### 26. NFC normalize before hashing tool definitions (security F12, Step 6 audit)
+**Priority:** P3 — v0.5.1
+**What:** `hashToolDefinition` hashes raw bytes. Legitimate server upgrades that change Unicode normalization form (e.g., NFD → NFC, U+212B Angstrom → U+00C5 Å) produce different hashes and false-positive as drift. Apply `string.normalize("NFC")` to description strings before hashing. This is a breaking change to existing pins — bump PINS_FORMAT_VERSION and add a migration that re-pins on first read.
+**Effort:** ~1 hr (incl. migration).
+
+### 27. Buffer first-session tools/list until off-thread pin write commits (security F3 hardening)
+**Priority:** P3 — v0.5.1
+**What:** Step 6 closed F3 with a per-session in-memory "first hash seen" map, which catches double-tools/list in the same session. A stricter close is: don't forward the first tools/list response until the off-thread pin write completes (one round-trip delay; once-per-session-per-server). Higher latency but eliminates any same-session unprotected window.
+**Effort:** ~2 hrs (refactor sync inspect → async with await on the off-thread).

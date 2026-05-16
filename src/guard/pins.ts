@@ -1,0 +1,286 @@
+/**
+ * Schema-pin storage for mcpm-guard (v0.5.0, Next Step 6).
+ *
+ * Persists per-server, per-tool SHA-256 hashes of the tool definition
+ * (description + schema + annotations) captured at install time. Drift
+ * detection at runtime compares the live tools/list response against
+ * the pin and blocks if the hash has changed — catching rug-pull attacks
+ * structurally, complementing the regex-based pattern engine.
+ *
+ * Storage:
+ *   ~/.mcpm/pins.json            — pin data, JSON, format_version-tagged
+ *   ~/.mcpm/pins.json.integrity  — SHA-256 of pins.json contents (sidecar)
+ *
+ * The integrity sidecar (security review F4.2) lets us detect tampering
+ * by another local process. Any mismatch on read refuses to use the
+ * pin file until the user runs `mcpm guard reset-integrity`.
+ *
+ * Two-target scope: install-time capture writes captured_via:"install".
+ * If install-time spawn fails (OAuth, network), a placeholder entry with
+ * current_hash:null + captured_via:"first-session" is written; the next
+ * successful runtime tools/list fills the hash.
+ */
+
+import { createHash } from "node:crypto";
+import { readFile, writeFile, rename, unlink } from "node:fs/promises";
+import path from "node:path";
+import lockfile from "proper-lockfile";
+import { getStorePath } from "../store/index.js";
+
+const PINS_FILENAME = "pins.json";
+const INTEGRITY_FILENAME = "pins.json.integrity";
+
+export const PINS_FORMAT_VERSION = 1;
+
+export type CapturedVia = "install" | "first-session" | "backfill";
+
+export interface PinEntry {
+  /** SHA-256 of JSON.stringify({description, schema, annotations}). null in first-session mode awaiting first session. */
+  current_hash: string | null;
+  /** Previous hashes kept for accept-drift history. */
+  previous_hashes: string[];
+  /** ISO 8601 timestamp. */
+  captured_at: string;
+  captured_via: CapturedVia;
+  signature_list_version: string;
+}
+
+export interface PinsFile {
+  format_version: number;
+  servers: Record<string, Record<string, PinEntry>>;
+}
+
+// ---------------------------------------------------------------------------
+// Pure helpers
+// ---------------------------------------------------------------------------
+
+/**
+ * Stable hash of a tool definition. Stringifies in canonical (sorted-key)
+ * form so equivalent JSON with different key order produces the same hash.
+ */
+export function hashToolDefinition(input: {
+  description?: string | null;
+  schema?: unknown;
+  annotations?: unknown;
+}): string {
+  const canonical = JSON.stringify(
+    {
+      description: input.description ?? "",
+      schema: input.schema ?? null,
+      annotations: input.annotations ?? null,
+    },
+    sortedReplacer,
+  );
+  return `sha256:${createHash("sha256").update(canonical, "utf8").digest("hex")}`;
+}
+
+function sortedReplacer(_key: string, value: unknown): unknown {
+  if (value !== null && typeof value === "object" && !Array.isArray(value)) {
+    const obj = value as Record<string, unknown>;
+    const sorted: Record<string, unknown> = {};
+    for (const k of Object.keys(obj).sort()) sorted[k] = obj[k];
+    return sorted;
+  }
+  return value;
+}
+
+export function emptyPinsFile(): PinsFile {
+  return { format_version: PINS_FORMAT_VERSION, servers: {} };
+}
+
+// ---------------------------------------------------------------------------
+// Read / write with integrity sidecar
+// ---------------------------------------------------------------------------
+
+export class PinsIntegrityError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "PinsIntegrityError";
+  }
+}
+
+function fileSha(content: string): string {
+  return `sha256:${createHash("sha256").update(content, "utf8").digest("hex")}`;
+}
+
+async function pinsPath(): Promise<string> {
+  return path.join(await getStorePath(), PINS_FILENAME);
+}
+
+async function integrityPath(): Promise<string> {
+  return path.join(await getStorePath(), INTEGRITY_FILENAME);
+}
+
+/**
+ * Read the pin file + verify its integrity sidecar. Returns an empty pins
+ * file if pins.json does not exist (first-run). Throws PinsIntegrityError
+ * if the sidecar exists but does not match the file content — the user must
+ * run `mcpm guard reset-integrity` before pins are usable again.
+ */
+export async function readPins(): Promise<PinsFile> {
+  const filePath = await pinsPath();
+  const sidecarPath = await integrityPath();
+
+  let content: string;
+  try {
+    content = await readFile(filePath, "utf-8");
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") return emptyPinsFile();
+    throw err;
+  }
+
+  // If the sidecar exists, it must match. If the sidecar is missing, treat as
+  // first-run — write a fresh sidecar on the next writePins.
+  let sidecar: string | null = null;
+  try {
+    sidecar = (await readFile(sidecarPath, "utf-8")).trim();
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
+  }
+  if (sidecar !== null) {
+    const actual = fileSha(content);
+    if (actual !== sidecar) {
+      throw new PinsIntegrityError(
+        `pins.json integrity check failed (expected ${sidecar}, got ${actual}). ` +
+          `If you intentionally modified ~/.mcpm/pins.json (e.g., copied between machines), ` +
+          `run \`mcpm guard reset-integrity\`. Otherwise, review ~/.mcpm/guard-events.jsonl ` +
+          `for unauthorized activity.`,
+      );
+    }
+  }
+
+  const parsed = JSON.parse(content) as PinsFile;
+  if (parsed.format_version !== PINS_FORMAT_VERSION) {
+    throw new Error(
+      `pins.json format_version mismatch (file: ${parsed.format_version}, expected: ${PINS_FORMAT_VERSION}). ` +
+        `Migration is not yet implemented — file an issue.`,
+    );
+  }
+  return parsed;
+}
+
+/**
+ * Write pins.json + refresh the integrity sidecar. Atomic via .tmp + rename.
+ *
+ * Uses proper-lockfile (security review F2) to serialize concurrent writes
+ * from multiple IDE sessions hitting the same wrapped server. Without the
+ * lock, two relays writing first-session pins can race and corrupt the
+ * sidecar relative to pins.json.
+ */
+export async function writePins(pins: PinsFile): Promise<void> {
+  const filePath = await pinsPath();
+  const sidecarPath = await integrityPath();
+  const serialized = `${JSON.stringify(pins, null, 2)}\n`;
+
+  // Touch the file first if it doesn't exist — proper-lockfile requires
+  // the target to exist before locking.
+  try {
+    await writeFile(filePath, "", { flag: "wx", mode: 0o600 });
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== "EEXIST") throw err;
+  }
+
+  const release = await lockfile.lock(filePath, {
+    retries: { retries: 5, minTimeout: 10, maxTimeout: 200 },
+    stale: 5_000,
+  });
+  try {
+    const tmp = `${filePath}.tmp`;
+    await writeFile(tmp, serialized, { encoding: "utf-8", mode: 0o600 });
+    await rename(tmp, filePath);
+
+    const tmpSidecar = `${sidecarPath}.tmp`;
+    await writeFile(tmpSidecar, fileSha(serialized), { encoding: "utf-8", mode: 0o600 });
+    await rename(tmpSidecar, sidecarPath);
+  } finally {
+    await release();
+  }
+}
+
+/**
+ * Force-regenerate the integrity sidecar from whatever pins.json currently
+ * contains. Used by `mcpm guard reset-integrity` after the user has reviewed
+ * the file and acknowledged the tamper warning.
+ */
+export async function resetIntegrity(): Promise<void> {
+  const filePath = await pinsPath();
+  const sidecarPath = await integrityPath();
+  let content: string;
+  try {
+    content = await readFile(filePath, "utf-8");
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") {
+      // Nothing to reset; remove any stale sidecar.
+      await unlink(sidecarPath).catch(() => undefined);
+      return;
+    }
+    throw err;
+  }
+  const tmpSidecar = `${sidecarPath}.tmp`;
+  await writeFile(tmpSidecar, fileSha(content), { encoding: "utf-8", mode: 0o600 });
+  await rename(tmpSidecar, sidecarPath);
+}
+
+// ---------------------------------------------------------------------------
+// Mutation helpers — pure functions that return new PinsFile instances
+// ---------------------------------------------------------------------------
+
+export function upsertToolPin(
+  pins: PinsFile,
+  serverName: string,
+  toolName: string,
+  newEntry: PinEntry,
+): PinsFile {
+  const server = pins.servers[serverName] ?? {};
+  return {
+    ...pins,
+    servers: {
+      ...pins.servers,
+      [serverName]: { ...server, [toolName]: newEntry },
+    },
+  };
+}
+
+export function clearServerPins(pins: PinsFile, serverName: string): PinsFile {
+  if (!pins.servers[serverName]) return pins;
+  const { [serverName]: _removed, ...rest } = pins.servers;
+  return { ...pins, servers: rest };
+}
+
+export function clearToolPin(
+  pins: PinsFile,
+  serverName: string,
+  toolName: string,
+): PinsFile {
+  const server = pins.servers[serverName];
+  if (!server || !server[toolName]) return pins;
+  const { [toolName]: _removed, ...rest } = server;
+  return {
+    ...pins,
+    servers: { ...pins.servers, [serverName]: rest },
+  };
+}
+
+/**
+ * Move the current hash into previous_hashes + set a new current.
+ * Used when a drift is "accepted" — preserves history without losing
+ * the audit trail of prior hashes.
+ */
+export function acceptDrift(
+  pins: PinsFile,
+  serverName: string,
+  toolName: string,
+  newHash: string,
+): PinsFile {
+  const existing = pins.servers[serverName]?.[toolName];
+  if (!existing) return pins;
+  const updated: PinEntry = {
+    ...existing,
+    current_hash: newHash,
+    previous_hashes: existing.current_hash
+      ? [...existing.previous_hashes, existing.current_hash]
+      : existing.previous_hashes,
+    captured_at: new Date().toISOString(),
+  };
+  return upsertToolPin(pins, serverName, toolName, updated);
+}
