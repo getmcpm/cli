@@ -145,3 +145,16 @@ These came out of the security-reviewer agent's audit of the v0.5.0 guard subsys
 **Priority:** P3 — v0.5.1
 **What:** `mcpm guard pause --for 5m --off` currently lets `--off` win silently. Add a `.conflicts("for")` on `--off` (Commander supports this) so users get a clear error rather than implicit precedence.
 **Effort:** ~5 min.
+
+### 29. Expand FP-rate corpus from 5 seed sessions to 20 real-server captures (Step 9 follow-up)
+**Priority:** P2 — ongoing maintainer task
+**What:** v0.5.0 ships with 5 synthetic-but-realistic session fixtures (filesystem/github/slack/postgres/fetch) totaling 24 messages. Per design doc Success Criterion, the full FP-rate measurement target is "top-20 servers by GitHub stars under modelcontextprotocol/servers" — captured as 5-minute record-replay sessions.
+**How:** Build `scripts/capture-fp-session.ts` that tees stdio through `mcpm guard run --inner` and writes JSONL. Run against the top 20 servers; vendor under `src/guard/__tests__/fixtures/legitimate-corpus/`. CI publishes the aggregate FP rate per release in the release notes.
+**Refresh cadence:** quarterly (servers update, signature set changes, regex tuning).
+**Effort:** ~3 hrs initial (one-time capture session) + ~30 min/quarter (refresh).
+
+### 30. LLM-as-judge context-aware detection for verbatim attack-phrase docs (Step 9 FP limitation)
+**Priority:** P3 — v0.5.1+
+**What:** The seed corpus discovered that a documentation page containing the **verbatim** trigger phrase ("disregard prior instructions" exactly) false-positives. Regex can't distinguish meta-discussion from instruction. An opt-in LLM-as-judge tier could resolve borderline cases by reading the surrounding context.
+**Why deferred:** v0.5.0 ships deterministic-only (no model API calls). This is the V2-roadmap LLM tier.
+**Effort:** ~5 hrs (signature schema extension + judge prompt + tests).
