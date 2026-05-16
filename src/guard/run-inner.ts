@@ -16,7 +16,9 @@ import { OWASP_MCP_TOP_10 } from "./signatures.js";
 import { startRelay, type GuardEvent } from "./relay.js";
 import { inspectForDrift } from "./drift.js";
 import { readPins, writePins, emptyPinsFile } from "./pins.js";
-import type { InspectResult } from "./types.js";
+import { readPolicy, expireStale, type GuardPolicyFile } from "./policy.js";
+import { sanitizeForTerminal } from "./sanitize.js";
+import type { InspectFinding, InspectResult } from "./types.js";
 
 export interface RunInnerArgs {
   readonly serverName: string;
@@ -26,27 +28,61 @@ export interface RunInnerArgs {
 
 const SIGNATURE_LIST_VERSION = "owasp-mcp-top-10@v0.5.0";
 
-/**
- * Strip ANSI/control characters from a string used in stderr output.
- *
- * The previous regex (security review Step 5 F5) missed the ESC character itself
- * and the C0/C1 control ranges generally. Step 6 F4 catches both:
- *   - full ANSI escape sequences (ESC + either single-char dispatch or [-CSI sequence])
- *   - all C0 control chars (\x00-\x1F + \x7F)
- *   - all C1 control chars (\x80-\x9F, the 8-bit CSI range)
- */
-function sanitizeForTerminal(s: string): string {
-  // eslint-disable-next-line no-control-regex
-  return s.replace(/\x1B(?:[@-Z\\\-_]|\[[0-9;]*[a-zA-Z])/g, "")
-    // eslint-disable-next-line no-control-regex
-    .replace(/[\x00-\x1F\x7F\x80-\x9F]/g, "");
-}
-
 function mergeInspect(a: InspectResult, b: InspectResult): InspectResult {
   // Most-severe action wins; concat findings.
   const rank = { block: 3, warn: 2, pass: 1 } as const;
   const action = rank[a.action] >= rank[b.action] ? a.action : b.action;
   return { action, findings: [...a.findings, ...b.findings] };
+}
+
+/**
+ * Apply guard-policy.yaml signature_overrides to an inspection result.
+ *
+ * Per-finding semantics:
+ *   - no override  → finding keeps its native severity → action
+ *   - "ignore"     → finding is dropped from the result entirely
+ *   - "log_only"   → finding is kept (visible in event log) but counts as "pass" for action
+ *   - "warn"       → finding is kept, counts as "warn"
+ *   - "block"      → finding is kept, counts as "block"
+ *
+ * Action is the MAX severity across ALL findings post-override. A log_only
+ * override on one finding cannot suppress a block from another unmuted
+ * finding — security review Step 7 F1 caught this as the previous code's
+ * critical bug.
+ */
+function applyPolicy(result: InspectResult, policy: GuardPolicyFile): InspectResult {
+  const overrides = policy.signature_overrides ?? [];
+  if (overrides.length === 0) return result;
+  const byId = new Map(overrides.map((o) => [o.id, o]));
+
+  const rank = { pass: 0, warn: 1, block: 2 } as const;
+  const fromSeverity = (sev: InspectFinding["severity"]): InspectResult["action"] => {
+    if (sev === "critical") return "block";
+    if (sev === "high") return "warn";
+    return "pass";
+  };
+
+  let highest: InspectResult["action"] = "pass";
+  const kept: InspectFinding[] = [];
+  for (const f of result.findings) {
+    const o = byId.get(f.signature_id);
+    let perFindingAction: InspectResult["action"];
+    if (o === undefined) {
+      perFindingAction = fromSeverity(f.severity);
+      kept.push(f);
+    } else if (o.action === "ignore") {
+      continue; // drop entirely
+    } else if (o.action === "log_only") {
+      perFindingAction = "pass";
+      kept.push(f);
+    } else {
+      perFindingAction = o.action; // "warn" or "block"
+      kept.push(f);
+    }
+    if (rank[perFindingAction] > rank[highest]) highest = perFindingAction;
+  }
+
+  return { action: highest, findings: kept };
 }
 
 function hasToolsList(msg: JSONRPCMessage): boolean {
@@ -71,6 +107,13 @@ export async function runInner(parsed: RunInnerArgs): Promise<number> {
   // callbacks are sync, so we keep a cached snapshot updated off-thread.
   let pinsSnapshot = await readPins().catch(() => emptyPinsFile());
 
+  // Load policy once per session (mute/pause/etc.). Stale overrides expire
+  // here; the next session picks up fresh state. Pausing mid-session is not
+  // supported in v0.5.0 — restart the wrapped server to pick up changes.
+  const policy = expireStale(await readPolicy().catch(() => ({})));
+  const pausedUntilFuture =
+    policy.paused_until !== undefined && new Date(policy.paused_until) > new Date();
+
   // SECURITY F3: per-session "first hash seen" map. Closes the double-
   // tools/list bypass — if a server sends two tools/list within the same
   // session, the second must hash-match the first or it blocks. Without this,
@@ -80,6 +123,7 @@ export async function runInner(parsed: RunInnerArgs): Promise<number> {
   const sessionFirstHashes = new Map<string, string>();
 
   const inspectChild = (msg: JSONRPCMessage): InspectResult => {
+    if (pausedUntilFuture) return { action: "pass", findings: [] };
     const patternResult = inspectMessage(msg, OWASP_MCP_TOP_10);
     let driftResult: InspectResult = { action: "pass", findings: [] };
 
@@ -97,11 +141,13 @@ export async function runInner(parsed: RunInnerArgs): Promise<number> {
       })();
     }
 
-    return mergeInspect(patternResult, driftResult);
+    return applyPolicy(mergeInspect(patternResult, driftResult), policy);
   };
 
-  const inspectParent = (msg: JSONRPCMessage): InspectResult =>
-    inspectMessage(msg, OWASP_MCP_TOP_10);
+  const inspectParent = (msg: JSONRPCMessage): InspectResult => {
+    if (pausedUntilFuture) return { action: "pass", findings: [] };
+    return applyPolicy(inspectMessage(msg, OWASP_MCP_TOP_10), policy);
+  };
 
   // SECURITY F2: forward env unchanged — IDE already chose which vars to expose.
   const handle = startRelay({
@@ -125,7 +171,6 @@ export async function runInner(parsed: RunInnerArgs): Promise<number> {
 // ---------------------------------------------------------------------------
 
 import { hashToolDefinition, type PinsFile } from "./pins.js";
-import type { InspectFinding } from "./types.js";
 
 function inspectForDriftSync(
   msg: JSONRPCMessage,

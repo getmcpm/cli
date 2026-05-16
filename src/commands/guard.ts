@@ -111,23 +111,131 @@ export function registerGuardCommand(program: Command): void {
     });
 
   guard
-    .command("reset-integrity")
-    .description("Regenerate the pins.json integrity sidecar (use after manually editing pins.json)")
-    .option("--yes", "skip the safety warning (for CI / automation)")
-    .action(async (opts: { yes?: boolean }) => {
-      if (opts.yes !== true) {
-        process.stdout.write(
-          "WARNING: This command trusts whatever is currently in ~/.mcpm/pins.json.\n" +
-            "If pins.json was modified by an untrusted process, this will bypass drift\n" +
-            "detection for every pinned tool. Review the file first:\n\n" +
-            "  cat ~/.mcpm/pins.json\n\n" +
-            "Then re-run with --yes to confirm.\n",
+    .command("mute <signature-id>")
+    .description("Disable a signature (action: ignore). Use --for to auto-expire.")
+    .option("--for <duration>", "duration: 30s, 5m, 1h, 24h, 7d")
+    .action(async (sigId: string, opts: { for?: string }) => {
+      // SECURITY F7: refuse unknown signature ids so users don't typo and
+      // silently get no mute. Shows valid ids on mismatch.
+      const { OWASP_MCP_TOP_10 } = await import("../guard/signatures.js");
+      const validIds = new Set(OWASP_MCP_TOP_10.map((s) => s.id));
+      if (!validIds.has(sigId)) {
+        process.stderr.write(
+          `Unknown signature id "${sigId}". Valid ids:\n` +
+            OWASP_MCP_TOP_10.map((s) => `  ${s.id}`).join("\n") +
+            "\n",
         );
         process.exit(1);
       }
-      const { resetIntegrity } = await import("../guard/pins.js");
-      await resetIntegrity();
-      process.stdout.write("mcpm guard reset-integrity: pins.json.integrity refreshed.\n");
+      const { readPolicy, writePolicy, setOverride, parseDuration, isoOffsetFromNow } = await import(
+        "../guard/policy.js"
+      );
+      let expiresAt: string | undefined;
+      try {
+        expiresAt = opts.for !== undefined ? isoOffsetFromNow(parseDuration(opts.for)) : undefined;
+      } catch (err) {
+        process.stderr.write(`${err instanceof Error ? err.message : String(err)}\n`);
+        process.exit(1);
+      }
+      const policy = await readPolicy();
+      const next = setOverride(policy, sigId, "ignore", expiresAt);
+      await writePolicy(next);
+      const until = expiresAt !== undefined ? ` until ${expiresAt}` : " (permanent until unmute)";
+      process.stdout.write(`mcpm guard mute: signature "${sigId}" muted${until}.\n`);
+    });
+
+  guard
+    .command("unmute <signature-id>")
+    .description("Re-enable a muted signature")
+    .action(async (sigId: string) => {
+      const { readPolicy, writePolicy, removeOverride } = await import("../guard/policy.js");
+      const policy = await readPolicy();
+      const next = removeOverride(policy, sigId);
+      await writePolicy(next);
+      process.stdout.write(`mcpm guard unmute: signature "${sigId}" override removed.\n`);
+    });
+
+  guard
+    .command("pause")
+    .description("Pause all guard inspection (relay continues forwarding without scanning)")
+    .option("--for <duration>", "duration: 30s, 5m, 1h, 24h, 7d (default: 10m)")
+    .option("--off", "lift any active pause")
+    .action(async (opts: { for?: string; off?: boolean }) => {
+      const { readPolicy, writePolicy, setPausedUntil, parseDuration, isoOffsetFromNow } =
+        await import("../guard/policy.js");
+      const policy = await readPolicy();
+      if (opts.off === true) {
+        await writePolicy(setPausedUntil(policy, null));
+        process.stdout.write("mcpm guard pause: cleared.\n");
+        return;
+      }
+      const ms = parseDuration(opts.for ?? "10m");
+      const until = isoOffsetFromNow(ms);
+      await writePolicy(setPausedUntil(policy, until));
+      process.stdout.write(`mcpm guard pause: inspection paused until ${until}.\n`);
+    });
+
+  guard
+    .command("cleanup")
+    .description("Prune pin entries for uninstalled servers + orphan wrap entries")
+    .option("--yes", "skip the dry-run prompt")
+    .action(async (opts: { yes?: boolean }) => {
+      const { runCleanupCommand } = await import("../guard/cli.js");
+      await runCleanupCommand({ apply: opts.yes === true, write: (s) => process.stdout.write(s) });
+    });
+
+  guard
+    .command("list-signatures")
+    .description("Show installed signatures (OWASP MCP Top 10 coverage)")
+    .option("--json", "emit machine-readable JSON")
+    .action(async (opts: { json?: boolean }) => {
+      const { OWASP_MCP_TOP_10 } = await import("../guard/signatures.js");
+      if (opts.json === true) {
+        process.stdout.write(JSON.stringify(OWASP_MCP_TOP_10.map((s) => ({
+          id: s.id,
+          category: s.category,
+          severity: s.severity,
+          target: s.target,
+          description: s.description,
+        })), null, 2) + "\n");
+        return;
+      }
+      process.stdout.write(`mcpm guard signatures (vendored, ${OWASP_MCP_TOP_10.length} total):\n\n`);
+      for (const s of OWASP_MCP_TOP_10) {
+        process.stdout.write(`  ${s.id}\n`);
+        process.stdout.write(`    category : ${s.category}\n`);
+        process.stdout.write(`    severity : ${s.severity}\n`);
+        process.stdout.write(`    target   : ${s.target}\n`);
+        process.stdout.write(`    details  : ${s.description}\n\n`);
+      }
+    });
+
+  guard
+    .command("reset-integrity")
+    .description("Regenerate the pins.json or guard-policy.yaml integrity sidecar")
+    .option("--policy", "reset the guard-policy.yaml sidecar instead of pins.json")
+    .option("--yes", "skip the safety warning (for CI / automation)")
+    .action(async (opts: { policy?: boolean; yes?: boolean }) => {
+      const target = opts.policy === true ? "~/.mcpm/guard-policy.yaml" : "~/.mcpm/pins.json";
+      if (opts.yes !== true) {
+        process.stdout.write(
+          `WARNING: This command trusts whatever is currently in ${target}.\n` +
+            `If the file was modified by an untrusted process, this will bypass\n` +
+            `${opts.policy === true ? "policy" : "drift"} enforcement. Review the file first:\n\n` +
+            `  cat ${target}\n\n` +
+            `Then re-run with --yes to confirm.\n`,
+        );
+        process.exit(1);
+      }
+      if (opts.policy === true) {
+        const { resetPolicyIntegrity } = await import("../guard/policy.js");
+        await resetPolicyIntegrity();
+        process.stdout.write("mcpm guard reset-integrity: guard-policy.yaml.integrity refreshed.\n");
+      } else {
+        const { resetIntegrity } = await import("../guard/pins.js");
+        await resetIntegrity();
+        process.stdout.write("mcpm guard reset-integrity: pins.json.integrity refreshed.\n");
+      }
     });
 
   guard

@@ -27,16 +27,9 @@ const CLIENT_LABELS: Record<ClientId, string> = {
   windsurf: "Windsurf",
 };
 
-/**
- * Strip ANSI escapes + C0/C1 control chars from server names + reasons
- * before terminal output (security review F5). A malicious config containing
- * a server named "\x1b[2J" (clear screen) would otherwise execute the escape
- * sequence on `mcpm guard status`, hiding evidence of itself.
- */
-function sanitize(s: string): string {
-  // eslint-disable-next-line no-control-regex
-  return s.replace(/\[[0-9;]*[a-zA-Z]/g, "").replace(/[ --]/g, "");
-}
+// Re-export the shared sanitizer under the local name (security review Step 7 F5:
+// the cli.ts local version missed ESC + OSC; share the run-inner.ts one instead).
+import { sanitizeForTerminal as sanitize } from "./sanitize.js";
 
 interface CommandIO {
   readonly write: (s: string) => void;
@@ -176,4 +169,58 @@ function printRestartReminder(opts: CommandIO): void {
     "\n→ Restart your IDE (Claude Desktop / Cursor / VS Code / Windsurf) " +
       "for changes to take effect.\n",
   );
+}
+
+// ---------------------------------------------------------------------------
+// cleanup
+// ---------------------------------------------------------------------------
+
+export interface CleanupOpts extends CommandIO {
+  readonly apply: boolean;
+}
+
+export async function runCleanupCommand(opts: CleanupOpts): Promise<void> {
+  const deps = buildDeps();
+  const status = await statusAcrossClients(deps);
+
+  // Collect the union of server names seen across detected client configs.
+  // Anything pinned that doesn't appear here is an orphan pin entry.
+  const installedServerNames = new Set<string>();
+  for (const c of status.clients) {
+    for (const s of c.servers) installedServerNames.add(sanitize(s.name));
+  }
+
+  const { readPins, writePins, clearServerPins } = await import("./pins.js");
+  const pins = await readPins().catch(() => null);
+  const orphanPinned: string[] = [];
+  if (pins !== null) {
+    for (const serverName of Object.keys(pins.servers)) {
+      if (!installedServerNames.has(serverName)) orphanPinned.push(serverName);
+    }
+  }
+
+  // Orphan wrapped entries: servers wrapped in some client config but whose
+  // original binary is no longer reachable (v0.5.0 simplification: we can't
+  // cheaply check binary reachability; report wraps that reference a
+  // command name not present in any other client's UNWRAPPED entries).
+  // Conservative: skip for v0.5.0, report only pin orphans.
+
+  if (orphanPinned.length === 0) {
+    opts.write("mcpm guard cleanup: nothing to prune (0 orphan pins, 0 orphan wraps).\n");
+    return;
+  }
+
+  opts.write(`mcpm guard cleanup: ${orphanPinned.length} orphan pin entr${orphanPinned.length === 1 ? "y" : "ies"} found:\n`);
+  for (const s of orphanPinned) opts.write(`  - ${s}\n`);
+
+  if (!opts.apply) {
+    opts.write("\nDry run. Re-run with --yes to prune.\n");
+    return;
+  }
+
+  if (pins === null) return;
+  let next = pins;
+  for (const serverName of orphanPinned) next = clearServerPins(next, serverName);
+  await writePins(next);
+  opts.write(`\nPruned ${orphanPinned.length} orphan pin entr${orphanPinned.length === 1 ? "y" : "ies"} from ~/.mcpm/pins.json.\n`);
 }

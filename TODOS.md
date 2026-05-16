@@ -140,3 +140,8 @@ These came out of the security-reviewer agent's audit of the v0.5.0 guard subsys
 **Priority:** P3 — v0.5.1
 **What:** Step 6 closed F3 with a per-session in-memory "first hash seen" map, which catches double-tools/list in the same session. A stricter close is: don't forward the first tools/list response until the off-thread pin write completes (one round-trip delay; once-per-session-per-server). Higher latency but eliminates any same-session unprotected window.
 **Effort:** ~2 hrs (refactor sync inspect → async with await on the off-thread).
+
+### 28. `pause --for --off` flag conflict declaration (security review Step 7 F9)
+**Priority:** P3 — v0.5.1
+**What:** `mcpm guard pause --for 5m --off` currently lets `--off` win silently. Add a `.conflicts("for")` on `--off` (Commander supports this) so users get a clear error rather than implicit precedence.
+**Effort:** ~5 min.
