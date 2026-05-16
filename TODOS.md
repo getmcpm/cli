@@ -109,3 +109,14 @@ These came out of the security-reviewer agent's audit of the v0.5.0 guard subsys
 **Priority:** P3 — docs
 **What:** Add an inline comment in patterns.ts:targetSubtree explaining that `tool_response` matches any JSON-RPC `result.content`, regardless of which method prompted it. This is intentional (broader detection coverage) but should be documented so it's not "fixed" away.
 **Effort:** ~5 min docs.
+
+### 22. Track `fast-uri` CVE remediation (security review F3, Next Step 5 audit)
+**Priority:** P1 — when upstream patches
+**What:** `@modelcontextprotocol/sdk@1.29.0` pulls in `ajv` which depends on `fast-uri <= 3.1.1`. Two HIGH CVEs (GHSA-q3j6-qgpj-74h6 path traversal, GHSA-v39h-62p7-jpjc host confusion) are unpatched in our locked version. Neither is directly exploitable in our usage (the SDK uses ajv for JSON-schema $id resolution on trusted MCP envelope shapes), but they show up in `pnpm audit`.
+**How:** Monitor `@modelcontextprotocol/sdk` releases for a version that bumps fast-uri to ≥3.1.2. If urgent, add a `pnpm overrides` entry to force `fast-uri@^3.1.2` once SDK compatibility is verified.
+**Depends on:** Upstream SDK release.
+
+### 23. Zod-validate McpServerEntry shape in BaseAdapter.read() (security review F8, Next Step 5 audit)
+**Priority:** P2 — v0.5.1
+**What:** `BaseAdapter.read()` does an unchecked cast: `servers as Record<string, McpServerEntry>`. A malformed config (e.g., `args: "bad"` instead of `args: ["bad"]`) silently corrupts the wrap transform (spreading a string produces single-character args). Validate each entry through a Zod schema before returning; skip-with-warning on malformed entries.
+**Effort:** ~1 hr (schema + tests).

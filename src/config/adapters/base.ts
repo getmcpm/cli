@@ -171,6 +171,27 @@ export abstract class BaseAdapter implements ConfigAdapter {
 
     await this.writeAtomic(configPath, updated, raw);
   }
+
+  async replaceServer(configPath: string, name: string, entry: McpServerEntry): Promise<void> {
+    const raw = await this.readRaw(configPath);
+    const existing = (raw[this.rootKey] ?? {}) as Record<string, McpServerEntry>;
+
+    if (!Object.prototype.hasOwnProperty.call(existing, name)) {
+      throw new Error(`Server "${name}" not found in ${this.clientId} config.`);
+    }
+
+    const updatedServers: Record<string, McpServerEntry> = {
+      ...existing,
+      [name]: { ...entry },
+    };
+
+    const updated: Record<string, unknown> = {
+      ...raw,
+      [this.rootKey]: updatedServers,
+    };
+
+    await this.writeAtomic(configPath, updated, raw);
+  }
 }
 
 // ---------------------------------------------------------------------------

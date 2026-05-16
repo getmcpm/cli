@@ -53,4 +53,12 @@ export interface ConfigAdapter {
 
   /** Set or clear the disabled flag on a server entry. Throws if not found. */
   setServerDisabled(configPath: string, name: string, disabled: boolean): Promise<void>;
+
+  /**
+   * Replace a server's entry with a transformed version (e.g., wrapped by
+   * `mcpm guard enable`). Throws if the server name is not found. The
+   * caller supplies the new entry; the adapter handles atomic write +
+   * `.bak` backup with the same discipline as addServer.
+   */
+  replaceServer(configPath: string, name: string, entry: McpServerEntry): Promise<void>;
 }
