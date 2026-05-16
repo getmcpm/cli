@@ -1,0 +1,14 @@
+{
+  "name": "Standard initialize handshake",
+  "expected_action": "pass",
+  "notes": "Handshake messages should pass through silently. No targets apply to initialize.",
+  "message": {
+    "jsonrpc": "2.0",
+    "id": 107,
+    "result": {
+      "protocolVersion": "2024-11-05",
+      "capabilities": { "tools": {} },
+      "serverInfo": { "name": "test-server", "version": "1.0.0" }
+    }
+  }
+}

@@ -1,0 +1,17 @@
+{
+  "name": "Realistic tools/list from a real MCP server",
+  "expected_action": "pass",
+  "notes": "Modeled on @modelcontextprotocol/server-filesystem. Multiple tools, all descriptions are legitimate.",
+  "message": {
+    "jsonrpc": "2.0",
+    "id": 105,
+    "result": {
+      "tools": [
+        { "name": "read_file", "description": "Read the complete contents of a file as text or binary.", "inputSchema": { "type": "object", "properties": { "path": { "type": "string" } }, "required": ["path"] } },
+        { "name": "write_file", "description": "Write text or binary content to a file, creating parent directories as needed.", "inputSchema": { "type": "object", "properties": { "path": { "type": "string" }, "content": { "type": "string" } } } },
+        { "name": "list_directory", "description": "List entries (files and subdirectories) in a given directory path.", "inputSchema": { "type": "object", "properties": { "path": { "type": "string" } }, "required": ["path"] } },
+        { "name": "search_files", "description": "Recursively search for files matching a pattern under a directory.", "inputSchema": { "type": "object" } }
+      ]
+    }
+  }
+}

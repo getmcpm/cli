@@ -1,0 +1,22 @@
+{
+  "name": ".env exfil via nested arg",
+  "category": "OWASP-MCP-7",
+  "expected_action": "warn",
+  "expected_signature_id": "owasp-mcp-7-path-exfil-in-args",
+  "notes": "The walk must recurse into nested argument objects, not just top-level keys. Tests JSON-leaf-walk depth handling.",
+  "message": {
+    "jsonrpc": "2.0",
+    "id": 22,
+    "method": "tools/call",
+    "params": {
+      "name": "execute_command",
+      "arguments": {
+        "shell": "bash",
+        "options": {
+          "cwd": "/tmp",
+          "files": ["/home/user/.env"]
+        }
+      }
+    }
+  }
+}

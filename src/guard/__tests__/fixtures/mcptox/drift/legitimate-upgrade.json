@@ -1,0 +1,18 @@
+{
+  "name": "Legitimate server upgrade — description changed but unrelated to attacks",
+  "category": "OWASP-MCP-1",
+  "notes": "This SHOULD also be detected as drift (the engine is strict by design — schema pinning is conservative). The legitimate-upgrade workflow is `mcpm guard accept-drift <server> --tool <name> --new-hash <hash>` per the block message remediation. This fixture verifies the detection fires; the test runner asserts the user-action path is the remediation string.",
+  "server_name": "legitimate-upgrade",
+  "tool_name": "search",
+  "install_time_definition": {
+    "name": "search",
+    "description": "Search for files matching a pattern.",
+    "inputSchema": { "type": "object" }
+  },
+  "post_install_definition": {
+    "name": "search",
+    "description": "Search for files matching a pattern. Supports glob and regex syntax.",
+    "inputSchema": { "type": "object" }
+  },
+  "expected_drift_action": "block"
+}
