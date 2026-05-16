@@ -104,17 +104,32 @@ function truncate(s: string): string {
 }
 
 /**
- * NFKC-normalize a string leaf and run every signature whose target matches
- * the inspection scope. Returns all matches as findings.
+ * NFKC-normalize + strip evasion characters before pattern matching.
  *
- * Skip leaves longer than 1MB defensively — those are not user-instruction-
- * shaped and would dominate the engine's tail latency on pathological input.
+ * NFKC folds compatibility characters (full-width Latin "ｉｇｎｏｒｅ" → "ignore")
+ * but does NOT strip zero-width spaces, soft hyphens, or bidi controls, which
+ * an attacker can insert between word characters to defeat a regex. PATTERN_BREAKERS
+ * captures those classes after normalization.
+ *
+ * For leaves > MAX_LEAF_BYTES (1MB), normalize head + tail independently to
+ * avoid an O(n) string copy on huge benign payloads while still catching
+ * injections an attacker would pad with garbage. The join uses a newline so
+ * patterns that span the join boundary don't accidentally match across them.
  */
 const MAX_LEAF_BYTES = 1_024 * 1_024; // 1MB
 
+// Zero-width chars, bidi overrides, ZWJ/ZWNJ, byte-order mark, Unicode tag block.
+// Stripping these post-NFKC closes a class of "invisible separator" evasions where
+// an attacker inserts U+200B between "ignore" and "previous" to break the regex.
+const PATTERN_BREAKERS = /[­​-‏‪-‮⁠-⁯﻿]|[\u{E0000}-\u{E007F}]/gu;
+
 function normalizeForMatch(leaf: string): string {
-  if (leaf.length > MAX_LEAF_BYTES) return leaf; // skip normalization on huge leaves
-  return leaf.normalize("NFKC");
+  if (leaf.length <= MAX_LEAF_BYTES) {
+    return leaf.normalize("NFKC").replace(PATTERN_BREAKERS, "");
+  }
+  const head = leaf.slice(0, MAX_LEAF_BYTES).normalize("NFKC").replace(PATTERN_BREAKERS, "");
+  const tail = leaf.slice(-MAX_LEAF_BYTES).normalize("NFKC").replace(PATTERN_BREAKERS, "");
+  return `${head}\n${tail}`;
 }
 
 function inspectAgainstSignatures(

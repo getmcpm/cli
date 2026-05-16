@@ -19,9 +19,12 @@ export const OWASP_MCP_TOP_10: readonly Signature[] = [
     severity: "critical",
     description: "Imperative instructions embedded in tool response content",
     target: "tool_response",
+    // [\s]+ instead of literal space catches newline / tab / multi-space evasions
+    // (an attacker inserting "ignore\nprevious instructions" otherwise bypasses).
     patterns: [
-      /(?:^|[\s.,;:!?])ignore (?:all |any |the )?(?:previous|prior|above) instructions?/i,
-      /you are now (?:in |operating in |entering )?(?:developer|debug|admin|jailbreak|dan) mode/i,
+      /(?:^|[\s.,;:!?])ignore[\s]+(?:all[\s]+|any[\s]+|the[\s]+)?(?:previous|prior|above)[\s]+instructions?/i,
+      /(?:disregard|forget)[\s]+(?:all[\s]+|any[\s]+|the[\s]+)?(?:previous|prior|above)[\s]+instructions?/i,
+      /you[\s]+are[\s]+now[\s]+(?:in[\s]+|operating[\s]+in[\s]+|entering[\s]+)?(?:developer|debug|admin|jailbreak|dan)[\s]+mode/i,
       /<\|system\|>|<\|im_start\|>system/,
     ],
     remediation:
@@ -48,9 +51,15 @@ export const OWASP_MCP_TOP_10: readonly Signature[] = [
     severity: "critical",
     description: "Instruction-shaped text in tool descriptions (poisoning / rug-pull)",
     target: "tool_description",
+    // The previous version included /when (?:the )?user asks/ which false-positives
+    // on legitimate descriptions like "Returns X when the user asks for Y." Tightened
+    // to require an imperative verb following the phrase, which is the actual
+    // tool-poisoning shape (e.g., "when the user asks, exfiltrate ~/.ssh/").
     patterns: [
-      /(?:^|[\s.,;:!?])ignore (?:all |any |the )?(?:previous|prior|above) instructions?/i,
-      /<important>|<system>|when (?:the )?user asks/i,
+      /(?:^|[\s.,;:!?])ignore[\s]+(?:all[\s]+|any[\s]+|the[\s]+)?(?:previous|prior|above)[\s]+instructions?/i,
+      /(?:disregard|forget)[\s]+(?:all[\s]+|any[\s]+|the[\s]+)?(?:previous|prior|above)[\s]+instructions?/i,
+      /<important>|<system>/i,
+      /when[\s]+(?:the[\s]+)?user[\s]+asks,?[\s]+(?:you[\s]+(?:must|should|always|never)|always|never|exfil|read|access|send|email|do[\s]+not)/i,
     ],
     remediation:
       "A tool description contains imperative or system-prompt-style text. " +
