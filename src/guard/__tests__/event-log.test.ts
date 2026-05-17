@@ -103,8 +103,17 @@ describe("appendEvent (filesystem round-trip)", () => {
   });
 
   test("write failure is non-blocking (no throw)", async () => {
-    // Make ~/.mcpm read-only after creation by removing HOME entirely.
-    delete process.env.HOME;
+    // CAUTION: do NOT just `delete process.env.HOME` — os.homedir() falls
+    // back to the real user home (/Users/<user>) and the write would
+    // actually succeed AGAINST THE REAL HOME directory, leaking test
+    // artifacts. Caught during E2E smoke test.
+    //
+    // Instead: point HOME at an existing FILE (not a directory). mkdir
+    // then fails with ENOTDIR, which the appendEvent catch swallows.
+    const { writeFileSync } = await import("node:fs");
+    const blocker = path.join(tmpHome, "homefile");
+    writeFileSync(blocker, "not-a-directory");
+    process.env.HOME = blocker;
     _resetCachedStorePath();
     await expect(
       appendEvent(
