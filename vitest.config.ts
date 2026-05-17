@@ -34,6 +34,14 @@ export default defineConfig({
         "**/utils/confirm.ts",
         "**/utils/output.ts",
         "**/config/adapters/factory.ts",
+        // Guard v0.5.0 — Commander glue + subprocess entry (no testable logic;
+        // behavior covered indirectly by guard-cli.test.ts integration + relay.test.ts)
+        "**/guard/cli.ts",
+        "**/guard/run-inner.ts",
+        // Type-only file
+        "**/guard/types.ts",
+        // Demo terminal-output formatter (logic in inspectMessage; runner just formats)
+        "**/guard/demo/runner.ts",
       ],
     },
   },

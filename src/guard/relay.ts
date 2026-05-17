@@ -122,6 +122,10 @@ export interface GuardEvent {
   readonly findings: InspectResult["findings"];
 }
 
+/* c8 ignore start — subprocess production path: behavior verified via E2E
+ * smoke (mcpm guard run --inner with real spawned echo-bot), not unit-testable
+ * without forking child processes in CI. The shared logic (frame parsing,
+ * inspection, block synthesis) is covered via startInProcessRelay. */
 export function startRelay(opts: RelayOptions): RelayHandle {
   const child = spawn(opts.command, [...opts.args], {
     env: opts.env ?? buildSafeEnv(),
@@ -189,6 +193,7 @@ export function startRelay(opts: RelayOptions): RelayHandle {
 
   return { child, exit };
 }
+/* c8 ignore stop */
 
 // ---------------------------------------------------------------------------
 // In-process relay (unit tests + demo)
@@ -242,6 +247,8 @@ export function startInProcessRelay(opts: InProcessRelayOptions): void {
 // Shared wiring (subprocess-side: byte-level pass-through with inspection)
 // ---------------------------------------------------------------------------
 
+/* c8 ignore start — only called by startRelay (subprocess path); the
+ * inspection + block logic is mirrored in startInProcessRelay which IS unit-tested. */
 interface DirectionWiring {
   readonly source: Readable;
   readonly target: (bytes: string) => void;
@@ -293,6 +300,7 @@ function wireDirection(w: DirectionWiring): void {
     w.targetEnd();
   });
 }
+/* c8 ignore stop */
 
 // ---------------------------------------------------------------------------
 // Event helper
