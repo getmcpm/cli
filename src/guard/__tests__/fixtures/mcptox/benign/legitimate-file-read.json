@@ -1,0 +1,14 @@
+{
+  "name": "Reading a project file (no sensitive path)",
+  "expected_action": "pass",
+  "notes": "Most file reads aren't ~/.ssh/ or ~/.aws/. Verifies owasp-mcp-7 doesn't false-positive on normal file paths.",
+  "message": {
+    "jsonrpc": "2.0",
+    "id": 104,
+    "method": "tools/call",
+    "params": {
+      "name": "read_file",
+      "arguments": { "path": "/home/user/projects/my-app/src/main.ts" }
+    }
+  }
+}

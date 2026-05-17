@@ -27,6 +27,7 @@ import { registerUpCommand } from "./up.js";
 import { registerDiffCommand } from "./diff.js";
 import { registerPublishCommand } from "./publish/index.js";
 import { registerOutdatedCommand } from "./outdated.js";
+import { registerGuardCommand } from "./guard.js";
 
 export { registerSearch } from "./search.js";
 export { registerInstallCommand, handleInstall, resolveInstallEntry, formatTrustScore } from "./install.js";
@@ -84,4 +85,5 @@ export function registerCommands(program: Command): void {
   registerDiffCommand(program);
   registerOutdatedCommand(program);
   registerPublishCommand(program);
+  registerGuardCommand(program);
 }

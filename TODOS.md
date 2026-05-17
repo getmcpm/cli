@@ -71,3 +71,87 @@ Cursor and Windsurf are home-relative on ALL platforms (`~/.cursor/mcp.json`, `~
 **Why:** After V1 launch, you'll want to know adoption patterns. V1 skips this to avoid trust paradox ("security tool that tracks you").
 **How:** Simple opt-in on first run. Anonymous counters only. No PII, no server names.
 **Depends on:** V1 launch, established trust.
+
+## v0.5.0 mcpm-guard — Deferred Security Findings
+
+These came out of the security-reviewer agent's audit of the v0.5.0 guard subsystem (2026-05-16). Critical and high findings were fixed in commit; these are deferred with rationale.
+
+### 16. Add tool_annotations signatures (security review F12)
+**Priority:** P1 — v0.5.0.1
+**What:** The pattern engine's `tool_annotations` target is wired (patterns.ts routes to `result.tools[*].annotations`) but no shipped signature uses it. Add an annotation-injection signature mapped to OWASP-MCP-1.
+**Why:** Annotations are an MCP extension surface that tool-poisoning attacks specifically exploit (Invariant Labs disclosure). Custom annotation fields can carry injection text that bypasses description-only checks.
+**Effort:** ~30 min (one signature entry + tests).
+
+### 17. Credential-content detection in tool responses (security review F4)
+**Priority:** P1 — v0.5.0.1
+**What:** Add `tool_response` signatures matching PEM private keys, AWS credentials block, JWT tokens, etc. Current guard catches the path in tool_call_args (warn) but not the resulting key material in the response (no signature).
+**Why:** Real exfil chain is: poisoned description → tool call with path (warned, forwarded) → server returns key contents in response (no signature fires). Closes the chain.
+**Effort:** ~1 hr (3-5 signature entries + tests).
+
+### 18. Base64 / URL-encoded payload decoding pass (security review F13)
+**Priority:** P2 — v0.5.1
+**What:** Preprocess string leaves: detect ≥20-char base64 / URL-encoded blobs, decode, re-run inspection on decoded content.
+**Why:** Naive regex evasion. Attackers can base64-encode "ignore previous instructions" and slip past the engine.
+**Effort:** ~2 hrs (decoder + recursion guard + tests).
+
+### 19. Homoglyph normalization (Unicode TR39 skeleton) (security review F2 partial)
+**Priority:** P2 — v0.5.1
+**What:** NFKC + zero-width strip (done in v0.5.0) does NOT fold homoglyphs (Cyrillic `о` for Latin `o`, etc.). TR39 skeleton algorithm or a confusables library would close this gap.
+**Why:** "ignоre previоus instructiоns" (Cyrillic 'о' substitutions) evades every shipped signature today.
+**Effort:** ~3 hrs (vendor a confusables map, integrate into normalizeForMatch, add tests).
+
+### 20. Direct test for ReadBuffer 64MB cap (security review F6 follow-up)
+**Priority:** P2 — v0.5.1
+**What:** The cap is implemented in `wireDirection`; tested only by inspection. Add a subprocess test that withholds the newline delimiter and verifies the relay closes the child + emits the DoS event.
+**Effort:** ~30 min.
+
+### 21. Document `tool_response` target scope precisely (security review F10)
+**Priority:** P3 — docs
+**What:** Add an inline comment in patterns.ts:targetSubtree explaining that `tool_response` matches any JSON-RPC `result.content`, regardless of which method prompted it. This is intentional (broader detection coverage) but should be documented so it's not "fixed" away.
+**Effort:** ~5 min docs.
+
+### 22. ~~Track `fast-uri` CVE remediation~~ DONE (2026-05-17, v0.5.0 ship gate)
+**Resolution:** Added `pnpm overrides` entry `fast-uri: ^3.1.2` (and bumped `hono: ^4.12.18`, `postcss: ^8.5.10`, added `ip-address: ^10.1.1` for completeness). All transitive SDK CVEs cleared. `pnpm audit` reports "No known vulnerabilities found." Tests + typecheck + build all pass post-override. The fast-uri 3.1.0 → 3.1.2 jump was a pure security fix with no API surface change; SDK functions unchanged.
+
+### 23. Zod-validate McpServerEntry shape in BaseAdapter.read() (security review F8, Next Step 5 audit)
+**Priority:** P2 — v0.5.1
+**What:** `BaseAdapter.read()` does an unchecked cast: `servers as Record<string, McpServerEntry>`. A malformed config (e.g., `args: "bad"` instead of `args: ["bad"]`) silently corrupts the wrap transform (spreading a string produces single-character args). Validate each entry through a Zod schema before returning; skip-with-warning on malformed entries.
+**Effort:** ~1 hr (schema + tests).
+
+### 24. Single-atomic-write for pins.json + integrity (security F8, Step 6 audit)
+**Priority:** P2 — v0.5.1
+**What:** `writePins` currently does two atomic renames (pins.json then pins.json.integrity). A concurrent reader between the two sees new content + old hash and fires `PinsIntegrityError`. With Step 6's fail-closed F1 fix, that brief window blocks all traffic transiently. Reformat to a single file where the integrity hash is embedded as the first line, or retry once on read-side mismatch before raising.
+**Effort:** ~1.5 hrs (refactor + tests for race).
+
+### 25. Zod-validate PinsFile shape on read (security F10, Step 6 audit)
+**Priority:** P2 — v0.5.1
+**What:** `readPins` does `JSON.parse(content) as PinsFile`. A tampered or hand-corrupted pins.json with `current_hash: 42` slips past type-only validation and causes weird downstream behavior (always-drift or always-pass depending on shape). Add a Zod schema with strict hash regex (sha256:[0-9a-f]{64}) and reject malformed entries with a clear message.
+**Effort:** ~45 min.
+
+### 26. NFC normalize before hashing tool definitions (security F12, Step 6 audit)
+**Priority:** P3 — v0.5.1
+**What:** `hashToolDefinition` hashes raw bytes. Legitimate server upgrades that change Unicode normalization form (e.g., NFD → NFC, U+212B Angstrom → U+00C5 Å) produce different hashes and false-positive as drift. Apply `string.normalize("NFC")` to description strings before hashing. This is a breaking change to existing pins — bump PINS_FORMAT_VERSION and add a migration that re-pins on first read.
+**Effort:** ~1 hr (incl. migration).
+
+### 27. Buffer first-session tools/list until off-thread pin write commits (security F3 hardening)
+**Priority:** P3 — v0.5.1
+**What:** Step 6 closed F3 with a per-session in-memory "first hash seen" map, which catches double-tools/list in the same session. A stricter close is: don't forward the first tools/list response until the off-thread pin write completes (one round-trip delay; once-per-session-per-server). Higher latency but eliminates any same-session unprotected window.
+**Effort:** ~2 hrs (refactor sync inspect → async with await on the off-thread).
+
+### 28. `pause --for --off` flag conflict declaration (security review Step 7 F9)
+**Priority:** P3 — v0.5.1
+**What:** `mcpm guard pause --for 5m --off` currently lets `--off` win silently. Add a `.conflicts("for")` on `--off` (Commander supports this) so users get a clear error rather than implicit precedence.
+**Effort:** ~5 min.
+
+### 29. Expand FP-rate corpus from 5 seed sessions to 20 real-server captures (Step 9 follow-up)
+**Priority:** P2 — ongoing maintainer task
+**What:** v0.5.0 ships with 5 synthetic-but-realistic session fixtures (filesystem/github/slack/postgres/fetch) totaling 24 messages. Per design doc Success Criterion, the full FP-rate measurement target is "top-20 servers by GitHub stars under modelcontextprotocol/servers" — captured as 5-minute record-replay sessions.
+**How:** Build `scripts/capture-fp-session.ts` that tees stdio through `mcpm guard run --inner` and writes JSONL. Run against the top 20 servers; vendor under `src/guard/__tests__/fixtures/legitimate-corpus/`. CI publishes the aggregate FP rate per release in the release notes.
+**Refresh cadence:** quarterly (servers update, signature set changes, regex tuning).
+**Effort:** ~3 hrs initial (one-time capture session) + ~30 min/quarter (refresh).
+
+### 30. LLM-as-judge context-aware detection for verbatim attack-phrase docs (Step 9 FP limitation)
+**Priority:** P3 — v0.5.1+
+**What:** The seed corpus discovered that a documentation page containing the **verbatim** trigger phrase ("disregard prior instructions" exactly) false-positives. Regex can't distinguish meta-discussion from instruction. An opt-in LLM-as-judge tier could resolve borderline cases by reading the surrounding context.
+**Why deferred:** v0.5.0 ships deterministic-only (no model API calls). This is the V2-roadmap LLM tier.
+**Effort:** ~5 hrs (signature schema extension + judge prompt + tests).

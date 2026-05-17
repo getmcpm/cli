@@ -1,0 +1,16 @@
+{
+  "name": "SSH key exfil via tool argument",
+  "category": "OWASP-MCP-7",
+  "expected_action": "warn",
+  "expected_signature_id": "owasp-mcp-7-path-exfil-in-args",
+  "notes": "Classic exfil — agent (poisoned via OWASP-MCP-1 or -2) calls read_file with ~/.ssh/id_rsa. Default action is warn (forward with log); enterprise users can promote to block via policy.",
+  "message": {
+    "jsonrpc": "2.0",
+    "id": 20,
+    "method": "tools/call",
+    "params": {
+      "name": "read_file",
+      "arguments": { "path": "/home/user/.ssh/id_rsa" }
+    }
+  }
+}

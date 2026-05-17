@@ -248,9 +248,42 @@ When community quality signals require a backend (user reviews, aggregated telem
 - [ ] Usage stats (installs, active users)
 - [ ] Optional anonymous telemetry
 
+### V0.5 (runtime defense — SHIPPED v0.5.0)
+
+- [x] `mcpm guard enable / disable / status` — auto-wraps detected client configs (Claude Desktop / Cursor / VS Code / Windsurf) with the inspection relay; per-server scope via `--server`
+- [x] `mcpm guard run --inner` — production stdio MITM using SDK framing helpers (OQ1 closed: p99 0.065ms small / 3.1ms large, 78×/8× under budget)
+- [x] `mcpm guard demo` — synthetic prompt-injection scenario for the launch screenshot
+- [x] Pattern engine (`src/guard/patterns.ts`) — NFKC + zero-width-strip + JSON leaf walk; 4 target types (tool_response / tool_call_args / tool_description / tool_annotations)
+- [x] 3 vendored OWASP MCP Top 10 v0.1 signatures (mcp-1 description injection, mcp-2 response injection, mcp-7 path exfil)
+- [x] Schema pinning + drift detection (rug-pull defense) — install-time + first-session-pin fallback + per-session same-session hash cache, SHA-256 integrity sidecar
+- [x] `mcpm guard accept-drift --new-hash` — re-pin after legitimate upgrade (requires explicit hash to close unbounded-window vulnerability)
+- [x] `mcpm guard mute / unmute / pause` — policy file editing CLI with auto-expiry, Zod-validated, integrity-sidecar-protected, lockfile-serialized
+- [x] `mcpm guard cleanup` — prune orphan pin entries for uninstalled servers
+- [x] `mcpm guard list-signatures` — show shipped catalog with OWASP category mapping
+- [x] `mcpm guard reset-integrity` — regenerate pins or policy sidecar after manual edits
+- [x] Event log `~/.mcpm/guard-events.jsonl` — append-only, parse with jq
+- [x] MCPTox-derived deterministic CI fixture eval (25 attack + benign fixtures; closes OQ2 with MCPoison-equivalent rug-pull)
+- [x] FP-rate corpus measurement (5-session seed, 0/24 FP; full 20-server capture in TODOS #29)
+- [x] 6 rounds of independent security review during development; all CRITICAL + HIGH fixed before commit
+- [x] Docs: README "Runtime defense" section + docs/GUARD.md + docs/SIGNATURES.md + docs/POLICY.md
+
+### V1.5 (community trust)
+
+- [ ] `mcpm publish` — submit to official registry with mandatory security scan gate
+- [ ] User ratings and reviews (requires backend)
+- [ ] Verified publisher badge
+- [ ] Usage stats (installs, active users)
+- [ ] Optional anonymous telemetry
+
 ### V2 (runtime security + monetization)
 
-- [ ] Runtime proxy (mcpm-guard) — intercept tool calls, behavioral trust scores
+- [x] Runtime proxy (mcpm-guard) — shipped in v0.5.0 (see above)
+- [ ] Cross-server flow analysis — track exfil chains across tool calls (research-grade)
+- [ ] Agent intent contracts — agent declares session intent, guard rejects calls outside the envelope
+- [ ] `mcpm guard serve` — expose guard itself as an MCP server (agents can introspect their own security perimeter)
+- [ ] LLM-as-judge detection tier (opt-in) — close the verbatim-attack-phrase documentation gap
+- [ ] Separate signatures repo + signing (Sigstore / PGP) — when update cadence requires faster releases than @getmcpm/cli's normal cycle
+- [ ] HTTP transport guard — currently stdio-only
 - [ ] Private registry for orgs (SSO, audit logs, policy enforcement)
 - [ ] Dependency graph (which servers compose well together)
 - [ ] AI-generated docs (Claude reads source → writes human-friendly tool docs)
@@ -333,6 +366,51 @@ the registry concept end-to-end before we launch publicly.
            └── cache/          (registry response cache, 1hr TTL)
 ```
 
+### mcpm-guard subsystem (v0.5.0)
+
+```
+  IDE (Claude Desktop / Cursor / VS Code / Windsurf)
+       │
+       │  JSON-RPC over stdio
+       ▼
+  mcpm guard run --inner --server-name <name> -- <orig> [args]
+       │
+       ├── Pattern engine (src/guard/patterns.ts)
+       │   NFKC + zero-width-strip + regex → InspectResult
+       │   Signatures: src/guard/signatures.ts (vendored OWASP MCP Top 10)
+       │
+       ├── Schema-drift inspector (src/guard/drift.ts + run-inner.ts sync path)
+       │   SHA-256(description + schema + annotations) vs ~/.mcpm/pins.json
+       │   Per-session in-memory cache catches same-session rug-pulls
+       │
+       ├── Policy filter (run-inner.ts applyPolicy)
+       │   ~/.mcpm/guard-policy.yaml → ignore / warn / block / log_only
+       │   Or short-circuit pass-through if paused_until in future
+       │
+       ├── Production relay (src/guard/relay.ts)
+       │   SDK ReadBuffer + serializeMessage, 64MB buffer cap,
+       │   signal forwarding, child.stdin error swallow
+       │
+       └── Event log writer (src/guard/event-log.ts)
+           Append-only to ~/.mcpm/guard-events.jsonl (parse with jq)
+       │
+       ▼  inspected JSON-RPC over stdio
+  Wrapped MCP server process (e.g. servers-filesystem)
+
+  ~/.mcpm/ (guard files)
+    ├── pins.json + pins.json.integrity       (sha256 sidecar, proper-lockfile)
+    ├── guard-policy.yaml + .integrity        (sha256 sidecar, proper-lockfile, Zod-validated)
+    └── guard-events.jsonl                    (append-only)
+
+  <client config>.guard-{enable,disable}.bak  (per-batch backup, written by orchestrator)
+```
+
+The orchestrator (`src/guard/orchestrator.ts`) implements two-phase commit
+across detected clients: Phase 1 reads all + computes plans, Phase 2 applies
+via `BaseAdapter.replaceServer`. Wrap transformation is centralized in
+`src/guard/wrap.ts` and verified-once on `BaseAdapter` (all 4 adapters share
+the same entry shape).
+
 ---
 
 ## Decisions Log
@@ -358,6 +436,20 @@ the registry concept end-to-end before we launch publicly.
 | 2026-03-30 | No LLM in mcpm for `mcpm_setup`             | Calling agent handles NL understanding; mcpm does keyword extraction   |
 | 2026-03-30 | CI derives version from git tag             | Single source of truth; no manual package.json version bumps           |
 | 2026-03-30 | Auto GitHub Release on publish              | `--generate-notes` from commit history; grouped by label               |
+| 2026-05-16 | v0.5.0 mcpm-guard ships as `v0.5.0`, not `v1.6` | Office-hours user-challenge — pre-1.0 honest framing matches mcpm's actual maturity (V1.5 community trust unshipped). Versioning is a contract with users about stability. |
+| 2026-05-16 | Distribution > Detection — guard's wedge is bundling into the package manager | Eng-review verified the runtime-guard market is crowded (10+ OSS proxies, Snyk acquired Invariant Labs, Microsoft Agent Governance Toolkit). Detection sophistication commoditizing fast; distribution-as-moat is the structural play. |
+| 2026-05-16 | MITM substrate: SDK ReadBuffer/serializeMessage, not full Transport classes | OQ1 spike measured p99 0.065ms small / 3.1ms large with parse+reserialize — 78×/8× under budget. Eng-review caught that `StdioServerTransport` hardcodes process.stdin/stdout; only the framing helpers are reusable. |
+| 2026-05-16 | MCP stdio is line-delimited JSON only, not Content-Length | Verified against SDK `ReadBuffer.readMessage` source. Eng-review F2.1's "Content-Length framing" test gap was a false positive for MCP and dropped from the conformance harness. |
+| 2026-05-16 | Vendored signatures inside `@getmcpm/cli` for v0.5.0 | Defer separate `getmcpm/signatures` repo + signing (Sigstore/PGP) until update cadence requires faster releases than @getmcpm/cli's normal cycle. Cuts v0.5.0 scope without losing detection coverage. |
+| 2026-05-16 | Curated by maintainers, not crowdsourced (signatures) | uBlock-Origin-style community contribution model needs a community we don't have yet (~200 people in the world can write a credible MCP attack signature). v0.5.0 ships curated; community PRs unlocked v0.7+. |
+| 2026-05-17 | Pin subprocess uses allowlisted env, not process.env passthrough | Step 5 F4.1 — full env would leak `AWS_*` / `GITHUB_TOKEN` / `OPENAI_API_KEY` to a just-installed server's init handler. Security regression vs current `mcpm install` (which doesn't execute the server at all). |
+| 2026-05-17 | `accept-drift` requires explicit `--new-hash sha256:...` | Step 6 F5 — setting `current_hash: null` created an unbounded "accept anything next" window an attacker could race into. User copies hash from block-message remediation. |
+| 2026-05-17 | applyPolicy: MAX action across remaining findings (not single downgrade var) | Step 7 F1 CRITICAL — original implementation let `log_only` override on ANY one finding silently downgrade `block` from unrelated critical findings. Dedicated regression suite in `apply-policy.test.ts`. |
+| 2026-05-17 | Integrity sidecars on both pins.json AND guard-policy.yaml | Step 7 F4 — a malicious npm postinstall script could otherwise silently mute every signature. Sidecar protects against same-machine tampering (postinstall scripts, malware); not anti-same-user-malware. |
+| 2026-05-17 | Zod-validated YAML parse with `.catch({})` fallback | Step 7 F2 — `paused_until: 99999999999999` (numeric, not ISO string) would otherwise bypass all inspection because `new Date(numeric)` is year 5138. Fall back to empty policy on any structural mismatch. |
+| 2026-05-17 | Same-session "first hash seen" cache | Step 6 F3 — closes the double-`tools/list` bypass where a malicious server delivers benign-then-poisoned schemas before the off-thread pin write commits. |
+| 2026-05-17 | FP-rate threshold 2%; effective floor 4% on the 24-message seed | Step 9 — the threshold becomes meaningful at corpus sizes ≥ 50. Documented inline in `fp-rate.test.ts`. Full 20-server capture is TODOS #29. |
+| 2026-05-17 | MCPTox attack fixtures hand-authored from public methodology, not vendored | Step 8 closes OQ3 — sidesteps the MCPTox redistribution license question. Hand-authored from Invariant Labs disclosure / MCPoison CVE / Equixly-Pillar audits. License-clean. |
 
 ---
 

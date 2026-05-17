@@ -64,6 +64,21 @@ mcpm/
 │   │   ├── policy.ts               — trust policy enforcement
 │   │   ├── env.ts                  — .env file parser
 │   │   └── index.ts                — public API surface
+│   ├── guard/                       — v0.5.0 runtime defense (mcpm-guard)
+│   │   ├── types.ts                — Severity, Signature, InspectResult types
+│   │   ├── patterns.ts             — pattern engine (NFKC + leaf walk + regex)
+│   │   ├── signatures.ts           — vendored OWASP MCP Top 10 catalog
+│   │   ├── relay.ts                — production stdio MITM (subprocess + in-process variants)
+│   │   ├── wrap.ts                 — entry transformation (wrapEntry/unwrapEntry/isWrapped)
+│   │   ├── orchestrator.ts         — two-phase commit across detected clients
+│   │   ├── pins.ts                 — schema-pin storage + integrity sidecar
+│   │   ├── drift.ts                — async drift detection + accept-drift application
+│   │   ├── policy.ts               — guard-policy.yaml (mute/pause overrides)
+│   │   ├── run-inner.ts            — `mcpm guard run --inner` entry, wires the relay
+│   │   ├── event-log.ts            — append-only JSONL writer for guard-events.jsonl
+│   │   ├── sanitize.ts             — shared ANSI/control-char terminal sanitizer
+│   │   ├── cli.ts                  — Commander glue for enable/disable/status/cleanup
+│   │   └── demo/                   — synthetic echo-bot + runner for `mcpm guard demo`
 │   └── utils/
 │       ├── output.ts               — leveled output helpers
 │       ├── confirm.ts              — confirmation prompts
@@ -89,13 +104,14 @@ mcpm/
 
 | Module | Purpose |
 |---|---|
-| `commands/` | 19 CLI commands, each a self-contained Commander action |
+| `commands/` | 20 CLI commands (incl. `guard` subcommand group with 11 subcommands), each a self-contained Commander action |
 | `server/` | MCP server (stdio): 9 tools wrapping CLI logic via injectable handlers |
 | `stack/` | Stack file schemas (mcpm.yaml/mcpm-lock.yaml), semver resolution, trust policy, .env parsing |
+| `guard/` | **v0.5.0 runtime defense.** Stdio MITM relay, OWASP MCP Top 10 pattern engine, schema pinning + drift detection, policy file editor, integrity sidecars, event log. See `docs/GUARD.md`. |
 | `registry/` | Typed HTTP client for the official MCP Registry API (v0.1 at registry.modelcontextprotocol.io) |
 | `config/` | OS-aware config paths, client detection, and per-client config adapters with atomic writes |
 | `scanner/` | Trust scoring engine: tier 1 (metadata), tier 2 (static pattern analysis), composite score |
-| `store/` | Local state in `~/.mcpm/` — installed server registry, HTTP response cache, server name aliases |
+| `store/` | Local state in `~/.mcpm/` — installed server registry, HTTP response cache, server name aliases, guard pins + policy + events |
 | `utils/` | Output formatting, confirmation prompts, trust display helpers |
 
 ## Commands
@@ -121,6 +137,11 @@ mcpm/
 | `mcpm diff` | Compare installed servers against mcpm.yaml and lock file |
 | `mcpm completions <shell>` | Generate shell completion scripts (bash, zsh, fish) |
 | `mcpm serve` | Start mcpm as an MCP server (stdio transport) |
+| `mcpm guard enable / disable / status` | Wrap detected client configs with the inspection relay; restore; report state |
+| `mcpm guard demo` | Synthetic prompt-injection scenario (visible block in terminal) |
+| `mcpm guard accept-drift / mute / unmute / pause / cleanup` | Runtime tuning + escape hatches |
+| `mcpm guard list-signatures / reset-integrity` | Catalog inspection + integrity sidecar regeneration |
+| `mcpm guard run --inner` | Internal: relay entry point invoked by wrapped configs (semver-exempt) |
 
 ## Data Flow
 
@@ -153,16 +174,45 @@ store.recordInstall(name, clients, version)
   │  Write to ~/.mcpm/servers.json
 ```
 
+### Guard data flow (v0.5.0 — when `mcpm guard enable` is active)
+
+```
+IDE (Claude Desktop / Cursor / VS Code / Windsurf)
+  │  JSON-RPC over stdio
+  ▼
+mcpm guard run --inner --server-name <name> -- <orig> [args]
+  │  (spawned by the wrapped client config)
+  │
+  ├── ReadBuffer + serializeMessage (SDK framing helpers)
+  ├── per-message inspect:
+  │     • pattern engine (NFKC + signatures)
+  │     • schema-drift check vs ~/.mcpm/pins.json
+  │     • policy filter (signature_overrides, paused_until)
+  ├── on block: synthesize JSON-RPC error -32099, drop original
+  ├── on pass/warn: forward + append to ~/.mcpm/guard-events.jsonl
+  ▼
+child process: the real MCP server (e.g. servers-filesystem)
+```
+
 ## Configuration
 
 ### Local state directory
 
 ```
 ~/.mcpm/
-├── servers.json       — installed server registry (name, version, clients, install date)
-├── aliases.json       — short aliases for server names
-└── cache/             — HTTP response cache (TTL-based)
+├── servers.json                  — installed server registry (name, version, clients, install date)
+├── aliases.json                  — short aliases for server names
+├── cache/                        — HTTP response cache (TTL-based)
+├── pins.json                     — guard schema pins (v0.5.0)
+├── pins.json.integrity           — sha256 sidecar over pins.json
+├── guard-policy.yaml             — user overrides (mute/pause)
+├── guard-policy.yaml.integrity   — sha256 sidecar over guard-policy.yaml
+└── guard-events.jsonl            — append-only event log (parse with jq)
 ```
+
+Plus, when `mcpm guard enable` runs, each touched client config gets a
+`<config>.guard-{enable,disable}.bak` pre-batch backup alongside the per-write
+`.bak` that `BaseAdapter.writeAtomic` already produces.
 
 ### Client config paths (macOS)
 

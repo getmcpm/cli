@@ -3,7 +3,7 @@
   "name": "io.github.getmcpm/cli",
   "title": "mcpm",
   "description": "MCP package manager with built-in trust scoring. Search, install, audit, and manage MCP servers across Claude Desktop, Cursor, VS Code, and Windsurf. Also runs as an MCP server itself — agents can search, install, and audit servers programmatically.",
-  "version": "0.1.1",
+  "version": "0.5.0",
   "packages": [
     {
       "registryType": "npm",
