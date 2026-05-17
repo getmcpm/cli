@@ -8,7 +8,7 @@
 
 # mcpm
 
-**MCP package manager -- search, install, and audit MCP servers from your terminal.**
+**MCP package manager -- search, install, audit, and guard MCP servers from your terminal.**
 
 [![npm version](https://img.shields.io/npm/v/@getmcpm/cli)](https://www.npmjs.com/package/@getmcpm/cli)
 [![license](https://img.shields.io/github/license/getmcpm/cli)](./LICENSE)
@@ -190,6 +190,17 @@ Without an external scanner installed, the maximum possible score is 80/100. The
 | `mcpm diff` | Compare installed servers against mcpm.yaml and lock file |
 | `mcpm completions <shell>` | Generate shell completion scripts (bash, zsh, fish) |
 | `mcpm serve` | Start mcpm as an MCP server (stdio transport) |
+| `mcpm guard enable` | Wrap detected client configs with the inspection relay (v0.5.0) |
+| `mcpm guard disable` | Restore original client configs |
+| `mcpm guard status` | Show what's wrapped and the per-server pin state |
+| `mcpm guard demo` | Run the synthetic prompt-injection scenario (visible block) |
+| `mcpm guard accept-drift <server>` | Re-pin a tool's schema after a legitimate upgrade |
+| `mcpm guard mute <signature-id>` | Disable a signature with optional `--for <duration>` |
+| `mcpm guard unmute <signature-id>` | Re-enable a muted signature |
+| `mcpm guard pause` | Pause all guard inspection (debugging escape hatch) |
+| `mcpm guard cleanup` | Prune pin entries for uninstalled servers |
+| `mcpm guard list-signatures` | Show the shipped OWASP MCP Top 10 signature catalog |
+| `mcpm guard reset-integrity` | Regenerate the pins.json or guard-policy.yaml integrity sidecar |
 
 Run `mcpm <command> --help` for options and flags.
 
