@@ -17,6 +17,7 @@ import { startRelay, type GuardEvent } from "./relay.js";
 import { inspectForDrift } from "./drift.js";
 import { readPins, writePins, emptyPinsFile } from "./pins.js";
 import { readPolicy, expireStale, type GuardPolicyFile } from "./policy.js";
+import { appendEvent } from "./event-log.js";
 import { sanitizeForTerminal } from "./sanitize.js";
 import type { InspectFinding, InspectResult } from "./types.js";
 
@@ -100,6 +101,8 @@ export async function runInner(parsed: RunInnerArgs): Promise<number> {
         `[mcpm-guard] ${event.action.toUpperCase()} ${safeName} ` +
           `${event.findings.map((f) => f.signature_id).join(",")}\n`,
       );
+      // Persist to ~/.mcpm/guard-events.jsonl best-effort (Step 10).
+      void appendEvent(event, parsed.serverName);
     }
   };
 

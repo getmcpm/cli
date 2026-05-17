@@ -193,6 +193,88 @@ Without an external scanner installed, the maximum possible score is 80/100. The
 
 Run `mcpm <command> --help` for options and flags.
 
+## Runtime defense (mcpm-guard, v0.5.0)
+
+Install-time trust scoring catches most poisoned servers before they ship. But what about **rug-pulls** — a server that changes its tool definitions after you've already approved them? Or **prompt-injection in tool responses** — adversarial text embedded in a Slack message, web page, or calendar invite that the agent reads through your trusted MCP server?
+
+`mcpm guard` adds a runtime inspection layer. It wraps every installed MCP server with a stdio relay, scans tool descriptions / responses / arguments for OWASP MCP Top 10 attack patterns, pins each tool's schema at install time, and blocks calls when the live response drifts from the pin (rug-pull defense).
+
+### Quick start
+
+```bash
+npm install -g @getmcpm/cli@latest
+
+mcpm guard enable           # wrap detected client configs (Claude Desktop / Cursor / VS Code / Windsurf)
+# → restart your IDE so it re-spawns the wrapped server processes
+mcpm guard demo             # synthetic prompt-injection scenario — see a live block in your terminal
+mcpm guard status           # what's protected, what's still in first-session-pin mode
+```
+
+The `demo` command boots an in-process synthetic malicious server that returns a canned prompt-injection payload; the relay blocks it. Total time from `npm install` to a screenshot-worthy block: ~5 minutes (most of which is the IDE restart).
+
+### What it catches
+
+| Category | Attack class | Action |
+|---|---|---|
+| OWASP-MCP-1 | Tool-description injection (poisoning) | block |
+| OWASP-MCP-1 | Schema drift since install (rug-pull) | block |
+| OWASP-MCP-2 | Instruction injection in tool responses | block |
+| OWASP-MCP-7 | Sensitive-path exfil in tool arguments | warn (promote to block via policy) |
+
+Detection is regex + structural; NFKC + zero-width-char stripping defeats the common Unicode evasions. See `mcpm guard list-signatures` for the current shipped set.
+
+### Day-1 commands
+
+```bash
+mcpm guard enable [--client <name>] [--server <name>] [--dry-run]    # wrap detected configs
+mcpm guard disable [--client <name>] [--server <name>]               # unwrap
+mcpm guard status                                                    # what's wrapped + pin state
+mcpm guard demo                                                      # synthetic attack-block demo
+mcpm guard list-signatures [--json]                                  # show shipped signatures
+```
+
+### When a block fires
+
+The relay returns a JSON-RPC error response to your IDE with the signature id + a `remediation` string telling you exactly which command to run. Two typical cases:
+
+```bash
+# False positive on a legitimate signature
+mcpm guard mute owasp-mcp-2-instruction-injection-in-response --for 5m
+
+# Schema drift on a legitimate server upgrade
+mcpm guard accept-drift slack-mcp --tool send_message --new-hash sha256:abc... --yes
+```
+
+### Audit the log
+
+Every block / warn is appended to `~/.mcpm/guard-events.jsonl`. Inspect with `jq`:
+
+```bash
+# Last hour's blocks
+tail -n 1000 ~/.mcpm/guard-events.jsonl | jq 'select(.action == "block")'
+
+# Group by signature id
+jq -s 'group_by(.findings[0].signature_id) | map({sig: .[0].findings[0].signature_id, n: length})' \
+   < ~/.mcpm/guard-events.jsonl
+
+# Top-N most-blocked servers
+jq -s 'group_by(.server_name) | map({server: .[0].server_name, n: length}) | sort_by(-.n) | .[:10]' \
+   < ~/.mcpm/guard-events.jsonl
+```
+
+### When you're debugging and need to turn it off briefly
+
+```bash
+mcpm guard pause --for 10m     # disables all inspection for 10 minutes
+mcpm guard pause --off         # cancel an active pause
+```
+
+### Read more
+
+- `docs/GUARD.md` — full command reference
+- `docs/SIGNATURES.md` — signature catalog + how to contribute new ones
+- `docs/POLICY.md` — `~/.mcpm/guard-policy.yaml` reference
+
 ## Agent mode
 
 mcpm can run as an MCP server itself, letting AI agents search, install, and audit MCP servers programmatically.
