@@ -147,12 +147,23 @@ async function warnUnresolvablePlaceholders(opts: DisableOpts): Promise<void> {
   );
   for (const a of affected) {
     opts.write(
-      `  - ${sanitize(a.server)} (${CLIENT_LABELS[a.client]}): ${a.keys.map(sanitize).join(", ")}\n`,
+      `  - ${sanitize(a.server)} (${CLIENT_LABELS[a.client]}): ${formatAffectedKeys(a.keys)}\n`,
     );
   }
   opts.write(
     "Re-enable with `mcpm guard enable`, or replace those env values with plaintext.\n",
   );
+}
+
+/**
+ * Sanitize + join the affected env-key names for the disable warning.
+ *
+ * The explicit arrow is load-bearing: `keys.map(sanitize)` would pass the array
+ * index as `sanitizeForTerminal`'s `maxLen`, truncating the first key to "…",
+ * the second to one char, etc. Wrapping ensures each key is passed alone.
+ */
+export function formatAffectedKeys(keys: readonly string[]): string {
+  return keys.map((k) => sanitize(k)).join(", ");
 }
 
 // ---------------------------------------------------------------------------
