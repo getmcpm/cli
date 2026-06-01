@@ -2,6 +2,33 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.6.0] - 2026-06-01
+
+### Added
+
+**Encrypted secrets — `mcpm secrets`.** Store MCP server credentials AES-GCM-encrypted in `~/.mcpm` instead of as plaintext in client config files. When a server is wrapped by mcpm-guard, the credential is resolved into the server's environment at launch, so the plaintext never touches disk.
+
+New command:
+
+- `mcpm secrets set <server> <KEY>` — store an encrypted secret (masked prompt)
+- `mcpm secrets list [server]` — list stored secret keys (values are never shown)
+- `mcpm secrets get <server> <KEY> --reveal` — print a decrypted secret
+- `mcpm secrets rm <server> <KEY>` — delete a stored secret
+
+New flags:
+
+- `mcpm install --secrets keychain` and `mcpm up --secrets keychain` — write `mcpm:keychain:…` placeholders for secret env vars instead of plaintext (opt-in; default unchanged). `up --secrets keychain` is rejected under `--ci`.
+
+### Changed
+
+- `mcpm guard disable` now warns when an unwrapped config still references `mcpm:keychain:` placeholders that will no longer resolve.
+- Node support: dropped Node 20, added Node 26 (`engines` now `>=22`).
+
+### Security
+
+- Keychain ids are derived injectively (sanitized prefix + SHA-256 suffix), so two distinct server names can never share a secret namespace.
+- A server's secrets are persisted in a single atomic batch — no orphaned half-written secrets if one fails.
+
 ## [0.5.0] - 2026-05-17
 
 ### Added
