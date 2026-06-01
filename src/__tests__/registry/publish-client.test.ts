@@ -5,7 +5,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { submitToRegistry } from "../../registry/publish-client.js";
+import { submitToRegistry, validateRegistryUrl } from "../../registry/publish-client.js";
 import { NetworkError, RegistryError } from "../../registry/errors.js";
 
 const MANIFEST = {
@@ -56,5 +56,55 @@ describe("submitToRegistry", () => {
     vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("Network failure")));
 
     await expect(submitToRegistry(MANIFEST, TOKEN, REGISTRY_URL)).rejects.toThrow(NetworkError);
+  });
+
+  it("passes redirect:'manual' so a 3xx can't carry the token to the redirect target", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ url: "https://registry.example.com/servers/x" }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    await submitToRegistry(MANIFEST, TOKEN, REGISTRY_URL);
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({ redirect: "manual" })
+    );
+  });
+});
+
+describe("validateRegistryUrl (security #17 — token-exfil guard)", () => {
+  it("accepts a public https URL", () => {
+    expect(() => validateRegistryUrl("https://registry.modelcontextprotocol.io")).not.toThrow();
+  });
+
+  it("rejects http (no auth token over plaintext)", () => {
+    expect(() => validateRegistryUrl("http://registry.example.com")).toThrow(/https/);
+  });
+
+  it("rejects loopback and private/internal hosts", () => {
+    for (const u of [
+      "https://localhost",
+      "https://127.0.0.1",
+      "https://10.0.0.5",
+      "https://192.168.1.1",
+      "https://172.16.0.1",
+      "https://169.254.1.1",
+      "https://[::1]",
+    ]) {
+      expect(() => validateRegistryUrl(u), u).toThrow(/non-public/);
+    }
+  });
+
+  it("rejects a malformed URL", () => {
+    expect(() => validateRegistryUrl("not a url")).toThrow(/Invalid registry URL/);
+  });
+
+  it("submitToRegistry never calls fetch for an unsafe URL", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(
+      submitToRegistry(MANIFEST, TOKEN, "http://evil.example.com")
+    ).rejects.toThrow(/https/);
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 });
