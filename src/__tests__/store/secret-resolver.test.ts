@@ -94,3 +94,90 @@ describe("listAll", () => {
     expect(await listAll()).toEqual({});
   });
 });
+
+describe("deriveKeychainId round-trip", () => {
+  beforeEach(() => {
+    storeModule._resetStore();
+    vi.clearAllMocks();
+  });
+
+  it("a slash-containing server name survives derive → placeholder → resolve", async () => {
+    const { setSecret, deriveKeychainId, toPlaceholder, resolveEnvPlaceholders } = await import(
+      "../../store/keychain.js"
+    );
+    const id = deriveKeychainId("io.github.owner/repo-mcp");
+    await setSecret(id, "TOKEN", "sk-roundtrip");
+    const resolved = await resolveEnvPlaceholders({ TOKEN: toPlaceholder(id, "TOKEN") });
+    expect(resolved.TOKEN).toBe("sk-roundtrip");
+  });
+});
+
+describe("applyKeychainSecrets", () => {
+  beforeEach(() => {
+    storeModule._resetStore();
+    vi.clearAllMocks();
+  });
+
+  it("keychain mode encrypts secret keys + writes placeholders; non-secrets stay inline", async () => {
+    const { applyKeychainSecrets, getSecret, deriveKeychainId, toPlaceholder, setSecrets } =
+      await import("../../store/keychain.js");
+    const { env, storedCount } = await applyKeychainSecrets({
+      serverName: "io.github.owner/repo",
+      resolvedEnv: { API_KEY: "sk-1", REGION: "us" },
+      isSecret: (k) => k === "API_KEY",
+      mode: "keychain",
+      setSecrets,
+    });
+    const id = deriveKeychainId("io.github.owner/repo");
+    expect(storedCount).toBe(1);
+    expect(env.API_KEY).toBe(toPlaceholder(id, "API_KEY"));
+    expect(env.REGION).toBe("us");
+    expect(await getSecret(id, "API_KEY")).toBe("sk-1");
+    expect(JSON.stringify(env)).not.toContain("sk-1");
+  });
+
+  it("plaintext mode returns the input unchanged and stores nothing", async () => {
+    const { applyKeychainSecrets } = await import("../../store/keychain.js");
+    const setSecrets = vi.fn();
+    const { env, storedCount } = await applyKeychainSecrets({
+      serverName: "s",
+      resolvedEnv: { API_KEY: "sk-1" },
+      isSecret: () => true,
+      mode: "plaintext",
+      setSecrets,
+    });
+    expect(env).toEqual({ API_KEY: "sk-1" });
+    expect(storedCount).toBe(0);
+    expect(setSecrets).not.toHaveBeenCalled();
+  });
+
+  it("throws in keychain mode without a setSecrets implementation", async () => {
+    const { applyKeychainSecrets } = await import("../../store/keychain.js");
+    await expect(
+      applyKeychainSecrets({
+        serverName: "s",
+        resolvedEnv: { K: "v" },
+        isSecret: () => true,
+        mode: "keychain",
+      })
+    ).rejects.toThrow(/unavailable/i);
+  });
+});
+
+describe("placeholderEnvKeys", () => {
+  it("returns only keys whose value is a keychain placeholder", async () => {
+    const { placeholderEnvKeys, toPlaceholder } = await import("../../store/keychain.js");
+    const keys = placeholderEnvKeys({
+      A: toPlaceholder("s", "A"),
+      B: "plain-value",
+      C: toPlaceholder("s", "C"),
+    });
+    expect(keys.sort()).toEqual(["A", "C"]);
+  });
+
+  it("returns [] for undefined env or all-plain values", async () => {
+    const { placeholderEnvKeys } = await import("../../store/keychain.js");
+    expect(placeholderEnvKeys(undefined)).toEqual([]);
+    expect(placeholderEnvKeys({ X: "y" })).toEqual([]);
+  });
+});

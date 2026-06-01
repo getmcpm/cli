@@ -14,7 +14,7 @@
  * High-value credentials should use the OS keychain (keytar) rather than this layer.
  */
 
-import { randomBytes, webcrypto } from "node:crypto";
+import { createHash, randomBytes, webcrypto } from "node:crypto";
 import os from "node:os";
 import { readJson, writeJson } from "./index.js";
 
@@ -128,6 +128,23 @@ export async function setSecret(server: string, key: string, value: string): Pro
   await writeJson(STORE_FILE, { ...store, [sk]: await encrypt(value) });
 }
 
+/**
+ * Store multiple secrets for one server in a single read-modify-write, so the
+ * batch is all-or-nothing: either every value is persisted or none is (no
+ * orphaned half-written secrets if one encrypt fails — security review MED-1).
+ */
+export async function setSecrets(
+  server: string,
+  values: Record<string, string>
+): Promise<void> {
+  const store = await readStore();
+  const next: Record<string, string> = { ...store };
+  for (const [key, value] of Object.entries(values)) {
+    next[validatedStoreKey(server, key)] = await encrypt(value);
+  }
+  await writeJson(STORE_FILE, next);
+}
+
 export async function getSecret(server: string, key: string): Promise<string | null> {
   const sk = validatedStoreKey(server, key);
   const stored = (await readStore())[sk];
@@ -199,6 +216,24 @@ export async function resolveEnvPlaceholders(
 }
 
 /**
+ * Derive a keychain-safe server id from a (possibly slash-containing) server
+ * name. Registry ids like "io.github.owner/repo" contain `/`, which is invalid
+ * for a keychain id (assertSafeId) and would break placeholder parsing (which
+ * splits on the first `/`).
+ *
+ * The sanitised prefix keeps the id human-recognisable; a sha256 suffix makes
+ * the mapping INJECTIVE, so two names that differ only in unsafe characters
+ * (e.g. "owner/repo" vs "owner_repo") can never collide into one secret
+ * namespace (security review CRIT-1). Deterministic: the same name always maps
+ * to the same id, so a placeholder written at install resolves at launch.
+ */
+export function deriveKeychainId(name: string): string {
+  const sanitized = name.replace(/[^a-zA-Z0-9._-]/g, "_").slice(0, 200);
+  const hash = createHash("sha256").update(name).digest("hex").slice(0, 12);
+  return `${sanitized}-${hash}`;
+}
+
+/**
  * List all stored secrets grouped by server name. Returns only key names —
  * decrypted values are never read or returned.
  */
@@ -213,4 +248,68 @@ export async function listAll(): Promise<Record<string, string[]>> {
     (grouped[server] ??= []).push(key);
   }
   return grouped;
+}
+
+/**
+ * How secret-flagged env vars are persisted.
+ * - "plaintext": written directly into the client config (legacy default).
+ * - "keychain":  stored AES-GCM-encrypted; config gets a `mcpm:keychain:…`
+ *   placeholder that mcpm guard resolves at launch.
+ */
+export type SecretsMode = "plaintext" | "keychain";
+
+/**
+ * Resolve a server's env map for writing to a client config under the given
+ * secrets mode. In "keychain" mode, every key for which `isSecret(key)` is true
+ * is stored encrypted via `setSecret` and replaced with a `mcpm:keychain:…`
+ * placeholder; all other values pass through. In "plaintext" mode the input is
+ * returned unchanged. This is the single place the "no plaintext secret in
+ * config" invariant is enforced — install and up both go through it.
+ *
+ * Throws if keychain mode is requested without a `setSecret` implementation.
+ */
+export async function applyKeychainSecrets(opts: {
+  serverName: string;
+  resolvedEnv: Record<string, string>;
+  isSecret: (key: string) => boolean;
+  mode: SecretsMode;
+  setSecrets?: (server: string, values: Record<string, string>) => Promise<void>;
+}): Promise<{ env: Record<string, string>; storedCount: number }> {
+  if (opts.mode !== "keychain") {
+    return { env: opts.resolvedEnv, storedCount: 0 };
+  }
+  if (!opts.setSecrets) {
+    throw new Error("Keychain secret storage is unavailable.");
+  }
+  const keychainId = deriveKeychainId(opts.serverName);
+  const env: Record<string, string> = {};
+  const toStore: Record<string, string> = {};
+  for (const [key, value] of Object.entries(opts.resolvedEnv)) {
+    if (opts.isSecret(key)) {
+      toStore[key] = value;
+      env[key] = toPlaceholder(keychainId, key);
+    } else {
+      env[key] = value;
+    }
+  }
+  const storedCount = Object.keys(toStore).length;
+  // Persist all secrets in one atomic batch BEFORE returning the env that the
+  // caller writes to config — so we never write a placeholder for a secret that
+  // failed to store (all-or-nothing; security review MED-1).
+  if (storedCount > 0) {
+    await opts.setSecrets(keychainId, toStore);
+  }
+  return { env, storedCount };
+}
+
+/**
+ * Return the keys of `env` whose value is a `mcpm:keychain:…` placeholder.
+ * Used by `mcpm guard disable` to warn about secrets that will no longer
+ * resolve once guard stops wrapping the server.
+ */
+export function placeholderEnvKeys(env: Record<string, string> | undefined): string[] {
+  if (!env) return [];
+  return Object.entries(env)
+    .filter(([, v]) => typeof v === "string" && parsePlaceholder(v) !== null)
+    .map(([k]) => k);
 }
