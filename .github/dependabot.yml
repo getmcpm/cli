@@ -1,0 +1,23 @@
+# Dependabot — keep dependencies and pinned GitHub Actions patched. (security #31)
+version: 2
+updates:
+  # Pinned action SHAs in ci.yml / publish.yml — get PRs when a new release
+  # is available so they don't silently drift out of date.
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    labels: ["dependencies", "ci"]
+
+  # npm dependencies.
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 10
+    labels: ["dependencies"]
+    groups:
+      # Batch low-risk dev tooling updates into one PR to cut noise.
+      dev-dependencies:
+        dependency-type: "development"
