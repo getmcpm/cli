@@ -39,9 +39,9 @@ import {
 } from "../stack/schema.js";
 import { checkTrustPolicy } from "../stack/policy.js";
 import { parseEnvFile } from "../stack/env.js";
-import { resolveInstallEntry, parseSecretsMode, type SecretsMode } from "./install.js";
+import { resolveInstallEntry, parseSecretsMode } from "./install.js";
 import { extractRegistryMeta } from "../utils/format-trust.js";
-import { toPlaceholder, deriveKeychainId, setSecret as _setSecret } from "../store/keychain.js";
+import { applyKeychainSecrets, type SecretsMode, setSecret as _setSecret } from "../store/keychain.js";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -82,6 +82,8 @@ interface ServerSuccess {
   readonly name: string;
   readonly status: "installed" | "skipped";
   readonly message: string;
+  /** Number of secrets persisted to the keychain for this server (keychain mode). */
+  readonly storedSecrets?: number;
 }
 
 interface ServerFailure {
@@ -199,7 +201,11 @@ export async function handleUp(
     `\n${installed} installed, ${skipped} skipped, ${blocked} blocked, ${failed} failed`
   );
 
-  if (options.secrets === "keychain" && installed > 0 && !options.dryRun) {
+  const totalSecretsStored = results.reduce(
+    (sum, r) => sum + ((r as ServerSuccess).storedSecrets ?? 0),
+    0
+  );
+  if (options.secrets === "keychain" && totalSecretsStored > 0 && !options.dryRun) {
     deps.output(
       "Secrets stored encrypted in ~/.mcpm. Run `mcpm guard enable` (then restart your IDE) so they resolve at launch."
     );
@@ -320,8 +326,8 @@ async function processServer(input: ProcessInput): Promise<ServerResult> {
     };
   }
 
-  // Resolve env vars
-  const envVars = await resolveEnvVars(name, server, envFileVars, options, deps);
+  // Resolve env vars (keychain mode swaps secrets for placeholders + a count)
+  const { env: envVars, storedCount } = await resolveEnvVars(name, server, envFileVars, options, deps);
 
   // Install to each client
   for (const clientId of clients) {
@@ -343,6 +349,7 @@ async function processServer(input: ProcessInput): Promise<ServerResult> {
     name,
     status: "installed",
     message: `v${locked.version} (trust: ${trustScore.score}/${trustScore.maxPossible})`,
+    storedSecrets: storedCount,
   };
 }
 
@@ -386,16 +393,15 @@ async function resolveEnvVars(
   envFileVars: Readonly<Record<string, string>>,
   options: UpOptions,
   deps: UpDeps
-): Promise<Record<string, string>> {
+): Promise<{ env: Record<string, string>; storedCount: number }> {
   const envDecl = (isRegistryServer(server) || isUrlServer(server))
     ? server.env
     : undefined;
 
-  if (!envDecl) return {};
+  if (!envDecl) return { env: {}, storedCount: 0 };
 
   const resolved: Record<string, string> = {};
-  const secretsMode: SecretsMode = options.secrets ?? "plaintext";
-  const keychainId = deriveKeychainId(serverName);
+  const secretKeys = new Set<string>();
 
   for (const [key, decl] of Object.entries(envDecl)) {
     // Resolution order: process.env → .env file → default → prompt
@@ -421,21 +427,19 @@ async function resolveEnvVars(
     }
 
     if (value === undefined) continue;
-
-    // In keychain mode, persist secret-flagged values encrypted and write a
-    // placeholder instead of plaintext (resolved by mcpm guard at launch).
-    if (secretsMode === "keychain" && decl.secret) {
-      if (!deps.setSecret) {
-        throw new Error("Keychain secret storage is unavailable.");
-      }
-      await deps.setSecret(keychainId, key, value);
-      resolved[key] = toPlaceholder(keychainId, key);
-    } else {
-      resolved[key] = value;
-    }
+    resolved[key] = value;
+    if (decl.secret) secretKeys.add(key);
   }
 
-  return resolved;
+  // In keychain mode this stores secret-flagged values encrypted and replaces
+  // them with placeholders; in plaintext mode it returns `resolved` unchanged.
+  return applyKeychainSecrets({
+    serverName,
+    resolvedEnv: resolved,
+    isSecret: (key) => secretKeys.has(key),
+    mode: options.secrets ?? "plaintext",
+    setSecret: deps.setSecret,
+  });
 }
 
 // ---------------------------------------------------------------------------

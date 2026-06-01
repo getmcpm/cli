@@ -21,7 +21,7 @@ import type { Finding } from "../scanner/tier1.js";
 import type { TrustScore, TrustScoreInput } from "../scanner/trust-score.js";
 import type { InstalledServer } from "../store/servers.js";
 import { scoreBar, levelColor, extractRegistryMeta } from "../utils/format-trust.js";
-import { toPlaceholder, deriveKeychainId, setSecret as _setSecret } from "../store/keychain.js";
+import { applyKeychainSecrets, type SecretsMode, setSecret as _setSecret } from "../store/keychain.js";
 
 // ---------------------------------------------------------------------------
 // Identifier validation — guard against command injection
@@ -149,14 +149,6 @@ export function validateRuntimeArgs(args: string[]): void {
 // ---------------------------------------------------------------------------
 // Public types
 // ---------------------------------------------------------------------------
-
-/**
- * How secret-flagged env vars are persisted.
- * - "plaintext": written directly into the client config (legacy default).
- * - "keychain":  stored AES-GCM-encrypted in ~/.mcpm; config gets a
- *   `mcpm:keychain:…` placeholder that mcpm guard resolves at launch.
- */
-export type SecretsMode = "plaintext" | "keychain";
 
 export interface InstallOptions {
   client?: string;
@@ -471,30 +463,18 @@ export async function handleInstall(
 
   // Step 6b: In keychain mode, persist secret-flagged values encrypted and swap
   // them for `mcpm:keychain:…` placeholders, so no plaintext is written to any
-  // client config. Non-secret vars stay inline. Each secret is stored once and
+  // client config. Non-secret vars stay inline; each secret is stored once and
   // reused for every client. The placeholder resolves at launch only while mcpm
-  // guard wraps the server (run-inner.ts → resolveEnvPlaceholders).
+  // guard wraps the server (run-inner.ts → resolveEnvPlaceholders). The swap
+  // (and the "no plaintext in config" invariant) lives in applyKeychainSecrets.
   const secretsMode: SecretsMode = options.secrets ?? "plaintext";
-  const storedSecretKeys: string[] = [];
-  let envForConfig: Record<string, string> = resolvedEnvVars;
-  if (secretsMode === "keychain") {
-    if (!deps.setSecret) {
-      throw new Error("Keychain secret storage is unavailable.");
-    }
-    const keychainId = deriveKeychainId(name);
-    const swapped: Record<string, string> = {};
-    for (const [key, value] of Object.entries(resolvedEnvVars)) {
-      const def = envVarDefs.find((d) => d.name === key);
-      if (def?.isSecret) {
-        await deps.setSecret(keychainId, key, value);
-        swapped[key] = toPlaceholder(keychainId, key);
-        storedSecretKeys.push(key);
-      } else {
-        swapped[key] = value;
-      }
-    }
-    envForConfig = swapped;
-  }
+  const { env: envForConfig, storedCount: storedSecretCount } = await applyKeychainSecrets({
+    serverName: name,
+    resolvedEnv: resolvedEnvVars,
+    isSecret: (key) => envVarDefs.find((d) => d.name === key)?.isSecret === true,
+    mode: secretsMode,
+    setSecret: deps.setSecret,
+  });
 
   // -------------------------------------------------------------------------
   // Step 7: Validate install path exists
@@ -532,9 +512,9 @@ export async function handleInstall(
   // Step 8b: Secret-storage notice
   // -------------------------------------------------------------------------
   if (!options.json) {
-    if (secretsMode === "keychain" && storedSecretKeys.length > 0) {
+    if (secretsMode === "keychain" && storedSecretCount > 0) {
       output(
-        `\x1b[32mStored ${storedSecretKeys.length} secret(s) encrypted in ~/.mcpm. ` +
+        `\x1b[32mStored ${storedSecretCount} secret(s) encrypted in ~/.mcpm. ` +
         "Run `mcpm guard enable` (then restart your IDE) so they resolve at launch — " +
         "until guard wraps this server it receives the literal placeholder.\x1b[0m"
       );

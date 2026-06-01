@@ -226,3 +226,61 @@ export async function listAll(): Promise<Record<string, string[]>> {
   }
   return grouped;
 }
+
+/**
+ * How secret-flagged env vars are persisted.
+ * - "plaintext": written directly into the client config (legacy default).
+ * - "keychain":  stored AES-GCM-encrypted; config gets a `mcpm:keychain:…`
+ *   placeholder that mcpm guard resolves at launch.
+ */
+export type SecretsMode = "plaintext" | "keychain";
+
+/**
+ * Resolve a server's env map for writing to a client config under the given
+ * secrets mode. In "keychain" mode, every key for which `isSecret(key)` is true
+ * is stored encrypted via `setSecret` and replaced with a `mcpm:keychain:…`
+ * placeholder; all other values pass through. In "plaintext" mode the input is
+ * returned unchanged. This is the single place the "no plaintext secret in
+ * config" invariant is enforced — install and up both go through it.
+ *
+ * Throws if keychain mode is requested without a `setSecret` implementation.
+ */
+export async function applyKeychainSecrets(opts: {
+  serverName: string;
+  resolvedEnv: Record<string, string>;
+  isSecret: (key: string) => boolean;
+  mode: SecretsMode;
+  setSecret?: (server: string, key: string, value: string) => Promise<void>;
+}): Promise<{ env: Record<string, string>; storedCount: number }> {
+  if (opts.mode !== "keychain") {
+    return { env: opts.resolvedEnv, storedCount: 0 };
+  }
+  if (!opts.setSecret) {
+    throw new Error("Keychain secret storage is unavailable.");
+  }
+  const keychainId = deriveKeychainId(opts.serverName);
+  const env: Record<string, string> = {};
+  let storedCount = 0;
+  for (const [key, value] of Object.entries(opts.resolvedEnv)) {
+    if (opts.isSecret(key)) {
+      await opts.setSecret(keychainId, key, value);
+      env[key] = toPlaceholder(keychainId, key);
+      storedCount += 1;
+    } else {
+      env[key] = value;
+    }
+  }
+  return { env, storedCount };
+}
+
+/**
+ * Return the keys of `env` whose value is a `mcpm:keychain:…` placeholder.
+ * Used by `mcpm guard disable` to warn about secrets that will no longer
+ * resolve once guard stops wrapping the server.
+ */
+export function placeholderEnvKeys(env: Record<string, string> | undefined): string[] {
+  if (!env) return [];
+  return Object.entries(env)
+    .filter(([, v]) => typeof v === "string" && parsePlaceholder(v) !== null)
+    .map(([k]) => k);
+}

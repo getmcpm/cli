@@ -19,6 +19,7 @@ import {
   type OrchestratorDeps,
 } from "./orchestrator.js";
 import { defaultWrapContext } from "./wrap.js";
+import { placeholderEnvKeys } from "../store/keychain.js";
 
 const CLIENT_LABELS: Record<ClientId, string> = {
   "claude-desktop": "Claude Desktop",
@@ -100,10 +101,19 @@ export async function runDisableCommand(opts: DisableOpts): Promise<void> {
  * cannot resolve the placeholder. Warn (read-only) so the user isn't surprised
  * by a server that receives the literal placeholder and fails to start. We
  * never silently rewrite plaintext into the config (security-first).
+ *
+ * Respects the disable command's `--client`/`--server` filters, so it only
+ * checks the subset that was just disabled. Purely advisory: it never throws,
+ * so it cannot turn an otherwise-successful disable into a failure.
  */
 async function warnUnresolvablePlaceholders(opts: DisableOpts): Promise<void> {
-  const { parsePlaceholder } = await import("../store/keychain.js");
-  const clients = await detectInstalledClients();
+  let clients: ClientId[];
+  try {
+    clients = await detectInstalledClients();
+  } catch {
+    return;
+  }
+
   const affected: Array<{ client: ClientId; server: string; keys: string[] }> = [];
 
   for (const clientId of clients) {
@@ -111,15 +121,19 @@ async function warnUnresolvablePlaceholders(opts: DisableOpts): Promise<void> {
     let entries;
     try {
       entries = await getAdapter(clientId).read(getConfigPath(clientId));
-    } catch {
+    } catch (err) {
+      // A missing config is expected; surface anything else (permissions,
+      // malformed JSON) rather than silently skipping it.
+      if ((err as NodeJS.ErrnoException).code !== "ENOENT") {
+        opts.write(
+          `  (could not read ${CLIENT_LABELS[clientId]} config: ${sanitize((err as Error).message)})\n`,
+        );
+      }
       continue;
     }
     for (const [name, entry] of Object.entries(entries)) {
       if (opts.server !== undefined && name !== opts.server) continue;
-      if (!entry.env) continue;
-      const keys = Object.entries(entry.env)
-        .filter(([, v]) => typeof v === "string" && parsePlaceholder(v) !== null)
-        .map(([k]) => k);
+      const keys = placeholderEnvKeys(entry.env);
       if (keys.length > 0) affected.push({ client: clientId, server: name, keys });
     }
   }
