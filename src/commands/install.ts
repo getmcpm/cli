@@ -21,7 +21,7 @@ import type { Finding } from "../scanner/tier1.js";
 import type { TrustScore, TrustScoreInput } from "../scanner/trust-score.js";
 import type { InstalledServer } from "../store/servers.js";
 import { scoreBar, levelColor, extractRegistryMeta } from "../utils/format-trust.js";
-import { applyKeychainSecrets, type SecretsMode, setSecret as _setSecret } from "../store/keychain.js";
+import { applyKeychainSecrets, type SecretsMode, setSecrets as _setSecrets } from "../store/keychain.js";
 
 // ---------------------------------------------------------------------------
 // Identifier validation — guard against command injection
@@ -174,7 +174,7 @@ export interface InstallDeps {
   promptEnvVars: (vars: EnvVar[]) => Promise<Record<string, string>>;
   output: (text: string) => void;
   /** Optional; required only when options.secrets === "keychain". */
-  setSecret?: (server: string, key: string, value: string) => Promise<void>;
+  setSecrets?: (server: string, values: Record<string, string>) => Promise<void>;
 }
 
 // ---------------------------------------------------------------------------
@@ -473,7 +473,7 @@ export async function handleInstall(
     resolvedEnv: resolvedEnvVars,
     isSecret: (key) => envVarDefs.find((d) => d.name === key)?.isSecret === true,
     mode: secretsMode,
-    setSecret: deps.setSecret,
+    setSecrets: deps.setSecrets,
   });
 
   // -------------------------------------------------------------------------
@@ -514,7 +514,8 @@ export async function handleInstall(
   if (!options.json) {
     if (secretsMode === "keychain" && storedSecretCount > 0) {
       output(
-        `\x1b[32mStored ${storedSecretCount} secret(s) encrypted in ~/.mcpm. ` +
+        `\x1b[32mStored ${storedSecretCount} secret(s) encrypted at rest in ~/.mcpm ` +
+        "(protects against other-user/offline access, not same-user processes). " +
         "Run `mcpm guard enable` (then restart your IDE) so they resolve at launch — " +
         "until guard wraps this server it receives the literal placeholder.\x1b[0m"
       );
@@ -676,7 +677,7 @@ export function registerInstallCommand(program: Command): void {
         confirm: createConfirm(),
         promptEnvVars: promptEnvVarsDefault,
         output: stdoutOutput,
-        setSecret: _setSecret,
+        setSecrets: _setSecrets,
       };
 
       try {

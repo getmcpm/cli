@@ -41,7 +41,7 @@ import { checkTrustPolicy } from "../stack/policy.js";
 import { parseEnvFile } from "../stack/env.js";
 import { resolveInstallEntry, parseSecretsMode } from "./install.js";
 import { extractRegistryMeta } from "../utils/format-trust.js";
-import { applyKeychainSecrets, type SecretsMode, setSecret as _setSecret } from "../store/keychain.js";
+import { applyKeychainSecrets, type SecretsMode, setSecrets as _setSecrets } from "../store/keychain.js";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -71,7 +71,7 @@ export interface UpDeps {
   promptEnvVar: (name: string, isSecret: boolean) => Promise<string>;
   output: (text: string) => void;
   /** Optional; required only when options.secrets === "keychain". */
-  setSecret?: (server: string, key: string, value: string) => Promise<void>;
+  setSecrets?: (server: string, values: Record<string, string>) => Promise<void>;
 }
 
 // ---------------------------------------------------------------------------
@@ -207,7 +207,8 @@ export async function handleUp(
   );
   if (options.secrets === "keychain" && totalSecretsStored > 0 && !options.dryRun) {
     deps.output(
-      "Secrets stored encrypted in ~/.mcpm. Run `mcpm guard enable` (then restart your IDE) so they resolve at launch."
+      "Secrets stored encrypted at rest in ~/.mcpm (protects against other-user/offline access, not same-user processes). " +
+        "Run `mcpm guard enable` (then restart your IDE) so they resolve at launch."
     );
   }
 
@@ -438,7 +439,7 @@ async function resolveEnvVars(
     resolvedEnv: resolved,
     isSecret: (key) => secretKeys.has(key),
     mode: options.secrets ?? "plaintext",
-    setSecret: deps.setSecret,
+    setSecrets: deps.setSecrets,
   });
 }
 
@@ -591,7 +592,7 @@ export function registerUpCommand(program: Command): void {
                 return input({ message: `${name}:` });
               },
               output: stdoutOutput,
-              setSecret: _setSecret,
+              setSecrets: _setSecrets,
             }
           );
         } catch (err) {

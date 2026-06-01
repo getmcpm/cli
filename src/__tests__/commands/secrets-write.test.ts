@@ -21,17 +21,24 @@ import type { ConfigAdapter, McpServerEntry } from "../../config/adapters/index.
 // ---------------------------------------------------------------------------
 
 describe("deriveKeychainId", () => {
-  it("replaces '/' and unsafe chars so registry ids become valid keychain ids", () => {
-    expect(deriveKeychainId("io.github.owner/repo-mcp")).toBe("io.github.owner_repo-mcp");
+  it("produces a slash-free, SAFE_ID-compatible id with a human-readable prefix", () => {
+    const id = deriveKeychainId("io.github.owner/repo-mcp");
+    expect(id).not.toContain("/");
+    expect(id).toMatch(/^[a-zA-Z0-9._-]+$/);
+    expect(id).toContain("io.github.owner_repo-mcp");
   });
 
-  it("preserves already-safe chars and is deterministic", () => {
-    expect(deriveKeychainId("a.b_c-d")).toBe("a.b_c-d");
-    expect(deriveKeychainId("x/y")).toBe(deriveKeychainId("x/y"));
+  it("is deterministic", () => {
+    expect(deriveKeychainId("io.github.owner/repo")).toBe(
+      deriveKeychainId("io.github.owner/repo")
+    );
   });
 
-  it("never produces a '/', so placeholder round-trips correctly", () => {
-    expect(deriveKeychainId("io.github.owner/repo")).not.toContain("/");
+  it("maps separator-colliding names to DISTINCT ids (CRIT-1 injectivity)", () => {
+    expect(deriveKeychainId("a/b")).not.toBe(deriveKeychainId("a_b"));
+    expect(deriveKeychainId("io.github.owner/repo")).not.toBe(
+      deriveKeychainId("io.github.owner_repo")
+    );
   });
 });
 
@@ -111,15 +118,15 @@ describe("install --secrets keychain", () => {
 
   it("encrypts secret vars + writes placeholders; non-secrets stay inline", async () => {
     const adapter = installAdapter();
-    const setSecret = vi.fn().mockResolvedValue(undefined);
+    const setSecrets = vi.fn().mockResolvedValue(undefined);
     await handleInstall(
       "io.github.test/my-server",
       { yes: true, secrets: "keychain" },
-      installDeps(adapter, { setSecret })
+      installDeps(adapter, { setSecrets })
     );
 
-    expect(setSecret).toHaveBeenCalledWith(id, "API_KEY", "sk-xyz");
-    expect(setSecret).not.toHaveBeenCalledWith(id, "REGION", expect.anything());
+    // Exactly the secret-flagged var is stored (REGION, non-secret, is excluded).
+    expect(setSecrets).toHaveBeenCalledWith(id, { API_KEY: "sk-xyz" });
 
     const entry = writtenEntry(adapter);
     expect(entry.env?.API_KEY).toBe(`mcpm:keychain:${id}/API_KEY`);
@@ -131,24 +138,24 @@ describe("install --secrets keychain", () => {
     await handleInstall(
       "io.github.test/my-server",
       { yes: true, secrets: "keychain" },
-      installDeps(adapter, { setSecret: vi.fn().mockResolvedValue(undefined) })
+      installDeps(adapter, { setSecrets: vi.fn().mockResolvedValue(undefined) })
     );
     expect(JSON.stringify(writtenEntry(adapter))).not.toContain("sk-xyz");
   });
 
-  it("plaintext mode (default) writes inline and does not call setSecret", async () => {
+  it("plaintext mode (default) writes inline and does not call setSecrets", async () => {
     const adapter = installAdapter();
-    const setSecret = vi.fn();
+    const setSecrets = vi.fn();
     await handleInstall(
       "io.github.test/my-server",
       { yes: true },
-      installDeps(adapter, { setSecret })
+      installDeps(adapter, { setSecrets })
     );
     expect(writtenEntry(adapter).env?.API_KEY).toBe("sk-xyz");
-    expect(setSecret).not.toHaveBeenCalled();
+    expect(setSecrets).not.toHaveBeenCalled();
   });
 
-  it("throws if keychain mode is requested without a setSecret dep", async () => {
+  it("throws if keychain mode is requested without a setSecrets dep", async () => {
     const adapter = installAdapter();
     await expect(
       handleInstall(
@@ -263,11 +270,11 @@ describe("up --secrets keychain", () => {
     delete process.env.SERVER_A_SECRET;
     const stackPath = await writeStackAndLock(stackWithSecret, lockA);
     const adapter = upAdapter();
-    const setSecret = vi.fn().mockResolvedValue(undefined);
-    await handleUp({ stackFile: stackPath, secrets: "keychain" }, upDeps(adapter, { setSecret }));
+    const setSecrets = vi.fn().mockResolvedValue(undefined);
+    await handleUp({ stackFile: stackPath, secrets: "keychain" }, upDeps(adapter, { setSecrets }));
 
     const id = deriveKeychainId("io.github.test/server-a");
-    expect(setSecret).toHaveBeenCalledWith(id, "SERVER_A_SECRET", "prompted-secret");
+    expect(setSecrets).toHaveBeenCalledWith(id, { SERVER_A_SECRET: "prompted-secret" });
     const entry = (adapter.addServer as ReturnType<typeof vi.fn>).mock.calls[0][2] as McpServerEntry;
     expect(entry.env?.SERVER_A_SECRET).toBe(`mcpm:keychain:${id}/SERVER_A_SECRET`);
   });

@@ -119,14 +119,14 @@ describe("applyKeychainSecrets", () => {
   });
 
   it("keychain mode encrypts secret keys + writes placeholders; non-secrets stay inline", async () => {
-    const { applyKeychainSecrets, getSecret, deriveKeychainId, toPlaceholder, setSecret } =
+    const { applyKeychainSecrets, getSecret, deriveKeychainId, toPlaceholder, setSecrets } =
       await import("../../store/keychain.js");
     const { env, storedCount } = await applyKeychainSecrets({
       serverName: "io.github.owner/repo",
       resolvedEnv: { API_KEY: "sk-1", REGION: "us" },
       isSecret: (k) => k === "API_KEY",
       mode: "keychain",
-      setSecret,
+      setSecrets,
     });
     const id = deriveKeychainId("io.github.owner/repo");
     expect(storedCount).toBe(1);
@@ -138,20 +138,20 @@ describe("applyKeychainSecrets", () => {
 
   it("plaintext mode returns the input unchanged and stores nothing", async () => {
     const { applyKeychainSecrets } = await import("../../store/keychain.js");
-    const setSecret = vi.fn();
+    const setSecrets = vi.fn();
     const { env, storedCount } = await applyKeychainSecrets({
       serverName: "s",
       resolvedEnv: { API_KEY: "sk-1" },
       isSecret: () => true,
       mode: "plaintext",
-      setSecret,
+      setSecrets,
     });
     expect(env).toEqual({ API_KEY: "sk-1" });
     expect(storedCount).toBe(0);
-    expect(setSecret).not.toHaveBeenCalled();
+    expect(setSecrets).not.toHaveBeenCalled();
   });
 
-  it("throws in keychain mode without a setSecret implementation", async () => {
+  it("throws in keychain mode without a setSecrets implementation", async () => {
     const { applyKeychainSecrets } = await import("../../store/keychain.js");
     await expect(
       applyKeychainSecrets({
