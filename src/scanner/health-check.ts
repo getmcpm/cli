@@ -26,7 +26,9 @@ import type { McpServerEntry } from "../config/adapters/index.js";
 const SAFE_ENV_ALLOWLIST: ReadonlySet<string> = new Set([
   "PATH", "HOME", "TMPDIR", "TEMP", "TMP", "LANG", "LC_ALL", "USER", "SHELL",
   // Windows essentials for spawning npx / node / uvx
-  "SYSTEMROOT", "COMSPEC", "PATHEXT",
+  "SYSTEMROOT", "COMSPEC", "PATHEXT", "APPDATA", "USERPROFILE",
+  // nvm-managed Node needs these (beyond PATH) to resolve the right runtime
+  "NVM_DIR", "NVM_BIN",
 ]);
 
 /**

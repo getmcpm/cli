@@ -29,6 +29,9 @@ export function validateRegistryUrl(registryUrl: string): void {
       0
     );
   }
+  if (parsed.username !== "" || parsed.password !== "") {
+    throw new RegistryError("Registry URL must not contain embedded credentials.", 0);
+  }
   if (isPrivateHost(parsed.hostname)) {
     throw new RegistryError(
       `Refusing to send auth token to non-public host "${parsed.hostname}".`,
@@ -40,7 +43,20 @@ export function validateRegistryUrl(registryUrl: string): void {
 function isPrivateHost(hostname: string): boolean {
   const h = hostname.toLowerCase().replace(/^\[|\]$/g, ""); // strip IPv6 brackets
   if (h === "localhost" || h.endsWith(".localhost")) return true;
-  if (h === "::1" || h === "0.0.0.0" || h === "") return true;
+  if (h === "::1" || h === "::" || h === "0.0.0.0" || h === "") return true;
+  // IPv4-mapped IPv6 (Node normalizes [::ffff:127.0.0.1] → ::ffff:7f00:1).
+  // Decode the embedded IPv4 and re-check, or treat unknown forms as private.
+  const mapped = h.match(/^::ffff:(.+)$/);
+  if (mapped) {
+    const inner = mapped[1];
+    if (inner.includes(".")) return isPrivateHost(inner);
+    const hx = inner.match(/^([0-9a-f]{1,4}):([0-9a-f]{1,4})$/);
+    if (hx) {
+      const n = ((parseInt(hx[1], 16) << 16) | parseInt(hx[2], 16)) >>> 0;
+      return isPrivateHost(`${(n >>> 24) & 255}.${(n >>> 16) & 255}.${(n >>> 8) & 255}.${n & 255}`);
+    }
+    return true;
+  }
   const m = h.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.\d{1,3}$/);
   if (m) {
     const a = Number(m[1]);
@@ -86,6 +102,13 @@ export async function submitToRegistry(
     );
   } finally {
     clearTimeout(timerId);
+  }
+
+  if (response.type === "opaqueredirect" || response.status === 0) {
+    throw new RegistryError(
+      "Registry attempted a redirect (3xx); refusing to follow it with the auth token. Check the --registry URL.",
+      0
+    );
   }
 
   if (!response.ok) {

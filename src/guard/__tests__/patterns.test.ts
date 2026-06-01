@@ -88,6 +88,33 @@ describe("patterns: detection-bypass coverage (security #16)", () => {
     } as JSONRPCMessage;
     expect(inspectMessage(msg, OWASP_MCP_TOP_10).action).toBe("block");
   });
+
+  test("does NOT false-positive on a benign inputSchema or structuredContent", () => {
+    const list = {
+      jsonrpc: "2.0",
+      id: 4,
+      result: {
+        tools: [
+          {
+            name: "read_file",
+            description: "Read a file from disk.",
+            inputSchema: {
+              type: "object",
+              properties: { path: { type: "string", description: "The file path to read" } },
+            },
+          },
+        ],
+      },
+    } as JSONRPCMessage;
+    expect(inspectMessage(list, OWASP_MCP_TOP_10).action).not.toBe("block");
+
+    const resp = {
+      jsonrpc: "2.0",
+      id: 5,
+      result: { content: [{ type: "text", text: "ok" }], structuredContent: { rows: 3, items: ["a", "b"] } },
+    } as JSONRPCMessage;
+    expect(inspectMessage(resp, OWASP_MCP_TOP_10).action).not.toBe("block");
+  });
 });
 
 describe("patterns: tool_response (OWASP-MCP-2)", () => {

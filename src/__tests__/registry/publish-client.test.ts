@@ -81,7 +81,7 @@ describe("validateRegistryUrl (security #17 — token-exfil guard)", () => {
     expect(() => validateRegistryUrl("http://registry.example.com")).toThrow(/https/);
   });
 
-  it("rejects loopback and private/internal hosts", () => {
+  it("rejects loopback and private/internal hosts (incl. IPv4-mapped IPv6, ULA, integer forms)", () => {
     for (const u of [
       "https://localhost",
       "https://127.0.0.1",
@@ -90,9 +90,24 @@ describe("validateRegistryUrl (security #17 — token-exfil guard)", () => {
       "https://172.16.0.1",
       "https://169.254.1.1",
       "https://[::1]",
+      "https://[::ffff:127.0.0.1]", // IPv4-mapped IPv6 loopback (review finding)
+      "https://[::ffff:10.0.0.1]",
+      "https://[fc00::1]", // IPv6 unique-local
+      "https://[fd12::1]",
+      "https://[fe80::1]", // IPv6 link-local
+      "https://2130706433", // integer form of 127.0.0.1 (Node normalizes → caught)
     ]) {
       expect(() => validateRegistryUrl(u), u).toThrow(/non-public/);
     }
+  });
+
+  it("rejects a registry URL with embedded credentials", () => {
+    expect(() => validateRegistryUrl("https://user:pass@registry.example.com")).toThrow(
+      /credentials/
+    );
+    expect(() => validateRegistryUrl("https://attacker@registry.example.com")).toThrow(
+      /credentials/
+    );
   });
 
   it("rejects a malformed URL", () => {
