@@ -17,64 +17,26 @@ import type { McpServerEntry } from "../config/adapters/index.js";
 // ---------------------------------------------------------------------------
 
 /**
- * Environment variables that should NOT be passed to untrusted MCP servers
- * during health checks. The health check only needs the server to start and
- * respond to tools/list — it does not need access to the user's secrets.
- *
- * Pattern: known secret variable names from major cloud providers, AI APIs,
- * CI systems, and databases. Uses exact matches (case-insensitive compare).
+ * Non-sensitive operational env vars safe to forward to an untrusted MCP
+ * server during a health check. We use an ALLOWLIST, not a denylist: a
+ * denylist of "known secret" names misses custom-named secrets (STRIPE_KEY,
+ * MY_COMPANY_TOKEN, …) which would then leak to a server we don't trust.
+ * (security #18)
  */
-const SENSITIVE_ENV_PREFIXES: readonly string[] = [
-  "AWS_SECRET",
-  "AWS_SESSION",
-  "AZURE_CLIENT_SECRET",
-  "AZURE_TENANT",
-  "GCP_SERVICE_ACCOUNT",
-  "GOOGLE_APPLICATION_CREDENTIALS",
-];
-
-const SENSITIVE_ENV_NAMES: ReadonlySet<string> = new Set([
-  // Cloud provider secrets
-  "AWS_SECRET_ACCESS_KEY",
-  "AWS_SESSION_TOKEN",
-  // AI API keys
-  "ANTHROPIC_API_KEY",
-  "OPENAI_API_KEY",
-  "GOOGLE_API_KEY",
-  // VCS tokens
-  "GITHUB_TOKEN",
-  "GH_TOKEN",
-  "GITLAB_TOKEN",
-  "BITBUCKET_TOKEN",
-  // Package registry tokens
-  "NPM_TOKEN",
-  "NODE_AUTH_TOKEN",
-  "PYPI_TOKEN",
-  // Database
-  "DATABASE_URL",
-  "DB_PASSWORD",
-  "PGPASSWORD",
-  "MYSQL_PWD",
-  "REDIS_PASSWORD",
-  // CI/CD
-  "CI_JOB_TOKEN",
-  "CIRCLE_TOKEN",
-  "TRAVIS_TOKEN",
-  // Generic
-  "SECRET_KEY",
-  "PRIVATE_KEY",
-  "ENCRYPTION_KEY",
-  "API_SECRET",
-  "AUTH_TOKEN",
+const SAFE_ENV_ALLOWLIST: ReadonlySet<string> = new Set([
+  "PATH", "HOME", "TMPDIR", "TEMP", "TMP", "LANG", "LC_ALL", "USER", "SHELL",
+  // Windows essentials for spawning npx / node / uvx
+  "SYSTEMROOT", "COMSPEC", "PATHEXT", "APPDATA", "USERPROFILE",
+  // nvm-managed Node needs these (beyond PATH) to resolve the right runtime
+  "NVM_DIR", "NVM_BIN",
 ]);
 
 /**
- * Build a sanitized environment for health check subprocesses.
- * Strips known sensitive variables from process.env before merging
- * the server's declared env vars (which may legitimately need API keys
- * the user provided during install).
+ * Build a sanitized environment for health-check subprocesses.
+ * Forwards only the SAFE_ENV_ALLOWLIST vars from process.env, then merges the
+ * server's own declared env on top (the user explicitly provided those).
  */
-function buildHealthCheckEnv(
+export function buildHealthCheckEnv(
   serverEnv?: Record<string, string>,
   extraEnv?: Record<string, string>
 ): Record<string, string> {
@@ -83,14 +45,14 @@ function buildHealthCheckEnv(
   for (const [key, value] of Object.entries(process.env)) {
     if (value === undefined) continue;
     const upper = key.toUpperCase();
-    if (SENSITIVE_ENV_NAMES.has(upper)) continue;
-    if (SENSITIVE_ENV_PREFIXES.some((p) => upper.startsWith(p))) continue;
-    base[key] = value;
+    if (SAFE_ENV_ALLOWLIST.has(upper) || upper.startsWith("LC_")) {
+      base[key] = value;
+    }
   }
 
-  // Merge caller-provided env and server-declared env on top.
-  // Server env vars (e.g. API keys the user typed during install) are
-  // intentionally NOT filtered — the user explicitly provided them.
+  // Merge caller-provided env + server-declared env on top. The server's own
+  // declared vars (e.g. API keys the user typed at install) are intentionally
+  // forwarded — the user explicitly provided them for this server.
   return { ...base, ...(extraEnv ?? {}), ...(serverEnv ?? {}) };
 }
 

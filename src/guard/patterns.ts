@@ -55,12 +55,15 @@ function* stringLeaves(node: unknown, depth = 0, maxDepth = 32): Iterable<string
  */
 function targetSubtree(msg: JSONRPCMessage, target: SignatureTarget): unknown {
   if (target === "tool_response") {
-    // tools/call response → result.content[*]
+    // tools/call response → result.content, result.structuredContent, AND the
+    // JSON-RPC error object. Injection placed in structuredContent or an error
+    // message would otherwise evade every tool_response signature. (security #16)
+    const error = (msg as { error?: unknown }).error ?? null;
     if ("result" in msg) {
-      const result = (msg as { result?: { content?: unknown } }).result;
-      return result?.content ?? null;
+      const result = (msg as { result?: { content?: unknown; structuredContent?: unknown } }).result;
+      return [result?.content ?? null, result?.structuredContent ?? null, error];
     }
-    return null;
+    return error;
   }
   if (target === "tool_call_args") {
     // tools/call request → params.arguments
@@ -71,12 +74,16 @@ function targetSubtree(msg: JSONRPCMessage, target: SignatureTarget): unknown {
     return null;
   }
   if (target === "tool_description") {
-    // tools/list response → result.tools[*].description
+    // tools/list response → per tool: description + title + the FULL inputSchema.
+    // Poison in inputSchema.properties.*.description / enum / title is a known
+    // tool-poisoning vector that scanning only `description` would miss. (#16)
     if ("result" in msg) {
-      const result = (msg as { result?: { tools?: Array<{ description?: string }> } }).result;
+      const result = (msg as {
+        result?: { tools?: Array<{ description?: unknown; title?: unknown; inputSchema?: unknown }> };
+      }).result;
       const tools = result?.tools;
       if (!tools) return null;
-      return tools.map((t) => t.description ?? "");
+      return tools.map((t) => [t.description ?? "", t.title ?? "", t.inputSchema ?? null]);
     }
     return null;
   }
