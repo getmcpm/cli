@@ -28,6 +28,7 @@ import { registerDiffCommand } from "./diff.js";
 import { registerPublishCommand } from "./publish/index.js";
 import { registerOutdatedCommand } from "./outdated.js";
 import { registerGuardCommand } from "./guard.js";
+import { registerSecretsCommand } from "./secrets.js";
 
 export { registerSearch } from "./search.js";
 export { registerInstallCommand, handleInstall, resolveInstallEntry, formatTrustScore } from "./install.js";
@@ -62,6 +63,14 @@ export { registerUpCommand, handleUp } from "./up.js";
 export type { UpDeps, UpOptions } from "./up.js";
 export { registerDiffCommand, handleDiff } from "./diff.js";
 export type { DiffDeps, DiffOptions } from "./diff.js";
+export {
+  registerSecretsCommand,
+  handleSecretsSet,
+  handleSecretsList,
+  handleSecretsGet,
+  handleSecretsRemove,
+} from "./secrets.js";
+export type { SecretsDeps } from "./secrets.js";
 
 export function registerCommands(program: Command): void {
   registerSearch(program);
@@ -86,4 +95,5 @@ export function registerCommands(program: Command): void {
   registerOutdatedCommand(program);
   registerPublishCommand(program);
   registerGuardCommand(program);
+  registerSecretsCommand(program);
 }

@@ -19,6 +19,7 @@ import { readPins, writePins, emptyPinsFile } from "./pins.js";
 import { readPolicy, expireStale, type GuardPolicyFile } from "./policy.js";
 import { appendEvent } from "./event-log.js";
 import { sanitizeForTerminal } from "./sanitize.js";
+import { resolveEnvPlaceholders } from "../store/keychain.js";
 import type { InspectFinding, InspectResult } from "./types.js";
 
 export interface RunInnerArgs {
@@ -153,10 +154,23 @@ export async function runInner(parsed: RunInnerArgs): Promise<number> {
   };
 
   // SECURITY F2: forward env unchanged — IDE already chose which vars to expose.
+  // Exception: values written as `mcpm:keychain:server/KEY` placeholders (by
+  // `mcpm secrets`) are resolved to their decrypted secrets here, so the
+  // plaintext exists only in this child's in-memory env and never on disk.
+  let childEnv: Record<string, string>;
+  try {
+    childEnv = await resolveEnvPlaceholders(process.env);
+  } catch (err) {
+    process.stderr.write(
+      `[mcpm-guard] SECRET-MISSING ${safeName} ${(err as Error).message}\n`,
+    );
+    return 1;
+  }
+
   const handle = startRelay({
     command: parsed.command,
     args: parsed.args,
-    env: process.env,
+    env: childEnv,
     parentIn: process.stdin,
     parentOut: process.stdout,
     inspectChildResponse: inspectChild,

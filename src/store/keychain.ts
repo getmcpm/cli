@@ -163,3 +163,54 @@ export function parsePlaceholder(value: string): { server: string; key: string }
   if (slashIdx === -1) return null;
   return { server: rest.slice(0, slashIdx), key: rest.slice(slashIdx + 1) };
 }
+
+/**
+ * Resolve any `mcpm:keychain:server/KEY` placeholder values in an env map to
+ * their decrypted secrets. Non-placeholder values pass through unchanged;
+ * `undefined` values are dropped. Throws if a placeholder references a secret
+ * that is not stored.
+ *
+ * The decrypted values exist only in the returned in-memory object — they are
+ * never written to disk. `mcpm guard run --inner` calls this to inject secrets
+ * into a wrapped server's child process without storing plaintext in client
+ * config files.
+ */
+export async function resolveEnvPlaceholders(
+  env: NodeJS.ProcessEnv
+): Promise<Record<string, string>> {
+  const resolved: Record<string, string> = {};
+  for (const [name, value] of Object.entries(env)) {
+    if (value === undefined) continue;
+    const placeholder = parsePlaceholder(value);
+    if (placeholder === null) {
+      resolved[name] = value;
+      continue;
+    }
+    const secret = await getSecret(placeholder.server, placeholder.key);
+    if (secret === null) {
+      throw new Error(
+        `Secret "${placeholder.server}/${placeholder.key}" not found. ` +
+          `Run \`mcpm secrets set ${placeholder.server} ${placeholder.key}\` to store it.`
+      );
+    }
+    resolved[name] = secret;
+  }
+  return resolved;
+}
+
+/**
+ * List all stored secrets grouped by server name. Returns only key names —
+ * decrypted values are never read or returned.
+ */
+export async function listAll(): Promise<Record<string, string[]>> {
+  const store = await readStore();
+  const grouped: Record<string, string[]> = {};
+  for (const storeKey of Object.keys(store)) {
+    const slashIdx = storeKey.indexOf("/");
+    if (slashIdx === -1) continue;
+    const server = storeKey.slice(0, slashIdx);
+    const key = storeKey.slice(slashIdx + 1);
+    (grouped[server] ??= []).push(key);
+  }
+  return grouped;
+}
