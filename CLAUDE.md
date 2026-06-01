@@ -450,6 +450,7 @@ the same entry shape).
 | 2026-05-17 | Same-session "first hash seen" cache | Step 6 F3 — closes the double-`tools/list` bypass where a malicious server delivers benign-then-poisoned schemas before the off-thread pin write commits. |
 | 2026-05-17 | FP-rate threshold 2%; effective floor 4% on the 24-message seed | Step 9 — the threshold becomes meaningful at corpus sizes ≥ 50. Documented inline in `fp-rate.test.ts`. Full 20-server capture is TODOS #29. |
 | 2026-05-17 | MCPTox attack fixtures hand-authored from public methodology, not vendored | Step 8 closes OQ3 — sidesteps the MCPTox redistribution license question. Hand-authored from Invariant Labs disclosure / MCPoison CVE / Equixly-Pillar audits. License-clean. |
+| 2026-06-01 | Secret store keyed by machine id (hostname + username), not a real secret | Zero-native-deps constraint (no keytar). AES-GCM with a machine-derived key protects against casual local inspection, NOT same-account file exfiltration — a copied `secrets.enc.json` decrypts on the same OS account. Runtime notices + docs reworded to drop any exfil-resistance claim. True at-rest resistance (OS keychain / user passphrase) deferred (security issue #15). |
 
 ---
 
