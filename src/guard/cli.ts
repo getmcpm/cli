@@ -91,6 +91,54 @@ export async function runDisableCommand(opts: DisableOpts): Promise<void> {
   const summary = await disableGuardAcrossClients(deps, opts);
   printEnableDisable(summary, opts);
   printRestartReminder(opts);
+  await warnUnresolvablePlaceholders(opts);
+}
+
+/**
+ * After disabling guard, any server config that referenced a secret via a
+ * `mcpm:keychain:…` placeholder is now launched directly by the IDE — which
+ * cannot resolve the placeholder. Warn (read-only) so the user isn't surprised
+ * by a server that receives the literal placeholder and fails to start. We
+ * never silently rewrite plaintext into the config (security-first).
+ */
+async function warnUnresolvablePlaceholders(opts: DisableOpts): Promise<void> {
+  const { parsePlaceholder } = await import("../store/keychain.js");
+  const clients = await detectInstalledClients();
+  const affected: Array<{ client: ClientId; server: string; keys: string[] }> = [];
+
+  for (const clientId of clients) {
+    if (opts.client !== undefined && clientId !== opts.client) continue;
+    let entries;
+    try {
+      entries = await getAdapter(clientId).read(getConfigPath(clientId));
+    } catch {
+      continue;
+    }
+    for (const [name, entry] of Object.entries(entries)) {
+      if (opts.server !== undefined && name !== opts.server) continue;
+      if (!entry.env) continue;
+      const keys = Object.entries(entry.env)
+        .filter(([, v]) => typeof v === "string" && parsePlaceholder(v) !== null)
+        .map(([k]) => k);
+      if (keys.length > 0) affected.push({ client: clientId, server: name, keys });
+    }
+  }
+
+  if (affected.length === 0) return;
+
+  opts.write(
+    "\n\x1b[33mwarning: these servers reference encrypted secrets " +
+      "(mcpm:keychain:…) that only resolve while mcpm guard is enabled. Without " +
+      "guard they receive the literal placeholder and will fail to start:\x1b[0m\n",
+  );
+  for (const a of affected) {
+    opts.write(
+      `  - ${sanitize(a.server)} (${CLIENT_LABELS[a.client]}): ${a.keys.map(sanitize).join(", ")}\n`,
+    );
+  }
+  opts.write(
+    "Re-enable with `mcpm guard enable`, or replace those env values with plaintext.\n",
+  );
 }
 
 // ---------------------------------------------------------------------------

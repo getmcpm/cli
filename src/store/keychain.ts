@@ -199,6 +199,18 @@ export async function resolveEnvPlaceholders(
 }
 
 /**
+ * Derive a keychain-safe server id from a (possibly slash-containing) server
+ * name. Registry ids like "io.github.owner/repo" contain `/`, which is invalid
+ * for a keychain id (assertSafeId) and would break placeholder parsing (which
+ * splits on the first `/`). Replaces every character outside [a-zA-Z0-9._-]
+ * with `_` and truncates to 256 chars. Deterministic: the same name always
+ * maps to the same id, so a placeholder written at install resolves at launch.
+ */
+export function deriveKeychainId(name: string): string {
+  return name.replace(/[^a-zA-Z0-9._-]/g, "_").slice(0, 256);
+}
+
+/**
  * List all stored secrets grouped by server name. Returns only key names —
  * decrypted values are never read or returned.
  */

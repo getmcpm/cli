@@ -21,6 +21,7 @@ import type { Finding } from "../scanner/tier1.js";
 import type { TrustScore, TrustScoreInput } from "../scanner/trust-score.js";
 import type { InstalledServer } from "../store/servers.js";
 import { scoreBar, levelColor, extractRegistryMeta } from "../utils/format-trust.js";
+import { toPlaceholder, deriveKeychainId, setSecret as _setSecret } from "../store/keychain.js";
 
 // ---------------------------------------------------------------------------
 // Identifier validation — guard against command injection
@@ -149,6 +150,14 @@ export function validateRuntimeArgs(args: string[]): void {
 // Public types
 // ---------------------------------------------------------------------------
 
+/**
+ * How secret-flagged env vars are persisted.
+ * - "plaintext": written directly into the client config (legacy default).
+ * - "keychain":  stored AES-GCM-encrypted in ~/.mcpm; config gets a
+ *   `mcpm:keychain:…` placeholder that mcpm guard resolves at launch.
+ */
+export type SecretsMode = "plaintext" | "keychain";
+
 export interface InstallOptions {
   client?: string;
   yes?: boolean;
@@ -156,6 +165,7 @@ export interface InstallOptions {
   skipHealthCheck?: boolean;
   json?: boolean;
   minTrust?: number;
+  secrets?: SecretsMode;
 }
 
 export interface InstallDeps {
@@ -171,6 +181,8 @@ export interface InstallDeps {
   confirm: (message: string) => Promise<boolean>;
   promptEnvVars: (vars: EnvVar[]) => Promise<Record<string, string>>;
   output: (text: string) => void;
+  /** Optional; required only when options.secrets === "keychain". */
+  setSecret?: (server: string, key: string, value: string) => Promise<void>;
 }
 
 // ---------------------------------------------------------------------------
@@ -457,6 +469,33 @@ export async function handleInstall(
   const envVarDefs: EnvVar[] = bestPkg?.environmentVariables ?? [];
   const resolvedEnvVars = await promptEnvVars(envVarDefs);
 
+  // Step 6b: In keychain mode, persist secret-flagged values encrypted and swap
+  // them for `mcpm:keychain:…` placeholders, so no plaintext is written to any
+  // client config. Non-secret vars stay inline. Each secret is stored once and
+  // reused for every client. The placeholder resolves at launch only while mcpm
+  // guard wraps the server (run-inner.ts → resolveEnvPlaceholders).
+  const secretsMode: SecretsMode = options.secrets ?? "plaintext";
+  const storedSecretKeys: string[] = [];
+  let envForConfig: Record<string, string> = resolvedEnvVars;
+  if (secretsMode === "keychain") {
+    if (!deps.setSecret) {
+      throw new Error("Keychain secret storage is unavailable.");
+    }
+    const keychainId = deriveKeychainId(name);
+    const swapped: Record<string, string> = {};
+    for (const [key, value] of Object.entries(resolvedEnvVars)) {
+      const def = envVarDefs.find((d) => d.name === key);
+      if (def?.isSecret) {
+        await deps.setSecret(keychainId, key, value);
+        swapped[key] = toPlaceholder(keychainId, key);
+        storedSecretKeys.push(key);
+      } else {
+        swapped[key] = value;
+      }
+    }
+    envForConfig = swapped;
+  }
+
   // -------------------------------------------------------------------------
   // Step 7: Validate install path exists
   // -------------------------------------------------------------------------
@@ -476,11 +515,12 @@ export async function handleInstall(
     const configPath = getConfigPath(clientId);
     const rawEntry = resolveInstallEntry(serverEntry, clientId);
 
-    // Merge resolved env vars into the entry (immutable)
+    // Merge env vars into the entry (immutable). In keychain mode envForConfig
+    // carries placeholders in place of secret values; otherwise it === resolvedEnvVars.
     const entry: McpServerEntry = {
       ...rawEntry,
-      ...(Object.keys(resolvedEnvVars).length > 0
-        ? { env: { ...(rawEntry.env ?? {}), ...resolvedEnvVars } }
+      ...(Object.keys(envForConfig).length > 0
+        ? { env: { ...(rawEntry.env ?? {}), ...envForConfig } }
         : {}),
     };
 
@@ -489,14 +529,24 @@ export async function handleInstall(
   }
 
   // -------------------------------------------------------------------------
-  // Step 8b: Warn about plaintext secret storage
+  // Step 8b: Secret-storage notice
   // -------------------------------------------------------------------------
-  const hasSecrets = envVarDefs.some((ev) => ev.isSecret && resolvedEnvVars[ev.name]);
-  if (hasSecrets && !options.json) {
-    output(
-      "\x1b[33mNote: API keys are stored as plaintext in client config files. " +
-      "Ensure config files have appropriate permissions (chmod 600).\x1b[0m"
-    );
+  if (!options.json) {
+    if (secretsMode === "keychain" && storedSecretKeys.length > 0) {
+      output(
+        `\x1b[32mStored ${storedSecretKeys.length} secret(s) encrypted in ~/.mcpm. ` +
+        "Run `mcpm guard enable` (then restart your IDE) so they resolve at launch — " +
+        "until guard wraps this server it receives the literal placeholder.\x1b[0m"
+      );
+    } else {
+      const hasSecrets = envVarDefs.some((ev) => ev.isSecret && resolvedEnvVars[ev.name]);
+      if (hasSecrets) {
+        output(
+          "\x1b[33mNote: API keys are stored as plaintext in client config files. " +
+          "Ensure config files have appropriate permissions (chmod 600).\x1b[0m"
+        );
+      }
+    }
   }
 
   // -------------------------------------------------------------------------
@@ -582,6 +632,15 @@ async function promptEnvVarsDefault(
   return result;
 }
 
+export function parseSecretsMode(raw: string): SecretsMode {
+  if (raw !== "keychain" && raw !== "plaintext") {
+    throw new InvalidArgumentError(
+      `--secrets must be "keychain" or "plaintext", got: "${raw}"`
+    );
+  }
+  return raw;
+}
+
 export function parseMinTrust(raw: string): number {
   // Reject anything that isn't plain decimal digits (blocks hex "0x50", scientific
   // notation "1e2", spaces, empty string, and negative sign before range check).
@@ -609,7 +668,8 @@ export function registerInstallCommand(program: Command): void {
     .option("--skip-health-check", "skip post-install health check")
     .option("--json", "output result as JSON")
     .option("--min-trust <n>", "abort install if pre-install trust score is below this threshold (0-100; health check runs after install)", parseMinTrust)
-    .action(async (name: string, opts: { client?: string; yes?: boolean; force?: boolean; skipHealthCheck?: boolean; json?: boolean; minTrust?: number }) => {
+    .option("--secrets <mode>", "where to store secret env vars: 'keychain' (encrypted in ~/.mcpm, resolved by mcpm guard at launch) or 'plaintext' (default)", parseSecretsMode)
+    .action(async (name: string, opts: { client?: string; yes?: boolean; force?: boolean; skipHealthCheck?: boolean; json?: boolean; minTrust?: number; secrets?: SecretsMode }) => {
       const { RegistryClient } = await import("../registry/client.js");
       const client = new RegistryClient();
 
@@ -620,6 +680,7 @@ export function registerInstallCommand(program: Command): void {
         skipHealthCheck: opts.skipHealthCheck,
         json: opts.json,
         minTrust: opts.minTrust,
+        secrets: opts.secrets,
       };
 
       const installDeps: InstallDeps = {
@@ -635,6 +696,7 @@ export function registerInstallCommand(program: Command): void {
         confirm: createConfirm(),
         promptEnvVars: promptEnvVarsDefault,
         output: stdoutOutput,
+        setSecret: _setSecret,
       };
 
       try {

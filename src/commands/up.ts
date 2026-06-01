@@ -39,8 +39,9 @@ import {
 } from "../stack/schema.js";
 import { checkTrustPolicy } from "../stack/policy.js";
 import { parseEnvFile } from "../stack/env.js";
-import { resolveInstallEntry } from "./install.js";
+import { resolveInstallEntry, parseSecretsMode, type SecretsMode } from "./install.js";
 import { extractRegistryMeta } from "../utils/format-trust.js";
+import { toPlaceholder, deriveKeychainId, setSecret as _setSecret } from "../store/keychain.js";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -53,6 +54,7 @@ export interface UpOptions {
   ci?: boolean;
   strict?: boolean;
   yes?: boolean;
+  secrets?: SecretsMode;
 }
 
 export interface UpDeps {
@@ -68,6 +70,8 @@ export interface UpDeps {
   confirm: (message: string) => Promise<boolean>;
   promptEnvVar: (name: string, isSecret: boolean) => Promise<string>;
   output: (text: string) => void;
+  /** Optional; required only when options.secrets === "keychain". */
+  setSecret?: (server: string, key: string, value: string) => Promise<void>;
 }
 
 // ---------------------------------------------------------------------------
@@ -96,6 +100,13 @@ export async function handleUp(
   options: UpOptions,
   deps: UpDeps
 ): Promise<void> {
+  // Keychain mode persists secrets locally — never do that on a CI runner.
+  if (options.secrets === "keychain" && options.ci) {
+    throw new Error(
+      "--secrets keychain cannot be combined with --ci (it would persist secrets to the CI runner's keychain). Use --secrets plaintext in CI."
+    );
+  }
+
   const stackPath = options.stackFile ?? "mcpm.yaml";
   const lockPath = stackPath.replace(/\.yaml$/, "-lock.yaml");
 
@@ -187,6 +198,12 @@ export async function handleUp(
   deps.output(
     `\n${installed} installed, ${skipped} skipped, ${blocked} blocked, ${failed} failed`
   );
+
+  if (options.secrets === "keychain" && installed > 0 && !options.dryRun) {
+    deps.output(
+      "Secrets stored encrypted in ~/.mcpm. Run `mcpm guard enable` (then restart your IDE) so they resolve at launch."
+    );
+  }
 
   if (blocked > 0 || failed > 0) {
     // Signal failure via thrown error (caught by Commander registration)
@@ -377,6 +394,8 @@ async function resolveEnvVars(
   if (!envDecl) return {};
 
   const resolved: Record<string, string> = {};
+  const secretsMode: SecretsMode = options.secrets ?? "plaintext";
+  const keychainId = deriveKeychainId(serverName);
 
   for (const [key, decl] of Object.entries(envDecl)) {
     // Resolution order: process.env → .env file → default → prompt
@@ -384,12 +403,13 @@ async function resolveEnvVars(
     const fromFile = envFileVars[key];
     const fromDefault = decl.default;
 
+    let value: string | undefined;
     if (fromEnv) {
-      resolved[key] = fromEnv;
+      value = fromEnv;
     } else if (fromFile) {
-      resolved[key] = fromFile;
+      value = fromFile;
     } else if (fromDefault) {
-      resolved[key] = fromDefault;
+      value = fromDefault;
     } else if (decl.required) {
       if (options.ci) {
         throw new Error(
@@ -397,7 +417,21 @@ async function resolveEnvVars(
             `Set it in process.env or .env file (--ci mode, no interactive prompt).`
         );
       }
-      resolved[key] = await deps.promptEnvVar(key, decl.secret);
+      value = await deps.promptEnvVar(key, decl.secret);
+    }
+
+    if (value === undefined) continue;
+
+    // In keychain mode, persist secret-flagged values encrypted and write a
+    // placeholder instead of plaintext (resolved by mcpm guard at launch).
+    if (secretsMode === "keychain" && decl.secret) {
+      if (!deps.setSecret) {
+        throw new Error("Keychain secret storage is unavailable.");
+      }
+      await deps.setSecret(keychainId, key, value);
+      resolved[key] = toPlaceholder(keychainId, key);
+    } else {
+      resolved[key] = value;
     }
   }
 
@@ -495,6 +529,7 @@ export function registerUpCommand(program: Command): void {
     .option("--ci", "CI mode: no interactive prompts, exit nonzero on failure")
     .option("--strict", "remove servers not declared in mcpm.yaml")
     .option("-y, --yes", "skip confirmation prompts (required with --strict --ci)")
+    .option("--secrets <mode>", "where to store secret env vars: 'keychain' (encrypted in ~/.mcpm, resolved by mcpm guard at launch) or 'plaintext' (default); 'keychain' is rejected with --ci", parseSecretsMode)
     .action(
       async (opts: {
         file?: string;
@@ -503,6 +538,7 @@ export function registerUpCommand(program: Command): void {
         ci?: boolean;
         strict?: boolean;
         yes?: boolean;
+        secrets?: SecretsMode;
       }) => {
         const client = new RegistryClient();
 
@@ -515,6 +551,7 @@ export function registerUpCommand(program: Command): void {
               ci: opts.ci,
               strict: opts.strict,
               yes: opts.yes,
+              secrets: opts.secrets,
             },
             {
               detectClients: detectInstalledClients,
@@ -550,6 +587,7 @@ export function registerUpCommand(program: Command): void {
                 return input({ message: `${name}:` });
               },
               output: stdoutOutput,
+              setSecret: _setSecret,
             }
           );
         } catch (err) {
