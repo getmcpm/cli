@@ -15,8 +15,8 @@ import { inspectMessage } from "./patterns.js";
 import { OWASP_MCP_TOP_10 } from "./signatures.js";
 import { startRelay, buildSafeEnv, type GuardEvent } from "./relay.js";
 import { inspectForDrift } from "./drift.js";
-import { readPins, writePins, emptyPinsFile } from "./pins.js";
-import { readPolicy, expireStale, type GuardPolicyFile } from "./policy.js";
+import { readPins, writePins } from "./pins.js";
+import { readPolicy, expireStale, PolicyIntegrityError, type GuardPolicyFile } from "./policy.js";
 import { appendEvent } from "./event-log.js";
 import { sanitizeForTerminal } from "./sanitize.js";
 import { resolveEnvPlaceholders } from "../store/keychain.js";
@@ -116,12 +116,56 @@ export async function runInner(parsed: RunInnerArgs): Promise<number> {
 
   // Drift detection is async (reads + writes pins.json). The relay's inspect
   // callbacks are sync, so we keep a cached snapshot updated off-thread.
-  let pinsSnapshot = await readPins().catch(() => emptyPinsFile());
+  //
+  // FAIL CLOSED on a pins-read error. First-run ENOENT is handled INSIDE
+  // readPins (returns an empty pins file, no throw), so the only errors that
+  // reach here are the dangerous ones: a PinsIntegrityError (tampered sidecar),
+  // EACCES/EMFILE, or a corrupt/invalid pins.json. Swallowing those to an empty
+  // snapshot would silently disable cross-session rug-pull detection — exactly
+  // when it matters most. Refuse to start the relay instead.
+  let pinsSnapshot: PinsFile;
+  try {
+    pinsSnapshot = await readPins();
+  } catch (err) {
+    process.stderr.write(
+      `[mcpm-guard] PINS-READ-ERROR: ${safeName} could not load ~/.mcpm/pins.json: ` +
+        `${(err as Error).message}\n` +
+        `Refusing to start the relay — running with rug-pull (schema-drift) protection ` +
+        `silently disabled is more dangerous than not starting. Review ` +
+        `~/.mcpm/guard-events.jsonl for unauthorized activity. If you intentionally ` +
+        `changed pins.json, run \`mcpm guard reset-integrity\`.\n`,
+    );
+    process.exit(1);
+  }
 
   // Load policy once per session (mute/pause/etc.). Stale overrides expire
   // here; the next session picks up fresh state. Pausing mid-session is not
   // supported in v0.5.0 — restart the wrapped server to pick up changes.
-  const policy = expireStale(await readPolicy().catch(() => ({})));
+  //
+  // The `{}` fallback is the SAFE state (full enforcement), so we keep falling
+  // back on any read failure. BUT a PolicyIntegrityError (tampered
+  // guard-policy.yaml) would otherwise be invisible — surface it on stderr
+  // before falling back so the user knows their policy file was tampered with.
+  const policy = expireStale(
+    await readPolicy().catch((err: unknown) => {
+      if (err instanceof PolicyIntegrityError) {
+        process.stderr.write(
+          `[mcpm-guard] POLICY-INTEGRITY-ERROR: ${safeName} ${(err as Error).message}\n` +
+            `Falling back to full enforcement (ignoring guard-policy.yaml) for this session.\n`,
+        );
+      } else {
+        // Generic non-ENOENT I/O error (EACCES, EMFILE, …). ENOENT is already
+        // returned as {} inside readPolicy and never reaches here. The {}
+        // fallback is the SAFE state (full enforcement), but swallowing the
+        // error silently hides a misconfigured/unreadable policy file — surface
+        // it on stderr before falling back. Do NOT exit: enforcement is preserved.
+        process.stderr.write(
+          `[mcpm-guard] POLICY-READ-ERROR: ${(err as Error).message}\n`,
+        );
+      }
+      return {};
+    }),
+  );
   const pausedUntilFuture =
     policy.paused_until !== undefined && new Date(policy.paused_until) > new Date();
 
@@ -209,7 +253,12 @@ export async function runInner(parsed: RunInnerArgs): Promise<number> {
 
 import { hashToolDefinition, type PinsFile } from "./pins.js";
 
-function inspectForDriftSync(
+/**
+ * Sync, pure (no I/O) drift inspection against an in-memory pin snapshot.
+ * Exported for unit testing the SECURITY F3 same-session guard in isolation;
+ * the async {@link inspectForDrift} in drift.ts also writes first-session pins.
+ */
+export function inspectForDriftSync(
   msg: JSONRPCMessage,
   serverName: string,
   pins: PinsFile,

@@ -266,13 +266,33 @@ export async function runCleanupCommand(opts: CleanupOpts): Promise<void> {
     for (const s of c.servers) installedServerNames.add(s.name);
   }
 
-  const { readPins, writePins, clearServerPins } = await import("./pins.js");
-  const pins = await readPins().catch(() => null);
-  const orphanPinned: string[] = [];
-  if (pins !== null) {
-    for (const serverName of Object.keys(pins.servers)) {
-      if (!installedServerNames.has(serverName)) orphanPinned.push(serverName);
+  const { readPins, writePins, clearServerPins, PinsIntegrityError } = await import("./pins.js");
+  // readPins returns an empty pins file (not a throw) when pins.json is absent,
+  // so a thrown error here is never "no pins yet" — it is a PinsIntegrityError
+  // (tampered/corrupted sidecar) or an I/O error. Swallowing it to `null` would
+  // make `cleanup` print "nothing to prune" on a TAMPERED pins file, hiding the
+  // exact tamper signal the user needs. Surface it loudly and abort instead.
+  let pins: Awaited<ReturnType<typeof readPins>>;
+  try {
+    pins = await readPins();
+  } catch (err) {
+    if (err instanceof PinsIntegrityError) {
+      opts.write(
+        `mcpm guard cleanup: cannot read ~/.mcpm/pins.json — integrity check failed.\n` +
+          `${err.message}\n` +
+          `Refusing to prune until this is resolved.\n`,
+      );
+    } else {
+      opts.write(
+        `mcpm guard cleanup: cannot read ~/.mcpm/pins.json — ${(err as Error).message}\n` +
+          `Refusing to prune until this is resolved.\n`,
+      );
     }
+    return;
+  }
+  const orphanPinned: string[] = [];
+  for (const serverName of Object.keys(pins.servers)) {
+    if (!installedServerNames.has(serverName)) orphanPinned.push(serverName);
   }
 
   // Orphan wrapped entries: servers wrapped in some client config but whose
@@ -294,7 +314,6 @@ export async function runCleanupCommand(opts: CleanupOpts): Promise<void> {
     return;
   }
 
-  if (pins === null) return;
   let next = pins;
   for (const serverName of orphanPinned) next = clearServerPins(next, serverName);
   await writePins(next);

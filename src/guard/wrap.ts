@@ -264,10 +264,16 @@ export function unwrapEntry(entry: McpServerEntry): McpServerEntry | null {
   // A tampered marker (or a manual edit) that rewrites the wrapped command or
   // the declared-env list will not match the embedded hash, so we refuse to
   // write an attacker-influenced command back into the IDE config.
-  if (marker.origHash !== null) {
-    const recomputed = hashOriginalEntry(origCommand, origArgs, marker.declaredEnvKeys);
-    if (recomputed !== marker.origHash) return null;
-  }
+  //
+  // Fail closed when the hash is absent. An attacker can strip the
+  // `--orig-hash <hex>` pair from a wrapped entry to skip verification entirely
+  // (a downgrade/strip bypass); treating a missing hash as "legacy, trust it"
+  // would re-open exactly the hole the hash closes. Every entry this mcpm wraps
+  // carries the flag, so refusing here only rejects tampered (or genuinely
+  // pre-hash legacy) markers — callers fall back to a `.bak` restore.
+  if (marker.origHash === null) return null;
+  const recomputed = hashOriginalEntry(origCommand, origArgs, marker.declaredEnvKeys);
+  if (recomputed !== marker.origHash) return null;
 
   const unwrapped: McpServerEntry = { command: origCommand };
   if (origArgs.length > 0) unwrapped.args = [...origArgs];

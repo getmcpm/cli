@@ -306,6 +306,26 @@ describe("relay inspection + block behavior", () => {
     expect(safe.ANTHROPIC_API_KEY).toBeUndefined();
   });
 
+  test("buildSafeEnv strips code-injection env vars but forwards SHELL (allowlist)", () => {
+    const source = {
+      SHELL: "/bin/zsh",
+      // Code-injection vectors: a wrapped (semi-trusted) server must NOT inherit
+      // these — they let an attacker preload native code or rewrite npm config.
+      NODE_OPTIONS: "--require /tmp/evil.js",
+      LD_PRELOAD: "/tmp/evil.so",
+      DYLD_INSERT_LIBRARIES: "/tmp/evil.dylib",
+      NPM_CONFIG_USERCONFIG: "/tmp/evil-npmrc",
+    };
+    const safe = buildSafeEnv(source);
+    // SHELL is on the allowlist — forwarded.
+    expect(safe.SHELL).toBe("/bin/zsh");
+    // Injection vectors are not on the allowlist — stripped.
+    expect(safe.NODE_OPTIONS).toBeUndefined();
+    expect(safe.LD_PRELOAD).toBeUndefined();
+    expect(safe.DYLD_INSERT_LIBRARIES).toBeUndefined();
+    expect(safe.NPM_CONFIG_USERCONFIG).toBeUndefined();
+  });
+
   test("block on notification has no error response (no id to reply to)", async () => {
     const { parentIn, captured } = setupRelay(() => null, {
       inspectParentRequest: () => ({

@@ -30,9 +30,10 @@
  */
 
 import { createHash } from "node:crypto";
-import { readFile, writeFile, rename, unlink } from "node:fs/promises";
+import { readFile, writeFile, rename, unlink, lstat } from "node:fs/promises";
 import path from "node:path";
 import lockfile from "proper-lockfile";
+import { z } from "zod";
 import { getStorePath } from "../store/index.js";
 
 const PINS_FILENAME = "pins.json";
@@ -57,6 +58,25 @@ export interface PinsFile {
   format_version: number;
   servers: Record<string, Record<string, PinEntry>>;
 }
+
+// The integrity sidecar proves the BYTES are unchanged; it says nothing about
+// the SHAPE. A structurally-malformed (but sidecar-consistent) pins.json — e.g.
+// `servers` is an array, or an entry is missing `current_hash` — would slip
+// through a bare `as PinsFile` cast and corrupt drift detection downstream.
+// Validate the shape with Zod (mirrors policy.ts's GuardPolicyFileSchema) and
+// throw a descriptive (NON-PinsIntegrityError) error so the user knows the file
+// is structurally invalid, not tampered.
+const PinEntrySchema = z.object({
+  current_hash: z.string().nullable(),
+  previous_hashes: z.array(z.string()),
+  captured_at: z.string(),
+  captured_via: z.enum(["install", "first-session", "backfill"]),
+  signature_list_version: z.string(),
+});
+const PinsFileSchema = z.object({
+  format_version: z.number(),
+  servers: z.record(z.string(), z.record(z.string(), PinEntrySchema)),
+});
 
 // ---------------------------------------------------------------------------
 // Pure helpers
@@ -115,6 +135,39 @@ function fileSha(content: string): string {
   return `sha256:${createHash("sha256").update(content, "utf8").digest("hex")}`;
 }
 
+// #26 (replicated from config/adapters/base.ts, which does not export it): throw
+// if `targetPath` is a symlink. lstat does not follow the final component, so
+// this detects a symlinked target before a write follows it onto an
+// attacker-chosen path. A missing path (ENOENT) is fine — nothing to traverse.
+async function assertNotSymlink(targetPath: string): Promise<void> {
+  let st: Awaited<ReturnType<typeof lstat>>;
+  try {
+    st = await lstat(targetPath);
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") return;
+    throw err;
+  }
+  if (st.isSymbolicLink()) {
+    throw new Error(`Refusing to write pins through a symlink: ${targetPath}`);
+  }
+}
+
+// Write `data` atomically to `target`: refuse symlinks, clear any stale `.tmp`
+// (which may itself be a pre-placed symlink — unlinking removes only the link),
+// then create the `.tmp` EXCLUSIVELY (wx) so it is a fresh, unfollowed inode,
+// and rename into place. Mirrors base.ts/writeAtomic.
+async function writeFileAtomic(target: string, data: string): Promise<void> {
+  await assertNotSymlink(target);
+  const tmp = `${target}.tmp`;
+  try {
+    await unlink(tmp);
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
+  }
+  await writeFile(tmp, data, { encoding: "utf-8", mode: 0o600, flag: "wx" });
+  await rename(tmp, target);
+}
+
 async function pinsPath(): Promise<string> {
   return path.join(await getStorePath(), PINS_FILENAME);
 }
@@ -161,7 +214,30 @@ export async function readPins(): Promise<PinsFile> {
     }
   }
 
-  const parsed = JSON.parse(content) as PinsFile;
+  // The sidecar guarantees byte integrity; Zod guarantees the SHAPE. Anything
+  // that parses as JSON but is not a well-formed PinsFile (e.g. a hand-edit, a
+  // truncated write, an incompatible future schema) is rejected with a clear,
+  // NON-PinsIntegrityError message so the user knows it is structurally invalid
+  // rather than tampered.
+  let json: unknown;
+  try {
+    json = JSON.parse(content);
+  } catch (err) {
+    throw new Error(
+      `pins.json is not valid JSON (${(err as Error).message}). The file at ` +
+        `~/.mcpm/pins.json is corrupt; remove it to start fresh or restore from a backup.`,
+    );
+  }
+  const result = PinsFileSchema.safeParse(json);
+  if (!result.success) {
+    throw new Error(
+      `pins.json has an invalid structure: ${result.error.issues
+        .map((i) => `${i.path.join(".") || "<root>"}: ${i.message}`)
+        .join("; ")}. The file is structurally invalid (not tampered); ` +
+        `remove ~/.mcpm/pins.json to start fresh or restore from a backup.`,
+    );
+  }
+  const parsed = result.data as PinsFile;
   if (parsed.format_version !== PINS_FORMAT_VERSION) {
     throw new Error(
       `pins.json format_version mismatch (file: ${parsed.format_version}, expected: ${PINS_FORMAT_VERSION}). ` +
@@ -197,13 +273,8 @@ export async function writePins(pins: PinsFile): Promise<void> {
     stale: 5_000,
   });
   try {
-    const tmp = `${filePath}.tmp`;
-    await writeFile(tmp, serialized, { encoding: "utf-8", mode: 0o600 });
-    await rename(tmp, filePath);
-
-    const tmpSidecar = `${sidecarPath}.tmp`;
-    await writeFile(tmpSidecar, fileSha(serialized), { encoding: "utf-8", mode: 0o600 });
-    await rename(tmpSidecar, sidecarPath);
+    await writeFileAtomic(filePath, serialized);
+    await writeFileAtomic(sidecarPath, fileSha(serialized));
   } finally {
     await release();
   }
@@ -228,9 +299,12 @@ export async function resetIntegrity(): Promise<void> {
     }
     throw err;
   }
-  const tmpSidecar = `${sidecarPath}.tmp`;
-  await writeFile(tmpSidecar, fileSha(content), { encoding: "utf-8", mode: 0o600 });
-  await rename(tmpSidecar, sidecarPath);
+  // Route the sidecar write through the same hardened atomic writer used by
+  // writePins (assertNotSymlink + stale-.tmp unlink + {flag:"wx"}). A bare
+  // writeFile(`${sidecarPath}.tmp`) + rename would follow a pre-placed symlink
+  // at the sidecar (or its .tmp), redirecting the write onto an attacker-chosen
+  // path — the exact gap the PR closed for the main pins/policy writes.
+  await writeFileAtomic(sidecarPath, fileSha(content));
 }
 
 // ---------------------------------------------------------------------------
