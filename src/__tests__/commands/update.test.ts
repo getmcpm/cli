@@ -249,6 +249,72 @@ describe("handleUpdate — one update available", () => {
 });
 
 // ---------------------------------------------------------------------------
+// Fix #5: client config is re-written on update (not just the store record)
+// ---------------------------------------------------------------------------
+
+function makeOciEntry(name: string, version: string): ServerEntry {
+  return {
+    server: {
+      name,
+      description: "An OCI test server",
+      version,
+      repository: { url: "https://github.com/test/server" },
+      packages: [
+        {
+          registryType: "oci",
+          identifier: `ghcr.io/test/server:${version}`,
+          version,
+          transport: { type: "stdio" },
+          environmentVariables: [],
+        },
+      ],
+      remotes: [],
+    },
+    _meta: {
+      "io.modelcontextprotocol.registry/official": {
+        status: "active",
+        publishedAt: "2026-01-01T00:00:00Z",
+        isLatest: true,
+      },
+    },
+  } as ServerEntry;
+}
+
+describe("handleUpdate — writes new version to client config", () => {
+  it("calls adapter.addServer with the new-version entry for each client", async () => {
+    const adapter = makeAdapter("claude-desktop");
+    const deps = makeDeps({
+      getInstalledServers: vi.fn().mockResolvedValue([
+        makeInstalledServer({ name: "io.github.test/oci", version: "1.0.0", clients: ["claude-desktop"] }),
+      ]),
+      getServer: vi.fn().mockResolvedValue(makeOciEntry("io.github.test/oci", "2.0.0")),
+      getAdapter: vi.fn().mockReturnValue(adapter),
+    });
+
+    await handleUpdate({ yes: true }, deps);
+
+    expect(adapter.addServer).toHaveBeenCalledTimes(1);
+    const call = (adapter.addServer as ReturnType<typeof vi.fn>).mock.calls[0];
+    expect(call[0]).toBe("/fake/claude-desktop/config.json");
+    expect(call[1]).toBe("io.github.test/oci");
+    // The re-resolved entry must carry the NEW version (2.0.0), not the old one.
+    expect(call[2].command).toBe("docker");
+    expect(call[2].args).toContain("ghcr.io/test/server:2.0.0");
+    expect(call[3]).toEqual({ force: true });
+  });
+
+  it("does not write to client config when nothing is updated", async () => {
+    const adapter = makeAdapter("claude-desktop");
+    const deps = makeDeps({
+      getServer: vi.fn().mockResolvedValue(makeServerEntry("io.github.test/server-a", "1.0.0")),
+      getAdapter: vi.fn().mockReturnValue(adapter),
+    });
+    await handleUpdate({ yes: true }, deps);
+    expect(adapter.addServer).not.toHaveBeenCalled();
+  });
+});
+
+// ---------------------------------------------------------------------------
 // --yes flag skips confirmation
 // ---------------------------------------------------------------------------
 

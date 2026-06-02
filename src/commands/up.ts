@@ -80,7 +80,7 @@ export interface UpDeps {
 
 interface ServerSuccess {
   readonly name: string;
-  readonly status: "installed" | "skipped";
+  readonly status: "installed" | "skipped" | "removed";
   readonly message: string;
   /** Number of secrets persisted to the keychain for this server (keychain mode). */
   readonly storedSecrets?: number;
@@ -196,9 +196,11 @@ export async function handleUp(
   const blocked = results.filter((r) => r.status === "blocked").length;
   const failed = results.filter((r) => r.status === "failed").length;
   const skipped = results.filter((r) => r.status === "skipped").length;
+  const removed = results.filter((r) => r.status === "removed").length;
 
   deps.output(
-    `\n${installed} installed, ${skipped} skipped, ${blocked} blocked, ${failed} failed`
+    `\n${installed} installed, ${skipped} skipped, ${blocked} blocked, ${failed} failed` +
+      (removed > 0 ? `, ${removed} removed` : "")
   );
 
   const totalSecretsStored = results.reduce(
@@ -245,11 +247,11 @@ async function backupConfigs(
   clients: readonly ClientId[],
   deps: Pick<UpDeps, "getAdapter" | "getPath">
 ): Promise<void> {
+  const { readFile, writeFile } = await import("fs/promises");
   for (const clientId of clients) {
     try {
       const adapter = deps.getAdapter(clientId);
       const configPath = deps.getPath(clientId);
-      const { readFile, writeFile } = await import("fs/promises");
       const content = await readFile(configPath, "utf-8");
       await writeFile(`${configPath}.bak`, content, {
         encoding: "utf-8",
@@ -330,7 +332,10 @@ async function processServer(input: ProcessInput): Promise<ServerResult> {
   // Resolve env vars (keychain mode swaps secrets for placeholders + a count)
   const { env: envVars, storedCount } = await resolveEnvVars(name, server, envFileVars, options, deps);
 
-  // Install to each client
+  // Install to each client. Track successes so we never report "installed"
+  // when every client write failed (e.g. all configs read-only or missing).
+  const installedClients: ClientId[] = [];
+  const clientErrors: string[] = [];
   for (const clientId of clients) {
     try {
       const entry = resolveInstallEntry(serverEntry, clientId);
@@ -341,15 +346,31 @@ async function processServer(input: ProcessInput): Promise<ServerResult> {
       const adapter = deps.getAdapter(clientId);
       const configPath = deps.getPath(clientId);
       await adapter.addServer(configPath, name, entryWithEnv, { force: true });
-    } catch {
-      // Some clients may not support this server type — skip
+      installedClients.push(clientId);
+    } catch (err) {
+      clientErrors.push(`${clientId}: ${err instanceof Error ? err.message : String(err)}`);
     }
   }
+
+  // No client accepted the write → this is a failure, not a silent success.
+  if (installedClients.length === 0) {
+    return {
+      name,
+      status: "failed",
+      message: `could not write to any client (${clientErrors.join("; ")})`,
+    };
+  }
+
+  // Partial success: surface the clients that failed as a warning suffix.
+  const partialNote =
+    clientErrors.length > 0
+      ? ` (warning: failed on ${clientErrors.join("; ")})`
+      : "";
 
   return {
     name,
     status: "installed",
-    message: `v${locked.version} (trust: ${trustScore.score}/${trustScore.maxPossible})`,
+    message: `v${locked.version} (trust: ${trustScore.score}/${trustScore.maxPossible})${partialNote}`,
     storedSecrets: storedCount,
   };
 }
@@ -471,7 +492,7 @@ async function handleStrictRemoval(
         );
       }
 
-      if (!options.ci) {
+      if (!options.ci && options.yes !== true) {
         const confirmed = await deps.confirm(
           `Remove "${name}" from ${clientId}? (not in mcpm.yaml)`
         );
@@ -481,7 +502,7 @@ async function handleStrictRemoval(
       await adapter.removeServer(configPath, name);
       results.push({
         name,
-        status: "installed",
+        status: "removed",
         message: `removed from ${clientId} (not in mcpm.yaml)`,
       });
       deps.output(`  - ${name}: removed from ${clientId}`);
@@ -496,6 +517,7 @@ async function handleStrictRemoval(
 function statusIcon(status: string): string {
   switch (status) {
     case "installed": return "\u2713";
+    case "removed": return "\u2212";
     case "skipped": return "\u2022";
     case "blocked": return "\u2717";
     case "failed": return "\u2717";

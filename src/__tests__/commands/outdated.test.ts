@@ -142,6 +142,38 @@ describe("handleOutdated", () => {
     expect(text.toLowerCase()).toMatch(/trust|score|regress/);
   });
 
+  it("shows BOTH version change and trust regression when a new version drops the score", async () => {
+    // Installed v1.0.0 @ trust 90; registry has v2.0.0 @ trust 45 — both a
+    // version bump AND a trust regression. The version line must not hide the
+    // regression line (fix #6).
+    getInstalledServers.mockResolvedValue([
+      makeInstalled("io.github.a/srv", "1.0.0", 90),
+    ]);
+    getServer.mockResolvedValue(makeEntry("io.github.a/srv", "2.0.0"));
+    computeTrustScore.mockReturnValue({ score: 45, level: "risky", breakdown: {} });
+    await run();
+    const text = output.join("");
+    // Version change shown
+    expect(text).toContain("1.0.0");
+    expect(text).toContain("2.0.0");
+    // Trust regression also shown (was 90 → now 45)
+    expect(text).toContain("trust score regression");
+    expect(text).toContain("90");
+    expect(text).toContain("45");
+  });
+
+  it("includes trustRegression=true in JSON when a new version drops the score", async () => {
+    getInstalledServers.mockResolvedValue([
+      makeInstalled("io.github.a/srv", "1.0.0", 90),
+    ]);
+    getServer.mockResolvedValue(makeEntry("io.github.a/srv", "2.0.0"));
+    computeTrustScore.mockReturnValue({ score: 45, level: "risky", breakdown: {} });
+    await run({ json: true });
+    const parsed = JSON.parse(output.join("")) as Array<Record<string, unknown>>;
+    expect(parsed[0].trustRegression).toBe(true);
+    expect(parsed[0].versionChange).toBe("major");
+  });
+
   it("outputs valid JSON array with --json flag", async () => {
     getInstalledServers.mockResolvedValue([makeInstalled("io.github.a/srv", "1.0.0")]);
     getServer.mockResolvedValue(makeEntry("io.github.a/srv", "2.0.0"));

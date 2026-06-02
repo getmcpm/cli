@@ -21,8 +21,9 @@ import type { ServerEntry } from "../registry/types.js";
 import type { Finding } from "../scanner/tier1.js";
 import type { TrustScore, TrustScoreInput } from "../scanner/trust-score.js";
 import type { ClientId } from "../config/paths.js";
-import type { ConfigAdapter } from "../config/adapters/index.js";
+import type { ConfigAdapter, McpServerEntry } from "../config/adapters/index.js";
 import { levelColor, extractRegistryMeta } from "../utils/format-trust.js";
+import { resolveInstallEntry } from "./install.js";
 import { stdoutOutput } from "../utils/output.js";
 
 // ---------------------------------------------------------------------------
@@ -57,6 +58,32 @@ interface UpdateResult {
 }
 
 // ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+/**
+ * Read the env block already present for a server in a client config, so an
+ * update preserves user-configured values (e.g. API keys) instead of wiping
+ * them when the entry is re-resolved from the registry. Best-effort: returns
+ * undefined if the config or entry can't be read.
+ */
+async function readExistingEnv(
+  getAdapter: UpdateDeps["getAdapter"],
+  getConfigPath: UpdateDeps["getConfigPath"],
+  clientId: ClientId,
+  name: string
+): Promise<Record<string, string> | undefined> {
+  try {
+    const adapter = getAdapter(clientId);
+    const configPath = getConfigPath(clientId);
+    const servers = await adapter.read(configPath);
+    return servers[name]?.env;
+  } catch {
+    return undefined;
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Handler
 // ---------------------------------------------------------------------------
 
@@ -72,6 +99,8 @@ export async function handleUpdate(
     getServer,
     addInstalledServer,
     removeInstalledServer,
+    getAdapter,
+    getConfigPath,
     scanTier1,
     computeTrustScore,
     confirm,
@@ -228,10 +257,35 @@ export async function handleUpdate(
 
     // Preserve original clients from installed server list (servers fetched once before this loop)
     const original = servers.find((s) => s.name === r.name);
+    const originalClients = original?.clients ?? [];
+
+    // Re-resolve the server entry for the new version and write it back to each
+    // client config. Without this the store record advances but the client
+    // config keeps the stale command/args — most visible for OCI/pypi servers
+    // whose image:tag or version changes between releases.
+    for (const clientId of originalClients) {
+      try {
+        const rawEntry = resolveInstallEntry(entry, clientId);
+        const existingEnv = await readExistingEnv(getAdapter, getConfigPath, clientId, r.name);
+        const newEntry: McpServerEntry = {
+          ...rawEntry,
+          ...(existingEnv && Object.keys(existingEnv).length > 0
+            ? { env: { ...rawEntry.env, ...existingEnv } }
+            : {}),
+        };
+        const adapter = getAdapter(clientId);
+        const configPath = getConfigPath(clientId);
+        await adapter.addServer(configPath, r.name, newEntry, { force: true });
+      } catch {
+        // Some clients may not support this server type, or the config may be
+        // unwritable — skip that client (store record still advances).
+      }
+    }
+
     const finalRecord: InstalledServer = {
       name: r.name,
       version: r.newVersion,
-      clients: original?.clients ?? [],
+      clients: originalClients,
       installedAt: new Date().toISOString(),
     };
 

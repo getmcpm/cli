@@ -349,6 +349,25 @@ describe("handleSetup", () => {
     ).rejects.toThrow(/keyword/i);
   });
 
+  // Fix #8: a registry outage must be distinguishable from a genuine empty
+  // result — the skip reason should say the search FAILED, not "no servers".
+  it("reports a search failure distinctly from an empty result", async () => {
+    const deps = makeDeps({
+      registrySearch: vi.fn().mockRejectedValue(new Error("ECONNREFUSED")),
+    });
+
+    const result = await handleSetup(
+      { description: "filesystem", minTrustScore: 50 },
+      deps
+    );
+    const r = result as { installed: unknown[]; skipped: Array<{ reason: string }> };
+    expect(r.installed).toHaveLength(0);
+    expect(r.skipped).toHaveLength(1);
+    expect(r.skipped[0].reason).toContain("Registry search failed");
+    expect(r.skipped[0].reason).toContain("ECONNREFUSED");
+    expect(r.skipped[0].reason).not.toContain("No servers found");
+  });
+
   it("returns restart note when servers are installed", async () => {
     const entry = makeEntry("io.github.acme/srv");
     const deps = makeDeps({
