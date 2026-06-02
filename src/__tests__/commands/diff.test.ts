@@ -280,6 +280,49 @@ servers:
     expect(row.detail).toContain("version not verifiable");
   });
 
+  // Fix #3: a SCOPED npm identifier whose pinned version in config differs from
+  // the lock must report a mismatch — guards extractInstalledVersion's
+  // lastIndexOf('@') logic (the leading scope '@' must not be treated as the
+  // version separator).
+  it("flags version mismatch for a scoped npm package (installed @scope/pkg@1.2.0 vs lock 1.3.0)", async () => {
+    const scopedLock = `
+lockfileVersion: 1
+lockedAt: "2026-04-05T10:00:00Z"
+servers:
+  io.github.test/server-a:
+    version: "1.3.0"
+    registryType: npm
+    identifier: "@scope/pkg"
+    trust:
+      score: 75
+      maxPossible: 80
+      level: safe
+      assessedAt: "2026-04-05T10:00:00Z"
+`;
+    const stackPath = await writeStackAndLock(basicStack, scopedLock);
+    const deps = makeDeps({
+      getAdapter: vi.fn().mockReturnValue(
+        makeAdapter({
+          // installed pins @scope/pkg@1.2.0 but lock says 1.3.0
+          "io.github.test/server-a": {
+            command: "npx",
+            args: ["-y", "@scope/pkg@1.2.0"],
+          },
+        })
+      ),
+    });
+
+    await handleDiff({ stackFile: stackPath, json: true }, deps);
+
+    const parsed = JSON.parse(
+      (deps.output as ReturnType<typeof vi.fn>).mock.calls[0][0]
+    ) as Array<{ name: string; status: string; detail: string }>;
+    const row = parsed.find((e) => e.name === "io.github.test/server-a")!;
+    expect(row.status).toBe("mismatch");
+    expect(row.detail).toContain("1.3.0");
+    expect(row.detail).toContain("1.2.0");
+  });
+
   it("throws when no lock file exists", async () => {
     const dir = await mkdtemp(path.join(os.tmpdir(), "mcpm-diff-nolock-"));
     const stackPath = path.join(dir, "mcpm.yaml");

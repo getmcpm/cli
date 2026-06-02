@@ -216,6 +216,10 @@ export async function handleDiff(
  * Returns null when the version cannot be determined from config (the common
  * case for npm servers installed without a pinned version) — callers MUST NOT
  * treat null as a mismatch.
+ *
+ * Note: an OCI digest pin (`<image>@sha256:<hash>`) satisfies the OCI_IDENTIFIER_RE
+ * constraint but is a content digest, not a version — it must never be read as one
+ * (see the `sha256:` guard below).
  */
 function extractInstalledVersion(
   entry: McpServerEntry,
@@ -231,6 +235,8 @@ function extractInstalledVersion(
     if (atIdx > 0) {
       const base = arg.slice(0, atIdx);
       const version = arg.slice(atIdx + 1);
+      // An OCI digest (`@sha256:…`) is not a version — never misread it as one.
+      if (version.startsWith("sha256:")) return null;
       if (base === identifier && version.length > 0) return version;
     }
   }

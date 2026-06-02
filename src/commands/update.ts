@@ -227,8 +227,11 @@ export async function handleUpdate(
     }
   }
 
-  // Track update outcomes immutably (name → { updated, trustScore })
-  const updateOutcomes = new Map<string, { updated: boolean; trustScore: TrustScore }>();
+  // Track update outcomes immutably (name → { updated, trustScore, clientErrors })
+  const updateOutcomes = new Map<
+    string,
+    { updated: boolean; trustScore: TrustScore; clientErrors: string[] }
+  >();
 
   // Perform updates
   for (const r of withUpdates) {
@@ -263,6 +266,11 @@ export async function handleUpdate(
     // client config. Without this the store record advances but the client
     // config keeps the stale command/args — most visible for OCI/pypi servers
     // whose image:tag or version changes between releases.
+    //
+    // Mirror the up.ts partial-failure pattern: collect the clients that failed
+    // so we can warn the user instead of silently leaving them on the old
+    // version. The store record still advances (best-effort write semantics).
+    const clientErrors: string[] = [];
     for (const clientId of originalClients) {
       try {
         const rawEntry = resolveInstallEntry(entry, clientId);
@@ -276,9 +284,10 @@ export async function handleUpdate(
         const adapter = getAdapter(clientId);
         const configPath = getConfigPath(clientId);
         await adapter.addServer(configPath, r.name, newEntry, { force: true });
-      } catch {
+      } catch (err) {
         // Some clients may not support this server type, or the config may be
-        // unwritable — skip that client (store record still advances).
+        // unwritable — collect the failure and warn (store record still advances).
+        clientErrors.push(`${clientId}: ${err instanceof Error ? err.message : String(err)}`);
       }
     }
 
@@ -292,11 +301,17 @@ export async function handleUpdate(
     await addInstalledServer(finalRecord);
 
     // Record outcome immutably instead of mutating the result object
-    updateOutcomes.set(r.name, { updated: true, trustScore });
+    updateOutcomes.set(r.name, { updated: true, trustScore, clientErrors });
 
     if (!isJson) {
+      // Surface partial config-write failures so a client silently left on the
+      // old version is visible to the user (mirrors the up.ts warning suffix).
+      const warning =
+        clientErrors.length > 0
+          ? chalk.yellow(` (warning: could not update ${clientErrors.join("; ")})`)
+          : "";
       output(
-        `  ${chalk.green("✓")} Updated ${chalk.white(r.name)} to ${chalk.green(r.newVersion)} [${levelColor(trustScore.level)}]`
+        `  ${chalk.green("✓")} Updated ${chalk.white(r.name)} to ${chalk.green(r.newVersion)} [${levelColor(trustScore.level)}]${warning}`
       );
     }
   }
@@ -306,6 +321,7 @@ export async function handleUpdate(
       JSON.stringify(
         results.map((r) => {
           const outcome = updateOutcomes.get(r.name);
+          const clientErrors = outcome?.clientErrors ?? [];
           return {
             name: r.name,
             oldVersion: r.oldVersion,
@@ -313,6 +329,7 @@ export async function handleUpdate(
             updated: outcome?.updated ?? r.updated,
             trustScore: outcome?.trustScore ?? r.trustScore ?? null,
             error: r.error ?? null,
+            clientErrors: clientErrors.length > 0 ? clientErrors : null,
           };
         }),
         null,
