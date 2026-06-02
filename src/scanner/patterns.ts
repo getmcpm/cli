@@ -6,6 +6,7 @@
  */
 
 import type { Finding } from "./tier1.js";
+import { normalizeForMatch } from "../guard/patterns.js";
 
 // ---------------------------------------------------------------------------
 // Arg schema shape used by detectExfilArgs
@@ -89,12 +90,15 @@ const SECRET_PATTERNS: ReadonlyArray<{ label: string; pattern: RegExp }> = [
 
 /**
  * Detect hardcoded secrets in a text string.
- * Applies NFKC normalization to defeat Unicode homoglyph evasion.
+ * Applies the guard's full normalization pipeline (NFKC + evasion-character
+ * strip + cross-script confusable fold) to defeat Unicode homoglyph evasion —
+ * e.g. an AWS key written with a Cyrillic "А" (U+0410) instead of Latin "A".
+ * Bare NFKC does not fold confusables, so such keys evaded the regexes. (#30)
  * Returns a new Finding[] (never mutates input).
  */
 export function detectSecrets(text: string): Finding[] {
   if (!text) return [];
-  text = text.normalize("NFKC");
+  text = normalizeForMatch(text);
 
   const findings: Finding[] = [];
 
@@ -189,12 +193,19 @@ function levenshtein(a: string, b: string): number {
 export function detectTyposquatting(name: string, knownNames: readonly string[]): Finding[] {
   if (!name || knownNames.length === 0) return [];
 
+  // The package namespace is case-insensitive, so compare case-folded. Otherwise
+  // a case-mixed typosquat (e.g. "Servers-Github") inflates the edit distance and
+  // evades detection, and a pure-casing difference would register as a spurious
+  // edit. Original casing is preserved in the finding message.
+  const nameLower = name.toLowerCase();
+
   const findings: Finding[] = [];
 
   for (const known of knownNames) {
-    if (name === known) continue; // Exact match — not a typosquat
+    const knownLower = known.toLowerCase();
+    if (nameLower === knownLower) continue; // Exact match (case-insensitive) — not a typosquat
 
-    const distance = levenshtein(name, known);
+    const distance = levenshtein(nameLower, knownLower);
     if (distance > 0 && distance <= 2) {
       findings.push(
         makeFinding(
@@ -245,9 +256,12 @@ export function detectExfilArgs(args: readonly ArgSchema[]): Finding[] {
   for (const arg of args) {
     const argNameLower = arg.name.toLowerCase();
 
-    // webhook_url is only suspicious when isSecret is explicitly false
+    // webhook_url is suspicious unless explicitly marked secret. isSecret is
+    // optional, so its default (undefined) means "not marked secret" and must
+    // be flagged — checking `=== false` let a webhook_url with isSecret omitted
+    // slip through entirely.
     if (/^webhook[_-]?url$/i.test(arg.name)) {
-      if (arg.isSecret === false) {
+      if (arg.isSecret !== true) {
         findings.push(
           makeFinding(
             "medium",

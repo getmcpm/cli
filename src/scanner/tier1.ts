@@ -20,9 +20,17 @@ import {
 
 export interface Finding {
   severity: "critical" | "high" | "medium" | "low";
-  type: "secrets" | "prompt-injection" | "typosquatting" | "exfil-args";
+  type: "secrets" | "prompt-injection" | "typosquatting" | "exfil-args" | "scanner-error";
   message: string;
   location: string;
+  /**
+   * Which scan bucket produced this finding. Tier-1/health-check findings are
+   * "static" (the default when omitted); tier-2 external-scanner findings are
+   * "external". The trust score deducts each finding from exactly one bucket
+   * based on this tag, so an external scanner being present no longer
+   * double-counts findings against both the static and external sub-scores.
+   */
+  source?: "static" | "external";
 }
 
 // ---------------------------------------------------------------------------

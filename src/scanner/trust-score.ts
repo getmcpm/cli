@@ -140,10 +140,19 @@ export function computeTrustScore(input: TrustScoreInput): TrustScore {
     ? 0
     : scoreRegistryMeta(input.registryMeta);
 
+  // Partition findings by source so each finding is deducted from exactly one
+  // bucket. Tier-1/health-check findings (source "static" or undefined) hit the
+  // static sub-score; tier-2 external-scanner findings (source "external") hit
+  // the external sub-score. Without this split, every finding was deducted from
+  // BOTH buckets whenever an external scanner was present — making scores
+  // artificially low precisely when the extra scanner was enabled.
+  const staticFindings = input.findings.filter((f) => f.source !== "external");
+  const externalFindings = input.findings.filter((f) => f.source === "external");
+
   const breakdown: TrustScoreBreakdown = {
     healthCheck: scoreHealthCheck(input.healthCheckPassed),
-    staticScan: scoreStaticScan(input.findings),
-    externalScan: scoreExternalScan(input.hasExternalScanner, input.findings),
+    staticScan: scoreStaticScan(staticFindings),
+    externalScan: scoreExternalScan(input.hasExternalScanner, externalFindings),
     registryMeta: registryMetaScore,
   };
 

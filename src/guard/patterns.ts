@@ -189,7 +189,13 @@ function normalizeSegment(segment: string): string {
   return foldConfusables(segment.normalize("NFKC").replace(PATTERN_BREAKERS, ""));
 }
 
-function normalizeForMatch(leaf: string): string {
+/**
+ * Exported for reuse by other detectors (e.g. the scanner's secret detection)
+ * that need the same NFKC + evasion-strip + confusable-fold pipeline. Keeping a
+ * single implementation here means cross-script homoglyph evasion is defeated
+ * consistently everywhere, not just on the guard relay path. (security #30)
+ */
+export function normalizeForMatch(leaf: string): string {
   if (leaf.length <= MATCH_SEGMENT_CAP) {
     return normalizeSegment(leaf);
   }

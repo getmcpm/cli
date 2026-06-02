@@ -51,17 +51,36 @@ describe("checkScannerAvailable", () => {
 // (callers are responsible for checking availability before calling scanTier2)
 // ---------------------------------------------------------------------------
 
-describe("scanTier2 — scan call fails gracefully", () => {
-  it("returns empty findings when the scan exec rejects (e.g. process killed)", async () => {
+describe("scanTier2 — scan call fails: surfaces a diagnostic, not a silent empty list", () => {
+  it("surfaces a low-severity scanner-error finding when the scan exec rejects (e.g. process killed)", async () => {
     const execImpl = vi.fn().mockRejectedValue(new Error("command not found"));
     const findings = await scanTier2("io.github.acme/server", { execImpl });
-    expect(findings).toEqual([]);
+    expect(findings).toHaveLength(1);
+    expect(findings[0].type).toBe("scanner-error");
+    expect(findings[0].severity).toBe("low");
+    expect(findings[0].source).toBe("external");
   });
 
-  it("returns empty findings when scan exits non-zero on first call", async () => {
+  it("surfaces a scanner-error finding when scan exits non-zero with empty output", async () => {
     const execImpl = vi.fn().mockResolvedValue({ stdout: "", exitCode: 1 });
     const findings = await scanTier2("io.github.acme/server", { execImpl });
-    expect(findings).toEqual([]);
+    expect(findings).toHaveLength(1);
+    expect(findings[0].type).toBe("scanner-error");
+    expect(findings[0].severity).toBe("low");
+    expect(findings[0].message).toMatch(/exit code 1/);
+  });
+
+  it("parses findings even when the scanner exits non-zero (issues-found exit codes)", async () => {
+    // A scanner may exit non-zero precisely because it found issues, while still
+    // emitting valid findings JSON. That must not be discarded.
+    const output = JSON.stringify({
+      findings: [{ severity: "high", description: "tool poisoning", location: "tool: x" }],
+    });
+    const execImpl = vi.fn().mockResolvedValue({ stdout: output, exitCode: 3 });
+    const findings = await scanTier2("io.github.acme/server", { execImpl });
+    expect(findings).toHaveLength(1);
+    expect(findings[0].type).toBe("prompt-injection");
+    expect(findings[0].severity).toBe("high");
   });
 });
 
@@ -125,6 +144,15 @@ describe("scanTier2 — scanner available, findings returned", () => {
       expect(f).toHaveProperty("location");
     }
   });
+
+  it("tags external-scanner findings with source: 'external'", async () => {
+    const execImpl = vi
+      .fn()
+      .mockResolvedValueOnce({ stdout: mcpScanOutput, exitCode: 0 });
+    const findings = await scanTier2("io.github.acme/bad-server", { execImpl });
+    expect(findings.length).toBeGreaterThan(0);
+    expect(findings.every((f) => f.source === "external")).toBe(true);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -172,16 +200,20 @@ describe("scanTier2 — unknown severity fails safe to high", () => {
 // scanTier2 — unparseable output (graceful degradation)
 // ---------------------------------------------------------------------------
 
-describe("scanTier2 — unparseable output", () => {
-  it("returns empty findings when output is not valid JSON", async () => {
+describe("scanTier2 — unparseable / non-clean output surfaces a diagnostic", () => {
+  it("surfaces a scanner-error finding when output is not valid JSON", async () => {
     const execImpl = vi
       .fn()
       .mockResolvedValueOnce({ stdout: "not json at all!!!", exitCode: 0 });
     const findings = await scanTier2("io.github.acme/server", { execImpl });
-    expect(findings).toEqual([]);
+    expect(findings).toHaveLength(1);
+    expect(findings[0].type).toBe("scanner-error");
+    expect(findings[0].message).toMatch(/could not be parsed/i);
   });
 
-  it("returns empty findings when output is empty string", async () => {
+  it("returns empty findings when output is empty string and exit code is 0 (ran clean)", async () => {
+    // Exit 0 + empty output is the one ambiguous case we treat as "clean" so a
+    // scanner that prints nothing on success doesn't generate a false diagnostic.
     const execImpl = vi
       .fn()
       .mockResolvedValueOnce({ stdout: "", exitCode: 0 });
@@ -189,28 +221,32 @@ describe("scanTier2 — unparseable output", () => {
     expect(findings).toEqual([]);
   });
 
-  it("returns empty findings when JSON has no findings field", async () => {
+  it("surfaces a scanner-error finding when JSON has no findings array", async () => {
     const execImpl = vi
       .fn()
       .mockResolvedValueOnce({ stdout: JSON.stringify({ results: [] }), exitCode: 0 });
     const findings = await scanTier2("io.github.acme/server", { execImpl });
-    expect(findings).toEqual([]);
+    expect(findings).toHaveLength(1);
+    expect(findings[0].type).toBe("scanner-error");
   });
 
-  it("returns empty findings when scan exits non-zero", async () => {
+  it("surfaces a scanner-error finding when scan exits non-zero with unparseable output", async () => {
     const execImpl = vi
       .fn()
       .mockResolvedValueOnce({ stdout: "error: something failed", exitCode: 2 });
     const findings = await scanTier2("io.github.acme/server", { execImpl });
-    expect(findings).toEqual([]);
+    expect(findings).toHaveLength(1);
+    expect(findings[0].type).toBe("scanner-error");
   });
 
-  it("returns empty findings when scan call itself throws", async () => {
+  it("surfaces a scanner-error finding when scan call itself throws", async () => {
     const execImpl = vi
       .fn()
       .mockRejectedValueOnce(new Error("process killed"));
     const findings = await scanTier2("io.github.acme/server", { execImpl });
-    expect(findings).toEqual([]);
+    expect(findings).toHaveLength(1);
+    expect(findings[0].type).toBe("scanner-error");
+    expect(findings[0].message).toMatch(/process killed/);
   });
 });
 
