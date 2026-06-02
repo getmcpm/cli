@@ -8,8 +8,11 @@ import {
   unwrapEntry,
   isWrapped,
   getWrappedServerName,
+  hashOriginalEntry,
   resolveMcpmBinaryPath,
   defaultWrapContext,
+  WRAP_ORIG_HASH_FLAG,
+  WRAP_DECLARED_ENV_FLAG,
   type WrapContext,
 } from "../wrap.js";
 
@@ -28,6 +31,8 @@ describe("wrapEntry", () => {
       "/abs/path/to/dist/index.js",
       "guard", "run", "--inner",
       "--server-name", "fs-mcp",
+      "--declared-env", "FOO",
+      "--orig-hash", hashOriginalEntry("npx", ["-y", "@modelcontextprotocol/server-filesystem", "/data"], ["FOO"]),
       "--",
       "npx", "-y", "@modelcontextprotocol/server-filesystem", "/data",
     ]);
@@ -40,9 +45,33 @@ describe("wrapEntry", () => {
       "/abs/path/to/dist/index.js",
       "guard", "run", "--inner",
       "--server-name", "bare",
+      "--orig-hash", hashOriginalEntry("my-server", [], []),
       "--",
       "my-server",
     ]);
+  });
+
+  test("omits --declared-env when the original entry has no env (issue #20)", () => {
+    const wrapped = wrapEntry("bare", { command: "my-server" }, ctx);
+    expect(wrapped.args).not.toContain(WRAP_DECLARED_ENV_FLAG);
+  });
+
+  test("embeds sorted declared env key names (issue #20)", () => {
+    const wrapped = wrapEntry(
+      "multi",
+      { command: "x", env: { ZED: "1", ALPHA: "2", MID: "3" } },
+      ctx,
+    );
+    const idx = wrapped.args!.indexOf(WRAP_DECLARED_ENV_FLAG);
+    expect(idx).toBeGreaterThan(-1);
+    expect(wrapped.args![idx + 1]).toBe("ALPHA,MID,ZED");
+  });
+
+  test("embeds an --orig-hash integrity marker (issue #29)", () => {
+    const wrapped = wrapEntry("h", { command: "x", args: ["a"] }, ctx);
+    const idx = wrapped.args!.indexOf(WRAP_ORIG_HASH_FLAG);
+    expect(idx).toBeGreaterThan(-1);
+    expect(wrapped.args![idx + 1]).toBe(hashOriginalEntry("x", ["a"], []));
   });
 
   test("does not include env field when original had no env", () => {
@@ -102,9 +131,56 @@ describe("isWrapped + unwrapEntry round-trip", () => {
     expect(unwrapEntry(malformed)).toBeNull();
   });
 
-  test("getWrappedServerName extracts the name", () => {
-    const wrapped = wrapEntry("my-server", { command: "x" }, { mcpmBinary: "mcpm" });
+  test("getWrappedServerName extracts the name (with marker flags present)", () => {
+    const wrapped = wrapEntry("my-server", { command: "x", env: { K: "v" } }, { mcpmBinary: "mcpm" });
     expect(getWrappedServerName(wrapped)).toBe("my-server");
+  });
+});
+
+describe("unwrapEntry integrity verification (issue #29)", () => {
+  test("refuses to unwrap when the wrapped command is tampered", () => {
+    const wrapped = wrapEntry(
+      "victim",
+      { command: "npx", args: ["-y", "@org/good"] },
+      { mcpmBinary: "mcpm" },
+    );
+    // Attacker rewrites the original command after the `--` separator.
+    const sepIdx = wrapped.args!.indexOf("--");
+    const tampered = {
+      ...wrapped,
+      args: wrapped.args!.map((a, i) => (i === sepIdx + 1 ? "rm" : a)),
+    };
+    expect(isWrapped(tampered)).toBe(true); // marker still detected
+    expect(unwrapEntry(tampered)).toBeNull(); // but hash mismatch → refuse
+  });
+
+  test("refuses to unwrap when a wrapped arg is tampered", () => {
+    const wrapped = wrapEntry(
+      "victim",
+      { command: "node", args: ["/safe/server.js"] },
+      { mcpmBinary: "mcpm" },
+    );
+    const sepIdx = wrapped.args!.indexOf("--");
+    const tampered = {
+      ...wrapped,
+      args: wrapped.args!.map((a, i) => (i === sepIdx + 2 ? "/attacker/evil.js" : a)),
+    };
+    expect(unwrapEntry(tampered)).toBeNull();
+  });
+
+  test("accepts an untampered wrap (hash matches)", () => {
+    const orig = { command: "npx", args: ["-y", "@org/x"], env: { K: "v" } };
+    const wrapped = wrapEntry("ok", orig, { mcpmBinary: "mcpm" });
+    expect(unwrapEntry(wrapped)).toEqual(orig);
+  });
+
+  test("still unwraps legacy markers that carry no --orig-hash", () => {
+    // Backward-compat: entries wrapped by an older mcpm have no hash flag.
+    const legacy = {
+      command: "mcpm",
+      args: ["guard", "run", "--inner", "--server-name", "old", "--", "npx", "-y", "x"],
+    };
+    expect(unwrapEntry(legacy)).toEqual({ command: "npx", args: ["-y", "x"] });
   });
 });
 

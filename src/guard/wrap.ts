@@ -9,7 +9,9 @@
  *
  *   { command, args, env } → {
  *     command: <absolute path to current mcpm binary>,
- *     args:    ["guard", "run", "--inner", "--server-name", <name>, "--",
+ *     args:    ["guard", "run", "--inner", "--server-name", <name>,
+ *               "--declared-env", <csv of orig.env KEY names>,
+ *               "--orig-hash", <sha256 of original entry>, "--",
  *               <orig.command>, ...<orig.args>],
  *     env:     <orig.env>   // passthrough, including OAuth tokens the user
  *                            // explicitly placed in their MCP client config
@@ -20,14 +22,30 @@
  * wrapped server in every IDE dark simultaneously. The wrap marker
  * (`guard run --inner`) lets `disable` reconstruct the original entry
  * without depending on `.bak` files (Eng review F6.5).
+ *
+ * The marker also carries two authenticated/derived fields:
+ *   - `--declared-env` (issue #20): the KEY names of the original entry's
+ *     declared `env`. run-inner uses these to forward ONLY a safe baseline
+ *     (buildSafeEnv) + the server's own declared vars to the wrapped child,
+ *     instead of the relay's entire process.env (which also holds the user's
+ *     ambient shell secrets). Without the key list, run-inner cannot tell a
+ *     declared var from an ambient one.
+ *   - `--orig-hash` (issue #29): a SHA-256 over the canonical original entry
+ *     (command + args + sorted declared env keys). `unwrapEntry` recomputes
+ *     it from the reconstructed entry and REFUSES to unwrap on mismatch, so a
+ *     tampered wrapped entry cannot steer `guard disable` into writing an
+ *     attacker command into the IDE config.
  */
 
+import { createHash } from "node:crypto";
 import { isAbsolute } from "node:path";
 import type { McpServerEntry } from "../config/adapters/index.js";
 
 export const WRAP_MARKER_ARGS = ["guard", "run", "--inner"] as const;
 export const WRAP_ARG_SEPARATOR = "--";
 export const WRAP_SERVER_NAME_FLAG = "--server-name";
+export const WRAP_DECLARED_ENV_FLAG = "--declared-env";
+export const WRAP_ORIG_HASH_FLAG = "--orig-hash";
 
 /**
  * Resolve the mcpm binary path used at wrap time. Falls back to "mcpm"
@@ -49,23 +67,61 @@ export function resolveMcpmBinaryPath(argv: readonly string[] = process.argv): s
 }
 
 /**
+ * Sorted, de-duplicated declared env KEY names from an original entry.
+ * Sorting makes the marker (and the integrity hash) deterministic regardless
+ * of object key order, so a round-trip is stable.
+ */
+function declaredEnvKeys(env: McpServerEntry["env"]): string[] {
+  if (env === undefined) return [];
+  return [...new Set(Object.keys(env))].sort();
+}
+
+/**
+ * Issue #29: canonical SHA-256 over the original entry's command, args, and
+ * declared env KEY names. Only fields reconstructable from the wrap marker are
+ * hashed (env VALUES live in the wrapped entry's `env`, not the marker, so they
+ * are out of scope here). Newline-delimited length-prefixed encoding avoids any
+ * ambiguity between, e.g., command "a b" + arg "c" vs command "a" + arg "b c".
+ */
+export function hashOriginalEntry(
+  command: string,
+  args: readonly string[],
+  envKeys: readonly string[],
+): string {
+  const parts = [
+    `cmd:${command}`,
+    `args:${args.length}`,
+    ...args.map((a, i) => `arg${i}:${a}`),
+    `env:${envKeys.length}`,
+    ...[...envKeys].sort().map((k) => `envkey:${k}`),
+  ];
+  return createHash("sha256").update(parts.join("\n")).digest("hex");
+}
+
+/**
  * Build the args array for the wrapped command. The form sandwiches the
  * relay invocation between the resolved mcpm binary and the original
  * command, with `--` separating relay args from the wrapped server's
- * original argv.
+ * original argv. The `--declared-env` (issue #20) and `--orig-hash`
+ * (issue #29) flags are placed BEFORE `--` so Commander parses them as
+ * options rather than treating them as part of the wrapped argv.
  */
 function buildWrappedArgs(
   serverName: string,
   origCommand: string,
   origArgs: readonly string[],
+  envKeys: readonly string[],
   options: { scriptPath?: string } = {},
 ): string[] {
   const out: string[] = [];
   if (options.scriptPath) out.push(options.scriptPath);
+  out.push(...WRAP_MARKER_ARGS, WRAP_SERVER_NAME_FLAG, serverName);
+  if (envKeys.length > 0) {
+    out.push(WRAP_DECLARED_ENV_FLAG, envKeys.join(","));
+  }
   out.push(
-    ...WRAP_MARKER_ARGS,
-    WRAP_SERVER_NAME_FLAG,
-    serverName,
+    WRAP_ORIG_HASH_FLAG,
+    hashOriginalEntry(origCommand, origArgs, envKeys),
     WRAP_ARG_SEPARATOR,
     origCommand,
     ...origArgs,
@@ -102,9 +158,13 @@ export function wrapEntry(
       `Server "${serverName}" has no command field; cannot wrap. Only stdio-transport servers are wrappable in v0.5.0 (HTTP-transport via 'url' is deferred to V2).`,
     );
   }
-  const args = buildWrappedArgs(serverName, entry.command, entry.args ?? [], {
-    scriptPath: ctx.scriptPath,
-  });
+  const args = buildWrappedArgs(
+    serverName,
+    entry.command,
+    entry.args ?? [],
+    declaredEnvKeys(entry.env),
+    { scriptPath: ctx.scriptPath },
+  );
   return {
     command: ctx.mcpmBinary,
     args,
@@ -138,29 +198,76 @@ function findMarkerIndex(args: readonly string[]): number {
 }
 
 /**
- * Reverse a wrap by scanning args for the marker + `--` separator and
- * pulling out the original command + args. Returns null if the entry
- * doesn't look wrapped — callers should fall back to a `.bak` restore
- * or refuse to unwrap (Eng review F6.5).
+ * Parsed view of the marker section between the WRAP_MARKER_ARGS sequence and
+ * the `--` separator: `--server-name <name> [--declared-env <csv>]
+ * [--orig-hash <hex>]`. Returns null when the section is structurally invalid.
+ */
+interface ParsedMarker {
+  readonly serverName: string;
+  readonly declaredEnvKeys: string[];
+  readonly origHash: string | null;
+  /** Index (into entry.args) of the element immediately after `--`. */
+  readonly origStartIdx: number;
+}
+
+function parseMarker(args: readonly string[]): ParsedMarker | null {
+  const markerIdx = findMarkerIndex(args);
+  if (markerIdx === -1) return null;
+  let i = markerIdx + WRAP_MARKER_ARGS.length;
+
+  // Required: --server-name <name>
+  if (args[i] !== WRAP_SERVER_NAME_FLAG) return null;
+  const serverName = args[i + 1];
+  if (serverName === undefined) return null;
+  i += 2;
+
+  let declaredEnvKeys: string[] = [];
+  let origHash: string | null = null;
+
+  // Optional named flags, in any order, until the `--` separator.
+  while (i < args.length && args[i] !== WRAP_ARG_SEPARATOR) {
+    const flag = args[i];
+    const value = args[i + 1];
+    if (flag === WRAP_DECLARED_ENV_FLAG && value !== undefined) {
+      declaredEnvKeys = value.length > 0 ? value.split(",") : [];
+      i += 2;
+    } else if (flag === WRAP_ORIG_HASH_FLAG && value !== undefined) {
+      origHash = value;
+      i += 2;
+    } else {
+      // Unknown token before the separator — marker is malformed.
+      return null;
+    }
+  }
+
+  if (args[i] !== WRAP_ARG_SEPARATOR) return null; // no separator found
+  return { serverName, declaredEnvKeys, origHash, origStartIdx: i + 1 };
+}
+
+/**
+ * Reverse a wrap by parsing the marker and pulling out the original command +
+ * args. Returns null if the entry doesn't look wrapped, the marker is
+ * malformed, or (issue #29) the embedded `--orig-hash` does not match a hash
+ * recomputed from the reconstructed entry — callers should fall back to a
+ * `.bak` restore or refuse to unwrap (Eng review F6.5).
  */
 export function unwrapEntry(entry: McpServerEntry): McpServerEntry | null {
   if (!entry.args) return null;
-  const markerIdx = findMarkerIndex(entry.args);
-  if (markerIdx === -1) return null;
+  const marker = parseMarker(entry.args);
+  if (marker === null) return null;
 
-  // After the marker: --server-name <name> -- <origCommand> [...origArgs]
-  const afterMarker = entry.args.slice(markerIdx + WRAP_MARKER_ARGS.length);
-  // Validate: --server-name <name> -- ...
-  if (
-    afterMarker.length < 4 ||
-    afterMarker[0] !== WRAP_SERVER_NAME_FLAG ||
-    afterMarker[2] !== WRAP_ARG_SEPARATOR
-  ) {
-    return null;
-  }
-  const origCommand = afterMarker[3];
+  const origCommand = entry.args[marker.origStartIdx];
   if (origCommand === undefined) return null;
-  const origArgs = afterMarker.slice(4);
+  const origArgs = entry.args.slice(marker.origStartIdx + 1);
+
+  // Issue #29: verify the integrity hash before trusting reconstructed args.
+  // A tampered marker (or a manual edit) that rewrites the wrapped command or
+  // the declared-env list will not match the embedded hash, so we refuse to
+  // write an attacker-influenced command back into the IDE config.
+  if (marker.origHash !== null) {
+    const recomputed = hashOriginalEntry(origCommand, origArgs, marker.declaredEnvKeys);
+    if (recomputed !== marker.origHash) return null;
+  }
 
   const unwrapped: McpServerEntry = { command: origCommand };
   if (origArgs.length > 0) unwrapped.args = [...origArgs];
@@ -175,9 +282,6 @@ export function unwrapEntry(entry: McpServerEntry): McpServerEntry | null {
  */
 export function getWrappedServerName(entry: McpServerEntry): string | null {
   if (!entry.args) return null;
-  const markerIdx = findMarkerIndex(entry.args);
-  if (markerIdx === -1) return null;
-  const flagIdx = markerIdx + WRAP_MARKER_ARGS.length;
-  if (entry.args[flagIdx] !== WRAP_SERVER_NAME_FLAG) return null;
-  return entry.args[flagIdx + 1] ?? null;
+  const marker = parseMarker(entry.args);
+  return marker?.serverName ?? null;
 }
