@@ -24,10 +24,6 @@ import { scoreBar, levelColor, extractRegistryMeta } from "../utils/format-trust
 import { applyKeychainSecrets, type SecretsMode, setSecrets as _setSecrets } from "../store/keychain.js";
 
 // ---------------------------------------------------------------------------
-// Identifier validation — guard against command injection
-// ---------------------------------------------------------------------------
-
-// ---------------------------------------------------------------------------
 // URL validation — guard against malicious remote URLs
 // ---------------------------------------------------------------------------
 
@@ -477,12 +473,14 @@ export async function handleInstall(
   });
 
   // -------------------------------------------------------------------------
-  // Step 7: Validate install path exists
+  // Step 7: Resolve (and thereby validate) each client's entry up front
   // -------------------------------------------------------------------------
-  // This validates before writing any config
+  // resolveInstallEntry throws on an invalid identifier, so resolving here
+  // before any config is written preserves fail-fast validation. The resolved
+  // entries are reused in Step 8 to avoid recomputing them.
+  const resolvedEntries = new Map<ClientId, McpServerEntry>();
   for (const clientId of targetClients) {
-    const entry = resolveInstallEntry(serverEntry, clientId);
-    void entry; // used in step 8 below
+    resolvedEntries.set(clientId, resolveInstallEntry(serverEntry, clientId));
   }
 
   // -------------------------------------------------------------------------
@@ -493,7 +491,7 @@ export async function handleInstall(
   for (const clientId of targetClients) {
     const adapter = getAdapter(clientId);
     const configPath = getConfigPath(clientId);
-    const rawEntry = resolveInstallEntry(serverEntry, clientId);
+    const rawEntry = resolvedEntries.get(clientId)!;
 
     // Merge env vars into the entry (immutable). In keychain mode envForConfig
     // carries placeholders in place of secret values; otherwise it === resolvedEnvVars.
