@@ -862,3 +862,172 @@ describe("RegistryClient — edge cases", () => {
     expect(entry.server.name).toBe("io.github.test/minimal");
   });
 });
+
+// ---------------------------------------------------------------------------
+// SSRF / redirect handling — security #21
+// ---------------------------------------------------------------------------
+
+/**
+ * Build a Response-like mock whose body is a real ReadableStream of `byteLen`
+ * bytes (split into chunks), optionally declaring a Content-Length header.
+ */
+function mockStreamResponse(
+  byteLen: number,
+  opts: { contentLength?: number; chunkSize?: number; jsonText?: string } = {}
+) {
+  const chunkSize = opts.chunkSize ?? 64 * 1024;
+  const payload =
+    opts.jsonText !== undefined
+      ? new TextEncoder().encode(opts.jsonText)
+      : new Uint8Array(byteLen); // zero-filled; size is what matters for the cap
+  let offset = 0;
+  const body = new ReadableStream<Uint8Array>({
+    pull(controller) {
+      if (offset >= payload.byteLength) {
+        controller.close();
+        return;
+      }
+      const end = Math.min(offset + chunkSize, payload.byteLength);
+      controller.enqueue(payload.subarray(offset, end));
+      offset = end;
+    },
+  });
+  const headers = new Map<string, string>();
+  if (opts.contentLength !== undefined) {
+    headers.set("content-length", String(opts.contentLength));
+  }
+  return vi.fn().mockResolvedValue({
+    ok: true,
+    status: 200,
+    type: "default",
+    headers: { get: (k: string) => headers.get(k.toLowerCase()) ?? null },
+    body,
+    json: vi.fn().mockRejectedValue(new Error("should read stream, not json()")),
+  });
+}
+
+describe("RegistryClient — redirect (SSRF) handling [security #21]", () => {
+  it("does NOT follow a 3xx redirect — surfaces it as an error", async () => {
+    // Under redirect:"manual", fetch returns an opaqueredirect (status 0).
+    const fetchImpl = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 0,
+      type: "opaqueredirect",
+      json: vi.fn(),
+    });
+    const client = new RegistryClient({ fetchImpl });
+
+    await expect(client.searchServers("test")).rejects.toThrow(RegistryError);
+  });
+
+  it("passes redirect:\"manual\" to fetch", async () => {
+    const fetchImpl = mockFetch(makeSearchResponse([]));
+    const client = new RegistryClient({ fetchImpl });
+
+    await client.searchServers("test");
+
+    const init = fetchImpl.mock.calls[0][1] as RequestInit;
+    expect(init.redirect).toBe("manual");
+  });
+
+  it("rejects an explicit 302 status (runtime that exposes 3xx)", async () => {
+    const fetchImpl = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 302,
+      type: "default",
+      json: vi.fn(),
+    });
+    const client = new RegistryClient({ fetchImpl });
+
+    await expect(client.searchServers("test")).rejects.toThrow(RegistryError);
+  });
+});
+
+describe("RegistryClient — response body cap [security #21]", () => {
+  it("rejects when Content-Length exceeds the cap (before reading body)", async () => {
+    const fetchImpl = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      type: "default",
+      headers: { get: (k: string) => (k.toLowerCase() === "content-length" ? "20971520" : null) },
+      // body that would throw if read — proves we reject on the header first
+      body: { getReader: () => { throw new Error("body should not be read"); } },
+      json: vi.fn(),
+    });
+    const client = new RegistryClient({ fetchImpl });
+
+    await expect(client.searchServers("test")).rejects.toThrow(ValidationError);
+  });
+
+  it("rejects an oversized streamed body even without Content-Length", async () => {
+    // 11 MB stream, no declared length → must be caught by the running cap.
+    const fetchImpl = mockStreamResponse(11 * 1024 * 1024);
+    const client = new RegistryClient({ fetchImpl });
+
+    await expect(client.searchServers("test")).rejects.toThrow(ValidationError);
+  });
+
+  it("reads a small streamed body and parses it", async () => {
+    const json = JSON.stringify(makeSearchResponse([makeServerEntry()]));
+    const fetchImpl = mockStreamResponse(json.length, {
+      jsonText: json,
+      contentLength: json.length,
+    });
+    const client = new RegistryClient({ fetchImpl });
+
+    const result = await client.searchServers("test");
+    expect(result.servers).toHaveLength(1);
+  });
+});
+
+describe("RegistryClient — baseUrl validation (SSRF) [security #21]", () => {
+  it("rejects an http (non-https) base URL", () => {
+    expect(() => new RegistryClient({ baseUrl: "http://registry.example.com" })).toThrow(
+      RegistryError
+    );
+  });
+
+  it("rejects a loopback host", () => {
+    expect(() => new RegistryClient({ baseUrl: "https://localhost:8080" })).toThrow(
+      RegistryError
+    );
+  });
+
+  it("rejects the cloud metadata IP (169.254.169.254)", () => {
+    expect(() => new RegistryClient({ baseUrl: "https://169.254.169.254" })).toThrow(
+      RegistryError
+    );
+  });
+
+  it("rejects a private 10.x host", () => {
+    expect(() => new RegistryClient({ baseUrl: "https://10.0.0.5" })).toThrow(
+      RegistryError
+    );
+  });
+
+  it("rejects an IPv4-mapped IPv6 loopback", () => {
+    expect(
+      () => new RegistryClient({ baseUrl: "https://[::ffff:127.0.0.1]" })
+    ).toThrow(RegistryError);
+  });
+
+  it("rejects a base URL with embedded credentials", () => {
+    expect(
+      () => new RegistryClient({ baseUrl: "https://user:pass@registry.example.com" })
+    ).toThrow(RegistryError);
+  });
+
+  it("rejects a malformed base URL", () => {
+    expect(() => new RegistryClient({ baseUrl: "not a url" })).toThrow(RegistryError);
+  });
+
+  it("accepts a public https base URL", () => {
+    expect(
+      () => new RegistryClient({ baseUrl: "https://registry.example.com" })
+    ).not.toThrow();
+  });
+
+  it("accepts the default base URL", () => {
+    expect(() => new RegistryClient()).not.toThrow();
+  });
+});
