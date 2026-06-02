@@ -40,7 +40,7 @@ export function validateRegistryUrl(registryUrl: string): void {
   }
 }
 
-function isPrivateHost(hostname: string): boolean {
+export function isPrivateHost(hostname: string): boolean {
   const h = hostname.toLowerCase().replace(/^\[|\]$/g, ""); // strip IPv6 brackets
   if (h === "localhost" || h.endsWith(".localhost")) return true;
   if (h === "::1" || h === "::" || h === "0.0.0.0" || h === "") return true;

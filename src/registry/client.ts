@@ -21,9 +21,50 @@ import {
   RegistryError,
   ValidationError,
 } from "./errors.js";
+import { isPrivateHost } from "./publish-client.js";
 
 const DEFAULT_BASE_URL = "https://registry.modelcontextprotocol.io";
 const DEFAULT_TIMEOUT_MS = 10_000;
+
+/**
+ * Cap on response body size before parsing. A hostile (or 30x-redirected) host
+ * can return a small compressed payload that decompresses to GBs (decompression
+ * bomb → OOM). We refuse bodies larger than this. (security #21)
+ */
+const MAX_RESPONSE_BYTES = 10 * 1024 * 1024; // 10 MB
+
+/**
+ * Validate a registry base URL before any request is made. `baseUrl` is fully
+ * caller-overridable, so an attacker-chosen value must not let us talk to an
+ * internal address (SSRF). Requires https and rejects loopback/private hosts —
+ * mirrors validateRegistryUrl in publish-client.ts. (security #21)
+ */
+function validateBaseUrl(baseUrl: string): void {
+  let parsed: URL;
+  try {
+    parsed = new URL(baseUrl);
+  } catch {
+    throw new RegistryError(`Invalid registry base URL: "${baseUrl}"`, 0);
+  }
+  if (parsed.protocol !== "https:") {
+    throw new RegistryError(
+      `Registry base URL must use https (got "${baseUrl}").`,
+      0
+    );
+  }
+  if (parsed.username !== "" || parsed.password !== "") {
+    throw new RegistryError(
+      "Registry base URL must not contain embedded credentials.",
+      0
+    );
+  }
+  if (isPrivateHost(parsed.hostname)) {
+    throw new RegistryError(
+      `Refusing to use non-public registry host "${parsed.hostname}".`,
+      0
+    );
+  }
+}
 
 export interface RegistryClientOptions {
   baseUrl?: string;
@@ -47,9 +88,11 @@ export class RegistryClient {
   private readonly timeout: number;
 
   constructor(options: RegistryClientOptions = {}) {
-    this.baseUrl = stripTrailingSlash(
-      options.baseUrl ?? DEFAULT_BASE_URL
-    );
+    const baseUrl = stripTrailingSlash(options.baseUrl ?? DEFAULT_BASE_URL);
+    // Validate the (possibly caller-supplied) base URL up front: https-only,
+    // no embedded creds, no loopback/private hosts (SSRF). (security #21)
+    validateBaseUrl(baseUrl);
+    this.baseUrl = baseUrl;
     this.fetchImpl = options.fetchImpl ?? fetch;
     this.timeout = options.timeout ?? DEFAULT_TIMEOUT_MS;
   }
@@ -148,7 +191,13 @@ export class RegistryClient {
 
     let response: Response;
     try {
-      response = await this.fetchImpl(url, { signal: controller.signal });
+      // redirect:"manual" — never silently follow a 3xx to an attacker-chosen
+      // (possibly internal) host. A redirect surfaces as an opaqueredirect /
+      // status-0 response and is rejected below. (security #21)
+      response = await this.fetchImpl(url, {
+        redirect: "manual",
+        signal: controller.signal,
+      });
     } catch (err) {
       throw new NetworkError(
         `Network request failed: ${url}`,
@@ -156,6 +205,19 @@ export class RegistryClient {
       );
     } finally {
       clearTimeout(timerId);
+    }
+
+    // A 3xx surfaces as an opaqueredirect (status 0) under redirect:"manual",
+    // or as a 3xx status if the runtime exposes it. Treat both as an error —
+    // we do not follow cross-origin redirects. (security #21)
+    if (
+      response.type === "opaqueredirect" ||
+      (response.status >= 300 && response.status < 400)
+    ) {
+      throw new RegistryError(
+        `Registry returned a redirect (${response.status}) for ${url}; refusing to follow it.`,
+        response.status
+      );
     }
 
     if (!response.ok) {
@@ -168,16 +230,96 @@ export class RegistryClient {
       );
     }
 
-    let body: unknown;
+    return this.readCappedBody(url, response);
+  }
+
+  /**
+   * Read and JSON-parse a response body with a hard byte cap, so a hostile host
+   * cannot OOM us with an unbounded (or decompression-bomb) body. It:
+   *   1. Rejects early if a declared Content-Length exceeds the cap.
+   *   2. If a readable stream is present, reads it chunk-by-chunk and aborts
+   *      once MAX_RESPONSE_BYTES is exceeded — before fully decompressing.
+   *   3. Otherwise falls back to response.json() (e.g. non-stream Responses).
+   * (security #21)
+   */
+  private async readCappedBody(
+    url: string,
+    response: Response
+  ): Promise<unknown> {
+    const declared = response.headers?.get?.("content-length");
+    if (declared !== null && declared !== undefined) {
+      const len = Number(declared);
+      if (Number.isFinite(len) && len > MAX_RESPONSE_BYTES) {
+        throw new ValidationError(
+          `Registry response from ${url} too large (${len} bytes > ${MAX_RESPONSE_BYTES} cap).`
+        );
+      }
+    }
+
+    const body = response.body;
+    if (body && typeof body.getReader === "function") {
+      const text = await readCappedStream(url, body);
+      try {
+        return JSON.parse(text);
+      } catch (err) {
+        throw new ValidationError(
+          `Failed to parse JSON response from ${url}`,
+          err
+        );
+      }
+    }
+
+    // No readable stream (e.g. injected mock / non-stream Response). The
+    // Content-Length guard above is our cap here.
     try {
-      body = await response.json();
+      return await response.json();
     } catch (err) {
       throw new ValidationError(
         `Failed to parse JSON response from ${url}`,
         err
       );
     }
-
-    return body;
   }
+}
+
+/**
+ * Read a ReadableStream as UTF-8 text, throwing once the running total exceeds
+ * MAX_RESPONSE_BYTES — without buffering the whole (possibly bomb) body first.
+ */
+async function readCappedStream(
+  url: string,
+  body: ReadableStream<Uint8Array>
+): Promise<string> {
+  const reader = body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (value) {
+        total += value.byteLength;
+        if (total > MAX_RESPONSE_BYTES) {
+          throw new ValidationError(
+            `Registry response from ${url} exceeded ${MAX_RESPONSE_BYTES} byte cap.`
+          );
+        }
+        chunks.push(value);
+      }
+    }
+  } finally {
+    // Best-effort: release the stream even on the cap-exceeded path.
+    await reader.cancel().catch(() => {});
+  }
+  return new TextDecoder().decode(concatChunks(chunks, total));
+}
+
+function concatChunks(chunks: Uint8Array[], total: number): Uint8Array {
+  const out = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    out.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return out;
 }
