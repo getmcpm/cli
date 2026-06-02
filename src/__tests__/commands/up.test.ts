@@ -312,6 +312,21 @@ servers:
     );
   });
 
+  // Issue #22: the MCP mcpm_up surface wires `confirm: async () => false` so it
+  // never auto-confirms destructive actions on the no-human-in-loop path. This
+  // proves that a refusing confirm callback declines strict-mode removals.
+  it("does NOT remove extra servers when confirm refuses (non-CI strict)", async () => {
+    const stackPath = await writeStackAndLock(basicStack, basicLock);
+    const adapter = makeAdapter({ "extra-server": { command: "npx", args: ["-y", "extra"] } });
+    const deps = makeDeps({
+      getAdapter: vi.fn().mockReturnValue(adapter),
+      confirm: vi.fn().mockResolvedValue(false),
+    });
+
+    await handleUp({ stackFile: stackPath, strict: true }, deps);
+    expect(adapter.removeServer).not.toHaveBeenCalled();
+  });
+
   it("continues when one server fails and reports all errors", async () => {
     const twoServers = `
 version: "1"

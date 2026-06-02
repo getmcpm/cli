@@ -128,6 +128,47 @@ describe("scanTier2 — scanner available, findings returned", () => {
 });
 
 // ---------------------------------------------------------------------------
+// scanTier2 — severity normalisation fails safe (issue #24)
+// ---------------------------------------------------------------------------
+
+describe("scanTier2 — unknown severity fails safe to high", () => {
+  it("maps an unknown/novel severity string to 'high', not a non-blocking level", async () => {
+    const output = JSON.stringify({
+      findings: [
+        { severity: "catastrophic", description: "novel scanner category", location: "tool: x" },
+      ],
+    });
+    const execImpl = vi.fn().mockResolvedValueOnce({ stdout: output, exitCode: 0 });
+    const findings = await scanTier2("io.github.acme/server", { execImpl });
+    expect(findings).toHaveLength(1);
+    // Pre-fix this was "medium" (non-blocking); fail-safe maps it to "high".
+    expect(findings[0].severity).toBe("high");
+  });
+
+  it("maps a missing severity to 'high'", async () => {
+    const output = JSON.stringify({
+      findings: [{ description: "no severity field", location: "tool: y" }],
+    });
+    const execImpl = vi.fn().mockResolvedValueOnce({ stdout: output, exitCode: 0 });
+    const findings = await scanTier2("io.github.acme/server", { execImpl });
+    expect(findings[0].severity).toBe("high");
+  });
+
+  it("still maps known severities correctly", async () => {
+    const output = JSON.stringify({
+      findings: [
+        { severity: "LOW", description: "minor", location: "tool: z" },
+        { severity: "Critical", description: "bad", location: "tool: w" },
+      ],
+    });
+    const execImpl = vi.fn().mockResolvedValueOnce({ stdout: output, exitCode: 0 });
+    const findings = await scanTier2("io.github.acme/server", { execImpl });
+    expect(findings[0].severity).toBe("low");
+    expect(findings[1].severity).toBe("critical");
+  });
+});
+
+// ---------------------------------------------------------------------------
 // scanTier2 — unparseable output (graceful degradation)
 // ---------------------------------------------------------------------------
 

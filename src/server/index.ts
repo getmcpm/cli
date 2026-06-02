@@ -67,7 +67,9 @@ export async function startServer(): Promise<void> {
 
   const server = new McpServer({
     name: "mcpm",
-    version: "0.1.0",
+    // Issue #22: advertise the real package version (injected by tsup at build),
+    // not a hardcoded stale "0.1.0".
+    version: __PKG_VERSION__,
   });
 
   // Register tools using registerTool API

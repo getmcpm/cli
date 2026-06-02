@@ -29,8 +29,10 @@ export const PublishErrors = {
     );
   },
 
-  /** Pass only critical/high findings — callers pre-filter. */
-  trustGateBlocked(findings: Array<{ severity: "critical" | "high"; message: string }>): PublishError {
+  /** Pass blocking findings — callers pre-filter. Includes exfil-arg mediums (issue #24). */
+  trustGateBlocked(
+    findings: Array<{ severity: "critical" | "high" | "medium" | "low"; message: string }>
+  ): PublishError {
     const list = findings
       .map((f) => `    [${f.severity.toUpperCase()}] ${stripAnsi(f.message)}`)
       .join("\n");
@@ -38,7 +40,7 @@ export const PublishErrors = {
       "TRUST_GATE_BLOCKED",
       [
         "mcpm publish: Security findings block submission.",
-        "  Cause: The server has critical or high severity findings.",
+        "  Cause: The server has critical/high findings, or data-exfiltration-shaped arguments.",
         "  Fix:   Resolve the findings below, then re-run 'mcpm publish check':",
         list,
       ].join("\n")

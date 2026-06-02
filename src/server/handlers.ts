@@ -126,6 +126,22 @@ export async function handleSearch(
 /** Default minimum trust score for MCP server tool installs (no human in the loop). */
 const DEFAULT_MIN_TRUST_SCORE = 50;
 
+/**
+ * Hard, non-overridable trust floor for the MCP server surface (issue #24).
+ *
+ * The MCP `minTrustScore` input accepts `0`, which a prompt-injected agent could
+ * pass to disable the install gate entirely. We clamp the effective threshold to
+ * `Math.max(userValue, HARD_TRUST_FLOOR)` so no caller-supplied value can lower
+ * the gate below this floor. This protects the no-human-in-loop path; the CLI
+ * (with a human confirmation prompt) is the only place to install below it.
+ */
+const HARD_TRUST_FLOOR = 25;
+
+/** Clamp a requested minimum trust score so it can never sink below the floor. */
+function effectiveMinTrustScore(requested: number | undefined): number {
+  return Math.max(requested ?? DEFAULT_MIN_TRUST_SCORE, HARD_TRUST_FLOOR);
+}
+
 export async function handleInstall(
   args: { name: string; client?: string; minTrustScore?: number },
   deps: ServerDeps,
@@ -139,8 +155,9 @@ export async function handleInstall(
   // Unlike the CLI path which has a human confirmation prompt, the MCP server
   // path is driven by AI agents with no human in the loop. A malicious prompt
   // could trick an agent into installing a dangerous server, so we enforce a
-  // hard trust floor here.
-  const minScore = args.minTrustScore ?? DEFAULT_MIN_TRUST_SCORE;
+  // hard trust floor here. Issue #24: minTrustScore:0 must NOT disable the gate —
+  // the effective threshold is clamped to HARD_TRUST_FLOOR.
+  const minScore = effectiveMinTrustScore(args.minTrustScore);
   if (trust.score < minScore) {
     throw new Error(
       `Server "${args.name}" has trust score ${trust.score}/${trust.maxPossible} ` +
@@ -300,6 +317,10 @@ export async function handleSetup(
   }
   const keywords = extractKeywords(args.description);
 
+  // Issue #24: clamp to the hard floor so minTrustScore:0 can't disable the gate
+  // on the no-human-in-loop setup path either.
+  const minScore = effectiveMinTrustScore(args.minTrustScore);
+
   const installed: Array<{ name: string; trustScore: TrustScore }> = [];
   const skipped: Array<{ name: string; reason: string }> = [];
 
@@ -337,10 +358,10 @@ export async function handleSetup(
       continue;
     }
 
-    if (bestTrust.score < args.minTrustScore) {
+    if (bestTrust.score < minScore) {
       skipped.push({
         name: bestEntry.server.name,
-        reason: `Trust score ${bestTrust.score}/${bestTrust.maxPossible} is below minimum ${args.minTrustScore}`,
+        reason: `Trust score ${bestTrust.score}/${bestTrust.maxPossible} is below minimum ${minScore}`,
       });
       continue;
     }
@@ -438,7 +459,13 @@ export async function handleMcpUp(
             }
           );
         },
-        confirm: async () => true,
+        // Issue #22: never auto-confirm on the MCP (no-human-in-loop) surface.
+        // The previous `async () => true` blanket-approved every confirmation,
+        // including strict-mode *removals* of servers not in mcpm.yaml — a
+        // prompt-injected agent could silently mutate client configs. Refusing
+        // confirmation here means destructive prompts are declined; the trust
+        // policy still gates installs via checkTrustPolicy in handleUp.
+        confirm: async () => false,
         promptEnvVar: async () => "",
         output: (text) => outputLines.push(text),
       }

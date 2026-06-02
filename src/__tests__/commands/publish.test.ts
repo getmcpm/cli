@@ -83,6 +83,60 @@ describe("handlePublishCheck", () => {
 });
 
 // ---------------------------------------------------------------------------
+// Tests: assertTrustGate — medium / exfil-arg blocking (issue #24)
+// ---------------------------------------------------------------------------
+
+describe("assertTrustGate — medium-severity blind spot (issue #24)", () => {
+  async function gate(findings: Finding[]): Promise<void> {
+    const { assertTrustGate } = await import("../../commands/publish/check.js");
+    assertTrustGate(findings);
+  }
+
+  function exfilArg(name: string): Finding {
+    return {
+      type: "exfil-args",
+      severity: "medium",
+      message: `Argument "${name}" resembles an exfiltration destination parameter`,
+      location: `argument: ${name}`,
+    };
+  }
+
+  it("blocks on a single exfil-arg medium finding (pre-fix: passed)", async () => {
+    await expect(gate([exfilArg("webhook")])).rejects.toThrow(/block|exfil/i);
+  });
+
+  it("blocks when multiple exfil-arg findings are present", async () => {
+    await expect(
+      gate([exfilArg("url"), exfilArg("endpoint"), exfilArg("send_to")])
+    ).rejects.toThrow(/block/i);
+  });
+
+  it("blocks on 3+ medium findings even when none are exfil-args", async () => {
+    const med = (i: number): Finding => ({
+      type: "secrets",
+      severity: "medium",
+      message: `medium finding ${i}`,
+      location: `loc ${i}`,
+    });
+    await expect(gate([med(1), med(2), med(3)])).rejects.toThrow(/block/i);
+  });
+
+  it("does not block on a single non-exfil medium finding", async () => {
+    const med: Finding = {
+      type: "secrets",
+      severity: "medium",
+      message: "one medium",
+      location: "loc",
+    };
+    await expect(gate([med])).resolves.toBeUndefined();
+  });
+
+  it("does not block on clean findings", async () => {
+    await expect(gate([])).resolves.toBeUndefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Tests: handlePublishSubmit
 // ---------------------------------------------------------------------------
 

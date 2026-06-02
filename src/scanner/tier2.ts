@@ -94,7 +94,11 @@ const SEVERITY_MAP: Record<string, Finding["severity"]> = {
 };
 
 function normaliseSeverity(raw: string | undefined): Finding["severity"] {
-  return SEVERITY_MAP[raw?.toLowerCase() ?? ""] ?? "medium";
+  // Issue #24: fail safe. An unknown/novel severity from the external scanner
+  // (e.g. a new critical category) must NOT be silently downgraded to a
+  // non-blocking level. Map anything unrecognised to "high" so the trust gate
+  // treats it as blocking rather than letting it pass.
+  return SEVERITY_MAP[raw?.toLowerCase() ?? ""] ?? "high";
 }
 
 // ---------------------------------------------------------------------------
