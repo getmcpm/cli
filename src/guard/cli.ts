@@ -258,9 +258,12 @@ export async function runCleanupCommand(opts: CleanupOpts): Promise<void> {
 
   // Collect the union of server names seen across detected client configs.
   // Anything pinned that doesn't appear here is an orphan pin entry.
+  // #28: compare RAW names — pins.json is keyed by the raw server name, so
+  // sanitizing here would mismatch every pin key and wrongly flag live pins as
+  // orphans (or miss real orphans). sanitize() is for terminal display only.
   const installedServerNames = new Set<string>();
   for (const c of status.clients) {
-    for (const s of c.servers) installedServerNames.add(sanitize(s.name));
+    for (const s of c.servers) installedServerNames.add(s.name);
   }
 
   const { readPins, writePins, clearServerPins } = await import("./pins.js");
@@ -284,7 +287,7 @@ export async function runCleanupCommand(opts: CleanupOpts): Promise<void> {
   }
 
   opts.write(`mcpm guard cleanup: ${orphanPinned.length} orphan pin entr${orphanPinned.length === 1 ? "y" : "ies"} found:\n`);
-  for (const s of orphanPinned) opts.write(`  - ${s}\n`);
+  for (const s of orphanPinned) opts.write(`  - ${sanitize(s)}\n`);
 
   if (!opts.apply) {
     opts.write("\nDry run. Re-run with --yes to prune.\n");
