@@ -11,15 +11,19 @@ vi.mock("fs/promises", () => ({
   writeFile: vi.fn(),
   rename: vi.fn(),
   mkdir: vi.fn(),
+  lstat: vi.fn(),
+  unlink: vi.fn(),
 }));
 
-import { readFile, writeFile, rename } from "fs/promises";
+import { readFile, writeFile, rename, lstat, unlink } from "fs/promises";
 import { WindsurfAdapter } from "../../../config/adapters/windsurf.js";
 import type { McpServerEntry } from "../../../config/adapters/index.js";
 
 const mockReadFile = readFile as ReturnType<typeof vi.fn>;
 const mockWriteFile = writeFile as ReturnType<typeof vi.fn>;
 const mockRename = rename as ReturnType<typeof vi.fn>;
+const mockLstat = lstat as ReturnType<typeof vi.fn>;
+const mockUnlink = unlink as ReturnType<typeof vi.fn>;
 
 const CONFIG_PATH = "/fake/.codeium/windsurf/mcp_config.json";
 
@@ -34,6 +38,8 @@ describe("WindsurfAdapter", () => {
     vi.resetAllMocks();
     mockWriteFile.mockResolvedValue(undefined);
     mockRename.mockResolvedValue(undefined);
+    mockLstat.mockResolvedValue({ isSymbolicLink: () => false });
+    mockUnlink.mockResolvedValue(undefined);
   });
 
   it("has clientId = windsurf", () => {
