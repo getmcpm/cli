@@ -30,12 +30,15 @@ function makeInput(overrides: Partial<TrustScoreInput> = {}): TrustScoreInput {
   };
 }
 
-function makeFindings(specs: Array<{ severity: Finding["severity"]; type?: Finding["type"] }>): Finding[] {
-  return specs.map(({ severity, type = "secrets" }, i) => ({
+function makeFindings(
+  specs: Array<{ severity: Finding["severity"]; type?: Finding["type"]; source?: Finding["source"] }>,
+): Finding[] {
+  return specs.map(({ severity, type = "secrets", source }, i) => ({
     severity,
     type,
     message: `Finding ${i}`,
     location: "test location",
+    ...(source ? { source } : {}),
   }));
 }
 
@@ -147,19 +150,97 @@ describe("computeTrustScore — externalScan component", () => {
     expect(result.breakdown.externalScan).toBe(20);
   });
 
-  it("deducts 20 per critical finding from external scan total", () => {
-    const findings = makeFindings([{ severity: "critical" }]);
+  it("deducts 20 per external-sourced critical finding from external scan total", () => {
+    const findings = makeFindings([{ severity: "critical", source: "external" }]);
     const result = computeTrustScore(makeInput({ hasExternalScanner: true, findings }));
     expect(result.breakdown.externalScan).toBe(0);
   });
 
   it("floors at 0 for external scan component", () => {
     const findings = makeFindings([
-      { severity: "critical" },
-      { severity: "critical" },
+      { severity: "critical", source: "external" },
+      { severity: "critical", source: "external" },
     ]);
     const result = computeTrustScore(makeInput({ hasExternalScanner: true, findings }));
     expect(result.breakdown.externalScan).toBe(0);
+  });
+
+  it("does NOT deduct static-sourced findings from the external scan total", () => {
+    // A tier-1 (static / untagged) finding must hit only the static bucket,
+    // never the external one — this is the double-count regression guard.
+    const findings = makeFindings([{ severity: "critical" }]); // no source → static
+    const result = computeTrustScore(makeInput({ hasExternalScanner: true, findings }));
+    expect(result.breakdown.externalScan).toBe(20); // untouched
+    expect(result.breakdown.staticScan).toBe(20);   // deducted once, here only
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Source partitioning — no double counting (regression for the 2x-deduct bug)
+// ---------------------------------------------------------------------------
+
+describe("computeTrustScore — finding source partitioning", () => {
+  it("deducts a static finding from staticScan only, even with external scanner present", () => {
+    const findings = makeFindings([{ severity: "critical", source: "static" }]);
+    const result = computeTrustScore(makeInput({ hasExternalScanner: true, findings }));
+    expect(result.breakdown.staticScan).toBe(20);   // 40 - 20
+    expect(result.breakdown.externalScan).toBe(20); // full, not double-deducted
+  });
+
+  it("deducts an external finding from externalScan only", () => {
+    const findings = makeFindings([{ severity: "critical", source: "external" }]);
+    const result = computeTrustScore(makeInput({ hasExternalScanner: true, findings }));
+    expect(result.breakdown.staticScan).toBe(40);   // untouched
+    expect(result.breakdown.externalScan).toBe(0);  // 20 - 20
+  });
+
+  it("treats undefined source as static (default)", () => {
+    const findings = makeFindings([{ severity: "high" }]); // undefined source
+    const result = computeTrustScore(makeInput({ hasExternalScanner: true, findings }));
+    expect(result.breakdown.staticScan).toBe(30);   // 40 - 10
+    expect(result.breakdown.externalScan).toBe(20); // untouched
+  });
+
+  it("a mixed batch deducts each finding from exactly one bucket", () => {
+    const findings = makeFindings([
+      { severity: "critical", source: "static" },   // static: -20 → 20
+      { severity: "high", source: "external" },     // external: -10 → 10
+    ]);
+    const result = computeTrustScore(makeInput({ hasExternalScanner: true, findings }));
+    expect(result.breakdown.staticScan).toBe(20);
+    expect(result.breakdown.externalScan).toBe(10);
+  });
+
+  it("registryMeta cap still considers findings from BOTH buckets", () => {
+    const oldDate = new Date(Date.now() - 60 * 24 * 60 * 60 * 1000).toISOString();
+    const meta = { isVerifiedPublisher: true, publishedAt: oldDate, downloadCount: 500 };
+
+    // Only an external critical present → registryMeta must still be capped to 0.
+    const externalOnly = computeTrustScore(makeInput({
+      hasExternalScanner: true,
+      findings: makeFindings([{ severity: "critical", source: "external" }]),
+      registryMeta: meta,
+    }));
+    expect(externalOnly.breakdown.registryMeta).toBe(0);
+
+    // Only a static critical present → also capped to 0.
+    const staticOnly = computeTrustScore(makeInput({
+      hasExternalScanner: true,
+      findings: makeFindings([{ severity: "critical", source: "static" }]),
+      registryMeta: meta,
+    }));
+    expect(staticOnly.breakdown.registryMeta).toBe(0);
+  });
+
+  // Edge case: an "external"-tagged finding present when no external scanner ran.
+  // The external sub-score is hard-zeroed without a scanner, so the orphan must
+  // fall back into the static bucket and still deduct — never be silently dropped
+  // from all scoring.
+  it("routes an external-tagged finding into the static bucket when no external scanner ran", () => {
+    const findings = makeFindings([{ severity: "high", source: "external" }]);
+    const result = computeTrustScore(makeInput({ hasExternalScanner: false, findings }));
+    expect(result.breakdown.externalScan).toBe(0); // no scanner → always 0
+    expect(result.breakdown.staticScan).toBe(30);  // 40 - 10, the finding still deducts
   });
 });
 

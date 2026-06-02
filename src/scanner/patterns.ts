@@ -6,6 +6,7 @@
  */
 
 import type { Finding } from "./tier1.js";
+import { normalizeForMatch } from "../guard/patterns.js";
 
 // ---------------------------------------------------------------------------
 // Arg schema shape used by detectExfilArgs
@@ -89,12 +90,15 @@ const SECRET_PATTERNS: ReadonlyArray<{ label: string; pattern: RegExp }> = [
 
 /**
  * Detect hardcoded secrets in a text string.
- * Applies NFKC normalization to defeat Unicode homoglyph evasion.
+ * Applies the guard's full normalization pipeline (NFKC + evasion-character
+ * strip + cross-script confusable fold) to defeat Unicode homoglyph evasion —
+ * e.g. an AWS key written with a Cyrillic "А" (U+0410) instead of Latin "A".
+ * Bare NFKC does not fold confusables, so such keys evaded the regexes. (#30)
  * Returns a new Finding[] (never mutates input).
  */
 export function detectSecrets(text: string): Finding[] {
   if (!text) return [];
-  text = text.normalize("NFKC");
+  text = normalizeForMatch(text);
 
   const findings: Finding[] = [];
 
@@ -132,19 +136,32 @@ const PROMPT_INJECTION_PATTERNS: ReadonlyArray<{ label: string; pattern: RegExp;
   { label: "exfiltration URL destination", pattern: /to\s+https?:\/\/[^\s]+(?:collect|steal|exfil|harvest)/i, severity: "critical" },
 ];
 
+// The zero-width / invisible-character signature is the one pattern that must
+// run against the RAW text: normalizeForMatch() strips exactly these characters
+// (its PATTERN_BREAKERS class), so matching it post-normalization would always
+// miss. Every other signature runs against the folded text so a cross-script
+// homoglyph (e.g. Cyrillic "о" U+043E in "ignоre previous instructions") can no
+// longer slip past the ASCII-anchored regexes. (security #30)
+const ZERO_WIDTH_LABEL = "zero-width characters (obfuscation)";
+
 /**
  * Detect prompt injection and exfiltration patterns in a text string.
- * Applies NFKC normalization to defeat Unicode homoglyph evasion.
+ * Applies the guard's full normalization pipeline (NFKC + evasion-character
+ * strip + cross-script confusable fold) so a homoglyph-obfuscated injection
+ * phrase is caught. The zero-width-character signature is exempt: it is matched
+ * against the raw text because normalization deliberately strips the very
+ * characters it looks for.
  * Returns a new Finding[] (never mutates input).
  */
 export function detectPromptInjection(text: string): Finding[] {
   if (!text) return [];
-  text = text.normalize("NFKC");
+  const normalized = normalizeForMatch(text);
 
   const findings: Finding[] = [];
 
   for (const { label, pattern, severity } of PROMPT_INJECTION_PATTERNS) {
-    if (pattern.test(text)) {
+    const haystack = label === ZERO_WIDTH_LABEL ? text : normalized;
+    if (pattern.test(haystack)) {
       findings.push(
         makeFinding(severity, "prompt-injection", `Potential prompt injection detected: ${label}`, "tool description"),
       );
@@ -189,12 +206,19 @@ function levenshtein(a: string, b: string): number {
 export function detectTyposquatting(name: string, knownNames: readonly string[]): Finding[] {
   if (!name || knownNames.length === 0) return [];
 
+  // The package namespace is case-insensitive, so compare case-folded. Otherwise
+  // a case-mixed typosquat (e.g. "Servers-Github") inflates the edit distance and
+  // evades detection, and a pure-casing difference would register as a spurious
+  // edit. Original casing is preserved in the finding message.
+  const nameLower = name.toLowerCase();
+
   const findings: Finding[] = [];
 
   for (const known of knownNames) {
-    if (name === known) continue; // Exact match — not a typosquat
+    const knownLower = known.toLowerCase();
+    if (nameLower === knownLower) continue; // Exact match (case-insensitive) — not a typosquat
 
-    const distance = levenshtein(name, known);
+    const distance = levenshtein(nameLower, knownLower);
     if (distance > 0 && distance <= 2) {
       findings.push(
         makeFinding(
@@ -245,9 +269,12 @@ export function detectExfilArgs(args: readonly ArgSchema[]): Finding[] {
   for (const arg of args) {
     const argNameLower = arg.name.toLowerCase();
 
-    // webhook_url is only suspicious when isSecret is explicitly false
+    // webhook_url is suspicious unless explicitly marked secret. isSecret is
+    // optional, so its default (undefined) means "not marked secret" and must
+    // be flagged — checking `=== false` let a webhook_url with isSecret omitted
+    // slip through entirely.
     if (/^webhook[_-]?url$/i.test(arg.name)) {
-      if (arg.isSecret === false) {
+      if (arg.isSecret !== true) {
         findings.push(
           makeFinding(
             "medium",

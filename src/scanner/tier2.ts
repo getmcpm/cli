@@ -102,6 +102,30 @@ function normaliseSeverity(raw: string | undefined): Finding["severity"] {
 }
 
 // ---------------------------------------------------------------------------
+// Diagnostic finding for scanner failures
+// ---------------------------------------------------------------------------
+
+function errorMessage(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
+}
+
+/**
+ * A low-severity diagnostic surfaced when the external scanner could not be run
+ * or its output could not be understood. This distinguishes "scanner failed /
+ * not installed" from "scanner ran clean" (which returns []), without blocking
+ * the install (low severity only deducts a small amount from the trust score).
+ */
+function scannerErrorFinding(message: string): Finding {
+  return {
+    severity: "low",
+    type: "scanner-error",
+    message,
+    location: "external scan",
+    source: "external",
+  };
+}
+
+// ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
 
@@ -124,11 +148,19 @@ export async function checkScannerAvailable(options?: Tier2Options): Promise<boo
  * Run the tier-2 external scanner against a server name.
  * Returns a new Finding[] (never mutates state).
  *
- * Graceful degradation:
- * - If scanner is not available → return []
- * - If scan exits non-zero → return []
- * - If output is unparseable → return []
- * - If findings field is missing → return []
+ * Behaviour:
+ * - A non-zero exit with parseable JSON on stdout is still parsed — some
+ *   scanners signal "issues found" via a non-zero exit code while still
+ *   emitting valid findings JSON. Discarding it conflated "found issues" with
+ *   "ran clean".
+ * - A genuine failure (empty stdout, or stdout that doesn't parse) surfaces a
+ *   single low-severity "scanner-error" diagnostic finding instead of a silent
+ *   empty list, so "scanner failed / not installed" is distinguishable from
+ *   "scanner ran clean" downstream.
+ * - A clean run with an empty findings array returns [].
+ *
+ * All findings produced here are tagged source: "external" so the trust score
+ * deducts them from the external sub-score only.
  */
 export async function scanTier2(serverName: string, options?: Tier2Options): Promise<Finding[]> {
   const exec = options?.execImpl ?? defaultExec;
@@ -141,26 +173,36 @@ export async function scanTier2(serverName: string, options?: Tier2Options): Pro
   // redundant npx --version calls on every scan.
 
   // Step 2: run the scan
-  let stdout: string;
+  let result: ExecResult;
   try {
-    const result = await exec("npx", ["@invariantlabs/mcp-scan", "--json", serverName]);
-    if (result.exitCode !== 0) return [];
-    stdout = result.stdout;
-  } catch {
+    result = await exec("npx", ["@invariantlabs/mcp-scan", "--json", serverName]);
+  } catch (err: unknown) {
+    return [scannerErrorFinding(`external scanner did not run: ${errorMessage(err)}`)];
+  }
+
+  const stdout = result.stdout;
+
+  // Step 3: a non-zero exit with no output is a real failure. With output we
+  // still attempt to parse — a scanner may exit non-zero precisely because it
+  // found issues, while emitting valid findings JSON.
+  if (!stdout || !stdout.trim()) {
+    if (result.exitCode !== 0) {
+      return [scannerErrorFinding(`external scanner failed (exit code ${result.exitCode})`)];
+    }
     return [];
   }
 
   // Step 4: parse output
-  if (!stdout || !stdout.trim()) return [];
-
   let parsed: McpScanOutput;
   try {
     parsed = JSON.parse(stdout) as McpScanOutput;
   } catch {
-    return [];
+    return [scannerErrorFinding("external scanner output could not be parsed as JSON")];
   }
 
-  if (!Array.isArray(parsed.findings)) return [];
+  if (!Array.isArray(parsed.findings)) {
+    return [scannerErrorFinding("external scanner output had no findings array")];
+  }
 
   // Step 5: map to Finding[] immutably
   return parsed.findings.map((f): Finding => ({
@@ -168,5 +210,6 @@ export async function scanTier2(serverName: string, options?: Tier2Options): Pro
     type: "prompt-injection", // mcp-scan focuses on prompt injection / tool poisoning
     message: f.description ?? "External scanner finding",
     location: f.location ?? "external scan",
+    source: "external",
   }));
 }
