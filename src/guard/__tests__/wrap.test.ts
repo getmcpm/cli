@@ -174,13 +174,33 @@ describe("unwrapEntry integrity verification (issue #29)", () => {
     expect(unwrapEntry(wrapped)).toEqual(orig);
   });
 
-  test("still unwraps legacy markers that carry no --orig-hash", () => {
-    // Backward-compat: entries wrapped by an older mcpm have no hash flag.
-    const legacy = {
+  test("refuses to unwrap a marker that carries no --orig-hash (strip-bypass)", () => {
+    // Fail closed: an entry with no hash flag cannot be integrity-verified. An
+    // attacker stripping the flag (or a genuinely pre-hash legacy entry) must
+    // NOT skip verification — unwrap refuses and the caller falls back to .bak.
+    const noHash = {
       command: "mcpm",
       args: ["guard", "run", "--inner", "--server-name", "old", "--", "npx", "-y", "x"],
     };
-    expect(unwrapEntry(legacy)).toEqual({ command: "npx", args: ["-y", "x"] });
+    expect(unwrapEntry(noHash)).toBeNull();
+  });
+
+  test("refuses to unwrap when the --orig-hash pair is removed from a valid wrap", () => {
+    const wrapped = wrapEntry(
+      "victim",
+      { command: "npx", args: ["-y", "@org/good"] },
+      { mcpmBinary: "mcpm" },
+    );
+    // Attacker strips the `--orig-hash <hex>` pair, leaving an otherwise valid
+    // marker that reconstructs the real command — verification must not be
+    // silently skipped.
+    const hashIdx = wrapped.args!.indexOf(WRAP_ORIG_HASH_FLAG);
+    const stripped = {
+      ...wrapped,
+      args: [...wrapped.args!.slice(0, hashIdx), ...wrapped.args!.slice(hashIdx + 2)],
+    };
+    expect(isWrapped(stripped)).toBe(true); // marker still detected
+    expect(unwrapEntry(stripped)).toBeNull(); // but no hash → refuse
   });
 });
 

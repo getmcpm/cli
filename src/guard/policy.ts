@@ -19,7 +19,7 @@
  */
 
 import { createHash } from "node:crypto";
-import { mkdir, readFile, writeFile, rename, unlink } from "node:fs/promises";
+import { mkdir, readFile, writeFile, rename, unlink, lstat } from "node:fs/promises";
 import path from "node:path";
 import lockfile from "proper-lockfile";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
@@ -42,6 +42,39 @@ export interface GuardPolicyFile {
   readonly signature_overrides?: readonly SignatureOverride[];
   /** When set + in the future, all inspection passes through. */
   readonly paused_until?: string;
+}
+
+// #26 (replicated from config/adapters/base.ts, which does not export it): throw
+// if `targetPath` is a symlink. lstat does not follow the final component, so
+// this detects a symlinked target before a write follows it onto an
+// attacker-chosen path. A missing path (ENOENT) is fine — nothing to traverse.
+async function assertNotSymlink(targetPath: string): Promise<void> {
+  let st: Awaited<ReturnType<typeof lstat>>;
+  try {
+    st = await lstat(targetPath);
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") return;
+    throw err;
+  }
+  if (st.isSymbolicLink()) {
+    throw new Error(`Refusing to write policy through a symlink: ${targetPath}`);
+  }
+}
+
+// Write `data` atomically to `target`: refuse symlinks, clear any stale `.tmp`
+// (which may itself be a pre-placed symlink — unlinking removes only the link),
+// then create the `.tmp` EXCLUSIVELY (wx) so it is a fresh, unfollowed inode,
+// and rename into place. Mirrors base.ts/writeAtomic.
+async function writeFileAtomic(target: string, data: string): Promise<void> {
+  await assertNotSymlink(target);
+  const tmp = `${target}.tmp`;
+  try {
+    await unlink(tmp);
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
+  }
+  await writeFile(tmp, data, { encoding: "utf-8", mode: 0o600, flag: "wx" });
+  await rename(tmp, target);
 }
 
 async function policyPath(): Promise<string> {
@@ -142,13 +175,8 @@ export async function writePolicy(policy: GuardPolicyFile): Promise<void> {
   });
   try {
     const serialized = stringifyYaml(policy);
-    const tmp = `${p}.tmp`;
-    await writeFile(tmp, serialized, { encoding: "utf-8", mode: 0o600 });
-    await rename(tmp, p);
-
-    const tmpSidecar = `${sidecarP}.tmp`;
-    await writeFile(tmpSidecar, fileSha(serialized), { encoding: "utf-8", mode: 0o600 });
-    await rename(tmpSidecar, sidecarP);
+    await writeFileAtomic(p, serialized);
+    await writeFileAtomic(sidecarP, fileSha(serialized));
   } finally {
     await release();
   }

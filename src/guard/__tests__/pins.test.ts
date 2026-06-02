@@ -4,7 +4,15 @@
  */
 
 import { describe, expect, test, beforeEach, afterEach } from "vitest";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync, readFileSync, existsSync } from "node:fs";
+import {
+  mkdirSync,
+  mkdtempSync,
+  rmSync,
+  writeFileSync,
+  readFileSync,
+  existsSync,
+  symlinkSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -201,6 +209,52 @@ describe("readPins / writePins", () => {
     mkdirSync(dir, { recursive: true, mode: 0o700 });
     writeFileSync(path.join(dir, "pins.json"), '{"format_version": 99, "servers": {}}', { mode: 0o600 });
     await expect(readPins()).rejects.toThrow(/format_version mismatch/);
+  });
+
+  // Fix 6: the integrity sidecar proves bytes, not shape. A structurally
+  // invalid (but JSON-valid) pins.json must be rejected with a descriptive
+  // error that is NOT a PinsIntegrityError, so the user knows it is malformed
+  // rather than tampered.
+  test("readPins rejects a structurally-invalid pins.json (Zod), not as a PinsIntegrityError", async () => {
+    const dir = path.join(tmpHome, ".mcpm");
+    mkdirSync(dir, { recursive: true, mode: 0o700 });
+    // servers is an array, not a record → shape mismatch.
+    writeFileSync(path.join(dir, "pins.json"), '{"format_version": 1, "servers": []}', {
+      mode: 0o600,
+    });
+    await expect(readPins()).rejects.toThrow(/invalid structure/);
+    await expect(readPins()).rejects.not.toBeInstanceOf(PinsIntegrityError);
+  });
+
+  test("readPins rejects a pin entry missing required fields (Zod)", async () => {
+    const dir = path.join(tmpHome, ".mcpm");
+    mkdirSync(dir, { recursive: true, mode: 0o700 });
+    // Entry lacks previous_hashes / captured_at / captured_via / version.
+    writeFileSync(
+      path.join(dir, "pins.json"),
+      '{"format_version": 1, "servers": {"fs": {"read": {"current_hash": "sha256:x"}}}}',
+      { mode: 0o600 },
+    );
+    await expect(readPins()).rejects.toThrow(/invalid structure/);
+  });
+
+  test("readPins rejects non-JSON content with a clear (non-integrity) error", async () => {
+    const dir = path.join(tmpHome, ".mcpm");
+    mkdirSync(dir, { recursive: true, mode: 0o700 });
+    writeFileSync(path.join(dir, "pins.json"), "not json at all", { mode: 0o600 });
+    await expect(readPins()).rejects.toThrow(/not valid JSON/);
+  });
+
+  // Fix 5: writePins must refuse to write through a symlinked target so a
+  // pre-placed symlink cannot redirect the write onto an attacker-chosen path.
+  test("writePins refuses to write through a symlinked pins.json", async () => {
+    const dir = path.join(tmpHome, ".mcpm");
+    mkdirSync(dir, { recursive: true, mode: 0o700 });
+    const outside = path.join(tmpHome, "outside-target");
+    writeFileSync(outside, "{}", { mode: 0o600 });
+    // pins.json is a symlink pointing outside the store.
+    symlinkSync(outside, path.join(dir, "pins.json"));
+    await expect(writePins(emptyPinsFile())).rejects.toThrow(/symlink/);
   });
 });
 
