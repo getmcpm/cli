@@ -23,6 +23,8 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import type { ClientId } from "../../config/paths.js";
 import type { ConfigAdapter, McpServerEntry } from "../../config/adapters/index.js";
 import type { InstalledServer } from "../../store/servers.js";
+import { scanTier1 } from "../../scanner/tier1.js";
+import { computeTrustScore } from "../../scanner/trust-score.js";
 
 // ---------------------------------------------------------------------------
 // Import under test (will fail until implementation exists — RED phase)
@@ -71,6 +73,10 @@ function makeDeps(overrides: Partial<ImportDeps> = {}): ImportDeps {
     storeExists: vi.fn().mockResolvedValue(false),
     confirm: vi.fn().mockResolvedValue(true),
     output: vi.fn(),
+    // #23: use the real (pure) scanner + trust-score functions by default so
+    // tests exercise the actual assessment path, not a stub.
+    scanTier1,
+    computeTrustScore,
     ...overrides,
   };
 }
@@ -683,6 +689,138 @@ describe("handleImport — de-duplication across clients", () => {
 
 // ---------------------------------------------------------------------------
 // handleImport — immutability check
+// ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// handleImport — trust assessment (#23)
+// ---------------------------------------------------------------------------
+
+describe("handleImport — trust assessment (#23)", () => {
+  // A name one edit away from a known popular server triggers a HIGH
+  // typosquatting finding in scanTier1 → drives the trust level below "safe".
+  const TYPOSQUAT_NAME = "io.github.modelcontextprotocol/servers-githubb";
+
+  it("records a trustScore on every imported server", async () => {
+    const addToStoreMock = vi.fn().mockResolvedValue(undefined);
+    const deps = makeDeps({
+      detectClients: vi.fn().mockResolvedValue(["claude-desktop"]),
+      getAdapter: vi.fn().mockReturnValue(
+        makeAdapter("claude-desktop", { "filesystem": { command: "npx" } })
+      ),
+      getInstalledServers: vi.fn().mockResolvedValue([]),
+      confirm: vi.fn().mockResolvedValue(true),
+      addToStore: addToStoreMock,
+    });
+    await handleImport({}, deps);
+    const imported: InstalledServer = addToStoreMock.mock.calls[0][0];
+    expect(typeof imported.trustScore).toBe("number");
+  });
+
+  it("runs scanTier1 on each discovered server before importing", async () => {
+    const scanSpy = vi.fn(scanTier1);
+    const deps = makeDeps({
+      detectClients: vi.fn().mockResolvedValue(["claude-desktop"]),
+      getAdapter: vi.fn().mockReturnValue(
+        makeAdapter("claude-desktop", { "filesystem": { command: "npx" } })
+      ),
+      getInstalledServers: vi.fn().mockResolvedValue([]),
+      confirm: vi.fn().mockResolvedValue(true),
+      scanTier1: scanSpy,
+    });
+    await handleImport({}, deps);
+    expect(scanSpy).toHaveBeenCalledTimes(1);
+    // scanTier1 must receive the discovered server name so typosquatting works.
+    const arg = scanSpy.mock.calls[0][0];
+    expect(arg.server.name).toBe("filesystem");
+  });
+
+  it("surfaces a low-trust warning for a typosquatting server", async () => {
+    const lines: string[] = [];
+    const deps = makeDeps({
+      detectClients: vi.fn().mockResolvedValue(["claude-desktop"]),
+      getAdapter: vi.fn().mockReturnValue(
+        makeAdapter("claude-desktop", { [TYPOSQUAT_NAME]: { command: "npx" } })
+      ),
+      getInstalledServers: vi.fn().mockResolvedValue([]),
+      confirm: vi.fn().mockResolvedValue(true),
+      output: (t) => lines.push(t),
+    });
+    await handleImport({}, deps);
+    const out = lines.join("\n");
+    expect(out).toMatch(/security finding/i);
+    expect(out).toMatch(/severity/i);
+    expect(out).toContain(TYPOSQUAT_NAME);
+  });
+
+  it("records the (low) trustScore for a typosquatting server", async () => {
+    const addToStoreMock = vi.fn().mockResolvedValue(undefined);
+    const deps = makeDeps({
+      detectClients: vi.fn().mockResolvedValue(["claude-desktop"]),
+      getAdapter: vi.fn().mockReturnValue(
+        makeAdapter("claude-desktop", { [TYPOSQUAT_NAME]: { command: "npx" } })
+      ),
+      getInstalledServers: vi.fn().mockResolvedValue([]),
+      confirm: vi.fn().mockResolvedValue(true),
+      addToStore: addToStoreMock,
+    });
+    await handleImport({}, deps);
+    const imported: InstalledServer = addToStoreMock.mock.calls[0][0];
+    // A HIGH finding deducts from staticScan; the score must reflect that.
+    const clean = computeTrustScore({
+      findings: [],
+      healthCheckPassed: null,
+      hasExternalScanner: false,
+      registryMeta: {},
+    });
+    expect(imported.trustScore).toBeLessThan(clean.score);
+  });
+
+  it("does NOT warn for a clean server", async () => {
+    const lines: string[] = [];
+    const deps = makeDeps({
+      detectClients: vi.fn().mockResolvedValue(["claude-desktop"]),
+      getAdapter: vi.fn().mockReturnValue(
+        makeAdapter("claude-desktop", { "filesystem": { command: "npx" } })
+      ),
+      getInstalledServers: vi.fn().mockResolvedValue([]),
+      confirm: vi.fn().mockResolvedValue(true),
+      output: (t) => lines.push(t),
+    });
+    await handleImport({}, deps);
+    const out = lines.join("\n");
+    expect(out).not.toMatch(/security finding/i);
+    expect(out).not.toMatch(/low trust/i);
+  });
+
+  it("scans env var names and runtime args of the imported entry", async () => {
+    const scanSpy = vi.fn(scanTier1);
+    const deps = makeDeps({
+      detectClients: vi.fn().mockResolvedValue(["claude-desktop"]),
+      getAdapter: vi.fn().mockReturnValue(
+        makeAdapter("claude-desktop", {
+          "srv": {
+            command: "npx",
+            args: ["--flag", "value"],
+            env: { API_KEY: "x", ENDPOINT: "y" },
+          },
+        })
+      ),
+      getInstalledServers: vi.fn().mockResolvedValue([]),
+      confirm: vi.fn().mockResolvedValue(true),
+      scanTier1: scanSpy,
+    });
+    await handleImport({}, deps);
+    const entry = scanSpy.mock.calls[0][0];
+    const pkg = entry.server.packages[0];
+    const envNames = pkg.environmentVariables.map((e) => e.name);
+    expect(envNames).toContain("API_KEY");
+    expect(envNames).toContain("ENDPOINT");
+    expect(pkg.runtimeArguments).toEqual(["--flag", "value"]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// handleImport — immutability
 // ---------------------------------------------------------------------------
 
 describe("handleImport — immutability", () => {

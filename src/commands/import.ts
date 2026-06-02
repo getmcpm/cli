@@ -19,6 +19,9 @@ import Table from "cli-table3";
 import type { ClientId } from "../config/paths.js";
 import type { ConfigAdapter, McpServerEntry } from "../config/adapters/index.js";
 import type { InstalledServer } from "../store/servers.js";
+import type { ServerEntry } from "../registry/types.js";
+import type { Finding } from "../scanner/tier1.js";
+import type { TrustScore, TrustScoreInput } from "../scanner/trust-score.js";
 import { formatMcpEntryCommand } from "../utils/format-entry.js";
 import { stdoutOutput } from "../utils/output.js";
 
@@ -40,6 +43,11 @@ export interface ImportDeps {
   storeExists: () => Promise<boolean>;
   confirm: (message: string) => Promise<boolean>;
   output: (text: string) => void;
+  // #23: import must run the same tier-1 trust assessment that install does,
+  // so importing a pre-existing malicious config does not silently legitimize
+  // it. Both are injected (matching install's deps) for full testability.
+  scanTier1: (server: ServerEntry) => Finding[];
+  computeTrustScore: (input: TrustScoreInput) => TrustScore;
 }
 
 // ---------------------------------------------------------------------------
@@ -107,6 +115,85 @@ function deduplicateServers(discovered: DiscoveredServer[]): Array<{
     clients: val.clients,
     entry: val.entry,
   }));
+}
+
+// ---------------------------------------------------------------------------
+// Trust assessment (#23)
+// ---------------------------------------------------------------------------
+
+/**
+ * Map a discovered IDE-config entry (command/args/env or url/headers) into the
+ * minimal registry-shaped `ServerEntry` that the tier-1 scanner understands.
+ *
+ * This lets `import` reuse the exact same `scanTier1` logic `install` runs,
+ * feeding the relevant config data (server name, runtime args, env var names,
+ * remote URL/headers) through the scanner's pattern detectors.
+ *
+ * Pure — never mutates the input entry.
+ */
+function toServerEntry(name: string, entry: McpServerEntry): ServerEntry {
+  const environmentVariables = Object.keys(entry.env ?? {}).map((key) => ({
+    name: key,
+  }));
+  const runtimeArguments = [...(entry.args ?? [])];
+
+  const remotes = entry.url
+    ? [
+        {
+          type: "streamable-http",
+          url: entry.url,
+          headers: Object.keys(entry.headers ?? {}).map((key) => ({ name: key })),
+        },
+      ]
+    : undefined;
+
+  return {
+    server: {
+      name,
+      version: "unknown",
+      packages: [
+        {
+          registryType: "unknown",
+          identifier: name,
+          environmentVariables,
+          runtimeArguments,
+        },
+      ],
+      ...(remotes ? { remotes } : {}),
+    },
+  } as ServerEntry;
+}
+
+/**
+ * Run a tier-1 trust assessment on a single discovered server. No network or
+ * external scanner is used here (import is offline-only), so the score is
+ * computed from static findings + neutral metadata.
+ *
+ * Returns both the findings and the score. The warning decision keys off the
+ * findings (the genuine offline security signal) rather than the absolute
+ * level: imports structurally lack a health check and registry metadata, so a
+ * finding-free server still lands at "caution" — warning on level alone would
+ * be noise on every import.
+ */
+function assessImport(
+  name: string,
+  entry: McpServerEntry,
+  deps: ImportDeps
+): { findings: Finding[]; trustScore: TrustScore } {
+  const findings = deps.scanTier1(toServerEntry(name, entry));
+  const input: TrustScoreInput = {
+    findings,
+    healthCheckPassed: null, // health check not run during import
+    hasExternalScanner: false, // import is offline; tier-2 is not run
+    registryMeta: {}, // imported servers have no trusted registry metadata
+  };
+  return { findings, trustScore: deps.computeTrustScore(input) };
+}
+
+/** Highest severity present in a findings list, or undefined when empty. */
+function topSeverity(findings: Finding[]): Finding["severity"] | undefined {
+  const order: Finding["severity"][] = ["critical", "high", "medium", "low"];
+  return order.find((sev) => findings.some((f) => f.severity === sev));
 }
 
 // ---------------------------------------------------------------------------
@@ -181,14 +268,39 @@ export async function handleImport(
     return;
   }
 
-  // Import new servers
+  // Import new servers — each gets a tier-1 trust assessment (#23) so that
+  // importing a malicious pre-existing config does not silently legitimize it.
   const now = new Date().toISOString();
-  for (const { name, clients, entry: _entry } of newServers) {
+  let lowTrustCount = 0;
+  for (const { name, clients, entry } of newServers) {
+    const { findings, trustScore } = assessImport(name, entry, deps);
+
+    // Warn on actual tier-1 findings (the offline security signal). The
+    // absolute "level" is structurally depressed for imports (no health check,
+    // no registry metadata), so warning on level alone would fire on every
+    // import — see assessImport().
+    const severity = topSeverity(findings);
+    if (severity !== undefined) {
+      lowTrustCount += 1;
+      const critical = severity === "critical" || severity === "high";
+      const color = critical ? chalk.red : chalk.yellow;
+      const label = critical ? "WARNING" : "CAUTION";
+      output(
+        color(
+          `${label}: "${name}" has ${findings.length} security finding` +
+          `${findings.length === 1 ? "" : "s"} ` +
+          `(trust ${trustScore.score}/${trustScore.maxPossible}, top severity: ${severity}). ` +
+          `Review it with ${chalk.bold(`mcpm audit ${name}`)}.`
+        )
+      );
+    }
+
     const server: InstalledServer = {
       name,
       version: "unknown",
       clients: [...clients],
       installedAt: now,
+      trustScore: trustScore.score,
     };
     await deps.addToStore(server);
   }
@@ -200,6 +312,14 @@ export async function handleImport(
       `Skipped ${alreadyTrackedCount} already tracked.`
     )
   );
+  if (lowTrustCount > 0) {
+    output(
+      chalk.yellow(
+        `${lowTrustCount} imported server${lowTrustCount === 1 ? "" : "s"} ` +
+        `flagged with low trust findings — review the warnings above.`
+      )
+    );
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -259,6 +379,8 @@ export function registerImportCommand(program: Command): void {
       const { getAdapter } = await import("../config/index.js");
       const { getInstalledServers, addInstalledServer } = await import("../store/servers.js");
       const { readJson } = await import("../store/index.js");
+      const { scanTier1 } = await import("../scanner/tier1.js");
+      const { computeTrustScore } = await import("../scanner/trust-score.js");
       const { confirm } = await import("@inquirer/prompts");
       const path = await import("path");
       const os = await import("os");
@@ -279,6 +401,8 @@ export function registerImportCommand(program: Command): void {
         storeExists,
         confirm: (message: string) => confirm({ message }),
         output: stdoutOutput,
+        scanTier1,
+        computeTrustScore,
       };
 
       await handleImport({ yes: opts.yes, client: opts.client }, deps).catch(
