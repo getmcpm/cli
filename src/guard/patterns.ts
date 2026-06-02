@@ -111,31 +111,94 @@ function truncate(s: string): string {
 }
 
 /**
- * NFKC-normalize + strip evasion characters before pattern matching.
+ * NFKC-normalize + strip evasion characters + fold confusable homoglyphs
+ * before pattern matching.
  *
  * NFKC folds compatibility characters (full-width Latin "ｉｇｎｏｒｅ" → "ignore")
  * but does NOT strip zero-width spaces, soft hyphens, or bidi controls, which
  * an attacker can insert between word characters to defeat a regex. PATTERN_BREAKERS
  * captures those classes after normalization.
  *
- * For leaves > MAX_LEAF_BYTES (1MB), normalize head + tail independently to
- * avoid an O(n) string copy on huge benign payloads while still catching
- * injections an attacker would pad with garbage. The join uses a newline so
- * patterns that span the join boundary don't accidentally match across them.
+ * NFKC also does NOT fold visually-confusable homoglyphs from other scripts —
+ * e.g. Cyrillic "о" (U+043E) or Greek "ο" (U+03BF) for Latin "o". So
+ * "ignоre previous instructions" (Cyrillic "о") stays visually identical to a
+ * human/LLM but evades the ASCII-anchored signatures. foldConfusables maps the
+ * Cyrillic/Greek look-alikes most used for Latin-evasion down to ASCII, modeled
+ * on the TR39 confusables skeleton (scoped to the ranges that matter). (security #30)
+ *
+ * Match input is bounded to a head + tail window (64 KB total) regardless of
+ * leaf size: the regex engine never scans more than that, so a pathological
+ * future signature with ambiguous quantifiers cannot turn a 1 MB attacker leaf
+ * into a multi-second synchronous stall on the relay hot path. For oversized
+ * leaves we scan a bounded head + tail so an injection an attacker pads with
+ * garbage at either end is still caught; slicing happens BEFORE normalize() so
+ * we never pay the O(n) copy on a huge benign payload. (security #27)
  */
-const MAX_LEAF_BYTES = 1_024 * 1_024; // 1MB
+
+// Hard cap on the characters fed to the regex engine per leaf (32 KB head +
+// 32 KB tail = 64 KB scanned). Far below the relay's 1 MB leaf ceiling, so any
+// single match is bounded-cost even if a future signature is ReDoS-prone. (#27)
+const MATCH_SEGMENT_CAP = 32 * 1_024; // 32 KB
 
 // Zero-width chars, bidi overrides, ZWJ/ZWNJ, byte-order mark, Unicode tag block.
 // Stripping these post-NFKC closes a class of "invisible separator" evasions where
 // an attacker inserts U+200B between "ignore" and "previous" to break the regex.
 const PATTERN_BREAKERS = /[­​-‏‪-‮⁠-⁯﻿]|[\u{E0000}-\u{E007F}]/gu;
 
+// Targeted confusable → ASCII-Latin fold (TR39 skeleton, Cyrillic + Greek scope).
+// Only single-codepoint look-alikes that map cleanly to an ASCII letter/digit and
+// that appear in the injection signatures' alphabet. Kept as an explicit allowlist
+// (not a broad "non-ASCII → strip") so we never corrupt legitimate non-Latin text
+// in a way that fabricates a match. (security #30)
+const CONFUSABLES: Readonly<Record<string, string>> = {
+  // ── Cyrillic → Latin ──
+  "а": "a", "А": "A", // а А
+  "е": "e", "Е": "E", // е Е
+  "о": "o", "О": "O", // о О
+  "р": "p", "Р": "P", // р Р
+  "с": "c", "С": "C", // с С
+  "у": "y", "У": "Y", // у У
+  "х": "x", "Х": "X", // х Х
+  "і": "i", "І": "I", // і І
+  "ј": "j", "Ј": "J", // ј Ј
+  "ԁ": "d",                 // ԁ
+  "ԛ": "q",                 // ԛ
+  "ѕ": "s", "Ѕ": "S", // ѕ Ѕ
+  "һ": "h",                 // һ
+  // ── Greek → Latin ──
+  "ο": "o", "Ο": "O", // ο Ο
+  "α": "a", "Α": "A", // α Α
+  "ε": "e", "Ε": "E", // ε Ε
+  "ι": "i", "Ι": "I", // ι Ι
+  "ν": "v", "Ν": "N", // ν Ν
+  "ρ": "p", "Ρ": "P", // ρ Ρ
+  "τ": "t", "Τ": "T", // τ Τ
+  "υ": "u", "Υ": "Y", // υ Υ
+  "χ": "x", "Χ": "X", // χ Χ
+  "κ": "k", "Κ": "K", // κ Κ
+  "η": "n", "Η": "H", // η Η
+};
+
+function foldConfusables(s: string): string {
+  let out = "";
+  for (const ch of s) out += CONFUSABLES[ch] ?? ch;
+  return out;
+}
+
+function normalizeSegment(segment: string): string {
+  return foldConfusables(segment.normalize("NFKC").replace(PATTERN_BREAKERS, ""));
+}
+
 function normalizeForMatch(leaf: string): string {
-  if (leaf.length <= MAX_LEAF_BYTES) {
-    return leaf.normalize("NFKC").replace(PATTERN_BREAKERS, "");
+  if (leaf.length <= MATCH_SEGMENT_CAP) {
+    return normalizeSegment(leaf);
   }
-  const head = leaf.slice(0, MAX_LEAF_BYTES).normalize("NFKC").replace(PATTERN_BREAKERS, "");
-  const tail = leaf.slice(-MAX_LEAF_BYTES).normalize("NFKC").replace(PATTERN_BREAKERS, "");
+  // Bound the regex input to a head + tail window. Slice before normalize() so a
+  // 1 MB benign leaf never pays a full-length NFKC copy, and the engine never
+  // scans more than ~64 KB. The newline join keeps a padded-middle injection from
+  // matching across the boundary. (security #27)
+  const head = normalizeSegment(leaf.slice(0, MATCH_SEGMENT_CAP));
+  const tail = normalizeSegment(leaf.slice(-MATCH_SEGMENT_CAP));
   return `${head}\n${tail}`;
 }
 
