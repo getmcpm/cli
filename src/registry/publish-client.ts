@@ -66,6 +66,7 @@ export function isPrivateHost(hostname: string): boolean {
     if (a === 192 && b === 168) return true;
     if (a === 169 && b === 254) return true;
     if (a === 172 && b >= 16 && b <= 31) return true;
+    if (a === 100 && b >= 64 && b <= 127) return true; // CGNAT 100.64.0.0/10 (RFC 6598)
   }
   // IPv6 link-local (fe80::/10) and unique-local (fc00::/7) are matched by the
   // numeric value of the first 16-bit hextet, NOT a string prefix. A loose
@@ -76,6 +77,10 @@ export function isPrivateHost(hostname: string): boolean {
   if (firstHextet !== null) {
     if (firstHextet >= 0xfe80 && firstHextet <= 0xfebf) return true; // link-local fe80::/10
     if (firstHextet >= 0xfc00 && firstHextet <= 0xfdff) return true; // unique-local fc00::/7
+    // 6to4 (2002::/16) embeds an arbitrary IPv4 in the next 32 bits, so it can be
+    // used to reach a private/internal v4 host (e.g. 2002:7f00:1:: → 127.0.0.1).
+    // Block the whole 2002::/16 block before the Bearer token is attached.
+    if (firstHextet === 0x2002) return true;
   }
   return false;
 }

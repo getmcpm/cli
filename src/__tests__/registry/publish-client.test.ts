@@ -71,6 +71,36 @@ describe("submitToRegistry", () => {
     );
   });
 
+  it("reads a streamed (body.getReader) success response within the cap and parses it (security #21)", async () => {
+    // Exercises the production ReadableStream path on success: a small valid
+    // JSON payload delivered in two chunks → readCappedStream concats → JSON.parse.
+    const payload = JSON.stringify({ url: "https://registry.example.com/servers/streamed" });
+    const bytes = new TextEncoder().encode(payload);
+    const mid = Math.ceil(bytes.length / 2);
+    const reads = [
+      { done: false, value: bytes.subarray(0, mid) },
+      { done: false, value: bytes.subarray(mid) },
+      { done: true, value: undefined as Uint8Array | undefined },
+    ];
+    const reader = {
+      read: vi.fn().mockImplementation(async () => reads.shift()),
+      cancel: vi.fn().mockResolvedValue(undefined),
+    };
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
+      ok: true,
+      headers: { get: () => null },
+      body: { getReader: () => reader },
+      // json() must NOT be used when a streamable body is present.
+      json: async () => {
+        throw new Error("response.json() should not be called for a streamable body");
+      },
+    }));
+
+    const result = await submitToRegistry(MANIFEST, TOKEN, REGISTRY_URL);
+    expect(result.url).toBe("https://registry.example.com/servers/streamed");
+    expect(reader.read).toHaveBeenCalled();
+  });
+
   it("rejects an over-cap publish response rather than fully buffering it (security #21)", async () => {
     // A stream that would emit > 10 MB. readCappedBody must abort partway and
     // throw — we assert it never reads to completion (cancel is called).
@@ -130,6 +160,8 @@ describe("validateRegistryUrl (security #17 — token-exfil guard)", () => {
       "https://[fea0::1]",
       "https://[feb0::1]",
       "https://[febf::1]", // top of link-local fe80::/10
+      "https://[2002:7f00:1::]", // 6to4 (2002::/16) embedding 127.0.0.1 (review finding)
+      "https://100.64.0.1", // CGNAT 100.64.0.0/10 (RFC 6598, review finding)
       "https://2130706433", // integer form of 127.0.0.1 (Node normalizes → caught)
     ]) {
       expect(() => validateRegistryUrl(u), u).toThrow(/non-public/);
@@ -141,6 +173,15 @@ describe("validateRegistryUrl (security #17 — token-exfil guard)", () => {
     expect(() => validateRegistryUrl("https://[2001:db8::1]")).not.toThrow();
     // fec0::1 is just past the link-local ceiling (febf) — not link-local/ULA.
     expect(() => validateRegistryUrl("https://[fec0::1]")).not.toThrow();
+  });
+
+  it("allows normal public IPv4/IPv6 outside the 6to4 and CGNAT ranges", () => {
+    // 93.184.216.34 (example.com) is public; 100.x just outside 100.64/10 is public.
+    expect(() => validateRegistryUrl("https://93.184.216.34")).not.toThrow();
+    expect(() => validateRegistryUrl("https://100.63.255.255")).not.toThrow();
+    expect(() => validateRegistryUrl("https://100.128.0.1")).not.toThrow();
+    // 2001:db8::1 (public IPv6) must remain allowed alongside the 6to4 block.
+    expect(() => validateRegistryUrl("https://[2001:db8::1]")).not.toThrow();
   });
 
   it("rejects a registry URL with embedded credentials", () => {
