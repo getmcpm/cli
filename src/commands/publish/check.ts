@@ -45,13 +45,49 @@ export function manifestToEntry(manifest: PublishManifest): ServerEntry {
   } as unknown as ServerEntry;
 }
 
-/** Throws a PublishError if any critical or high findings are present. */
+/**
+ * Number of medium-severity findings that, in aggregate, block publishing.
+ * Issue #24: the gate was blind to mediums, so a server with several
+ * exfiltration-shaped args could publish cleanly.
+ */
+const MEDIUM_BLOCK_THRESHOLD = 3;
+
+/**
+ * Throws a PublishError when findings should block submission.
+ *
+ * Blocking conditions (issue #24 — fail safe, don't be blind to mediums):
+ * - any critical or high finding, OR
+ * - any exfil-args finding (data-exfiltration-shaped argument), OR
+ * - MEDIUM_BLOCK_THRESHOLD or more medium findings in aggregate.
+ */
 export function assertTrustGate(findings: Finding[]): void {
-  const blocking = findings.filter(
+  const criticalOrHigh = findings.filter(
     (f): f is Finding & { severity: "critical" | "high" } =>
       f.severity === "critical" || f.severity === "high"
   );
-  if (blocking.length > 0) throw PublishErrors.trustGateBlocked(blocking);
+
+  const exfilArgs = findings.filter((f) => f.type === "exfil-args");
+  const mediums = findings.filter((f) => f.severity === "medium");
+
+  const blockOnMediumCount = mediums.length >= MEDIUM_BLOCK_THRESHOLD;
+
+  if (criticalOrHigh.length === 0 && exfilArgs.length === 0 && !blockOnMediumCount) {
+    return;
+  }
+
+  // Build a deduplicated blocking list: all critical/high, plus the exfil-arg
+  // findings (and, when the medium-count threshold is tripped, the mediums).
+  const blocking: Finding[] = [
+    ...criticalOrHigh,
+    ...exfilArgs.filter((f) => f.severity !== "critical" && f.severity !== "high"),
+  ];
+  if (blockOnMediumCount) {
+    for (const m of mediums) {
+      if (!blocking.includes(m)) blocking.push(m);
+    }
+  }
+
+  throw PublishErrors.trustGateBlocked(blocking);
 }
 
 export async function handlePublishCheck(

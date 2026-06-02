@@ -13,6 +13,7 @@ import {
   handleRemove,
   handleAudit,
   handleSetup,
+  handleMcpUp,
   extractKeywords,
   type ServerDeps,
 } from "./handlers.js";
@@ -53,6 +54,14 @@ const BAD_TRUST: TrustScore = {
   maxPossible: 80,
   level: "risky",
   breakdown: { healthCheck: 0, staticScan: 20, externalScan: 0, registryMeta: 0 },
+};
+
+// Below the hard, non-overridable MCP trust floor (issue #24).
+const BELOW_FLOOR_TRUST: TrustScore = {
+  score: 10,
+  maxPossible: 80,
+  level: "risky",
+  breakdown: { healthCheck: 0, staticScan: 10, externalScan: 0, registryMeta: 0 },
 };
 
 function makeDeps(overrides: Partial<ServerDeps> = {}): ServerDeps {
@@ -127,6 +136,39 @@ describe("handleInstall", () => {
     const result = await handleInstall({ name: "io.github.acme/srv", client: "cursor" }, deps);
     const r = result as { clients: string[] };
     expect(r.clients).toEqual(["cursor"]);
+  });
+
+  it("rejects servers below the default minimum trust score", async () => {
+    const entry = makeEntry("io.github.acme/risky");
+    const deps = makeDeps({
+      registryGetServer: vi.fn().mockResolvedValue(entry),
+      computeTrustScore: vi.fn().mockReturnValue(BAD_TRUST),
+    });
+    await expect(handleInstall({ name: "io.github.acme/risky" }, deps)).rejects.toThrow(
+      /below the minimum threshold/i
+    );
+  });
+
+  // Issue #24: minTrustScore:0 must NOT bypass the hard trust floor.
+  it("does not let minTrustScore:0 bypass the hard trust floor", async () => {
+    const entry = makeEntry("io.github.acme/sketchy");
+    const addServer = vi.fn().mockResolvedValue(undefined);
+    const deps = makeDeps({
+      registryGetServer: vi.fn().mockResolvedValue(entry),
+      computeTrustScore: vi.fn().mockReturnValue(BELOW_FLOOR_TRUST),
+      getAdapter: vi.fn().mockReturnValue({
+        clientId: "cursor",
+        read: vi.fn().mockResolvedValue({}),
+        addServer,
+        removeServer: vi.fn(),
+      }),
+    });
+
+    // Pre-fix: minScore = args.minTrustScore ?? 50 = 0, so score 10 >= 0 → installed.
+    await expect(
+      handleInstall({ name: "io.github.acme/sketchy", minTrustScore: 0 }, deps)
+    ).rejects.toThrow(/below the minimum threshold/i);
+    expect(addServer).not.toHaveBeenCalled();
   });
 });
 
@@ -320,6 +362,61 @@ describe("handleSetup", () => {
     );
     const r = result as { note?: string };
     expect(r.note).toContain("Restart");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// handleMcpUp — no-human-in-loop guard (issue #22)
+// ---------------------------------------------------------------------------
+
+describe("handleMcpUp", () => {
+  it("validates stack file path: rejects traversal", async () => {
+    const deps = makeDeps();
+    await expect(
+      handleMcpUp({ stackFile: "../evil.yaml" }, deps)
+    ).rejects.toThrow(/Invalid stack file path/i);
+  });
+
+  it("validates stack file path: rejects absolute paths", async () => {
+    const deps = makeDeps();
+    await expect(
+      handleMcpUp({ stackFile: "/etc/mcpm.yaml" }, deps)
+    ).rejects.toThrow(/Invalid stack file path/i);
+  });
+
+  it("does not auto-confirm or mutate configs when no stack file exists", async () => {
+    // Run in an isolated empty CWD so the real handleUp pipeline finds no
+    // mcpm.yaml and degrades gracefully — proving the wired guard path runs
+    // without throwing and without auto-confirming any destructive action.
+    const { mkdtemp } = await import("fs/promises");
+    const os = await import("os");
+    const path = await import("path");
+    const dir = await mkdtemp(path.join(os.tmpdir(), "mcpm-mcpup-test-"));
+
+    const adapter = {
+      clientId: "cursor",
+      read: vi.fn().mockResolvedValue({}),
+      addServer: vi.fn().mockResolvedValue(undefined),
+      removeServer: vi.fn().mockResolvedValue(undefined),
+    };
+    const deps = makeDeps({ getAdapter: vi.fn().mockReturnValue(adapter) });
+
+    const prevCwd = process.cwd();
+    process.chdir(dir);
+    try {
+      const result = (await handleMcpUp({ stackFile: "mcpm.yaml" }, deps)) as {
+        installed: string[];
+        blocked: string[];
+        failed: string[];
+        skipped: string[];
+      };
+      expect(result.installed).toEqual([]);
+      // No destructive auto-confirm path should have removed anything.
+      expect(adapter.removeServer).not.toHaveBeenCalled();
+      expect(adapter.addServer).not.toHaveBeenCalled();
+    } finally {
+      process.chdir(prevCwd);
+    }
   });
 });
 
