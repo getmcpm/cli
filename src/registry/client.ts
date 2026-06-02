@@ -22,16 +22,10 @@ import {
   ValidationError,
 } from "./errors.js";
 import { isPrivateHost } from "./publish-client.js";
+import { readCappedBody } from "./http-utils.js";
 
 const DEFAULT_BASE_URL = "https://registry.modelcontextprotocol.io";
 const DEFAULT_TIMEOUT_MS = 10_000;
-
-/**
- * Cap on response body size before parsing. A hostile (or 30x-redirected) host
- * can return a small compressed payload that decompresses to GBs (decompression
- * bomb → OOM). We refuse bodies larger than this. (security #21)
- */
-const MAX_RESPONSE_BYTES = 10 * 1024 * 1024; // 10 MB
 
 /**
  * Validate a registry base URL before any request is made. `baseUrl` is fully
@@ -136,11 +130,12 @@ export class RegistryClient {
    */
   async getServer(name: string, version?: string): Promise<ServerEntry> {
     const encodedName = encodeURIComponent(name);
-    const params = new URLSearchParams();
-    if (version !== undefined) {
-      params.set("version", version);
-    }
-    const versionSegment = version ?? "latest";
+    // `version` is caller-supplied (e.g. an unvalidated lockfile/stack
+    // `version` string). Percent-encode it as a path segment so values like
+    // "../latest" or "latest?inject=1" cannot escape the segment and manipulate
+    // the request path or smuggle in a query string. The version is the path
+    // segment itself, so no redundant ?version= query param is needed.
+    const versionSegment = encodeURIComponent(version ?? "latest");
     const url = `${this.baseUrl}/v0.1/servers/${encodedName}/versions/${versionSegment}`;
 
     const raw = await this.get(url, name);
@@ -230,96 +225,6 @@ export class RegistryClient {
       );
     }
 
-    return this.readCappedBody(url, response);
+    return readCappedBody(url, response);
   }
-
-  /**
-   * Read and JSON-parse a response body with a hard byte cap, so a hostile host
-   * cannot OOM us with an unbounded (or decompression-bomb) body. It:
-   *   1. Rejects early if a declared Content-Length exceeds the cap.
-   *   2. If a readable stream is present, reads it chunk-by-chunk and aborts
-   *      once MAX_RESPONSE_BYTES is exceeded — before fully decompressing.
-   *   3. Otherwise falls back to response.json() (e.g. non-stream Responses).
-   * (security #21)
-   */
-  private async readCappedBody(
-    url: string,
-    response: Response
-  ): Promise<unknown> {
-    const declared = response.headers?.get?.("content-length");
-    if (declared !== null && declared !== undefined) {
-      const len = Number(declared);
-      if (Number.isFinite(len) && len > MAX_RESPONSE_BYTES) {
-        throw new ValidationError(
-          `Registry response from ${url} too large (${len} bytes > ${MAX_RESPONSE_BYTES} cap).`
-        );
-      }
-    }
-
-    const body = response.body;
-    if (body && typeof body.getReader === "function") {
-      const text = await readCappedStream(url, body);
-      try {
-        return JSON.parse(text);
-      } catch (err) {
-        throw new ValidationError(
-          `Failed to parse JSON response from ${url}`,
-          err
-        );
-      }
-    }
-
-    // No readable stream (e.g. injected mock / non-stream Response). The
-    // Content-Length guard above is our cap here.
-    try {
-      return await response.json();
-    } catch (err) {
-      throw new ValidationError(
-        `Failed to parse JSON response from ${url}`,
-        err
-      );
-    }
-  }
-}
-
-/**
- * Read a ReadableStream as UTF-8 text, throwing once the running total exceeds
- * MAX_RESPONSE_BYTES — without buffering the whole (possibly bomb) body first.
- */
-async function readCappedStream(
-  url: string,
-  body: ReadableStream<Uint8Array>
-): Promise<string> {
-  const reader = body.getReader();
-  const chunks: Uint8Array[] = [];
-  let total = 0;
-  try {
-    for (;;) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      if (value) {
-        total += value.byteLength;
-        if (total > MAX_RESPONSE_BYTES) {
-          throw new ValidationError(
-            `Registry response from ${url} exceeded ${MAX_RESPONSE_BYTES} byte cap.`
-          );
-        }
-        chunks.push(value);
-      }
-    }
-  } finally {
-    // Best-effort: release the stream even on the cap-exceeded path.
-    await reader.cancel().catch(() => {});
-  }
-  return new TextDecoder().decode(concatChunks(chunks, total));
-}
-
-function concatChunks(chunks: Uint8Array[], total: number): Uint8Array {
-  const out = new Uint8Array(total);
-  let offset = 0;
-  for (const chunk of chunks) {
-    out.set(chunk, offset);
-    offset += chunk.byteLength;
-  }
-  return out;
 }

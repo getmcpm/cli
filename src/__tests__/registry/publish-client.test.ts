@@ -70,6 +70,35 @@ describe("submitToRegistry", () => {
       expect.objectContaining({ redirect: "manual" })
     );
   });
+
+  it("rejects an over-cap publish response rather than fully buffering it (security #21)", async () => {
+    // A stream that would emit > 10 MB. readCappedBody must abort partway and
+    // throw — we assert it never reads to completion (cancel is called).
+    const CHUNK = new Uint8Array(2 * 1024 * 1024); // 2 MB per pull
+    let pulls = 0;
+    const cancel = vi.fn().mockResolvedValue(undefined);
+    const reader = {
+      read: vi.fn().mockImplementation(async () => {
+        pulls += 1;
+        return { done: false, value: CHUNK }; // never "done" — would be unbounded
+      }),
+      cancel,
+    };
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
+      ok: true,
+      headers: { get: () => null },
+      body: { getReader: () => reader },
+      // json() must NOT be used for a streamable body; fail loudly if it is.
+      json: async () => {
+        throw new Error("response.json() should not be called for a streamable over-cap body");
+      },
+    }));
+
+    await expect(submitToRegistry(MANIFEST, TOKEN, REGISTRY_URL)).rejects.toThrow(/cap/i);
+    // Aborted partway: 10 MB cap / 2 MB chunks ⇒ ~6 pulls, far fewer than ∞.
+    expect(pulls).toBeLessThan(10);
+    expect(cancel).toHaveBeenCalled();
+  });
 });
 
 describe("validateRegistryUrl (security #17 — token-exfil guard)", () => {
@@ -94,11 +123,24 @@ describe("validateRegistryUrl (security #17 — token-exfil guard)", () => {
       "https://[::ffff:10.0.0.1]",
       "https://[fc00::1]", // IPv6 unique-local
       "https://[fd12::1]",
+      "https://[fdff::1]", // top of unique-local fc00::/7
       "https://[fe80::1]", // IPv6 link-local
+      // fe80::/10 link-local addresses that do NOT begin literally with "fe80"
+      // and previously bypassed the startsWith("fe80") guard (review finding).
+      "https://[fea0::1]",
+      "https://[feb0::1]",
+      "https://[febf::1]", // top of link-local fe80::/10
       "https://2130706433", // integer form of 127.0.0.1 (Node normalizes → caught)
     ]) {
       expect(() => validateRegistryUrl(u), u).toThrow(/non-public/);
     }
+  });
+
+  it("allows a normal public IPv6 address (e.g. 2001:db8::/fec0:: just outside link-local)", () => {
+    // 2001:db8::1 is documentation/public-range and must NOT be blocked.
+    expect(() => validateRegistryUrl("https://[2001:db8::1]")).not.toThrow();
+    // fec0::1 is just past the link-local ceiling (febf) — not link-local/ULA.
+    expect(() => validateRegistryUrl("https://[fec0::1]")).not.toThrow();
   });
 
   it("rejects a registry URL with embedded credentials", () => {
