@@ -141,13 +141,25 @@ export function computeTrustScore(input: TrustScoreInput): TrustScore {
     : scoreRegistryMeta(input.registryMeta);
 
   // Partition findings by source so each finding is deducted from exactly one
-  // bucket. Tier-1/health-check findings (source "static" or undefined) hit the
-  // static sub-score; tier-2 external-scanner findings (source "external") hit
-  // the external sub-score. Without this split, every finding was deducted from
+  // bucket. Tier-1 findings (source "static" or undefined) hit the static
+  // sub-score; tier-2 external-scanner findings (source "external") hit the
+  // external sub-score. Without this split, every finding was deducted from
   // BOTH buckets whenever an external scanner was present — making scores
   // artificially low precisely when the extra scanner was enabled.
-  const staticFindings = input.findings.filter((f) => f.source !== "external");
-  const externalFindings = input.findings.filter((f) => f.source === "external");
+  //
+  // When no external scanner ran, the external sub-score is hard-zeroed and the
+  // bucket is removed from maxPossible, so an "external"-tagged finding present
+  // without a scanner would otherwise be silently dropped from ALL scoring and
+  // deduct nothing. That should not happen in normal flow, but we route such
+  // orphans into the static bucket as a safe fallback so they still deduct
+  // rather than vanish.
+  const externalScannerFindings = input.hasExternalScanner
+    ? input.findings.filter((f) => f.source === "external")
+    : [];
+  const staticFindings = input.hasExternalScanner
+    ? input.findings.filter((f) => f.source !== "external")
+    : input.findings;
+  const externalFindings = externalScannerFindings;
 
   const breakdown: TrustScoreBreakdown = {
     healthCheck: scoreHealthCheck(input.healthCheckPassed),

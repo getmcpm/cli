@@ -24,11 +24,13 @@ export interface Finding {
   message: string;
   location: string;
   /**
-   * Which scan bucket produced this finding. Tier-1/health-check findings are
-   * "static" (the default when omitted); tier-2 external-scanner findings are
-   * "external". The trust score deducts each finding from exactly one bucket
-   * based on this tag, so an external scanner being present no longer
-   * double-counts findings against both the static and external sub-scores.
+   * Which scan bucket produced this finding. Static-scan (tier-1) findings
+   * leave `source` undefined and are treated as static; tier-2
+   * external-scanner findings set "external". The trust score deducts each
+   * finding from exactly one bucket based on this tag, so an external scanner
+   * being present no longer double-counts findings against both the static and
+   * external sub-scores. (Health-check results are a boolean `passed`, not
+   * Finding objects, so they never carry a `source`.)
    */
   source?: "static" | "external";
 }

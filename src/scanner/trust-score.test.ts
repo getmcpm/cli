@@ -231,6 +231,17 @@ describe("computeTrustScore — finding source partitioning", () => {
     }));
     expect(staticOnly.breakdown.registryMeta).toBe(0);
   });
+
+  // Edge case: an "external"-tagged finding present when no external scanner ran.
+  // The external sub-score is hard-zeroed without a scanner, so the orphan must
+  // fall back into the static bucket and still deduct — never be silently dropped
+  // from all scoring.
+  it("routes an external-tagged finding into the static bucket when no external scanner ran", () => {
+    const findings = makeFindings([{ severity: "high", source: "external" }]);
+    const result = computeTrustScore(makeInput({ hasExternalScanner: false, findings }));
+    expect(result.breakdown.externalScan).toBe(0); // no scanner → always 0
+    expect(result.breakdown.staticScan).toBe(30);  // 40 - 10, the finding still deducts
+  });
 });
 
 // ---------------------------------------------------------------------------

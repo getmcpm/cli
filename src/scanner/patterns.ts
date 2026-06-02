@@ -136,19 +136,32 @@ const PROMPT_INJECTION_PATTERNS: ReadonlyArray<{ label: string; pattern: RegExp;
   { label: "exfiltration URL destination", pattern: /to\s+https?:\/\/[^\s]+(?:collect|steal|exfil|harvest)/i, severity: "critical" },
 ];
 
+// The zero-width / invisible-character signature is the one pattern that must
+// run against the RAW text: normalizeForMatch() strips exactly these characters
+// (its PATTERN_BREAKERS class), so matching it post-normalization would always
+// miss. Every other signature runs against the folded text so a cross-script
+// homoglyph (e.g. Cyrillic "о" U+043E in "ignоre previous instructions") can no
+// longer slip past the ASCII-anchored regexes. (security #30)
+const ZERO_WIDTH_LABEL = "zero-width characters (obfuscation)";
+
 /**
  * Detect prompt injection and exfiltration patterns in a text string.
- * Applies NFKC normalization to defeat Unicode homoglyph evasion.
+ * Applies the guard's full normalization pipeline (NFKC + evasion-character
+ * strip + cross-script confusable fold) so a homoglyph-obfuscated injection
+ * phrase is caught. The zero-width-character signature is exempt: it is matched
+ * against the raw text because normalization deliberately strips the very
+ * characters it looks for.
  * Returns a new Finding[] (never mutates input).
  */
 export function detectPromptInjection(text: string): Finding[] {
   if (!text) return [];
-  text = text.normalize("NFKC");
+  const normalized = normalizeForMatch(text);
 
   const findings: Finding[] = [];
 
   for (const { label, pattern, severity } of PROMPT_INJECTION_PATTERNS) {
-    if (pattern.test(text)) {
+    const haystack = label === ZERO_WIDTH_LABEL ? text : normalized;
+    if (pattern.test(haystack)) {
       findings.push(
         makeFinding(severity, "prompt-injection", `Potential prompt injection detected: ${label}`, "tool description"),
       );
