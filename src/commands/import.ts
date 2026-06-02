@@ -382,14 +382,9 @@ export function registerImportCommand(program: Command): void {
       const { scanTier1 } = await import("../scanner/tier1.js");
       const { computeTrustScore } = await import("../scanner/trust-score.js");
       const { confirm } = await import("@inquirer/prompts");
-      const path = await import("path");
-      const os = await import("os");
 
       async function storeExists(): Promise<boolean> {
-        const storePath = path.join(os.homedir(), ".mcpm", "servers.json");
-        const data = await readJson<unknown>("servers.json");
-        void storePath;
-        return data !== null;
+        return (await readJson<unknown>("servers.json")) !== null;
       }
 
       const deps: ImportDeps = {
