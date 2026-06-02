@@ -12,9 +12,11 @@ vi.mock("fs/promises", () => ({
   writeFile: vi.fn(),
   rename: vi.fn(),
   mkdir: vi.fn(),
+  lstat: vi.fn(),
+  unlink: vi.fn(),
 }));
 
-import { readFile, writeFile, rename, mkdir } from "fs/promises";
+import { readFile, writeFile, rename, mkdir, lstat, unlink } from "fs/promises";
 import { ClaudeDesktopAdapter } from "../../../config/adapters/claude-desktop.js";
 import type { McpServerEntry } from "../../../config/adapters/index.js";
 
@@ -22,6 +24,8 @@ const mockReadFile = readFile as ReturnType<typeof vi.fn>;
 const mockWriteFile = writeFile as ReturnType<typeof vi.fn>;
 const mockRename = rename as ReturnType<typeof vi.fn>;
 const mockMkdir = mkdir as ReturnType<typeof vi.fn>;
+const mockLstat = lstat as ReturnType<typeof vi.fn>;
+const mockUnlink = unlink as ReturnType<typeof vi.fn>;
 
 const CONFIG_PATH = "/fake/claude_desktop_config.json";
 
@@ -37,6 +41,9 @@ describe("ClaudeDesktopAdapter", () => {
     mockWriteFile.mockResolvedValue(undefined);
     mockRename.mockResolvedValue(undefined);
     mockMkdir.mockResolvedValue(undefined);
+    // Config path is a regular file (not a symlink) by default.
+    mockLstat.mockResolvedValue({ isSymbolicLink: () => false });
+    mockUnlink.mockResolvedValue(undefined);
   });
 
   // -------------------------------------------------------------------------
@@ -229,19 +236,34 @@ describe("ClaudeDesktopAdapter", () => {
   // -------------------------------------------------------------------------
 
   describe("backup-before-write", () => {
-    it("writes .bak from in-memory content before addServer modifies config", async () => {
-      const existing: McpServerEntry = { command: "uvx", args: ["old"] };
-      mockReadFile.mockResolvedValue(makeConfig({ old: existing }));
+    // #25: the .bak must preserve the RAW original bytes verbatim — not a
+    // re-serialized copy of the parsed object. We feed a config with custom
+    // formatting + a comment-style key; pre-fix code (JSON.stringify of the
+    // parsed object) would lose the exact bytes and fail this assertion.
+    it("writes the RAW original bytes to .bak before addServer modifies config", async () => {
+      // Valid JSON with deliberate formatting + key order that a re-serialize
+      // (JSON.stringify of the parsed object) would NOT reproduce. Pre-fix
+      // code wrote the re-serialized form and would fail the verbatim check.
+      const rawOriginal =
+        '{\n\t"z_last": true,\n\t"mcpServers": {"old": {"command": "uvx", "args": ["old"]}}\n}';
+      mockReadFile.mockResolvedValue(rawOriginal);
       const entry: McpServerEntry = { command: "npx", args: [] };
       await adapter.addServer(CONFIG_PATH, "srv", entry);
 
       // Two writeFile calls: first is .bak, second is .tmp
       expect(mockWriteFile).toHaveBeenCalledTimes(2);
-      const [bakPath, bakContent] = mockWriteFile.mock.calls[0] as [string, string, unknown];
+      const [bakPath, bakContent, bakOpts] = mockWriteFile.mock.calls[0] as [
+        string,
+        string,
+        { flag?: string },
+      ];
       expect(bakPath).toBe(`${CONFIG_PATH}.bak`);
-      const parsed = JSON.parse(bakContent);
-      expect(parsed.mcpServers.old).toEqual(existing);
-      expect(parsed.mcpServers.srv).toBeUndefined();
+      // Verbatim — byte-for-byte equal to what was read (tabs + key order kept).
+      expect(bakContent).toBe(rawOriginal);
+      // It is NOT the re-serialized form a pre-fix implementation would write.
+      expect(bakContent).not.toBe(JSON.stringify(JSON.parse(rawOriginal), null, 2));
+      // #26: exclusive create so a pre-placed .bak symlink can't be followed.
+      expect(bakOpts.flag).toBe("wx");
     });
 
     it("writes .bak before removeServer modifies config", async () => {
@@ -252,6 +274,33 @@ describe("ClaudeDesktopAdapter", () => {
       expect(mockWriteFile).toHaveBeenCalledTimes(2);
       const [bakPath] = mockWriteFile.mock.calls[0] as [string, string, unknown];
       expect(bakPath).toBe(`${CONFIG_PATH}.bak`);
+    });
+
+    // #25: write-once. If a .bak already exists (the exclusive write rejects
+    // EEXIST), the original backup is left intact and the operation still
+    // succeeds. Pre-fix code overwrote the .bak on every single write.
+    it("does not clobber an existing .bak (write-once)", async () => {
+      mockReadFile.mockResolvedValue(makeConfig({ old: { command: "uvx", args: [] } }));
+      // Simulate an existing .bak: the exclusive .bak write fails EEXIST,
+      // the .tmp write succeeds.
+      const eexist = Object.assign(new Error("EEXIST"), { code: "EEXIST" });
+      mockWriteFile
+        .mockReset()
+        .mockRejectedValueOnce(eexist) // .bak — already exists
+        .mockResolvedValueOnce(undefined); // .tmp
+
+      const entry: McpServerEntry = { command: "npx", args: [] };
+      await expect(adapter.addServer(CONFIG_PATH, "srv", entry)).resolves.toBeUndefined();
+
+      // .bak attempt used the exclusive flag; the config write still happened.
+      const [bakPath, , bakOpts] = mockWriteFile.mock.calls[0] as [
+        string,
+        string,
+        { flag?: string },
+      ];
+      expect(bakPath).toBe(`${CONFIG_PATH}.bak`);
+      expect(bakOpts.flag).toBe("wx");
+      expect(mockRename).toHaveBeenCalledOnce();
     });
 
     it("skips .bak when config does not exist yet (first-time creation)", async () => {
@@ -265,6 +314,46 @@ describe("ClaudeDesktopAdapter", () => {
       expect(mockWriteFile).toHaveBeenCalledOnce();
       const [writtenPath] = mockWriteFile.mock.calls[0] as [string, string, unknown];
       expect(writtenPath).toMatch(/\.tmp$/);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // symlink safety (#26)
+  // -------------------------------------------------------------------------
+
+  describe("symlink safety", () => {
+    // #26: the .tmp is created exclusively (O_CREAT|O_EXCL via flag "wx") and
+    // any stale .tmp is unlinked first, so a pre-placed .tmp symlink cannot
+    // redirect the write. Pre-fix code used a plain writeFile (no flag).
+    it("writes .tmp exclusively and unlinks any stale .tmp first", async () => {
+      // No existing config → no .bak, so the only writeFile is the .tmp.
+      const enoent = Object.assign(new Error("ENOENT"), { code: "ENOENT" });
+      mockReadFile.mockRejectedValue(enoent);
+      const entry: McpServerEntry = { command: "npx", args: [] };
+      await adapter.addServer(CONFIG_PATH, "srv", entry);
+
+      // Stale .tmp removed before the exclusive create.
+      expect(mockUnlink).toHaveBeenCalledWith(`${CONFIG_PATH}.tmp`);
+      const [tmpPath, , tmpOpts] = mockWriteFile.mock.calls[0] as [
+        string,
+        string,
+        { flag?: string },
+      ];
+      expect(tmpPath).toBe(`${CONFIG_PATH}.tmp`);
+      expect(tmpOpts.flag).toBe("wx");
+    });
+
+    // #26: refuse to write through a symlinked config path (lstat check).
+    it("refuses to write when the config path itself is a symlink", async () => {
+      mockReadFile.mockResolvedValue(makeConfig({ old: { command: "uvx", args: [] } }));
+      mockLstat.mockResolvedValue({ isSymbolicLink: () => true });
+
+      const entry: McpServerEntry = { command: "npx", args: [] };
+      await expect(adapter.addServer(CONFIG_PATH, "srv", entry)).rejects.toThrow(/symlink/i);
+
+      // Nothing was written or renamed through the symlink.
+      expect(mockWriteFile).not.toHaveBeenCalled();
+      expect(mockRename).not.toHaveBeenCalled();
     });
   });
 });
