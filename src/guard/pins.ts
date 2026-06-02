@@ -11,9 +11,17 @@
  *   ~/.mcpm/pins.json            — pin data, JSON, format_version-tagged
  *   ~/.mcpm/pins.json.integrity  — SHA-256 of pins.json contents (sidecar)
  *
- * The integrity sidecar (security review F4.2) lets us detect tampering
- * by another local process. Any mismatch on read refuses to use the
- * pin file until the user runs `mcpm guard reset-integrity`.
+ * The integrity sidecar (security review F4.2) is an UNKEYED SHA-256 of
+ * pins.json stored next to it with the same 0o600 perms. It provides
+ * INTEGRITY (tamper-EVIDENCE against accidental corruption / cross-machine
+ * copies / a different OS-user account), NOT AUTHENTICITY against a
+ * same-user/postinstall attacker: any process that can write pins.json can
+ * also recompute and rewrite this sidecar to match, so there is no
+ * attacker/writer asymmetry. A keyed scheme (HMAC/signature) would need a
+ * secret the writable store lacks — same constraint as the secret store
+ * (security issue #15); deferred to OS-keychain support. See security issue
+ * #19. Any mismatch on read refuses to use the pin file until the user runs
+ * `mcpm guard reset-integrity`.
  *
  * Two-target scope: install-time capture writes captured_via:"install".
  * If install-time spawn fails (OAuth, network), a placeholder entry with
@@ -99,6 +107,10 @@ export class PinsIntegrityError extends Error {
   }
 }
 
+// Issue #19: UNKEYED SHA-256. This is an integrity checksum (tamper-evidence),
+// not a keyed MAC — it cannot authenticate the writer. A same-user/postinstall
+// process can recompute this to match a malicious edit. Do not document it as
+// anti-malware. A keyed scheme needs a secret the writable store lacks (#15).
 function fileSha(content: string): string {
   return `sha256:${createHash("sha256").update(content, "utf8").digest("hex")}`;
 }

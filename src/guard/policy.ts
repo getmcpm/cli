@@ -52,6 +52,9 @@ async function integrityPath(): Promise<string> {
   return path.join(await getStorePath(), POLICY_INTEGRITY_FILENAME);
 }
 
+// Issue #19: UNKEYED SHA-256 — integrity (tamper-evidence), not authenticity.
+// A same-user/postinstall process can recompute this to match a malicious
+// edit, so it is not anti-malware. A keyed MAC needs a secret absent here (#15).
 function fileSha(content: string): string {
   return `sha256:${createHash("sha256").update(content, "utf8").digest("hex")}`;
 }
@@ -92,11 +95,17 @@ export async function readPolicy(): Promise<GuardPolicyFile> {
   }
   if (raw.trim() === "") return {};
 
-  // SECURITY F4: integrity sidecar parity with pins.json. A malicious
-  // postinstall script that mutates this file silently disables guard
-  // signatures (the relay reads at every session start). If a sidecar
-  // exists and doesn't match, refuse to use the policy until the user
-  // reviews + runs `mcpm guard reset-integrity --policy`.
+  // SECURITY F4 / issue #19: integrity sidecar parity with pins.json. This is
+  // an UNKEYED SHA-256 — it provides INTEGRITY (tamper-evidence vs accidental
+  // corruption / cross-machine copies / a different OS-user account), NOT
+  // AUTHENTICITY vs a same-user/postinstall attacker. A malicious postinstall
+  // script (running as this user) that mutates the policy can also recompute
+  // and rewrite this sidecar to match, so the mismatch check does NOT stop it.
+  // What it does catch: a naive edit that leaves the sidecar stale. A keyed
+  // scheme (HMAC/signature) would need a secret the writable store lacks (same
+  // constraint as the secret store, issue #15) — deferred to OS-keychain.
+  // On mismatch, refuse to use the policy until the user reviews + runs
+  // `mcpm guard reset-integrity --policy`.
   let sidecar: string | null = null;
   try {
     sidecar = (await readFile(sidecarP, "utf-8")).trim();
