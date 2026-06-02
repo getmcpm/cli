@@ -243,31 +243,50 @@ export function registerGuardCommand(program: Command): void {
     .description("Internal: relay entry point invoked by wrapped configs (semver-exempt)")
     .option("--inner", "required marker; this command is not for direct user use")
     .option("--server-name <name>", "server name (set by enable)")
+    .option("--declared-env <csv>", "comma-separated declared env key names (set by enable)")
+    .option("--orig-hash <hex>", "integrity hash of the original entry (set by enable)")
     .allowUnknownOption()
     .allowExcessArguments()
-    .action(async (opts: { inner?: boolean; serverName?: string }, cmd: Command) => {
-      // SECURITY F6: refuse direct user invocation without the --inner marker.
-      if (opts.inner !== true) {
-        process.stderr.write(
-          "mcpm guard run: --inner flag required (internal command, do not invoke directly).\n",
-        );
-        process.exit(1);
-      }
-      // SECURITY F1: Commander already consumed --server-name; pull from `opts`.
-      // cmd.args contains everything after `--` (the wrapped server's command + args).
-      if (typeof opts.serverName !== "string" || opts.serverName.length === 0) {
-        process.stderr.write("mcpm guard run --inner: missing --server-name <name>.\n");
-        process.exit(1);
-      }
-      const [command, ...args] = cmd.args;
-      if (!command) {
-        process.stderr.write("mcpm guard run --inner: missing -- <command>.\n");
-        process.exit(1);
-      }
-      const { runInner } = await import("../guard/run-inner.js");
-      const code = await runInner({ serverName: opts.serverName, command, args });
-      process.exit(code);
-    });
+    .action(
+      async (
+        opts: { inner?: boolean; serverName?: string; declaredEnv?: string; origHash?: string },
+        cmd: Command,
+      ) => {
+        // SECURITY F6: refuse direct user invocation without the --inner marker.
+        if (opts.inner !== true) {
+          process.stderr.write(
+            "mcpm guard run: --inner flag required (internal command, do not invoke directly).\n",
+          );
+          process.exit(1);
+        }
+        // SECURITY F1: Commander already consumed --server-name; pull from `opts`.
+        // cmd.args contains everything after `--` (the wrapped server's command + args).
+        if (typeof opts.serverName !== "string" || opts.serverName.length === 0) {
+          process.stderr.write("mcpm guard run --inner: missing --server-name <name>.\n");
+          process.exit(1);
+        }
+        const [command, ...args] = cmd.args;
+        if (!command) {
+          process.stderr.write("mcpm guard run --inner: missing -- <command>.\n");
+          process.exit(1);
+        }
+        // Issue #20: declared env key names are embedded in the wrap marker by
+        // `enable`; run-inner uses them to forward ONLY a safe baseline + the
+        // server's declared vars to the wrapped child (not the relay's full env).
+        const declaredEnvKeys =
+          typeof opts.declaredEnv === "string" && opts.declaredEnv.length > 0
+            ? opts.declaredEnv.split(",")
+            : [];
+        const { runInner } = await import("../guard/run-inner.js");
+        const code = await runInner({
+          serverName: opts.serverName,
+          command,
+          args,
+          declaredEnvKeys,
+        });
+        process.exit(code);
+      },
+    );
 }
 
 function parseClientServer(rawOpts: { client?: string; server?: string }): {

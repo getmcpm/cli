@@ -14,7 +14,12 @@ import { registerGuardCommand } from "../../commands/guard.js";
 
 let exitSpy: ReturnType<typeof vi.spyOn>;
 let stderrSpy: ReturnType<typeof vi.spyOn>;
-let runInnerCalls: Array<{ serverName: string; command: string; args: readonly string[] }>;
+let runInnerCalls: Array<{
+  serverName: string;
+  command: string;
+  args: readonly string[];
+  declaredEnvKeys: readonly string[];
+}>;
 
 beforeEach(() => {
   exitSpy = vi.spyOn(process, "exit").mockImplementation(((_code?: number) => {
@@ -23,7 +28,12 @@ beforeEach(() => {
   stderrSpy = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
   runInnerCalls = [];
   vi.doMock("../run-inner.js", () => ({
-    runInner: async (args: { serverName: string; command: string; args: readonly string[] }) => {
+    runInner: async (args: {
+      serverName: string;
+      command: string;
+      args: readonly string[];
+      declaredEnvKeys: readonly string[];
+    }) => {
       runInnerCalls.push(args);
       return 0;
     },
@@ -61,6 +71,25 @@ describe("mcpm guard run --inner argv parsing through Commander", () => {
       serverName: "fs-mcp",
       command: "npx",
       args: ["-y", "@modelcontextprotocol/server-filesystem", "/data"],
+      declaredEnvKeys: [],
+    });
+  });
+
+  test("parses --declared-env into declaredEnvKeys (issue #20)", async () => {
+    await runArgv([
+      "guard", "run", "--inner",
+      "--server-name", "fs-mcp",
+      "--declared-env", "FOO,BAR",
+      "--orig-hash", "deadbeef",
+      "--",
+      "npx", "-y", "server",
+    ]);
+    expect(runInnerCalls).toHaveLength(1);
+    expect(runInnerCalls[0]).toEqual({
+      serverName: "fs-mcp",
+      command: "npx",
+      args: ["-y", "server"],
+      declaredEnvKeys: ["FOO", "BAR"],
     });
   });
 

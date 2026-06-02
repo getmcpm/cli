@@ -13,7 +13,7 @@
 import type { JSONRPCMessage } from "@modelcontextprotocol/sdk/types.js";
 import { inspectMessage } from "./patterns.js";
 import { OWASP_MCP_TOP_10 } from "./signatures.js";
-import { startRelay, type GuardEvent } from "./relay.js";
+import { startRelay, buildSafeEnv, type GuardEvent } from "./relay.js";
 import { inspectForDrift } from "./drift.js";
 import { readPins, writePins, emptyPinsFile } from "./pins.js";
 import { readPolicy, expireStale, type GuardPolicyFile } from "./policy.js";
@@ -26,6 +26,13 @@ export interface RunInnerArgs {
   readonly serverName: string;
   readonly command: string;
   readonly args: readonly string[];
+  /**
+   * Issue #20: KEY names of the wrapped server's DECLARED env (embedded in the
+   * wrap marker at `enable` time). Only these keys are forwarded from the
+   * relay's process.env to the child, on top of the safe baseline — ambient
+   * shell secrets (OPENAI_API_KEY, AWS_*, GITHUB_TOKEN, …) are NOT forwarded.
+   */
+  readonly declaredEnvKeys: readonly string[];
 }
 
 const SIGNATURE_LIST_VERSION = "owasp-mcp-top-10@v0.5.0";
@@ -153,13 +160,26 @@ export async function runInner(parsed: RunInnerArgs): Promise<number> {
     return applyPolicy(inspectMessage(msg, OWASP_MCP_TOP_10), policy);
   };
 
-  // SECURITY F2: forward env unchanged — IDE already chose which vars to expose.
-  // Exception: values written as `mcpm:keychain:server/KEY` placeholders (by
-  // `mcpm secrets`) are resolved to their decrypted secrets here, so the
-  // plaintext exists only in this child's in-memory env and never on disk.
+  // SECURITY F2 / issue #20: build the wrapped child's env from an intentional
+  // allowlist instead of forwarding the relay's entire process.env. The relay
+  // env mixes the user's AMBIENT shell secrets (OPENAI_API_KEY, AWS_*,
+  // GITHUB_TOKEN, …) with the IDE-injected DECLARED vars; the wrapped server is
+  // only semi-trusted, so it must see just:
+  //   1. a safe baseline (PATH, HOME, locale, … via buildSafeEnv), plus
+  //   2. the server's own DECLARED env keys (names carried in the wrap marker).
+  // Values written as `mcpm:keychain:server/KEY` placeholders (by `mcpm
+  // secrets`) are then resolved to their decrypted secrets, so the plaintext
+  // exists only in this child's in-memory env and never on disk.
+  const baselineEnv = buildSafeEnv(process.env);
+  const childEnvSource: NodeJS.ProcessEnv = { ...baselineEnv };
+  for (const key of parsed.declaredEnvKeys) {
+    const value = process.env[key];
+    if (value !== undefined) childEnvSource[key] = value;
+  }
+
   let childEnv: Record<string, string>;
   try {
-    childEnv = await resolveEnvPlaceholders(process.env);
+    childEnv = await resolveEnvPlaceholders(childEnvSource);
   } catch (err) {
     process.stderr.write(
       `[mcpm-guard] SECRET-MISSING ${safeName} ${(err as Error).message}\n`,
