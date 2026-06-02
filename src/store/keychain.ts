@@ -17,6 +17,7 @@
 import { createHash, randomBytes, webcrypto } from "node:crypto";
 import os from "node:os";
 import { readJson, writeJson } from "./index.js";
+import { withStoreLock } from "./atomic.js";
 
 const STORE_FILE = "secrets.enc.json";
 const PLACEHOLDER_PREFIX = "mcpm:keychain:";
@@ -124,8 +125,13 @@ async function readStore(): Promise<Record<string, string>> {
 
 export async function setSecret(server: string, key: string, value: string): Promise<void> {
   const sk = validatedStoreKey(server, key);
-  const store = await readStore();
-  await writeJson(STORE_FILE, { ...store, [sk]: await encrypt(value) });
+  // Encrypt outside the lock (it does not depend on stored state) to keep the
+  // critical section short, then read-merge-write atomically under the lock.
+  const encrypted = await encrypt(value);
+  await withStoreLock(async () => {
+    const store = await readStore();
+    await writeJson(STORE_FILE, { ...store, [sk]: encrypted });
+  });
 }
 
 /**
@@ -137,12 +143,17 @@ export async function setSecrets(
   server: string,
   values: Record<string, string>
 ): Promise<void> {
-  const store = await readStore();
-  const next: Record<string, string> = { ...store };
+  // Encrypt every value first (no dependency on stored state), then read-merge-
+  // write atomically under the lock so a concurrent writer cannot lost-update
+  // this batch.
+  const encrypted: Record<string, string> = {};
   for (const [key, value] of Object.entries(values)) {
-    next[validatedStoreKey(server, key)] = await encrypt(value);
+    encrypted[validatedStoreKey(server, key)] = await encrypt(value);
   }
-  await writeJson(STORE_FILE, next);
+  await withStoreLock(async () => {
+    const store = await readStore();
+    await writeJson(STORE_FILE, { ...store, ...encrypted });
+  });
 }
 
 export async function getSecret(server: string, key: string): Promise<string | null> {
@@ -153,10 +164,12 @@ export async function getSecret(server: string, key: string): Promise<string | n
 
 export async function deleteSecret(server: string, key: string): Promise<void> {
   const sk = validatedStoreKey(server, key);
-  const store = await readStore();
-  if (!(sk in store)) return;
-  const { [sk]: _removed, ...rest } = store;
-  await writeJson(STORE_FILE, rest);
+  await withStoreLock(async () => {
+    const store = await readStore();
+    if (!(sk in store)) return;
+    const { [sk]: _removed, ...rest } = store;
+    await writeJson(STORE_FILE, rest);
+  });
 }
 
 export async function listSecretKeys(server: string): Promise<string[]> {

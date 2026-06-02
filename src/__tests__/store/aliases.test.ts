@@ -20,6 +20,13 @@ vi.mock("../../store/index.js", () => {
   };
 });
 
+// withStoreLock runs the real proper-lockfile + ~/.mcpm lock file; in these
+// in-memory tests it should just invoke the callback. Real lock/symlink
+// behavior is covered by atomic.test.ts.
+vi.mock("../../store/atomic.js", () => ({
+  withStoreLock: vi.fn(async (fn: () => Promise<unknown>) => fn()),
+}));
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const storeModule = await import("../../store/index.js") as any;
 
