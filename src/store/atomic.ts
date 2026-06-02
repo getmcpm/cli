@@ -70,11 +70,14 @@ async function assertNotSymlink(targetPath: string): Promise<void> {
  *
  * #26 hardening:
  *   1. lstat the destination — refuse if it is a symlink.
- *   2. unlink any stale `.tmp` (a leftover real file from a crashed run would
- *      otherwise cause a false EEXIST; unlinking a pre-placed symlink removes
- *      only the link, not its target).
- *   3. write the `.tmp` EXCLUSIVELY (flag "wx") so a pre-placed `.tmp` symlink
- *      fails with EEXIST instead of redirecting the write onto its target.
+ *   2. unlink any stale `.tmp`. This removes the LINK ITSELF, not its target:
+ *      a pre-placed `.tmp` symlink is deleted (leaving its target untouched),
+ *      and a leftover real `.tmp` from a crashed run — which would otherwise
+ *      cause a false EEXIST on the exclusive open — is cleared.
+ *   3. write the `.tmp` EXCLUSIVELY (flag "wx" = O_CREAT|O_EXCL). The unlink in
+ *      step 2 already removed any symlink, so this open creates a fresh inode;
+ *      "wx" is the BACKSTOP that still fails EEXIST (rather than following a
+ *      link) if the narrow unlink→open window is re-raced by an attacker.
  *   4. re-lstat the destination — refuse if it became a symlink — then rename.
  */
 export async function writeFileAtomic(
@@ -96,8 +99,11 @@ export async function writeFileAtomic(
     flag: "wx",
   });
 
-  // Re-check just before the rename closes a TOCTOU window where the
-  // destination is swapped for a symlink after the first lstat.
+  // Defense-in-depth, not the primary TOCTOU guard: POSIX rename(2) atomically
+  // REPLACES the destination and does NOT follow a symlink at that path, so even
+  // a destination swapped for a symlink after the first lstat is overwritten,
+  // not traversed. This re-lstat simply refuses that case early so we never
+  // leave a dangling link in the store dir.
   await assertNotSymlink(filePath);
   await rename(tmpPath, filePath);
 }
@@ -120,6 +126,12 @@ async function lockPath(): Promise<string> {
  */
 export async function withStoreLock<T>(fn: () => Promise<T>): Promise<T> {
   const lp = await lockPath();
+
+  // Refuse a pre-placed `.store.lock` symlink. proper-lockfile realpath-resolves
+  // its target, so a symlink would relocate the lock to a different directory —
+  // silently breaking mutual exclusion (two processes would lock different
+  // paths and both "succeed"). Same lstat guard writeFileAtomic uses.
+  await assertNotSymlink(lp);
 
   // proper-lockfile requires the lock target to exist; touch it once.
   try {

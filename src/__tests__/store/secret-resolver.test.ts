@@ -77,6 +77,43 @@ describe("resolveEnvPlaceholders", () => {
     });
     expect(resolved).toEqual({ DB_PASSWORD: "p@ss", DB_HOST: "localhost" });
   });
+
+  it("reads the store ONCE as a consistent snapshot for multiple placeholders", async () => {
+    // Consistency fix: all placeholders resolve against a single locked read, so
+    // a concurrent delete cannot tear the result. Two placeholders ⇒ exactly one
+    // readJson(secrets.enc.json), not one read per key.
+    const { setSecrets, toPlaceholder, resolveEnvPlaceholders } = await import(
+      "../../store/keychain.js"
+    );
+    await setSecrets("svc", { A: "va", B: "vb" });
+    storeModule.readJson.mockClear();
+
+    const resolved = await resolveEnvPlaceholders({
+      VA: toPlaceholder("svc", "A"),
+      VB: toPlaceholder("svc", "B"),
+    });
+
+    expect(resolved).toEqual({ VA: "va", VB: "vb" });
+    const secretReads = storeModule.readJson.mock.calls.filter(
+      (c: unknown[]) => c[0] === "secrets.enc.json"
+    );
+    expect(secretReads).toHaveLength(1);
+  });
+
+  it("does not read the store or take the lock when there are no placeholders", async () => {
+    const { resolveEnvPlaceholders } = await import("../../store/keychain.js");
+    const { withStoreLock } = (await import("../../store/atomic.js")) as unknown as {
+      withStoreLock: ReturnType<typeof vi.fn>;
+    };
+    storeModule.readJson.mockClear();
+    (withStoreLock as ReturnType<typeof vi.fn>).mockClear();
+
+    const resolved = await resolveEnvPlaceholders({ PATH: "/usr/bin", HOME: "/home/a" });
+
+    expect(resolved).toEqual({ PATH: "/usr/bin", HOME: "/home/a" });
+    expect(withStoreLock).not.toHaveBeenCalled();
+    expect(storeModule.readJson).not.toHaveBeenCalled();
+  });
 });
 
 describe("listAll", () => {

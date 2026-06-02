@@ -71,8 +71,10 @@ describe("writeJson — symlink safety (#26 parity)", () => {
     // Attacker pre-creates <file>.tmp as a symlink to a sensitive file.
     await symlink(secretPath, path.join(storeDir, "secrets.enc.json.tmp"));
 
-    // The exclusive "wx" open refuses the pre-placed symlink (EEXIST). After
-    // unlinking the stale link the write lands on a fresh, unfollowed inode.
+    // The unlink removes the attacker's symlink (the link, not its target), so
+    // the write lands on a fresh inode; the exclusive "wx" open is the backstop
+    // that would still fail EEXIST (not follow the link) if the unlink→open
+    // window were re-raced. Either way the write is never redirected.
     await writeJson("secrets.enc.json", { "srv/KEY": "ciphertext" });
 
     // The secret target is untouched — the write was not redirected.
@@ -124,6 +126,17 @@ describe("withStoreLock — locking around read-modify-write", () => {
     ).rejects.toThrow("boom");
     // Lock released despite the throw — the lock dir is gone.
     await expect(lstat(lockDirPath())).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  it("refuses to lock when the .store.lock path is a symlink", async () => {
+    // A pre-placed `.store.lock` symlink would be realpath-resolved by
+    // proper-lockfile to a different directory, silently breaking mutual
+    // exclusion. withStoreLock lstats the lock path and refuses the symlink.
+    const target = path.join(home, "elsewhere");
+    await mkdir(target, { recursive: true });
+    await symlink(target, path.join(storeDir, ".store.lock"));
+
+    await expect(withStoreLock(async () => "x")).rejects.toThrow(/symlink/i);
   });
 
   it("sequential locked secret writes do not lose prior keys", async () => {

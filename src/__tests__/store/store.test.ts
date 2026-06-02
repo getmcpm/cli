@@ -174,6 +174,19 @@ describe("writeJson", () => {
     await writeJson("x.json", data);
     expect(data).toEqual(copy);
   });
+
+  it("rejects when the destination lstat reports a symlink", async () => {
+    // Exercises the assertNotSymlink guard through the mock layer: the default
+    // stub makes lstat ENOENT (guard path never runs), so here we force lstat to
+    // resolve to a symlink. If a future change drops assertNotSymlink, this test
+    // catches it (writeFile/rename would be attempted instead of rejecting).
+    mockHomedir.mockReturnValue("/home/alice");
+    mockLstat.mockResolvedValue({ isSymbolicLink: () => true });
+
+    await expect(writeJson("secrets.enc.json", { k: "v" })).rejects.toThrow(/symlink/i);
+    expect(mockWriteFile).not.toHaveBeenCalled();
+    expect(mockRename).not.toHaveBeenCalled();
+  });
 });
 
 describe("readJson — path traversal protection", () => {
