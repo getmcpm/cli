@@ -7,6 +7,7 @@ import { describe, expect, test, beforeEach, afterEach } from "vitest";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync, readFileSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import {
   hashToolDefinition,
   emptyPinsFile,
@@ -200,5 +201,34 @@ describe("readPins / writePins", () => {
     mkdirSync(dir, { recursive: true, mode: 0o700 });
     writeFileSync(path.join(dir, "pins.json"), '{"format_version": 99, "servers": {}}', { mode: 0o600 });
     await expect(readPins()).rejects.toThrow(/format_version mismatch/);
+  });
+});
+
+// Issue #19: the unkeyed SHA-256 sidecars must be documented as integrity
+// (tamper-evidence), NOT authenticity vs a same-user/postinstall attacker, who
+// can recompute the sidecar to match. These tests pin the honest wording in the
+// source comments so the overclaim cannot silently return. Docs-only contract.
+describe("issue #19 — integrity sidecars relabeled integrity-not-authenticity", () => {
+  const here = path.dirname(fileURLToPath(import.meta.url));
+  const readSrc = (rel: string) => readFileSync(path.join(here, rel), "utf-8");
+
+  test("pins.ts states integrity-not-authenticity and references issue #19", () => {
+    const src = readSrc("../pins.ts");
+    expect(src).toMatch(/issue #19/i);
+    expect(src).toMatch(/UNKEYED SHA-256/);
+    expect(src).toMatch(/NOT AUTHENTICITY|not a keyed MAC/);
+    // The pre-fix comment claimed it "lets us detect tampering by another
+    // local process" with no caveat — that overclaim must be gone.
+    expect(src).not.toMatch(/lets us detect tampering\s*\n?\s*\* by another local process\./);
+  });
+
+  test("policy.ts states integrity-not-authenticity and references issue #19", () => {
+    const src = readSrc("../policy.ts");
+    expect(src).toMatch(/issue #19/i);
+    expect(src).toMatch(/UNKEYED SHA-256/);
+    expect(src).toMatch(/NOT\s*\n?\s*\/\/\s*AUTHENTICITY|not authenticity/i);
+    // The pre-fix comment claimed a malicious postinstall "silently disables
+    // guard signatures" with no caveat that it can also rewrite the sidecar.
+    expect(src).not.toMatch(/script that mutates this file silently disables guard/);
   });
 });
