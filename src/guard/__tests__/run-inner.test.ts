@@ -7,6 +7,8 @@
  *    the relay with rug-pull protection silently off.
  *  - Fix 3: a PolicyIntegrityError must be surfaced on stderr before falling
  *    back to the safe `{}` policy (full enforcement).
+ *  - Fix 2 (MED): a generic non-ENOENT policy read error (EACCES/EMFILE) must
+ *    be surfaced as POLICY-READ-ERROR before the same safe `{}` fallback.
  *  - Fix 7a: inspectForDriftSync's same-session guard (SECURITY F3).
  */
 
@@ -150,6 +152,44 @@ describe("runInner fail-safe loading", () => {
     const stderr = stderrSpy.mock.calls.flat().join("");
     expect(stderr).toContain("[mcpm-guard] POLICY-INTEGRITY-ERROR:");
     // Did NOT fail closed for a policy error (the {} fallback is the safe state).
+    expect(exitSpy).not.toHaveBeenCalled();
+  });
+
+  test("Fix 2 (MED): a generic policy read error (EACCES) is surfaced as POLICY-READ-ERROR, then falls back to {}", async () => {
+    vi.resetModules();
+    vi.doMock("../pins.js", async () => {
+      const actual = await vi.importActual<typeof import("../pins.js")>("../pins.js");
+      return { ...actual, readPins: async (): Promise<PinsFile> => actual.emptyPinsFile() };
+    });
+    // Policy read throws a generic (non-PolicyIntegrityError, non-ENOENT) I/O error.
+    vi.doMock("../policy.js", async () => {
+      const actual = await vi.importActual<typeof import("../policy.js")>("../policy.js");
+      return {
+        ...actual,
+        readPolicy: async () => {
+          const e = new Error("EACCES: permission denied, open '~/.mcpm/guard-policy.yaml'");
+          (e as NodeJS.ErrnoException).code = "EACCES";
+          throw e;
+        },
+      };
+    });
+    vi.doMock("../relay.js", async () => {
+      const actual = await vi.importActual<typeof import("../relay.js")>("../relay.js");
+      return {
+        ...actual,
+        startRelay: () => ({ child: {} as never, exit: Promise.resolve(0) }),
+      };
+    });
+
+    const { runInner } = await import("../run-inner.js");
+    const code = await runInner(runInnerArgs);
+    expect(code).toBe(0); // fell back to full enforcement, relay started
+    const stderr = stderrSpy.mock.calls.flat().join("");
+    expect(stderr).toContain("[mcpm-guard] POLICY-READ-ERROR:");
+    expect(stderr).toContain("EACCES");
+    // Must NOT mislabel a generic I/O error as an integrity tamper.
+    expect(stderr).not.toContain("POLICY-INTEGRITY-ERROR:");
+    // The {} fallback is the safe state — do NOT fail closed.
     expect(exitSpy).not.toHaveBeenCalled();
   });
 });

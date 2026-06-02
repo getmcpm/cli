@@ -153,6 +153,15 @@ export async function runInner(parsed: RunInnerArgs): Promise<number> {
           `[mcpm-guard] POLICY-INTEGRITY-ERROR: ${safeName} ${(err as Error).message}\n` +
             `Falling back to full enforcement (ignoring guard-policy.yaml) for this session.\n`,
         );
+      } else {
+        // Generic non-ENOENT I/O error (EACCES, EMFILE, …). ENOENT is already
+        // returned as {} inside readPolicy and never reaches here. The {}
+        // fallback is the SAFE state (full enforcement), but swallowing the
+        // error silently hides a misconfigured/unreadable policy file — surface
+        // it on stderr before falling back. Do NOT exit: enforcement is preserved.
+        process.stderr.write(
+          `[mcpm-guard] POLICY-READ-ERROR: ${(err as Error).message}\n`,
+        );
       }
       return {};
     }),

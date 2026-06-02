@@ -299,9 +299,12 @@ export async function resetIntegrity(): Promise<void> {
     }
     throw err;
   }
-  const tmpSidecar = `${sidecarPath}.tmp`;
-  await writeFile(tmpSidecar, fileSha(content), { encoding: "utf-8", mode: 0o600 });
-  await rename(tmpSidecar, sidecarPath);
+  // Route the sidecar write through the same hardened atomic writer used by
+  // writePins (assertNotSymlink + stale-.tmp unlink + {flag:"wx"}). A bare
+  // writeFile(`${sidecarPath}.tmp`) + rename would follow a pre-placed symlink
+  // at the sidecar (or its .tmp), redirecting the write onto an attacker-chosen
+  // path — the exact gap the PR closed for the main pins/policy writes.
+  await writeFileAtomic(sidecarPath, fileSha(content));
 }
 
 // ---------------------------------------------------------------------------

@@ -184,4 +184,23 @@ describe("security review Step 7 — Zod validation + integrity sidecar", () => 
     writeFileSync(path.join(tmpHome, ".mcpm", "guard-policy.yaml"), "signature_overrides:\n  - id: evil\n    action: ignore\n");
     await expect(readPolicy()).rejects.toBeInstanceOf(PolicyIntegrityError);
   });
+
+  // Fix 1 (HIGH): resetPolicyIntegrity must route its sidecar write through the
+  // same hardened atomic writer as writePolicy, so a pre-placed symlink at the
+  // sidecar path cannot redirect the write onto an attacker-chosen target.
+  test("resetPolicyIntegrity refuses to write through a symlinked sidecar", async () => {
+    const { resetPolicyIntegrity } = await import("../policy.js");
+    const { writeFileSync, mkdirSync, symlinkSync } = await import("node:fs");
+    const dir = path.join(tmpHome, ".mcpm");
+    mkdirSync(dir, { recursive: true, mode: 0o700 });
+    // guard-policy.yaml exists (so reset has something to hash).
+    writeFileSync(path.join(dir, "guard-policy.yaml"), "signature_overrides: []\n", {
+      mode: 0o600,
+    });
+    const outside = path.join(tmpHome, "outside-policy-sidecar");
+    writeFileSync(outside, "stale", { mode: 0o600 });
+    // The sidecar is a symlink pointing outside the store.
+    symlinkSync(outside, path.join(dir, "guard-policy.yaml.integrity"));
+    await expect(resetPolicyIntegrity()).rejects.toThrow(/symlink/);
+  });
 });

@@ -204,6 +204,23 @@ describe("readPins / writePins", () => {
     expect(pins.servers["hand-added"]).toEqual({});
   });
 
+  // Fix 1 (HIGH): resetIntegrity must route its sidecar write through the same
+  // hardened atomic writer as writePins, so a pre-placed symlink at the sidecar
+  // path cannot redirect the write onto an attacker-chosen target.
+  test("resetIntegrity refuses to write through a symlinked sidecar", async () => {
+    const dir = path.join(tmpHome, ".mcpm");
+    mkdirSync(dir, { recursive: true, mode: 0o700 });
+    // pins.json exists (so reset has something to hash).
+    writeFileSync(path.join(dir, "pins.json"), '{"format_version": 1, "servers": {}}\n', {
+      mode: 0o600,
+    });
+    const outside = path.join(tmpHome, "outside-sidecar");
+    writeFileSync(outside, "stale", { mode: 0o600 });
+    // The sidecar is a symlink pointing outside the store.
+    symlinkSync(outside, path.join(dir, "pins.json.integrity"));
+    await expect(resetIntegrity()).rejects.toThrow(/symlink/);
+  });
+
   test("readPins throws on format_version mismatch", async () => {
     const dir = path.join(tmpHome, ".mcpm");
     mkdirSync(dir, { recursive: true, mode: 0o700 });
