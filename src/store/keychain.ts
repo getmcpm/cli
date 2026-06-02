@@ -17,6 +17,7 @@
 import { createHash, randomBytes, webcrypto } from "node:crypto";
 import os from "node:os";
 import { readJson, writeJson } from "./index.js";
+import { withStoreLock } from "./atomic.js";
 
 const STORE_FILE = "secrets.enc.json";
 const PLACEHOLDER_PREFIX = "mcpm:keychain:";
@@ -118,14 +119,30 @@ async function readStore(): Promise<Record<string, string>> {
   return (await readJson<Record<string, string>>(STORE_FILE)) ?? {};
 }
 
+// Decrypt a single stored value identified by its store key against an
+// already-loaded store snapshot. Shared by the unlocked per-key getSecret and
+// the locked snapshot resolver so both decode entries identically.
+async function decryptFromSnapshot(
+  store: Record<string, string>,
+  sk: string
+): Promise<string | null> {
+  const stored = store[sk];
+  return stored ? decrypt(stored) : null;
+}
+
 // ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
 
 export async function setSecret(server: string, key: string, value: string): Promise<void> {
   const sk = validatedStoreKey(server, key);
-  const store = await readStore();
-  await writeJson(STORE_FILE, { ...store, [sk]: await encrypt(value) });
+  // Encrypt outside the lock (it does not depend on stored state) to keep the
+  // critical section short, then read-merge-write atomically under the lock.
+  const encrypted = await encrypt(value);
+  await withStoreLock(async () => {
+    const store = await readStore();
+    await writeJson(STORE_FILE, { ...store, [sk]: encrypted });
+  });
 }
 
 /**
@@ -137,28 +154,40 @@ export async function setSecrets(
   server: string,
   values: Record<string, string>
 ): Promise<void> {
-  const store = await readStore();
-  const next: Record<string, string> = { ...store };
+  // Encrypt every value first (no dependency on stored state), then read-merge-
+  // write atomically under the lock so a concurrent writer cannot lost-update
+  // this batch.
+  const encrypted: Record<string, string> = {};
   for (const [key, value] of Object.entries(values)) {
-    next[validatedStoreKey(server, key)] = await encrypt(value);
+    encrypted[validatedStoreKey(server, key)] = await encrypt(value);
   }
-  await writeJson(STORE_FILE, next);
+  await withStoreLock(async () => {
+    const store = await readStore();
+    await writeJson(STORE_FILE, { ...store, ...encrypted });
+  });
 }
 
+// Intentionally UNLOCKED: a read-only single-key lookup. It accepts eventual
+// consistency (it may observe a concurrent writer's snapshot before or after a
+// mutation, never a torn one — writeJson swaps the file atomically via rename).
+// The consistency-sensitive path is resolveEnvPlaceholders, which takes the
+// lock and reads one snapshot for all keys.
 export async function getSecret(server: string, key: string): Promise<string | null> {
   const sk = validatedStoreKey(server, key);
-  const stored = (await readStore())[sk];
-  return stored ? decrypt(stored) : null;
+  return decryptFromSnapshot(await readStore(), sk);
 }
 
 export async function deleteSecret(server: string, key: string): Promise<void> {
   const sk = validatedStoreKey(server, key);
-  const store = await readStore();
-  if (!(sk in store)) return;
-  const { [sk]: _removed, ...rest } = store;
-  await writeJson(STORE_FILE, rest);
+  await withStoreLock(async () => {
+    const store = await readStore();
+    if (!(sk in store)) return;
+    const { [sk]: _removed, ...rest } = store;
+    await writeJson(STORE_FILE, rest);
+  });
 }
 
+// Intentionally UNLOCKED: read-only key enumeration, eventual consistency.
 export async function listSecretKeys(server: string): Promise<string[]> {
   assertSafeId(server, "server");
   const prefix = `${server}/`;
@@ -191,28 +220,52 @@ export function parsePlaceholder(value: string): { server: string; key: string }
  * never written to disk. `mcpm guard run --inner` calls this to inject secrets
  * into a wrapped server's child process without storing plaintext in client
  * config files.
+ *
+ * Reads the store as a single CONSISTENT SNAPSHOT under `withStoreLock`: all
+ * placeholders are resolved against one read taken while holding the same lock
+ * the write paths (setSecret/setSecrets/deleteSecret) hold. This closes the
+ * read-after-delete race where a concurrent `secrets delete` during guard
+ * startup made a per-key unlocked lookup observe a torn state and throw "Secret
+ * not found" — the exact race the lock was added to prevent. This is the only
+ * caller (guard/run-inner.ts), invoked at the top level and NOT from inside an
+ * already-held store lock, so acquiring the lock here cannot self-deadlock.
  */
 export async function resolveEnvPlaceholders(
   env: NodeJS.ProcessEnv
 ): Promise<Record<string, string>> {
-  const resolved: Record<string, string> = {};
+  // Parse placeholders up front so the locked critical section is just one read
+  // plus decryption — no validation or iteration over non-placeholder values.
+  const passthrough: Record<string, string> = {};
+  const placeholders: Array<{ name: string; server: string; key: string }> = [];
   for (const [name, value] of Object.entries(env)) {
     if (value === undefined) continue;
     const placeholder = parsePlaceholder(value);
     if (placeholder === null) {
-      resolved[name] = value;
+      passthrough[name] = value;
       continue;
     }
-    const secret = await getSecret(placeholder.server, placeholder.key);
-    if (secret === null) {
-      throw new Error(
-        `Secret "${placeholder.server}/${placeholder.key}" not found. ` +
-          `Run \`mcpm secrets set ${placeholder.server} ${placeholder.key}\` to store it.`
-      );
-    }
-    resolved[name] = secret;
+    placeholders.push({ name, ...placeholder });
   }
-  return resolved;
+
+  // No secrets to resolve — skip the lock entirely.
+  if (placeholders.length === 0) return passthrough;
+
+  return withStoreLock(async () => {
+    const store = await readStore();
+    const resolved: Record<string, string> = { ...passthrough };
+    for (const { name, server, key } of placeholders) {
+      const sk = validatedStoreKey(server, key);
+      const secret = await decryptFromSnapshot(store, sk);
+      if (secret === null) {
+        throw new Error(
+          `Secret "${server}/${key}" not found. ` +
+            `Run \`mcpm secrets set ${server} ${key}\` to store it.`
+        );
+      }
+      resolved[name] = secret;
+    }
+    return resolved;
+  });
 }
 
 /**
@@ -236,6 +289,8 @@ export function deriveKeychainId(name: string): string {
 /**
  * List all stored secrets grouped by server name. Returns only key names —
  * decrypted values are never read or returned.
+ *
+ * Intentionally UNLOCKED: read-only enumeration, eventual consistency.
  */
 export async function listAll(): Promise<Record<string, string[]>> {
   const store = await readStore();

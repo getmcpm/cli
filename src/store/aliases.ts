@@ -6,6 +6,7 @@
  */
 
 import { readJson, writeJson } from "./index.js";
+import { withStoreLock } from "./atomic.js";
 
 const FILENAME = "aliases.json";
 
@@ -23,21 +24,26 @@ export async function getAliases(): Promise<AliasMap> {
  * Sets an alias. Overwrites if it already exists.
  */
 export async function setAlias(alias: string, serverName: string): Promise<void> {
-  const current = await getAliases();
-  const updated: AliasMap = { ...current, [alias]: serverName };
-  await writeJson(FILENAME, updated);
+  // Locked read-modify-write — `serve` mode can race a CLI invocation.
+  await withStoreLock(async () => {
+    const current = await getAliases();
+    const updated: AliasMap = { ...current, [alias]: serverName };
+    await writeJson(FILENAME, updated);
+  });
 }
 
 /**
  * Removes an alias. Throws if the alias does not exist.
  */
 export async function removeAlias(alias: string): Promise<void> {
-  const current = await getAliases();
-  if (!Object.prototype.hasOwnProperty.call(current, alias)) {
-    throw new Error(`Alias "${alias}" not found.`);
-  }
-  const { [alias]: _removed, ...remaining } = current;
-  await writeJson(FILENAME, remaining);
+  await withStoreLock(async () => {
+    const current = await getAliases();
+    if (!Object.prototype.hasOwnProperty.call(current, alias)) {
+      throw new Error(`Alias "${alias}" not found.`);
+    }
+    const { [alias]: _removed, ...remaining } = current;
+    await writeJson(FILENAME, remaining);
+  });
 }
 
 /**

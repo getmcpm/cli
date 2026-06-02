@@ -2,12 +2,15 @@
  * Local JSON file store for mcpm.
  *
  * All data is persisted under ~/.mcpm/ as JSON files.
- * All writes are atomic: data is written to a .tmp file first, then renamed.
+ * All writes are atomic and symlink-safe: data is written to a .tmp file
+ * exclusively (refusing a pre-placed symlink), then renamed into place.
+ * See src/store/atomic.ts.
  */
 
-import { readFile, writeFile, rename, mkdir } from "fs/promises";
+import { readFile, mkdir } from "fs/promises";
 import os from "os";
 import path from "path";
+import { writeFileAtomic } from "./atomic.js";
 
 // ---------------------------------------------------------------------------
 // Store path
@@ -100,11 +103,11 @@ export async function writeJson(
     throw new Error(`Path traversal attempt blocked: "${filename}"`);
   }
   const filePath = resolved;
-  const tmpPath = `${filePath}.tmp`;
 
-  await writeFile(tmpPath, JSON.stringify(data, null, 2), {
-    encoding: "utf-8",
-    mode: 0o600,
-  });
-  await rename(tmpPath, filePath);
+  // Symlink-safe atomic write (mirrors config adapter #26 hardening): refuses a
+  // symlinked destination/.tmp, writes the .tmp exclusively, and re-checks
+  // before the rename. writeJson is the writer for secrets.enc.json,
+  // servers.json, aliases.json, and the cache, so all store data lands through
+  // this single hardened path.
+  await writeFileAtomic(filePath, JSON.stringify(data, null, 2));
 }

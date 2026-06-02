@@ -17,10 +17,14 @@ vi.mock("fs/promises", () => ({
   writeFile: vi.fn(),
   rename: vi.fn(),
   mkdir: vi.fn(),
+  // writeJson now goes through the symlink-safe writeFileAtomic helper, which
+  // lstats the destination (refuse symlink) and unlinks any stale .tmp.
+  lstat: vi.fn(),
+  unlink: vi.fn(),
 }));
 
 import os from "os";
-import { readFile, writeFile, rename, mkdir } from "fs/promises";
+import { readFile, writeFile, rename, mkdir, lstat, unlink } from "fs/promises";
 import {
   getStorePath,
   readJson,
@@ -33,6 +37,17 @@ const mockReadFile = readFile as ReturnType<typeof vi.fn>;
 const mockWriteFile = writeFile as ReturnType<typeof vi.fn>;
 const mockRename = rename as ReturnType<typeof vi.fn>;
 const mockMkdir = mkdir as ReturnType<typeof vi.fn>;
+const mockLstat = lstat as ReturnType<typeof vi.fn>;
+const mockUnlink = unlink as ReturnType<typeof vi.fn>;
+
+const enoent = () => Object.assign(new Error("ENOENT"), { code: "ENOENT" });
+
+// Default for the symlink-safe write path: destination does not exist (so it is
+// not a symlink) and there is no stale .tmp to unlink.
+function stubAtomicWriteFs(): void {
+  mockLstat.mockRejectedValue(enoent());
+  mockUnlink.mockRejectedValue(enoent());
+}
 
 describe("getStorePath", () => {
   beforeEach(() => {
@@ -120,6 +135,7 @@ describe("writeJson", () => {
     mockMkdir.mockResolvedValue(undefined);
     mockWriteFile.mockResolvedValue(undefined);
     mockRename.mockResolvedValue(undefined);
+    stubAtomicWriteFs();
   });
 
   it("writes data as formatted JSON", async () => {
@@ -158,6 +174,19 @@ describe("writeJson", () => {
     await writeJson("x.json", data);
     expect(data).toEqual(copy);
   });
+
+  it("rejects when the destination lstat reports a symlink", async () => {
+    // Exercises the assertNotSymlink guard through the mock layer: the default
+    // stub makes lstat ENOENT (guard path never runs), so here we force lstat to
+    // resolve to a symlink. If a future change drops assertNotSymlink, this test
+    // catches it (writeFile/rename would be attempted instead of rejecting).
+    mockHomedir.mockReturnValue("/home/alice");
+    mockLstat.mockResolvedValue({ isSymbolicLink: () => true });
+
+    await expect(writeJson("secrets.enc.json", { k: "v" })).rejects.toThrow(/symlink/i);
+    expect(mockWriteFile).not.toHaveBeenCalled();
+    expect(mockRename).not.toHaveBeenCalled();
+  });
 });
 
 describe("readJson — path traversal protection", () => {
@@ -189,6 +218,7 @@ describe("writeJson — path traversal protection", () => {
     mockMkdir.mockResolvedValue(undefined);
     mockWriteFile.mockResolvedValue(undefined);
     mockRename.mockResolvedValue(undefined);
+    stubAtomicWriteFs();
   });
 
   it("throws when filename traverses outside the store directory", async () => {

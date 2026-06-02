@@ -13,6 +13,13 @@ vi.mock("../../store/index.js", () => ({
   writeJson: vi.fn(),
 }));
 
+// withStoreLock is exercised against the real filesystem in atomic.test.ts;
+// here it should just run the callback so the RMW merge logic is tested in
+// isolation without touching ~/.mcpm.
+vi.mock("../../store/atomic.js", () => ({
+  withStoreLock: vi.fn(async (fn: () => Promise<unknown>) => fn()),
+}));
+
 import { readJson, writeJson } from "../../store/index.js";
 import {
   getInstalledServers,

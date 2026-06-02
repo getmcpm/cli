@@ -3,6 +3,7 @@
  */
 
 import { readJson, writeJson } from "./index.js";
+import { withStoreLock } from "./atomic.js";
 import type { ClientId } from "../config/paths.js";
 
 const FILENAME = "servers.json";
@@ -53,20 +54,26 @@ function buildFile(servers: InstalledServer[]): ServersFile {
 export async function addInstalledServer(
   server: InstalledServer
 ): Promise<void> {
-  const current = await getInstalledServers();
-  await writeJson(FILENAME, buildFile([...current, { ...server }]));
+  // Locked read-modify-write: `serve` mode wires this as a live MCP tool handler
+  // that can race a CLI invocation, so an unlocked RMW would lost-update.
+  await withStoreLock(async () => {
+    const current = await getInstalledServers();
+    await writeJson(FILENAME, buildFile([...current, { ...server }]));
+  });
 }
 
 /**
  * Removes a server by name. Throws if the server is not found.
  */
 export async function removeInstalledServer(name: string): Promise<void> {
-  const current = await getInstalledServers();
-  const index = current.findIndex((s) => s.name === name);
+  await withStoreLock(async () => {
+    const current = await getInstalledServers();
+    const index = current.findIndex((s) => s.name === name);
 
-  if (index === -1) {
-    throw new Error(`Server "${name}" not found in installed servers list.`);
-  }
+    if (index === -1) {
+      throw new Error(`Server "${name}" not found in installed servers list.`);
+    }
 
-  await writeJson(FILENAME, buildFile(current.filter((s) => s.name !== name)));
+    await writeJson(FILENAME, buildFile(current.filter((s) => s.name !== name)));
+  });
 }
