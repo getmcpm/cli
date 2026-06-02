@@ -181,6 +181,148 @@ servers: {}
     expect(outputCalls).toContain("No servers to compare");
   });
 
+  // Fix #7: when the installed version is recoverable from config (OCI image:tag)
+  // and differs from the locked version, report a mismatch (not "match").
+  it("flags version mismatch when installed OCI tag differs from lock", async () => {
+    const ociLock = `
+lockfileVersion: 1
+lockedAt: "2026-04-05T10:00:00Z"
+servers:
+  io.github.test/server-a:
+    version: "2.0.0"
+    registryType: oci
+    identifier: "ghcr.io/test/server-a"
+    trust:
+      score: 75
+      maxPossible: 80
+      level: safe
+      assessedAt: "2026-04-05T10:00:00Z"
+`;
+    const stackPath = await writeStackAndLock(basicStack, ociLock);
+    const deps = makeDeps({
+      getAdapter: vi.fn().mockReturnValue(
+        makeAdapter({
+          // installed v1.0.0 but lock says v2.0.0
+          "io.github.test/server-a": {
+            command: "docker",
+            args: ["run", "--rm", "-i", "ghcr.io/test/server-a:1.0.0"],
+          },
+        })
+      ),
+    });
+
+    await handleDiff({ stackFile: stackPath, json: true }, deps);
+
+    const parsed = JSON.parse(
+      (deps.output as ReturnType<typeof vi.fn>).mock.calls[0][0]
+    ) as Array<{ name: string; status: string; detail: string }>;
+    const row = parsed.find((e) => e.name === "io.github.test/server-a")!;
+    expect(row.status).toBe("mismatch");
+    expect(row.detail).toContain("2.0.0");
+    expect(row.detail).toContain("1.0.0");
+  });
+
+  it("shows mismatch section in human-readable output", async () => {
+    const ociLock = `
+lockfileVersion: 1
+lockedAt: "2026-04-05T10:00:00Z"
+servers:
+  io.github.test/server-a:
+    version: "2.0.0"
+    registryType: oci
+    identifier: "ghcr.io/test/server-a"
+    trust:
+      score: 75
+      maxPossible: 80
+      level: safe
+      assessedAt: "2026-04-05T10:00:00Z"
+`;
+    const stackPath = await writeStackAndLock(basicStack, ociLock);
+    const deps = makeDeps({
+      getAdapter: vi.fn().mockReturnValue(
+        makeAdapter({
+          "io.github.test/server-a": {
+            command: "docker",
+            args: ["run", "--rm", "-i", "ghcr.io/test/server-a:1.0.0"],
+          },
+        })
+      ),
+    });
+
+    await handleDiff({ stackFile: stackPath }, deps);
+
+    const outputCalls = (deps.output as ReturnType<typeof vi.fn>).mock.calls
+      .map((c) => c[0])
+      .join("\n");
+    expect(outputCalls).toContain("Version mismatch");
+    expect(outputCalls).toContain("1 mismatched");
+  });
+
+  // Fix #7: when the installed version is NOT recoverable from config (npm
+  // without a pinned version), do NOT emit a false mismatch — stay "match".
+  it("does not flag a mismatch when the installed version is not verifiable", async () => {
+    const stackPath = await writeStackAndLock(basicStack, basicLock);
+    const deps = makeDeps({
+      getAdapter: vi.fn().mockReturnValue(
+        makeAdapter({
+          "io.github.test/server-a": { command: "npx", args: ["-y", "@test/server-a"] },
+        })
+      ),
+    });
+
+    await handleDiff({ stackFile: stackPath, json: true }, deps);
+
+    const parsed = JSON.parse(
+      (deps.output as ReturnType<typeof vi.fn>).mock.calls[0][0]
+    ) as Array<{ name: string; status: string; detail: string }>;
+    const row = parsed.find((e) => e.name === "io.github.test/server-a")!;
+    expect(row.status).toBe("match");
+    expect(row.detail).toContain("version not verifiable");
+  });
+
+  // Fix #3: a SCOPED npm identifier whose pinned version in config differs from
+  // the lock must report a mismatch — guards extractInstalledVersion's
+  // lastIndexOf('@') logic (the leading scope '@' must not be treated as the
+  // version separator).
+  it("flags version mismatch for a scoped npm package (installed @scope/pkg@1.2.0 vs lock 1.3.0)", async () => {
+    const scopedLock = `
+lockfileVersion: 1
+lockedAt: "2026-04-05T10:00:00Z"
+servers:
+  io.github.test/server-a:
+    version: "1.3.0"
+    registryType: npm
+    identifier: "@scope/pkg"
+    trust:
+      score: 75
+      maxPossible: 80
+      level: safe
+      assessedAt: "2026-04-05T10:00:00Z"
+`;
+    const stackPath = await writeStackAndLock(basicStack, scopedLock);
+    const deps = makeDeps({
+      getAdapter: vi.fn().mockReturnValue(
+        makeAdapter({
+          // installed pins @scope/pkg@1.2.0 but lock says 1.3.0
+          "io.github.test/server-a": {
+            command: "npx",
+            args: ["-y", "@scope/pkg@1.2.0"],
+          },
+        })
+      ),
+    });
+
+    await handleDiff({ stackFile: stackPath, json: true }, deps);
+
+    const parsed = JSON.parse(
+      (deps.output as ReturnType<typeof vi.fn>).mock.calls[0][0]
+    ) as Array<{ name: string; status: string; detail: string }>;
+    const row = parsed.find((e) => e.name === "io.github.test/server-a")!;
+    expect(row.status).toBe("mismatch");
+    expect(row.detail).toContain("1.3.0");
+    expect(row.detail).toContain("1.2.0");
+  });
+
   it("throws when no lock file exists", async () => {
     const dir = await mkdtemp(path.join(os.tmpdir(), "mcpm-diff-nolock-"));
     const stackPath = path.join(dir, "mcpm.yaml");

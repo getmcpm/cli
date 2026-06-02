@@ -113,8 +113,7 @@ export async function checkVersionDrift(
 
       const trustRegression =
         s.trustScore !== undefined &&
-        latestScore.score < s.trustScore &&
-        s.version === latest;
+        latestScore.score < s.trustScore;
 
       return {
         name: s.name,
@@ -176,11 +175,11 @@ export async function handleOutdated(
 
   for (const r of outdated) {
     const nameCol = chalk.white(r.name.padEnd(colWidth));
-    if (r.trustRegression) {
-      const was = r.installedTrustScore ?? "?";
-      const now = r.latestTrustScore ?? "?";
-      output(`  ${nameCol}  ${chalk.yellow(`trust score regression: ${was} → ${now}`)}`);
-    } else {
+    const hasVersionChange = r.versionChange !== "none";
+
+    // Show the version-change line whenever a newer version exists, even if a
+    // trust regression also arrived with it.
+    if (hasVersionChange) {
       const diffColor =
         r.versionChange === "major" ? chalk.red
         : r.versionChange === "minor" ? chalk.yellow
@@ -190,6 +189,15 @@ export async function handleOutdated(
         ? `  [${levelColor(r.latestLevel)}]`
         : "";
       output(`  ${nameCol}  ${chalk.yellow(r.installedVersion)} → ${diffColor(latest)}${trustStr}`);
+    }
+
+    // Show the trust-regression line independently so a score drop is never
+    // hidden by a coincident version bump.
+    if (r.trustRegression) {
+      const was = r.installedTrustScore ?? "?";
+      const now = r.latestTrustScore ?? "?";
+      const regCol = hasVersionChange ? chalk.white("".padEnd(colWidth)) : nameCol;
+      output(`  ${regCol}  ${chalk.yellow(`trust score regression: ${was} → ${now}`)}`);
     }
   }
 

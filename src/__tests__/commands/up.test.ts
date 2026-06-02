@@ -428,4 +428,91 @@ servers:
 
     await expect(handleUp({ stackFile: stackPath }, deps)).rejects.toThrow();
   });
+
+  // Fix #1: when every client write fails (e.g. all configs read-only), the
+  // server must be reported as failed — not silently "installed".
+  it("reports failure (not installed) when all client writes throw", async () => {
+    const stackPath = await writeStackAndLock(basicStack, basicLock);
+    const adapter = makeAdapter();
+    adapter.addServer = vi.fn().mockRejectedValue(new Error("EACCES: read-only config"));
+    const deps = makeDeps({ getAdapter: vi.fn().mockReturnValue(adapter) });
+
+    await expect(handleUp({ stackFile: stackPath }, deps)).rejects.toThrow(
+      "could not be installed"
+    );
+
+    const outputCalls = (deps.output as ReturnType<typeof vi.fn>).mock.calls
+      .map((c) => c[0])
+      .join("\n");
+    expect(outputCalls).toContain("could not write to any client");
+    expect(outputCalls).toContain("EACCES");
+    // Summary must not claim an install happened.
+    expect(outputCalls).toMatch(/0 installed/);
+  });
+
+  // Fix #1: partial failure (one of two clients fails) still installs but
+  // surfaces a warning rather than swallowing the error.
+  it("installs with a warning when some clients fail", async () => {
+    const stackPath = await writeStackAndLock(basicStack, basicLock);
+    const okAdapter = makeAdapter();
+    const badAdapter = makeAdapter();
+    badAdapter.addServer = vi.fn().mockRejectedValue(new Error("EROFS"));
+    const deps = makeDeps({
+      detectClients: vi.fn<() => Promise<ClientId[]>>().mockResolvedValue([
+        "claude-desktop",
+        "cursor",
+      ]),
+      getAdapter: vi.fn().mockImplementation((id: ClientId) =>
+        id === "cursor" ? badAdapter : okAdapter
+      ),
+    });
+
+    await handleUp({ stackFile: stackPath }, deps);
+
+    expect(okAdapter.addServer).toHaveBeenCalledTimes(1);
+    const outputCalls = (deps.output as ReturnType<typeof vi.fn>).mock.calls
+      .map((c) => c[0])
+      .join("\n");
+    expect(outputCalls).toContain("warning: failed on");
+    expect(outputCalls).toContain("cursor");
+    expect(outputCalls).toMatch(/1 installed/);
+  });
+
+  // Fix #2: removed servers must be counted as "removed", not inflate the
+  // "N installed" summary.
+  it("counts strict-removed servers as removed, not installed", async () => {
+    const stackPath = await writeStackAndLock(basicStack, basicLock);
+    const adapter = makeAdapter({
+      "io.github.test/server-a": { command: "npx", args: ["-y", "server-a"] },
+      "extra-server": { command: "npx", args: ["-y", "extra"] },
+    });
+    const deps = makeDeps({ getAdapter: vi.fn().mockReturnValue(adapter) });
+
+    await handleUp({ stackFile: stackPath, strict: true, yes: true }, deps);
+
+    expect(adapter.removeServer).toHaveBeenCalledWith("/mock/config.json", "extra-server");
+    const outputCalls = (deps.output as ReturnType<typeof vi.fn>).mock.calls
+      .map((c) => c[0])
+      .join("\n");
+    // server-a installs (1), extra-server is removed (1) — not 2 installed.
+    expect(outputCalls).toMatch(/1 installed/);
+    expect(outputCalls).toContain("1 removed");
+  });
+
+  // Fix #3: --strict --yes in interactive (non-CI) mode must honor --yes and
+  // NOT prompt via confirm.
+  it("does not prompt for strict removal when --yes is passed (non-CI)", async () => {
+    const stackPath = await writeStackAndLock(basicStack, basicLock);
+    const adapter = makeAdapter({ "extra-server": { command: "npx", args: ["-y", "extra"] } });
+    const confirm = vi.fn().mockResolvedValue(true);
+    const deps = makeDeps({
+      getAdapter: vi.fn().mockReturnValue(adapter),
+      confirm,
+    });
+
+    await handleUp({ stackFile: stackPath, strict: true, yes: true }, deps);
+
+    expect(confirm).not.toHaveBeenCalled();
+    expect(adapter.removeServer).toHaveBeenCalledWith("/mock/config.json", "extra-server");
+  });
 });

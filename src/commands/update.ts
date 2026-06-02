@@ -21,8 +21,9 @@ import type { ServerEntry } from "../registry/types.js";
 import type { Finding } from "../scanner/tier1.js";
 import type { TrustScore, TrustScoreInput } from "../scanner/trust-score.js";
 import type { ClientId } from "../config/paths.js";
-import type { ConfigAdapter } from "../config/adapters/index.js";
+import type { ConfigAdapter, McpServerEntry } from "../config/adapters/index.js";
 import { levelColor, extractRegistryMeta } from "../utils/format-trust.js";
+import { resolveInstallEntry } from "./install.js";
 import { stdoutOutput } from "../utils/output.js";
 
 // ---------------------------------------------------------------------------
@@ -57,6 +58,32 @@ interface UpdateResult {
 }
 
 // ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+/**
+ * Read the env block already present for a server in a client config, so an
+ * update preserves user-configured values (e.g. API keys) instead of wiping
+ * them when the entry is re-resolved from the registry. Best-effort: returns
+ * undefined if the config or entry can't be read.
+ */
+async function readExistingEnv(
+  getAdapter: UpdateDeps["getAdapter"],
+  getConfigPath: UpdateDeps["getConfigPath"],
+  clientId: ClientId,
+  name: string
+): Promise<Record<string, string> | undefined> {
+  try {
+    const adapter = getAdapter(clientId);
+    const configPath = getConfigPath(clientId);
+    const servers = await adapter.read(configPath);
+    return servers[name]?.env;
+  } catch {
+    return undefined;
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Handler
 // ---------------------------------------------------------------------------
 
@@ -72,6 +99,8 @@ export async function handleUpdate(
     getServer,
     addInstalledServer,
     removeInstalledServer,
+    getAdapter,
+    getConfigPath,
     scanTier1,
     computeTrustScore,
     confirm,
@@ -198,8 +227,11 @@ export async function handleUpdate(
     }
   }
 
-  // Track update outcomes immutably (name → { updated, trustScore })
-  const updateOutcomes = new Map<string, { updated: boolean; trustScore: TrustScore }>();
+  // Track update outcomes immutably (name → { updated, trustScore, clientErrors })
+  const updateOutcomes = new Map<
+    string,
+    { updated: boolean; trustScore: TrustScore; clientErrors: string[] }
+  >();
 
   // Perform updates
   for (const r of withUpdates) {
@@ -228,21 +260,58 @@ export async function handleUpdate(
 
     // Preserve original clients from installed server list (servers fetched once before this loop)
     const original = servers.find((s) => s.name === r.name);
+    const originalClients = original?.clients ?? [];
+
+    // Re-resolve the server entry for the new version and write it back to each
+    // client config. Without this the store record advances but the client
+    // config keeps the stale command/args — most visible for OCI/pypi servers
+    // whose image:tag or version changes between releases.
+    //
+    // Mirror the up.ts partial-failure pattern: collect the clients that failed
+    // so we can warn the user instead of silently leaving them on the old
+    // version. The store record still advances (best-effort write semantics).
+    const clientErrors: string[] = [];
+    for (const clientId of originalClients) {
+      try {
+        const rawEntry = resolveInstallEntry(entry, clientId);
+        const existingEnv = await readExistingEnv(getAdapter, getConfigPath, clientId, r.name);
+        const newEntry: McpServerEntry = {
+          ...rawEntry,
+          ...(existingEnv && Object.keys(existingEnv).length > 0
+            ? { env: { ...rawEntry.env, ...existingEnv } }
+            : {}),
+        };
+        const adapter = getAdapter(clientId);
+        const configPath = getConfigPath(clientId);
+        await adapter.addServer(configPath, r.name, newEntry, { force: true });
+      } catch (err) {
+        // Some clients may not support this server type, or the config may be
+        // unwritable — collect the failure and warn (store record still advances).
+        clientErrors.push(`${clientId}: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    }
+
     const finalRecord: InstalledServer = {
       name: r.name,
       version: r.newVersion,
-      clients: original?.clients ?? [],
+      clients: originalClients,
       installedAt: new Date().toISOString(),
     };
 
     await addInstalledServer(finalRecord);
 
     // Record outcome immutably instead of mutating the result object
-    updateOutcomes.set(r.name, { updated: true, trustScore });
+    updateOutcomes.set(r.name, { updated: true, trustScore, clientErrors });
 
     if (!isJson) {
+      // Surface partial config-write failures so a client silently left on the
+      // old version is visible to the user (mirrors the up.ts warning suffix).
+      const warning =
+        clientErrors.length > 0
+          ? chalk.yellow(` (warning: could not update ${clientErrors.join("; ")})`)
+          : "";
       output(
-        `  ${chalk.green("✓")} Updated ${chalk.white(r.name)} to ${chalk.green(r.newVersion)} [${levelColor(trustScore.level)}]`
+        `  ${chalk.green("✓")} Updated ${chalk.white(r.name)} to ${chalk.green(r.newVersion)} [${levelColor(trustScore.level)}]${warning}`
       );
     }
   }
@@ -252,6 +321,7 @@ export async function handleUpdate(
       JSON.stringify(
         results.map((r) => {
           const outcome = updateOutcomes.get(r.name);
+          const clientErrors = outcome?.clientErrors ?? [];
           return {
             name: r.name,
             oldVersion: r.oldVersion,
@@ -259,6 +329,7 @@ export async function handleUpdate(
             updated: outcome?.updated ?? r.updated,
             trustScore: outcome?.trustScore ?? r.trustScore ?? null,
             error: r.error ?? null,
+            clientErrors: clientErrors.length > 0 ? clientErrors : null,
           };
         }),
         null,

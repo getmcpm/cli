@@ -249,6 +249,154 @@ describe("handleUpdate — one update available", () => {
 });
 
 // ---------------------------------------------------------------------------
+// Fix #5: client config is re-written on update (not just the store record)
+// ---------------------------------------------------------------------------
+
+function makeOciEntry(name: string, version: string): ServerEntry {
+  return {
+    server: {
+      name,
+      description: "An OCI test server",
+      version,
+      repository: { url: "https://github.com/test/server" },
+      packages: [
+        {
+          registryType: "oci",
+          identifier: `ghcr.io/test/server:${version}`,
+          version,
+          transport: { type: "stdio" },
+          environmentVariables: [],
+        },
+      ],
+      remotes: [],
+    },
+    _meta: {
+      "io.modelcontextprotocol.registry/official": {
+        status: "active",
+        publishedAt: "2026-01-01T00:00:00Z",
+        isLatest: true,
+      },
+    },
+  } as ServerEntry;
+}
+
+describe("handleUpdate — writes new version to client config", () => {
+  it("calls adapter.addServer with the new-version entry for each client", async () => {
+    const adapter = makeAdapter("claude-desktop");
+    const deps = makeDeps({
+      getInstalledServers: vi.fn().mockResolvedValue([
+        makeInstalledServer({ name: "io.github.test/oci", version: "1.0.0", clients: ["claude-desktop"] }),
+      ]),
+      getServer: vi.fn().mockResolvedValue(makeOciEntry("io.github.test/oci", "2.0.0")),
+      getAdapter: vi.fn().mockReturnValue(adapter),
+    });
+
+    await handleUpdate({ yes: true }, deps);
+
+    expect(adapter.addServer).toHaveBeenCalledTimes(1);
+    const call = (adapter.addServer as ReturnType<typeof vi.fn>).mock.calls[0];
+    expect(call[0]).toBe("/fake/claude-desktop/config.json");
+    expect(call[1]).toBe("io.github.test/oci");
+    // The re-resolved entry must carry the NEW version (2.0.0), not the old one.
+    expect(call[2].command).toBe("docker");
+    expect(call[2].args).toContain("ghcr.io/test/server:2.0.0");
+    expect(call[3]).toEqual({ force: true });
+  });
+
+  it("does not write to client config when nothing is updated", async () => {
+    const adapter = makeAdapter("claude-desktop");
+    const deps = makeDeps({
+      getServer: vi.fn().mockResolvedValue(makeServerEntry("io.github.test/server-a", "1.0.0")),
+      getAdapter: vi.fn().mockReturnValue(adapter),
+    });
+    await handleUpdate({ yes: true }, deps);
+    expect(adapter.addServer).not.toHaveBeenCalled();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Fix #1: a pre-existing client-config env block (e.g. API keys) must be
+// preserved into the re-written entry — a regression would silently wipe them.
+// ---------------------------------------------------------------------------
+
+describe("handleUpdate — preserves existing client-config env on update", () => {
+  it("carries the user's existing env values into the new entry", async () => {
+    const adapter = makeAdapter("claude-desktop");
+    // The config already has this server with a user-set API key.
+    (adapter.read as ReturnType<typeof vi.fn>).mockResolvedValue({
+      "io.github.test/server-a": {
+        command: "npx",
+        args: ["-y", "@test/server"],
+        env: { MY_KEY: "user-value" },
+      },
+    });
+    const deps = makeDeps({
+      getInstalledServers: vi.fn().mockResolvedValue([
+        makeInstalledServer({ name: "io.github.test/server-a", version: "1.0.0", clients: ["claude-desktop"] }),
+      ]),
+      getServer: vi.fn().mockResolvedValue(makeServerEntry("io.github.test/server-a", "1.1.0")),
+      getAdapter: vi.fn().mockReturnValue(adapter),
+    });
+
+    await handleUpdate({ yes: true }, deps);
+
+    expect(adapter.addServer).toHaveBeenCalledTimes(1);
+    const call = (adapter.addServer as ReturnType<typeof vi.fn>).mock.calls[0];
+    expect(call[2].env.MY_KEY).toBe("user-value");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Fix #2: a per-client config-write failure must not be swallowed — surface a
+// warning so a client silently left on the old version is visible.
+// ---------------------------------------------------------------------------
+
+describe("handleUpdate — partial config-write failure warning", () => {
+  it("warns when a client config write fails (instead of silently swallowing)", async () => {
+    const adapter = makeAdapter("claude-desktop");
+    (adapter.addServer as ReturnType<typeof vi.fn>).mockRejectedValue(
+      new Error("config is read-only")
+    );
+    const lines: string[] = [];
+    const deps = makeDeps({
+      getInstalledServers: vi.fn().mockResolvedValue([
+        makeInstalledServer({ name: "io.github.test/server-a", version: "1.0.0", clients: ["claude-desktop"] }),
+      ]),
+      getServer: vi.fn().mockResolvedValue(makeServerEntry("io.github.test/server-a", "1.1.0")),
+      getAdapter: vi.fn().mockReturnValue(adapter),
+      output: (t) => lines.push(t),
+    });
+
+    await handleUpdate({ yes: true }, deps);
+
+    const out = lines.join("\n");
+    expect(out).toMatch(/warning/i);
+    expect(out).toContain("claude-desktop");
+    expect(out).toContain("config is read-only");
+  });
+
+  it("still advances the store record despite a client-write failure", async () => {
+    const adapter = makeAdapter("claude-desktop");
+    (adapter.addServer as ReturnType<typeof vi.fn>).mockRejectedValue(
+      new Error("config is read-only")
+    );
+    const deps = makeDeps({
+      getInstalledServers: vi.fn().mockResolvedValue([
+        makeInstalledServer({ name: "io.github.test/server-a", version: "1.0.0", clients: ["claude-desktop"] }),
+      ]),
+      getServer: vi.fn().mockResolvedValue(makeServerEntry("io.github.test/server-a", "1.1.0")),
+      getAdapter: vi.fn().mockReturnValue(adapter),
+    });
+
+    await handleUpdate({ yes: true }, deps);
+
+    expect(deps.addInstalledServer).toHaveBeenCalledWith(
+      expect.objectContaining({ name: "io.github.test/server-a", version: "1.1.0" })
+    );
+  });
+});
+
+// ---------------------------------------------------------------------------
 // --yes flag skips confirmation
 // ---------------------------------------------------------------------------
 

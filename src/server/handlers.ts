@@ -324,9 +324,22 @@ export async function handleSetup(
   const installed: Array<{ name: string; trustScore: TrustScore }> = [];
   const skipped: Array<{ name: string; reason: string }> = [];
 
-  // Parallel search pass — all keywords searched concurrently
-  const searchResults = await Promise.all(
-    keywords.map((kw) => deps.registrySearch(kw, 5).catch(() => [] as ServerEntry[]))
+  // Parallel search pass — all keywords searched concurrently. Capture the
+  // thrown error per keyword so a registry outage is distinguishable from a
+  // genuine empty result (both otherwise look like "no servers").
+  type SearchOutcome =
+    | { ok: true; entries: ServerEntry[] }
+    | { ok: false; error: string };
+  const searchResults: SearchOutcome[] = await Promise.all(
+    keywords.map((kw) =>
+      deps
+        .registrySearch(kw, 5)
+        .then((entries): SearchOutcome => ({ ok: true, entries }))
+        .catch((err): SearchOutcome => ({
+          ok: false,
+          error: err instanceof Error ? err.message : String(err),
+        }))
+    )
   );
 
   const seenNames = new Set<string>();
@@ -334,7 +347,14 @@ export async function handleSetup(
   // Sequential evaluate/install pass (installs depend on previous state)
   for (let i = 0; i < keywords.length; i++) {
     const keyword = keywords[i];
-    const entries = searchResults[i];
+    const outcome = searchResults[i];
+
+    if (!outcome.ok) {
+      skipped.push({ name: keyword, reason: `Registry search failed: ${outcome.error}` });
+      continue;
+    }
+
+    const entries = outcome.entries;
 
     if (entries.length === 0) {
       skipped.push({ name: keyword, reason: `No servers found for "${keyword}"` });

@@ -109,12 +109,23 @@ export async function handleDiff(
         clients: [],
       });
     } else if (locked && isLockedRegistryServer(locked)) {
-      entries.push({
-        name,
-        status: "match",
-        detail: `v${locked.version} (trust: ${locked.trust.score}/${locked.trust.maxPossible})`,
-        clients: inst.clients,
-      });
+      const installedVersion = extractInstalledVersion(inst.entry, locked.identifier);
+      if (installedVersion !== null && installedVersion !== locked.version) {
+        entries.push({
+          name,
+          status: "mismatch",
+          detail: `locked v${locked.version}, installed v${installedVersion}`,
+          clients: inst.clients,
+        });
+      } else {
+        const detail = `v${locked.version} (trust: ${locked.trust.score}/${locked.trust.maxPossible})`;
+        entries.push({
+          name,
+          status: "match",
+          detail: installedVersion === null ? `${detail} (version not verifiable)` : detail,
+          clients: inst.clients,
+        });
+      }
     } else {
       entries.push({
         name,
@@ -150,6 +161,7 @@ export async function handleDiff(
 
   const missing = entries.filter((e) => e.status === "missing");
   const extra = entries.filter((e) => e.status === "extra");
+  const mismatched = entries.filter((e) => e.status === "mismatch");
   const matched = entries.filter((e) => e.status === "match");
 
   if (missing.length > 0) {
@@ -168,6 +180,14 @@ export async function handleDiff(
     deps.output("");
   }
 
+  if (mismatched.length > 0) {
+    deps.output("Version mismatch (installed differs from lock):");
+    for (const e of mismatched) {
+      deps.output(`  ~ ${e.name} ${e.detail} [${e.clients.join(", ")}]`);
+    }
+    deps.output("");
+  }
+
   if (matched.length > 0) {
     deps.output("In sync:");
     for (const e of matched) {
@@ -177,13 +197,69 @@ export async function handleDiff(
   }
 
   deps.output(
-    `${matched.length} in sync, ${missing.length} missing, ${extra.length} extra`
+    `${matched.length} in sync, ${mismatched.length} mismatched, ${missing.length} missing, ${extra.length} extra`
   );
 }
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+/**
+ * Best-effort recovery of the installed version from a client config entry.
+ *
+ * The installed `args` mirror what `resolveInstallEntry` wrote, so a version is
+ * only recoverable when it was embedded in the package identifier / image:
+ * - npm/pypi: an arg of the form `<identifier>@<version>` (npx/uvx style)
+ * - oci:      an arg of the form `<image>:<tag>` (docker `run … image:tag`)
+ *
+ * Returns null when the version cannot be determined from config (the common
+ * case for npm servers installed without a pinned version) — callers MUST NOT
+ * treat null as a mismatch.
+ *
+ * Note: an OCI digest pin (`<image>@sha256:<hash>`) satisfies the OCI_IDENTIFIER_RE
+ * constraint but is a content digest, not a version — it must never be read as one
+ * (see the `sha256:` guard below).
+ */
+function extractInstalledVersion(
+  entry: McpServerEntry,
+  identifier: string
+): string | null {
+  const args = entry.args;
+  if (!args || args.length === 0) return null;
+
+  // npm/pypi: find the arg whose base equals the locked identifier and that
+  // carries an `@<version>` suffix. Skip a leading `@` (scoped npm packages).
+  for (const arg of args) {
+    const atIdx = arg.lastIndexOf("@");
+    if (atIdx > 0) {
+      const base = arg.slice(0, atIdx);
+      const version = arg.slice(atIdx + 1);
+      // An OCI digest (`@sha256:…`) is not a version — never misread it as one.
+      if (version.startsWith("sha256:")) return null;
+      if (base === identifier && version.length > 0) return version;
+    }
+  }
+
+  // oci: find the `<image>:<tag>` arg whose image equals the locked identifier
+  // (or the locked identifier already includes its own tag → strip it to match).
+  const lockedImage = identifier.includes(":")
+    ? identifier.slice(0, identifier.indexOf(":"))
+    : identifier;
+  for (const arg of args) {
+    const colonIdx = arg.lastIndexOf(":");
+    if (colonIdx > 0) {
+      const image = arg.slice(0, colonIdx);
+      const tag = arg.slice(colonIdx + 1);
+      // Reject path-like false positives (e.g. "/usr/bin"): tags have no slash.
+      if (image === lockedImage && tag.length > 0 && !tag.includes("/")) {
+        return tag;
+      }
+    }
+  }
+
+  return null;
+}
 
 function formatLocked(locked: LockedServer): string {
   if (isLockedRegistryServer(locked)) {
