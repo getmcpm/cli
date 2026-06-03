@@ -171,12 +171,6 @@ async function deriveMachineKey(salt: Uint8Array): Promise<webcrypto.CryptoKey> 
   );
 }
 
-/** Reset memoized master-key / HKDF state. Test-only. @internal */
-export function _resetMasterKeyCache(): void {
-  _masterKey = undefined;
-  _hkdfMaterial = undefined;
-}
-
 // ---------------------------------------------------------------------------
 // Encryption helpers
 // ---------------------------------------------------------------------------
@@ -438,10 +432,14 @@ export async function listAll(): Promise<Record<string, string[]>> {
 // ---------------------------------------------------------------------------
 
 /**
- * Which backend protects secrets written right now — reflects reality, not just
- * platform capability. Returns "os-keychain" only when a master key is actually
- * present (so it is accurate after a `setSecret`, even if a keychain write had
- * silently failed and fell back to the machine scheme).
+ * Which backend protected the most recent write — a backward-looking reflection,
+ * not a forward-looking prediction. Returns "os-keychain" only when a master key
+ * is actually present. Intended to be called AFTER a `setSecret`/`migrate` (as
+ * `mcpm secrets set` does), where it accurately reports the scheme just used —
+ * including reporting "machine-key" when a keychain write silently failed and
+ * fell back. Called standalone before any write on a keychain-capable machine
+ * with no key yet, it returns "machine-key" (no key created yet); the next write
+ * would create one and use "os-keychain".
  */
 export async function activeSecretBackend(): Promise<"os-keychain" | "machine-key"> {
   return (await readMasterKey()) !== null ? "os-keychain" : "machine-key";

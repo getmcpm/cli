@@ -58,10 +58,19 @@ function run(
     });
     let stdout = "";
     let stderr = "";
+    // `error` (ENOENT/EACCES) and `close` can both fire for one spawn; settle
+    // exactly once. `close` (not `exit`) is used so stdout is fully drained
+    // before we resolve.
+    let settled = false;
+    const settle = (r: RunResult): void => {
+      if (settled) return;
+      settled = true;
+      resolve(r);
+    };
     child.stdout.on("data", (d) => (stdout += d.toString()));
     child.stderr.on("data", (d) => (stderr += d.toString()));
-    child.on("error", () => resolve({ code: null, stdout, stderr }));
-    child.on("close", (code) => resolve({ code, stdout, stderr }));
+    child.on("error", () => settle({ code: null, stdout, stderr }));
+    child.on("close", (code) => settle({ code, stdout, stderr }));
     if (opts.input !== undefined) {
       child.stdin.on("error", () => {
         /* child may have exited before stdin flush; swallow EPIPE */
@@ -131,7 +140,7 @@ async function darwinStore(keyB64: string): Promise<boolean> {
 async function linuxGet(): Promise<Buffer | null> {
   const r = await run("secret-tool", ["lookup", "service", SERVICE, "account", ACCOUNT]);
   if (r.code !== 0) return null;
-  const value = r.stdout.replace(/\n$/, "");
+  const value = r.stdout.trim(); // consistent with darwin/windows; tolerate \r\n / spaces
   if (value.length === 0) return null;
   return decodeKey(value);
 }
