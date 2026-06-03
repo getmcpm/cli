@@ -2,15 +2,20 @@
  * `mcpm secrets` command handler.
  *
  * Manages encrypted credentials for MCP servers, stored AES-GCM-encrypted in
- * ~/.mcpm/secrets.enc.json (see store/keychain.ts). Instead of writing API
- * keys as plaintext into client config files, a server's env can reference a
- * stored secret via a `mcpm:keychain:server/KEY` placeholder, which
- * `mcpm guard run --inner` resolves to the real value at launch time.
+ * ~/.mcpm/secrets.enc.json (see store/keychain.ts). The encryption key is held
+ * in the OS keychain (macOS Keychain / libsecret / Windows DPAPI), so a copied
+ * store file cannot be decrypted off-machine; where no OS keychain is available
+ * it falls back to a machine-derived key that guards casual inspection only
+ * (security #15). Instead of writing API keys as plaintext into client config
+ * files, a server's env can reference a stored secret via a
+ * `mcpm:keychain:server/KEY` placeholder, which `mcpm guard run --inner`
+ * resolves to the real value at launch time.
  *
  *   mcpm secrets set <server> <KEY>    # prompts for the value (masked)
  *   mcpm secrets list [server]         # key names only — never values
  *   mcpm secrets get <server> <KEY>    # requires --reveal
  *   mcpm secrets rm  <server> <KEY>
+ *   mcpm secrets migrate               # upgrade legacy entries to keychain encryption
  */
 
 import { Command } from "commander";
@@ -31,6 +36,10 @@ export interface SecretsDeps {
   promptValue: (label: string) => Promise<string>;
   confirmRemove: (label: string) => Promise<boolean>;
   output: (text: string) => void;
+  /** Which backend protected the just-written secret (security #15). */
+  activeBackend: () => Promise<"os-keychain" | "machine-key">;
+  /** Re-encrypt legacy machine-scheme entries under the OS keychain key. */
+  migrate: () => Promise<{ migrated: number; failed: number; total: number; usingKeychain: boolean }>;
 }
 
 export interface SecretsGetOptions {
@@ -59,6 +68,40 @@ export async function handleSecretsSet(
     `Stored secret '${server}/${key}'. Reference it in a server's env as ` +
       `${chalk.cyan(`mcpm:keychain:${server}/${key}`)} ` +
       `(resolved by mcpm guard at launch).`
+  );
+  const backend = await deps.activeBackend();
+  deps.output(
+    backend === "os-keychain"
+      ? chalk.dim(
+          "  Encrypted with a key held in your OS keychain — a copied secrets.enc.json " +
+            "cannot be decrypted on another machine or account."
+        )
+      : chalk.yellow(
+          "  No OS keychain available: encrypted with a machine-derived key that guards " +
+            "casual local inspection only, NOT file exfiltration. Treat ~/.mcpm as sensitive."
+        )
+  );
+}
+
+export async function handleSecretsMigrate(deps: SecretsDeps): Promise<void> {
+  const { migrated, failed, total, usingKeychain } = await deps.migrate();
+  if (!usingKeychain) {
+    deps.output(
+      chalk.yellow(
+        "No OS keychain available on this system — nothing to migrate. Secrets remain " +
+          "protected by the machine-derived key (casual-inspection only)."
+      )
+    );
+    return;
+  }
+  deps.output(
+    `Migrated ${chalk.cyan(String(migrated))}/${total} secret(s) to OS keychain encryption.` +
+      (failed > 0
+        ? chalk.yellow(
+            ` ${failed} could not be decrypted with this machine's key (likely written on ` +
+              `another machine) and were left unchanged.`
+          )
+        : "")
   );
 }
 
@@ -133,9 +176,8 @@ export async function handleSecretsRemove(
 // ---------------------------------------------------------------------------
 
 async function buildDefaultDeps(): Promise<SecretsDeps> {
-  const { setSecret, getSecret, deleteSecret, listAll } = await import(
-    "../store/keychain.js"
-  );
+  const { setSecret, getSecret, deleteSecret, listAll, activeSecretBackend, migrateToKeychain } =
+    await import("../store/keychain.js");
   return {
     setSecret,
     getSecret,
@@ -145,6 +187,8 @@ async function buildDefaultDeps(): Promise<SecretsDeps> {
     confirmRemove: (label) =>
       confirm({ message: `Delete secret '${label}'?`, default: false }),
     output: stdoutOutput,
+    activeBackend: activeSecretBackend,
+    migrate: migrateToKeychain,
   };
 }
 
@@ -193,4 +237,9 @@ export function registerSecretsCommand(program: Command): void {
     .action((server: string, key: string, options: SecretsRemoveOptions) =>
       runWithDeps((deps) => handleSecretsRemove(server, key, options, deps))
     );
+
+  secrets
+    .command("migrate")
+    .description("Re-encrypt existing secrets under your OS keychain (exfiltration-resistant)")
+    .action(() => runWithDeps((deps) => handleSecretsMigrate(deps)));
 }
