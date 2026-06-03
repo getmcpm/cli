@@ -176,7 +176,7 @@ Without an external scanner installed, the maximum possible score is 80/100. The
 | `mcpm audit` | Scan all installed servers and produce a trust report |
 | `mcpm update` | Check for newer versions and update installed servers |
 | `mcpm outdated` | Show version drift and trust regression for installed servers |
-| `mcpm secrets` | Manage MCP server credentials (encrypted at rest with a machine-derived key — guards casual local inspection, not file exfiltration) |
+| `mcpm secrets` | Manage MCP server credentials (AES-GCM encrypted at rest; key held in the OS keychain — macOS Keychain / libsecret / Windows DPAPI — so a copied store can't be decrypted off-machine, with a machine-derived-key fallback where no keychain is available). `mcpm secrets migrate` upgrades older entries |
 | `mcpm publish` | Publish an MCP server to the registry |
 | `mcpm doctor` | Check MCP setup health and report issues |
 | `mcpm init <pack>` | Install a curated starter pack of MCP servers |

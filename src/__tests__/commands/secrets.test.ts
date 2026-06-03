@@ -13,6 +13,7 @@ import {
   handleSecretsList,
   handleSecretsGet,
   handleSecretsRemove,
+  handleSecretsMigrate,
   registerSecretsCommand,
   type SecretsDeps,
 } from "../../commands/secrets.js";
@@ -45,6 +46,8 @@ function makeDeps(overrides: Partial<SecretsDeps> = {}): {
     promptValue: vi.fn(async () => "prompted-secret"),
     confirmRemove: vi.fn(async () => true),
     output: (t: string) => out.push(t),
+    activeBackend: vi.fn(async () => "os-keychain" as const),
+    migrate: vi.fn(async () => ({ migrated: 0, failed: 0, total: 0, usingKeychain: true })),
     ...overrides,
   };
   return { deps, out, store };
@@ -154,7 +157,7 @@ describe("registerSecretsCommand", () => {
     const secrets = program.commands.find((c) => c.name() === "secrets");
     expect(secrets).toBeDefined();
     const subs = secrets!.commands.map((c) => c.name()).sort();
-    expect(subs).toEqual(["get", "list", "rm", "set"]);
+    expect(subs).toEqual(["get", "list", "migrate", "rm", "set"]);
   });
 
   it("gives `get` a --reveal flag and `rm` a --yes flag", () => {
@@ -165,5 +168,45 @@ describe("registerSecretsCommand", () => {
     const rm = secrets.commands.find((c) => c.name() === "rm")!;
     expect(get.options.some((o) => o.long === "--reveal")).toBe(true);
     expect(rm.options.some((o) => o.long === "--yes")).toBe(true);
+  });
+});
+
+describe("mcpm secrets — set backend notice (security #15)", () => {
+  it("tells the user the secret is keychain-protected when available", async () => {
+    const { deps, out } = makeDeps({ activeBackend: vi.fn(async () => "os-keychain" as const) });
+    await handleSecretsSet("gh", "TOKEN", deps);
+    expect(out.join("\n")).toMatch(/OS keychain/i);
+  });
+
+  it("warns honestly when only the machine-derived key is available", async () => {
+    const { deps, out } = makeDeps({ activeBackend: vi.fn(async () => "machine-key" as const) });
+    await handleSecretsSet("gh", "TOKEN", deps);
+    expect(out.join("\n")).toMatch(/NOT file exfiltration/i);
+  });
+});
+
+describe("mcpm secrets — migrate (security #15)", () => {
+  it("reports how many entries were upgraded to keychain encryption", async () => {
+    const { deps, out } = makeDeps({
+      migrate: vi.fn(async () => ({ migrated: 3, failed: 0, total: 3, usingKeychain: true })),
+    });
+    await handleSecretsMigrate(deps);
+    expect(out.join("\n")).toMatch(/Migrated 3\/3/);
+  });
+
+  it("notes entries it could not decrypt with this machine's key", async () => {
+    const { deps, out } = makeDeps({
+      migrate: vi.fn(async () => ({ migrated: 1, failed: 2, total: 3, usingKeychain: true })),
+    });
+    await handleSecretsMigrate(deps);
+    expect(out.join("\n")).toMatch(/2 could not be decrypted/i);
+  });
+
+  it("is a clear no-op when no OS keychain is available", async () => {
+    const { deps, out } = makeDeps({
+      migrate: vi.fn(async () => ({ migrated: 0, failed: 0, total: 0, usingKeychain: false })),
+    });
+    await handleSecretsMigrate(deps);
+    expect(out.join("\n")).toMatch(/nothing to migrate/i);
   });
 });
