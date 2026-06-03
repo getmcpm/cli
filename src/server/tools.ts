@@ -6,6 +6,8 @@
  */
 
 import { z } from "zod";
+import type { ClientId } from "../config/paths.js";
+import { CLIENT_IDS } from "../config/paths.js";
 
 export const TOOL_DEFINITIONS = [
   {
@@ -113,37 +115,52 @@ export const TOOL_DEFINITIONS = [
   },
 ] as const;
 
-export const SearchInput = z.object({
+// Shared field schemas (security #31): a bounded server-name string and a closed
+// client enum, so the Zod layer — not just the runtime `validateMcpServerName` /
+// `CLIENT_IDS.includes` checks in handlers.ts — is the declarative enforcement
+// point. The objects below are `strictObject` so unknown keys are rejected
+// instead of silently dropped.
+//
+// NOTE on `.shape`: these schemas reach the MCP SDK via `.shape` (see
+// server/index.ts), which rebuilds a plain `z.object(shape)`. The bounded fields
+// and client enum DO propagate through that path (they live on the per-field
+// schemas); the object-level `strict` setting does NOT. The runtime guards in
+// handlers.ts stay the enforced backstop; `strictObject` additionally hardens any
+// direct `.parse()` of these exported schemas.
+const serverName = z.string().min(1).max(256);
+const clientId = z.enum(CLIENT_IDS as [ClientId, ...ClientId[]]);
+
+export const SearchInput = z.strictObject({
   query: z.string().min(1).max(200),
   limit: z.number().int().min(1).max(100).optional().default(20),
 });
 
-export const InstallInput = z.object({
-  name: z.string(),
-  client: z.string().optional(),
+export const InstallInput = z.strictObject({
+  name: serverName,
+  client: clientId.optional(),
   minTrustScore: z.number().min(0).max(100).optional().default(50),
 });
 
-export const InfoInput = z.object({
-  name: z.string(),
+export const InfoInput = z.strictObject({
+  name: serverName,
 });
 
-export const ListInput = z.object({
-  client: z.string().optional(),
+export const ListInput = z.strictObject({
+  client: clientId.optional(),
 });
 
-export const RemoveInput = z.object({
-  name: z.string(),
-  client: z.string().optional(),
+export const RemoveInput = z.strictObject({
+  name: serverName,
+  client: clientId.optional(),
 });
 
-export const SetupInput = z.object({
+export const SetupInput = z.strictObject({
   description: z.string().min(1).max(1000),
-  client: z.string().optional(),
+  client: clientId.optional(),
   minTrustScore: z.number().min(0).max(100).optional().default(50),
 });
 
-export const UpInput = z.object({
+export const UpInput = z.strictObject({
   stackFile: z.string().optional().default("mcpm.yaml"),
   profile: z.string().optional(),
   dryRun: z.boolean().optional().default(false),
