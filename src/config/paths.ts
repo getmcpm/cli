@@ -8,14 +8,17 @@
 import os from "os";
 import path from "path";
 
-export type ClientId = "claude-desktop" | "cursor" | "vscode" | "windsurf";
-
-export const CLIENT_IDS: ClientId[] = [
+// `as const` makes this a readonly tuple of string literals, so it is the single
+// source of truth for both the ClientId union (derived below) and `z.enum` in
+// server/tools.ts — no hand-maintained duplicate list, no unsafe tuple cast.
+export const CLIENT_IDS = [
   "claude-desktop",
   "cursor",
   "vscode",
   "windsurf",
-];
+] as const;
+
+export type ClientId = (typeof CLIENT_IDS)[number];
 
 /**
  * Returns the base "app data" directory for the current (or overridden) platform.

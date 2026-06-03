@@ -6,7 +6,6 @@
  */
 
 import { z } from "zod";
-import type { ClientId } from "../config/paths.js";
 import { CLIENT_IDS } from "../config/paths.js";
 
 export const TOOL_DEFINITIONS = [
@@ -128,7 +127,7 @@ export const TOOL_DEFINITIONS = [
 // handlers.ts stay the enforced backstop; `strictObject` additionally hardens any
 // direct `.parse()` of these exported schemas.
 const serverName = z.string().min(1).max(256);
-const clientId = z.enum(CLIENT_IDS as [ClientId, ...ClientId[]]);
+const clientId = z.enum(CLIENT_IDS);
 
 export const SearchInput = z.strictObject({
   query: z.string().min(1).max(200),

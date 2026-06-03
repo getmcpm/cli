@@ -19,9 +19,11 @@ import {
   SetupInput,
   UpInput,
 } from "../../server/tools.js";
+import { CLIENT_IDS } from "../../config/paths.js";
 
 const VALID_NAME = "io.github.domdomegg/filesystem-mcp";
-const VALID_CLIENTS = ["claude-desktop", "cursor", "vscode", "windsurf"] as const;
+// Source of truth — newly added clients are covered automatically.
+const VALID_CLIENTS = CLIENT_IDS;
 
 describe("InstallInput (security #31)", () => {
   it("accepts a valid server name", () => {
