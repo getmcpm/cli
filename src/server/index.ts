@@ -14,6 +14,7 @@ import {
   ListInput,
   RemoveInput,
   SetupInput,
+  UpInput,
 } from "./tools.js";
 import {
   handleSearch,
@@ -24,6 +25,7 @@ import {
   handleAudit,
   handleDoctor,
   handleSetup,
+  handleMcpUp,
 } from "./handlers.js";
 import type { ServerDeps } from "./handlers.js";
 
@@ -139,6 +141,15 @@ export async function startServer(): Promise<void> {
     annotations: { destructiveHint: true },
   }, async (args) => {
     const result = await handleSetup(args, deps);
+    return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+  });
+
+  server.registerTool("mcpm_up", {
+    description: "Install all servers from an mcpm.yaml stack file with trust verification. Equivalent to docker-compose up for MCP servers. Runs trust re-assessment and blocks servers that violate the trust policy.",
+    inputSchema: UpInput.shape,
+    annotations: { destructiveHint: true },
+  }, async (args) => {
+    const result = await handleMcpUp(args, deps);
     return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
   });
 
