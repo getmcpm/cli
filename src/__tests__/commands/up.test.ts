@@ -131,6 +131,21 @@ describe("handleUp", () => {
     );
   });
 
+  // M2: the MCP surface passes a hard trust floor; a low-trust server must be
+  // blocked even when the stack file declares no policy (the caller controls the
+  // stack, so a missing/zero policy must not bypass the floor).
+  it("blocks a server below minTrustFloor even with no stack policy (M2)", async () => {
+    const stackPath = await writeStackAndLock(basicStack, basicLock);
+    const deps = makeDeps({ computeTrustScore: vi.fn().mockReturnValue(lowTrust) });
+
+    await expect(
+      handleUp({ stackFile: stackPath, minTrustFloor: 50 }, deps)
+    ).rejects.toThrow(/could not be installed/);
+
+    const adapter = (deps.getAdapter as ReturnType<typeof vi.fn>).mock.results[0].value;
+    expect(adapter.addServer).not.toHaveBeenCalled();
+  });
+
   it("auto-runs lock when no lock file exists", async () => {
     const dir = await mkdtemp(path.join(os.tmpdir(), "mcpm-up-nolock-"));
     const stackPath = path.join(dir, "mcpm.yaml");

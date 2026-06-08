@@ -67,6 +67,23 @@ export interface UpOptions {
    * `false` so URL servers are recorded as blocked instead of installed.
    */
   allowUrlServers?: boolean;
+  /**
+   * Whether declared env vars may be auto-read from the working-directory `.env`
+   * file. The `.env` is an ambient secret source just like `process.env`.
+   * DEFAULT (undefined/true) preserves CLI behavior. The MCP surface passes
+   * `false` so an attacker-controlled stack file can't siphon the host's `.env`
+   * into an installed server config.
+   */
+  allowEnvFile?: boolean;
+  /**
+   * Hard, non-overridable trust-score floor (absolute, 0–100). When set, any
+   * server scoring below it is blocked regardless of the stack file's `policy`
+   * (which the caller controls). DEFAULT (undefined) = no floor = CLI behavior.
+   * The MCP surface passes the same hard floor the single-install tool enforces
+   * (issue #24), so a prompt-injected agent can't use the batch `up` path to
+   * install a low-trust server that `mcpm_install` would reject.
+   */
+  minTrustFloor?: number;
 }
 
 export interface UpDeps {
@@ -168,8 +185,16 @@ export async function handleUp(
     return;
   }
 
-  // Step 5: Load .env file for env var resolution
-  const envFileVars = await parseEnvFile(".env");
+  // Step 5: Load .env file for env var resolution.
+  // MCP surface lockdown (fix H1): the working-directory `.env` is an ambient
+  // secret source just like process.env. When allowEnvFile === false (set by the
+  // MCP surface) we skip reading it entirely, so an attacker-controlled stack
+  // file can't harvest the host's `.env` into an installed server config. The CLI
+  // default (undefined/true) reads `.env` as before.
+  const envFileVars =
+    options.allowEnvFile === false
+      ? ({ vars: {}, warnings: [] } as Awaited<ReturnType<typeof parseEnvFile>>)
+      : await parseEnvFile(".env");
 
   // Step 6: Re-assess trust in parallel
   const scannerAvailable = await deps.checkScannerAvailable();
@@ -339,6 +364,24 @@ async function processServer(input: ProcessInput): Promise<ServerResult> {
   };
   const trustScore = deps.computeTrustScore(trustInput);
 
+  // M2: enforce the hard trust floor BEFORE the (caller-controlled) stack policy.
+  // The MCP surface sets this so the batch `up` path honors the same floor the
+  // single-install MCP tool enforces (issue #24) — a stack file with no policy (or
+  // `minTrustScore: 0`) can't lower it. The CLI leaves it undefined (no floor).
+  // Note: this is an ABSOLUTE score floor (matching the sibling handleInstall #24),
+  // whereas checkTrustPolicy below compares normalized percentages — intentional
+  // and consistent; revisit only if the hard floor is ever made percentage-based.
+  if (
+    options.minTrustFloor !== undefined &&
+    trustScore.score < options.minTrustFloor
+  ) {
+    return {
+      name,
+      status: "blocked",
+      message: `trust score ${trustScore.score}/${trustScore.maxPossible} is below the required floor of ${options.minTrustFloor}`,
+    };
+  }
+
   // Policy check
   const policyResult = checkTrustPolicy({
     serverName: name,
@@ -476,12 +519,15 @@ async function resolveEnvVars(
     const fromFile = envFileVars[key];
     const fromDefault = decl.default;
 
+    // L1: compare against undefined, not truthiness — an explicitly-set empty
+    // string ("") is a legitimate value and must not silently fall through to
+    // the next source (or to the required-var prompt/throw).
     let value: string | undefined;
-    if (fromEnv) {
+    if (fromEnv !== undefined) {
       value = fromEnv;
-    } else if (fromFile) {
+    } else if (fromFile !== undefined) {
       value = fromFile;
-    } else if (fromDefault) {
+    } else if (fromDefault !== undefined) {
       value = fromDefault;
     } else if (decl.required) {
       if (options.ci) {

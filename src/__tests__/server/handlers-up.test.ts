@@ -170,8 +170,14 @@ servers:
     expect(result.error).toBeUndefined();
   });
 
-  // Fix F.3
-  it("blocked-by-policy: low-trust server with high minTrustScore appears in blocked", async () => {
+  // Fix F.3, corrected per review finding H2: handleMcpUp constructs its own
+  // handleUp deps with the REAL computeTrustScore (cts), so overriding
+  // deps.computeTrustScore (as the original test did) has no effect on this path.
+  // We instead drive the genuine pipeline: the clean mock server scores 55/80 = 69%
+  // (health-null 15 + static 40 + externalScan 0 + registryMeta 0; no scanner ->
+  // maxPossible 80), which is below the 90% policy floor (and the 94% lock snapshot
+  // also blocks it via score-drop), so the real checkTrustPolicy blocks it.
+  it("blocked-by-policy: a server below the trust floor is blocked via the real pipeline", async () => {
     const stackWithPolicy = `
 version: "1"
 policy:
@@ -183,13 +189,6 @@ servers:
     await writeStack(stackWithPolicy, REGISTRY_LOCK);
     const adapter = makeAdapter();
     const deps = makeDeps(adapter);
-    // Trust 75/80 = 94%... so force a low score to be below the 90% floor.
-    (deps.computeTrustScore as ReturnType<typeof vi.fn>).mockReturnValue({
-      score: 30,
-      maxPossible: 80,
-      level: "risky",
-      breakdown: { healthCheck: 0, staticScan: 20, externalScan: 0, registryMeta: 10 },
-    });
 
     const result = await handleMcpUp({}, deps);
 
@@ -221,8 +220,9 @@ servers:
       const result = await handleMcpUp({}, deps);
 
       // Fix A: a thrown failure is surfaced, not swallowed into a clean result.
+      // M1: the failed server lands in `failed` by NAME (not the error message).
       expect(result.error).toBeDefined();
-      expect(result.failed.length).toBeGreaterThan(0);
+      expect(result.failed).toContain("io.github.test/server-a");
       expect(result.installed).toEqual([]);
       // Fix C: the ambient secret was never written into a client config.
       expect(adapter.addServer).not.toHaveBeenCalled();
@@ -269,8 +269,11 @@ servers:
 
     const result = await handleMcpUp({}, deps);
 
+    // M1: a whole-batch throw (no server ever processed) is signaled via the
+    // authoritative `error` field — NOT by poisoning `failed`, which holds server
+    // names only. So `failed` is empty here while `error` carries the message.
     expect(result.error).toBeDefined();
-    expect(result.failed.length).toBeGreaterThan(0);
+    expect(result.failed).toEqual([]);
     expect(result.installed).toEqual([]);
   });
 
@@ -282,6 +285,55 @@ servers:
 
     await expect(
       handleMcpUp({ stackFile: "../escape.yaml" }, deps)
+    ).rejects.toThrow("within the working directory");
+  });
+
+  // H1: a `.env` in the working directory is an ambient secret source. On the MCP
+  // surface (allowEnvFile:false) it must NOT be harvested into an installed config.
+  // This fails on the pre-fix code (which read .env ungated) and passes after.
+  it("does not harvest the working-directory .env into installed configs (H1)", async () => {
+    const stackWithEnv = `
+version: "1"
+servers:
+  io.github.test/server-a:
+    version: "^1.0.0"
+    env:
+      LEAKME:
+        required: false
+        secret: false
+`;
+    await writeStack(stackWithEnv, REGISTRY_LOCK);
+    await writeFile(
+      path.join(tmpDir, ".env"),
+      "LEAKME=host-secret-from-dotenv\n",
+      "utf-8"
+    );
+    const adapter = makeAdapter();
+    const deps = makeDeps(adapter);
+
+    const result = await handleMcpUp({}, deps);
+
+    expect(result.installed).toContain("io.github.test/server-a");
+    // Installed, but the .env value must never reach the written config env.
+    const entry = adapter.addServer.mock.calls[0]?.[2] as
+      | { env?: Record<string, string> }
+      | undefined;
+    expect(entry?.env?.LEAKME).toBeUndefined();
+  });
+
+  // M3: lexical containment passes an in-cwd symlink (its own path is inside cwd),
+  // but the reader would follow it out of tree. The realpath re-check must reject it.
+  it("rejects a stackFile that is an in-cwd symlink pointing outside (symlink traversal)", async () => {
+    const { symlink, writeFile: wf, mkdtemp: mkd } = await import("fs/promises");
+    const outsideDir = await mkd(path.join(os.tmpdir(), "mcpm-outside-"));
+    const outsideTarget = path.join(outsideDir, "secret.yaml");
+    await wf(outsideTarget, REGISTRY_STACK, "utf-8");
+    // Plant an in-cwd symlink whose real target is outside cwd.
+    await symlink(outsideTarget, path.join(tmpDir, "link.yaml"));
+    const deps = makeDeps();
+
+    await expect(
+      handleMcpUp({ stackFile: "link.yaml" }, deps)
     ).rejects.toThrow("within the working directory");
   });
 
