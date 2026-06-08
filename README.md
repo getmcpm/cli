@@ -342,9 +342,11 @@ subgraph registry["Registry API<br/>(Only Remote)"]
 end
 
 subgraph scanning["Local Scanning & Trust<br/>(src/scanner/)"]
-    TIER1["Tier 1: Metadata<br/>verified publisher,<br/>age, downloads"]
-    TIER2["Tier 2: Static Patterns<br/>secrets, injection,<br/>typosquatting"]
-    SCORE["Trust Score<br/>0-100"]
+    HEALTH["Health Check<br/>(0-30): spawn +<br/>verify response"]
+    TIER1["Tier 1: Static Patterns<br/>(0-40): secrets, injection,<br/>typosquatting, exfil"]
+    TIER2["Tier 2: External Scan<br/>(0-20): optional<br/>MCP-Scan"]
+    META["Registry Metadata<br/>(0-10): publisher,<br/>age, downloads"]
+    SCORE["Trust Score<br/>(max 80; 100 with<br/>external scan)"]
 end
 
 subgraph config["Config Management<br/>(src/config/adapters/)"]
@@ -377,9 +379,14 @@ end
 
 CLI --> commands
 commands -->|searchServers| REGAPI
-commands -->|check| TIER1
-TIER1 -->|findings| TIER2
-TIER2 -->|merged findings| SCORE
+commands -->|scan| HEALTH
+commands -->|scan| TIER1
+commands -->|if available| TIER2
+commands -->|registry meta| META
+HEALTH --> SCORE
+TIER1 --> SCORE
+TIER2 --> SCORE
+META --> SCORE
 commands -->|detect| DETECT
 commands -->|merge & write| ATOMIC
 DETECT -->|config paths| clients
