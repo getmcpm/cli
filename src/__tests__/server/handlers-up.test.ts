@@ -22,6 +22,12 @@ import type { ClientId } from "../../config/paths.js";
 import type { McpServerEntry } from "../../config/adapters/index.js";
 import type { ServerDeps } from "../../server/handlers.js";
 
+// Integration-style tests: each uses a real temp dir, and the first handleMcpUp
+// call pays a one-time dynamic import("../commands/up.js"). Under CI coverage
+// instrumentation on the slower Node 22 runner that first test can exceed the
+// 5s default timeout, so raise it for this file (it runs ~1s locally).
+vi.setConfig({ testTimeout: 30000 });
+
 // ---------------------------------------------------------------------------
 // Mock the registry client that handleMcpUp constructs internally.
 // ---------------------------------------------------------------------------
