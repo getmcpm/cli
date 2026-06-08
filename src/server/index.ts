@@ -64,16 +64,19 @@ async function createDeps(): Promise<ServerDeps> {
 // Server setup
 // ---------------------------------------------------------------------------
 
-export async function startServer(): Promise<void> {
-  const deps = await createDeps();
-
-  const server = new McpServer({
-    name: "mcpm",
-    // Issue #22: advertise the real package version (injected by tsup at build),
-    // not a hardcoded stale "0.1.0".
-    version: __PKG_VERSION__,
-  });
-
+/**
+ * Register every mcpm tool on the server. Extracted from startServer so the
+ * registration can be unit-tested (fix F.1): a test spies registerTool and
+ * asserts every TOOL_DEFINITIONS name is registered exactly once, guarding
+ * against future tool/registration divergence.
+ *
+ * `server` is typed loosely as `Pick<McpServer, "registerTool">` so tests can
+ * pass a lightweight spy without constructing a full McpServer.
+ */
+export function registerTools(
+  server: Pick<McpServer, "registerTool">,
+  deps: ServerDeps
+): void {
   // Register tools using registerTool API
   server.registerTool("mcpm_search", {
     description: "Search the MCP registry for servers with trust scores",
@@ -145,13 +148,26 @@ export async function startServer(): Promise<void> {
   });
 
   server.registerTool("mcpm_up", {
-    description: "Install all servers from an mcpm.yaml stack file with trust verification. Equivalent to docker-compose up for MCP servers. Runs trust re-assessment and blocks servers that violate the trust policy.",
+    description: "Install all servers from an mcpm.yaml stack file with trust verification. Equivalent to docker-compose up for MCP servers. Runs trust re-assessment and blocks servers that violate the trust policy. Pass profile to install only servers matching that profile, or dryRun to preview what would be installed without making changes.",
     inputSchema: UpInput.shape,
     annotations: { destructiveHint: true },
   }, async (args) => {
     const result = await handleMcpUp(args, deps);
     return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
   });
+}
+
+export async function startServer(): Promise<void> {
+  const deps = await createDeps();
+
+  const server = new McpServer({
+    name: "mcpm",
+    // Issue #22: advertise the real package version (injected by tsup at build),
+    // not a hardcoded stale "0.1.0".
+    version: __PKG_VERSION__,
+  });
+
+  registerTools(server, deps);
 
   // Start stdio transport
   const transport = new StdioServerTransport();

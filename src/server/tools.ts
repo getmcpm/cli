@@ -101,7 +101,7 @@ export const TOOL_DEFINITIONS = [
   },
   {
     name: "mcpm_up",
-    description: "Install all servers from an mcpm.yaml stack file with trust verification. Equivalent to docker-compose up for MCP servers. Runs trust re-assessment and blocks servers that violate the trust policy.",
+    description: "Install all servers from an mcpm.yaml stack file with trust verification. Equivalent to docker-compose up for MCP servers. Runs trust re-assessment and blocks servers that violate the trust policy. Pass profile to install only servers matching that profile, or dryRun to preview what would be installed without making changes.",
     inputSchema: {
       type: "object" as const,
       properties: {

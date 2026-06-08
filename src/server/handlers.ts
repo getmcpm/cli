@@ -7,6 +7,7 @@
 
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
+import path from "node:path";
 import type { ClientId } from "../config/paths.js";
 import { CLIENT_IDS } from "../config/paths.js";
 import type { ConfigAdapter } from "../config/adapters/index.js";
@@ -421,17 +422,21 @@ export async function handleMcpUp(
   blocked: string[];
   failed: string[];
   skipped: string[];
+  error?: string;
   note?: string;
 }> {
-  // Validate stackFile path: reject traversal and absolute paths (AI agent trust boundary)
-  if (args.stackFile !== undefined) {
-    if (args.stackFile.includes("..") || args.stackFile.startsWith("/")) {
-      throw new Error(`Invalid stack file path: must be relative to CWD with no ".." segments.`);
-    }
-    const PATH_RE = /^[a-zA-Z0-9._\-/]+\.yaml$/;
-    if (!PATH_RE.test(args.stackFile)) {
-      throw new Error(`Invalid stack file path: "${args.stackFile}"`);
-    }
+  // Validate stackFile path (AI agent trust boundary). Zod defaults stackFile to
+  // "mcpm.yaml", so the old `if (args.stackFile !== undefined)` guard was dead.
+  // Enforce real containment unconditionally via resolved paths: path.resolve
+  // normalizes Windows backslashes and "..", so this catches traversal and
+  // absolute escapes that string-only checks miss.
+  const stackFile = args.stackFile ?? "mcpm.yaml";
+  const resolved = path.resolve(process.cwd(), stackFile);
+  if (
+    resolved !== process.cwd() &&
+    !resolved.startsWith(process.cwd() + path.sep)
+  ) {
+    throw new Error("stackFile must be within the working directory");
   }
 
   const { handleUp } = await import("../commands/up.js");
@@ -444,15 +449,24 @@ export async function handleMcpUp(
 
   const client = new RegistryClient();
   const outputLines: string[] = [];
+  // Fix A/D: structured per-server results from handleUp. Authoritative source
+  // for categorization — emoji-scraping cannot distinguish blocked from failed.
+  const records: Array<{ name: string; status: string }> = [];
+  let thrownError: string | undefined;
 
   try {
     await handleUp(
       {
-        stackFile: args.stackFile,
+        stackFile,
         profile: args.profile,
         dryRun: args.dryRun,
         ci: true,
         yes: false,
+        // MCP surface lockdown (fixes C & D): never auto-read ambient secrets
+        // from process.env, and never install URL servers (they bypass the
+        // registry trust gate). Both default to true on the CLI.
+        allowProcessEnv: false,
+        allowUrlServers: false,
       },
       {
         detectClients: deps.detectClients,
@@ -488,23 +502,52 @@ export async function handleMcpUp(
         confirm: async () => false,
         promptEnvVar: async () => "",
         output: (text) => outputLines.push(text),
+        recordResult: (r) => records.push(r),
       }
     );
-  } catch {
-    // handleUp throws on failures — we capture via output
+  } catch (err) {
+    // Fix A: handleUp throws on early/whole-batch failures (no clients, lock-file
+    // creation failure, missing required env in CI, the summary "N could not be
+    // installed" throw, etc.). The previous bare catch swallowed these into a
+    // clean-looking empty result. Capture the message so the caller can never
+    // mistake a thrown failure for success.
+    thrownError = err instanceof Error ? err.message : String(err);
   }
 
-  // Parse output lines to categorize results
   const installed: string[] = [];
   const blocked: string[] = [];
   const failed: string[] = [];
   const skipped: string[] = [];
 
-  for (const line of outputLines) {
-    if (line.includes("\u2713")) installed.push(line.trim());
-    else if (line.includes("\u2717") && line.includes("blocked")) blocked.push(line.trim());
-    else if (line.includes("\u2717")) failed.push(line.trim());
-    else if (line.includes("\u2022")) skipped.push(line.trim());
+  if (records.length > 0) {
+    // Authoritative path (fix D, F.3/F.5): categorize from handleUp's typed
+    // per-server statuses. Unlike emoji-scraping, this reliably separates
+    // "blocked" (policy/URL-lockdown) from "failed".
+    for (const r of records) {
+      switch (r.status) {
+        case "installed": installed.push(r.name); break;
+        case "blocked": blocked.push(r.name); break;
+        case "failed": failed.push(r.name); break;
+        case "skipped":
+        case "removed": skipped.push(r.name); break;
+      }
+    }
+  } else {
+    // Fallback for the no-record path (e.g. a throw before any server is
+    // processed): preserve the original output-line parsing.
+    for (const line of outputLines) {
+      if (line.includes("\u2713")) installed.push(line.trim());
+      else if (line.includes("\u2717") && line.includes("blocked")) blocked.push(line.trim());
+      else if (line.includes("\u2717")) failed.push(line.trim());
+      else if (line.includes("\u2022")) skipped.push(line.trim());
+    }
+  }
+
+  // Fix A: if handleUp threw, the failure MUST be signaled in the result \u2014 never
+  // an empty success. Surface the message via `error`, and ensure `failed` is
+  // non-empty (so a throw that produced no per-server failure can't read as clean).
+  if (thrownError !== undefined && failed.length === 0) {
+    failed.push(thrownError);
   }
 
   return {
@@ -512,6 +555,7 @@ export async function handleMcpUp(
     blocked,
     failed,
     skipped,
+    ...(thrownError !== undefined ? { error: thrownError } : {}),
     ...(installed.length > 0
       ? { note: "Restart your AI client to use the newly installed servers." }
       : {}),

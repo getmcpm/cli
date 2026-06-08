@@ -123,6 +123,15 @@ describe("SearchInput / SetupInput / UpInput stay strict (security #31)", () => 
     expect(UpInput.safeParse({}).success).toBe(true);
     expect(UpInput.safeParse({ unexpected: 1 }).success).toBe(false);
   });
+
+  // Fix F.6: the Zod defaults are load-bearing — handleMcpUp's dead-guard
+  // replacement (fix B) relies on stackFile defaulting to "mcpm.yaml", and the
+  // dryRun default must be false so an omitted flag never silently dry-runs.
+  it("UpInput applies defaults: dryRun=false, stackFile='mcpm.yaml'", () => {
+    const parsed = UpInput.parse({});
+    expect(parsed.dryRun).toBe(false);
+    expect(parsed.stackFile).toBe("mcpm.yaml");
+  });
 });
 
 describe(".shape stays usable for MCP SDK registration (security #31)", () => {
