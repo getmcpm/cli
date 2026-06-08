@@ -35,6 +35,74 @@ Detection is layered:
 | **Same-session drift** | 2nd+ `tools/list` in one session | Catches mid-session rug-pull attempts before the pin write commits |
 | **Policy overrides** | Every message | `~/.mcpm/guard-policy.yaml` overrides (mute / warn / block / log_only / paused) |
 
+### Full message flow
+
+The relay inspects each direction independently — a request (parent → child) and the matching response (child → parent) each run the full pattern + pin + policy pipeline before anything is forwarded:
+
+```mermaid
+sequenceDiagram
+participant IDE as IDE<br/>(Claude Desktop)
+participant Relay as mcpm guard<br/>run --inner
+participant Child as Real MCP<br/>Server
+participant PinStore as ~/.mcpm/pins.json
+participant PolicyFile as ~/.mcpm/<br/>guard-policy.yaml
+participant EventLog as ~/.mcpm/<br/>guard-events.jsonl
+
+Note over IDE,EventLog: ENABLE PHASE (mcpm guard enable)<br/>Rewrites IDE config: real-server-cmd → mcpm guard run --inner -- real-server-cmd
+
+Note over IDE,EventLog: RUNTIME PHASE - JSON-RPC Inspection<br/>Load policy (muted signatures, paused_until)
+
+IDE->>Relay: JSON-RPC request<br/>(method: tool call)
+
+rect rgb(200, 150, 150)
+Note over Relay: PARENT→CHILD INSPECT
+Relay->>Relay: inspectMessage()<br/>Pattern engine<br/>(OWASP-MCP Top 10)
+Relay->>Relay: Check signatures vs<br/>tool_call_args<br/>(e.g., owasp-mcp-7-path-exfil)
+Relay->>Relay: applyPolicy()<br/>signature_overrides
+end
+
+alt BLOCK or WARN
+Relay->>EventLog: append event
+Relay->>IDE: JSON-RPC error<br/>(code: -32099)
+else PASS
+Relay->>Child: forward request
+end
+
+Child->>Relay: JSON-RPC response<br/>(e.g., tools/list)
+
+rect rgb(150, 200, 150)
+Note over Relay: CHILD→PARENT INSPECT
+Relay->>Relay: inspectMessage()<br/>Pattern engine<br/>(OWASP-MCP Top 10)
+
+alt hasToolsList()?
+Relay->>PinStore: Load pins
+Relay->>Relay: inspectForDriftSync():<br/>Hash live schema<br/>vs pinned hash
+Relay->>Relay: SECURITY F3:<br/>Check sessionFirstHashes<br/>for same-session drift
+alt Schema mismatch or in-session drift
+Relay->>EventLog: append finding<br/>(signature: schema-drift)
+Relay->>IDE: JSON-RPC error<br/>(block)
+else Schema matches
+Relay->>Relay: Off-thread:<br/>Async pin write +<br/>snapshot refresh
+end
+end
+end
+
+Relay->>Relay: applyPolicy()<br/>on pattern + drift findings
+Relay->>Relay: mergeInspect()<br/>Highest severity wins
+
+alt BLOCK
+Relay->>EventLog: append event
+Relay->>IDE: JSON-RPC error<br/>(code: -32099,<br/>remediation)
+else WARN (policy: log_only)
+Relay->>EventLog: append event
+Relay->>IDE: forward response<br/>(event logged)
+else PASS
+Relay->>IDE: forward response
+end
+
+Note over IDE,EventLog: Event log entry (if findings):<br/>{ts, server_name, direction,<br/>action, findings:[{signature_id,<br/>category, severity, target,<br/>matched_text_excerpt, remediation}]}
+```
+
 ---
 
 ## All commands
