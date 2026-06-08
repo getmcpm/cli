@@ -177,7 +177,9 @@ Without an external scanner installed, the maximum possible score is 80/100. The
 | `mcpm update` | Check for newer versions and update installed servers |
 | `mcpm outdated` | Show version drift and trust regression for installed servers |
 | `mcpm secrets` | Manage MCP server credentials (AES-GCM encrypted at rest; key held in the OS keychain — macOS Keychain / libsecret / Windows DPAPI — so a copied store can't be decrypted off-machine, with a machine-derived-key fallback where no keychain is available). `mcpm secrets migrate` upgrades older entries |
-| `mcpm publish` | Publish an MCP server to the registry |
+| `mcpm publish scaffold` | Create a .mcpm-publish.yaml manifest interactively |
+| `mcpm publish check` | Dry-run: show trust score and what would be submitted |
+| `mcpm publish` | Submit to the official MCP registry (requires GITHUB_TOKEN) |
 | `mcpm doctor` | Check MCP setup health and report issues |
 | `mcpm init <pack>` | Install a curated starter pack of MCP servers |
 | `mcpm disable <name>` | Disable an MCP server without removing it from config |
@@ -189,6 +191,7 @@ Without an external scanner installed, the maximum possible score is 80/100. The
 | `mcpm up` | Install all servers from mcpm.yaml with trust verification |
 | `mcpm diff` | Compare installed servers against mcpm.yaml and lock file |
 | `mcpm completions <shell>` | Generate shell completion scripts (bash, zsh, fish) |
+| `mcpm why <name>` | Explain a server's trust score (breakdown of all components) |
 | `mcpm serve` | Start mcpm as an MCP server (stdio transport) |
 | `mcpm guard enable` | Wrap detected client configs with the inspection relay (v0.5.0) |
 | `mcpm guard disable` | Restore original client configs |
@@ -301,7 +304,7 @@ mcpm can run as an MCP server itself, letting AI agents search, install, and aud
 }
 ```
 
-This exposes 9 tools: `mcpm_search`, `mcpm_install`, `mcpm_info`, `mcpm_list`, `mcpm_remove`, `mcpm_audit`, `mcpm_doctor`, `mcpm_setup`, and `mcpm_up`.
+This exposes 8 tools: `mcpm_search`, `mcpm_install`, `mcpm_info`, `mcpm_list`, `mcpm_remove`, `mcpm_audit`, `mcpm_doctor`, and `mcpm_setup`.
 
 The `mcpm_setup` tool takes a natural language description like "filesystem and GitHub" and handles everything: search, trust scoring, install. One tool call to assemble a working MCP toolchain.
 

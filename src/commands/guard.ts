@@ -1,10 +1,8 @@
 /**
  * `mcpm guard` Commander subcommand group (v0.5.0).
  *
- * v0.5.0 surface: demo, enable, disable, status, run --inner.
- * Other commands (accept-drift, mute/unmute, pause, reset-integrity,
- * cleanup, list-signatures) land in subsequent build steps per the
- * v0.5.0 design doc.
+ * Full v0.5.0 surface: demo, enable, disable, status, accept-drift,
+ * mute, unmute, pause, cleanup, list-signatures, reset-integrity, run --inner.
  */
 
 import { Command } from "commander";

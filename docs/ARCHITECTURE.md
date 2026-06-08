@@ -104,7 +104,7 @@ mcpm/
 
 | Module | Purpose |
 |---|---|
-| `commands/` | 20 CLI commands (incl. `guard` subcommand group with 11 subcommands), each a self-contained Commander action |
+| `commands/` | 24 CLI commands (incl. `guard` subcommand group with 12 subcommands and `publish` with 3 subcommands), each a self-contained Commander action |
 | `server/` | MCP server (stdio): 9 tools wrapping CLI logic via injectable handlers |
 | `stack/` | Stack file schemas (mcpm.yaml/mcpm-lock.yaml), semver resolution, trust policy, .env parsing |
 | `guard/` | **v0.5.0 runtime defense.** Stdio MITM relay, OWASP MCP Top 10 pattern engine, schema pinning + drift detection, policy file editor, integrity sidecars, event log. See `docs/GUARD.md`. |
@@ -125,6 +125,7 @@ mcpm/
 | `mcpm remove <name>` | Remove a server from client config(s) |
 | `mcpm audit` | Scan all installed servers and produce a trust report |
 | `mcpm update` | Check for newer versions and update installed servers |
+| `mcpm outdated` | Show version drift and trust regression for installed servers |
 | `mcpm doctor` | Check MCP setup health (runtimes, configs, servers) |
 | `mcpm init <pack>` | Install a curated starter pack of MCP servers |
 | `mcpm disable <name>` | Disable a server without removing it from config |
@@ -137,6 +138,9 @@ mcpm/
 | `mcpm diff` | Compare installed servers against mcpm.yaml and lock file |
 | `mcpm completions <shell>` | Generate shell completion scripts (bash, zsh, fish) |
 | `mcpm serve` | Start mcpm as an MCP server (stdio transport) |
+| `mcpm why <name>` | Explain a server's trust score (breakdown of all scoring components) |
+| `mcpm secrets` | Manage encrypted credentials for MCP servers |
+| `mcpm publish` | Publish an MCP server to the official registry |
 | `mcpm guard enable / disable / status` | Wrap detected client configs with the inspection relay; restore; report state |
 | `mcpm guard demo` | Synthetic prompt-injection scenario (visible block in terminal) |
 | `mcpm guard accept-drift / mute / unmute / pause / cleanup` | Runtime tuning + escape hatches |
@@ -329,7 +333,7 @@ pnpm test:watch        # watch mode
 
 ### CI (`ci.yml`)
 
-Runs on push to `main` and pull requests. Matrix: Node 20, 22, 24. All GitHub Actions are SHA-pinned.
+Runs on push to `main` and pull requests. Matrix: Node 22, 24, 26. All GitHub Actions are SHA-pinned.
 
 Steps: `pnpm install --frozen-lockfile` → `typecheck` → `build` → `test:coverage`
 

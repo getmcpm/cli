@@ -33,7 +33,7 @@ Detection is layered:
 | **Pattern engine** | Every message | NFKC-normalized regex against tool descriptions / responses / arguments / annotations |
 | **Schema pinning** | `tools/list` responses | SHA-256 hash of {description, schema, annotations} vs the pin captured at install |
 | **Same-session drift** | 2nd+ `tools/list` in one session | Catches mid-session rug-pull attempts before the pin write commits |
-| **Policy overrides** | Every message | `~/.mcpm/guard-policy.yaml` overrides (mute / warn / block / log_only / paused) |
+| **Policy overrides** | Every message | `~/.mcpm/guard-policy.yaml` signature overrides (ignore / warn / block / log_only) and global pause state (paused_until) |
 
 ### Full message flow
 
@@ -117,7 +117,7 @@ The wrap transformation in JSON:
 ```
 { "command": "<orig>", "args": [...], "env": {...} }
   ↓
-{ "command": "node", "args": ["<abs path to mcpm>/dist/index.js", "guard", "run", "--inner", "--server-name", "<name>", "--", "<orig>", ...], "env": {...} }
+{ "command": "node", "args": ["<abs path to mcpm>/dist/index.js", "guard", "run", "--inner", "--server-name", "<name>", "--declared-env", "<csv of env key names>", "--orig-hash", "<sha256 hash>", "--", "<orig>", ...], "env": {...} }
 ```
 
 A pre-batch `.bak` snapshot is written per touched client (`<config>.guard-enable.bak`) so the whole operation is recoverable even if a single per-server write fails mid-batch.
