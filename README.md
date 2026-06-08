@@ -304,7 +304,7 @@ mcpm can run as an MCP server itself, letting AI agents search, install, and aud
 }
 ```
 
-This exposes 8 tools: `mcpm_search`, `mcpm_install`, `mcpm_info`, `mcpm_list`, `mcpm_remove`, `mcpm_audit`, `mcpm_doctor`, and `mcpm_setup`.
+This exposes 9 tools: `mcpm_search`, `mcpm_install`, `mcpm_info`, `mcpm_list`, `mcpm_remove`, `mcpm_audit`, `mcpm_doctor`, `mcpm_setup`, and `mcpm_up`.
 
 The `mcpm_setup` tool takes a natural language description like "filesystem and GitHub" and handles everything: search, trust scoring, install. One tool call to assemble a working MCP toolchain.
 

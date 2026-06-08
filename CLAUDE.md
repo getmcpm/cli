@@ -129,7 +129,7 @@ Build the **open-source, community-owned npm+npm_audit** for MCP:
 - **Local storage**: JSON files in `~/.mcpm/` (servers.json, aliases.json, cache/)
 - **Testing**: Vitest + @vitest/coverage-v8 (80% line, 75% branch thresholds)
 - **Build**: tsup (TypeScript → JS)
-- **MCP server**: `mcpm serve` exposes 8 tools via `@modelcontextprotocol/sdk` (stdio transport)
+- **MCP server**: `mcpm serve` exposes 9 tools via `@modelcontextprotocol/sdk` (stdio transport)
 - **Commands**: `mcpm search`, `mcpm install`, `mcpm list`, `mcpm remove`, `mcpm info`,
   `mcpm audit`, `mcpm update`, `mcpm outdated`, `mcpm doctor`, `mcpm init`, `mcpm import`, `mcpm serve`,
   `mcpm disable`, `mcpm enable`, `mcpm alias`, `mcpm completions`,
@@ -344,7 +344,7 @@ the registry concept end-to-end before we launch publicly.
      │
      ├── CLI (terminal)              ├── MCP Server (stdio)
      │   mcpm search/install/...     │   mcpm serve
-     │                               │   8 tools via JSON-RPC
+     │                               │   9 tools via JSON-RPC
      ▼                               ▼
   mcpm core (Node.js, npm: @getmcpm/cli, bin: mcpm)
      │
