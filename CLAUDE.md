@@ -12,7 +12,7 @@ An open-source, CLI-first MCP package manager — **"npm for MCP servers"**.
 A registry where developers can search, install, audit, publish, and update MCP servers
 across all major clients (Claude Desktop, Cursor, VS Code, Windsurf) from a single tool.
 
-**npm package**: `@getmcpm/cli` (v0.8.0) | **bin command**: `mcpm` | **repo**: github.com/getmcpm/cli | **web UI**: deferred to V1+
+**npm package**: `@getmcpm/cli` (v0.8.1) | **bin command**: `mcpm` | **repo**: github.com/getmcpm/cli | **web UI**: deferred to V1+
 
 ---
 
