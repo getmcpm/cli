@@ -324,6 +324,79 @@ Linux and Windows paths are also supported. See `mcpm doctor` to verify which cl
 
 mcpm is a local-first CLI. There is no mcpm backend or account system.
 
+```mermaid
+flowchart TD
+subgraph user["User / Terminal"]
+    CLI["mcpm CLI<br/>Commander entry point"]
+end
+
+subgraph commands["Commands (src/commands/)"]
+    SEARCH["search"]
+    INSTALL["install"]
+    AUDIT["audit"]
+    GUARD["guard<br/>enable/disable/status"]
+end
+
+subgraph registry["Registry API<br/>(Only Remote)"]
+    REGAPI["https://registry.<br/>modelcontextprotocol.io<br/>v0.1"]
+end
+
+subgraph scanning["Local Scanning & Trust<br/>(src/scanner/)"]
+    TIER1["Tier 1: Metadata<br/>verified publisher,<br/>age, downloads"]
+    TIER2["Tier 2: Static Patterns<br/>secrets, injection,<br/>typosquatting"]
+    SCORE["Trust Score<br/>0-100"]
+end
+
+subgraph config["Config Management<br/>(src/config/adapters/)"]
+    DETECT["Detect AI clients<br/>Claude Desktop / Cursor<br/>VS Code / Windsurf"]
+    ATOMIC["Atomic writes<br/>0o600 + symlink-safe<br/>.tmp/.bak"]
+end
+
+subgraph guard_runtime["Guard Runtime v0.5.0<br/>(src/guard/)"]
+    WRAP["Config entry wrap<br/>via run --inner"]
+    RELAY["Stdio MITM Relay<br/>per-server"]
+    PATTERNS["Pattern Engine<br/>OWASP MCP Top 10"]
+    PINS["Schema Pins<br/>+ Drift Detection"]
+    FAILCLOSED["Fail-closed on<br/>pins.json error"]
+    EVENTS["Event Log<br/>guard-events.jsonl"]
+end
+
+subgraph local_state["Local State<br/>(~/.mcpm/)"]
+    SERVERS["servers.json"]
+    CACHE["cache/"]
+    PINS_STORE["pins.json"]
+    POLICY["guard-policy.yaml"]
+end
+
+subgraph clients["Native AI Clients"]
+    CD["Claude Desktop"]
+    CURSOR["Cursor"]
+    VSCODE["VS Code"]
+    WINDSURF["Windsurf"]
+end
+
+CLI --> commands
+commands -->|searchServers| REGAPI
+commands -->|check| TIER1
+TIER1 -->|findings| TIER2
+TIER2 -->|merged findings| SCORE
+commands -->|detect| DETECT
+commands -->|merge & write| ATOMIC
+DETECT -->|config paths| clients
+ATOMIC -->|config| clients
+GUARD -->|wrap| WRAP
+WRAP -->|modifies config<br/>to invoke| clients
+WRAP -->|setup| RELAY
+RELAY -->|parse frames<br/>inspect msg| PATTERNS
+PATTERNS -->|check pins| PINS
+PINS -->|read| PINS_STORE
+PATTERNS -->|read policy| POLICY
+PINS -->|fail-closed| FAILCLOSED
+RELAY -->|record| EVENTS
+commands -->|store| SERVERS
+commands -->|cache| CACHE
+```
+
 1. **Search and install** query the [official MCP Registry API](https://registry.modelcontextprotocol.io) (v0.1) maintained by the Model Context Protocol project.
 2. **Trust assessment** runs locally using built-in scanners (regex-based pattern detection) and optionally wraps [MCP-Scan](https://github.com/invariantlabs-ai/mcp-scan) for deeper analysis.
 3. **Config management** reads and writes the native config file for each AI client. All writes use atomic file operations with restricted permissions (0o600 files, 0o700 directories).
