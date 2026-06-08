@@ -1176,7 +1176,15 @@ describe("validateRuntimeArgs", () => {
   });
 
   it("rejects arguments containing path traversal (..)", () => {
-    expect(() => validateRuntimeArgs(["../../etc/passwd"])).toThrow(/unrecognized/i);
+    // M4b: a ".." path segment is rejected up front (more specific than the
+    // generic "unrecognized" allowlist failure), in bare and flag-value forms.
+    expect(() => validateRuntimeArgs(["../../etc/passwd"])).toThrow(/traversal/i);
+    expect(() => validateRuntimeArgs([".."])).toThrow(/traversal/i);
+    expect(() => validateRuntimeArgs(["a/../../b"])).toThrow(/traversal/i);
+    expect(() => validateRuntimeArgs(["--config=../secret"])).toThrow(/traversal/i);
+    expect(() => validateRuntimeArgs(["--config=../../secret"])).toThrow(/traversal/i);
+    // A non-traversal double-dot inside a token is left alone.
+    expect(() => validateRuntimeArgs(["--range=1..10"])).not.toThrow();
   });
 
   it("rejects shell metacharacters in flag values", () => {
@@ -1203,8 +1211,19 @@ describe("validateRemoteUrl", () => {
     expect(() => validateRemoteUrl("https://api.example.com/mcp")).not.toThrow();
   });
 
-  it("accepts http URLs", () => {
+  it("accepts http URLs only for loopback hosts", () => {
     expect(() => validateRemoteUrl("http://localhost:3000/mcp")).not.toThrow();
+    expect(() => validateRemoteUrl("http://127.0.0.1:8080/mcp")).not.toThrow();
+    expect(() => validateRemoteUrl("http://app.localhost/mcp")).not.toThrow();
+    // IPv6 loopback — the bracket-strip in isLoopbackHost is load-bearing.
+    expect(() => validateRemoteUrl("http://[::1]:8080/mcp")).not.toThrow();
+  });
+
+  it("rejects plaintext http to non-loopback hosts (M4a)", () => {
+    expect(() => validateRemoteUrl("http://api.example.com/mcp")).toThrow(/https for non-loopback|interception/i);
+    expect(() => validateRemoteUrl("http://10.0.0.5/mcp")).toThrow(/https for non-loopback|interception/i);
+    // https to the same host is always fine.
+    expect(() => validateRemoteUrl("https://api.example.com/mcp")).not.toThrow();
   });
 
   it("rejects file:// URLs", () => {

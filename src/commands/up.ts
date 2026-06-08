@@ -39,7 +39,7 @@ import {
 } from "../stack/schema.js";
 import { checkTrustPolicy } from "../stack/policy.js";
 import { parseEnvFile } from "../stack/env.js";
-import { resolveInstallEntry, parseSecretsMode } from "./install.js";
+import { resolveInstallEntry, parseSecretsMode, validateRemoteUrl } from "./install.js";
 import { extractRegistryMeta } from "../utils/format-trust.js";
 import { applyKeychainSecrets, type SecretsMode, setSecrets as _setSecrets } from "../store/keychain.js";
 
@@ -265,7 +265,10 @@ export async function handleUp(
   );
   if (options.secrets === "keychain" && totalSecretsStored > 0 && !options.dryRun) {
     deps.output(
-      "Secrets stored encrypted at rest in ~/.mcpm (protects against other-user/offline access, not same-user processes). " +
+      "Secrets stored encrypted at rest in ~/.mcpm. With an OS keychain this protects " +
+        "against other-user/offline access (not same-user processes); without one a " +
+        "machine-derived key is used that guards casual local inspection only, NOT file " +
+        "exfiltration — run `mcpm secrets migrate` once a keychain is available. " +
         "Run `mcpm guard enable` (then restart your IDE) so they resolve at launch."
     );
   }
@@ -466,6 +469,19 @@ async function processUrlServer(
     };
   }
 
+  // M4a: validate the URL before it is written to any client config. The up path
+  // previously wrote stack-file `url:` servers unvalidated; this rejects non-http(s)
+  // schemes and non-loopback plaintext http (interceptable once in an IDE config).
+  // Capture (don't throw): `--dry-run` must stay a read-only, exit-zero preview, and
+  // an invalid URL is categorized as `blocked` (mirroring trust-policy blocks) rather
+  // than crashing the per-server loop into a generic `failed`.
+  let urlError: string | undefined;
+  try {
+    validateRemoteUrl(url);
+  } catch (err) {
+    urlError = err instanceof Error ? err.message : String(err);
+  }
+
   const cursorClients = clients.filter((c) => c === "cursor");
 
   if (cursorClients.length === 0) {
@@ -477,7 +493,13 @@ async function processUrlServer(
   }
 
   if (options.dryRun) {
-    return { name, status: "skipped", message: `would install URL ${url} to Cursor` };
+    return urlError
+      ? { name, status: "skipped", message: `would reject URL ${url}: ${urlError}` }
+      : { name, status: "skipped", message: `would install URL ${url} to Cursor` };
+  }
+
+  if (urlError) {
+    return { name, status: "blocked", message: urlError };
   }
 
   for (const clientId of cursorClients) {

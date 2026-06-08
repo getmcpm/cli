@@ -530,4 +530,74 @@ servers:
     expect(confirm).not.toHaveBeenCalled();
     expect(adapter.removeServer).toHaveBeenCalledWith("/mock/config.json", "extra-server");
   });
+
+  // M4a (PR #66): the up path now validates stack-file `url:` servers before writing.
+  // These exercise processUrlServer end-to-end (previously untested at this level).
+  const urlStack = (url: string) => `
+version: "1"
+servers:
+  io.github.test/remote:
+    url: "${url}"
+`;
+
+  it("installs a valid https url: server to Cursor", async () => {
+    const stackPath = await writeStackAndLock(urlStack("https://api.example.com/mcp"), basicLock);
+    const adapter = makeAdapter();
+    const deps = makeDeps({
+      detectClients: vi.fn<() => Promise<ClientId[]>>().mockResolvedValue(["cursor"]),
+      getAdapter: vi.fn().mockReturnValue(adapter),
+    });
+
+    await handleUp({ stackFile: stackPath }, deps);
+
+    expect(adapter.addServer).toHaveBeenCalledWith(
+      "/mock/config.json",
+      "io.github.test/remote",
+      { url: "https://api.example.com/mcp" },
+      { force: true }
+    );
+  });
+
+  it("blocks a url: server with a non-loopback plaintext-http URL (M4a)", async () => {
+    const stackPath = await writeStackAndLock(urlStack("http://10.0.0.5/mcp"), basicLock);
+    const adapter = makeAdapter();
+    const deps = makeDeps({
+      detectClients: vi.fn<() => Promise<ClientId[]>>().mockResolvedValue(["cursor"]),
+      getAdapter: vi.fn().mockReturnValue(adapter),
+    });
+
+    await expect(handleUp({ stackFile: stackPath }, deps)).rejects.toThrow(/could not be installed/);
+    expect(adapter.addServer).not.toHaveBeenCalled();
+  });
+
+  it("blocks a url: server with a non-http(s) scheme", async () => {
+    const stackPath = await writeStackAndLock(urlStack("file:///etc/passwd"), basicLock);
+    const adapter = makeAdapter();
+    const deps = makeDeps({
+      detectClients: vi.fn<() => Promise<ClientId[]>>().mockResolvedValue(["cursor"]),
+      getAdapter: vi.fn().mockReturnValue(adapter),
+    });
+
+    await expect(handleUp({ stackFile: stackPath }, deps)).rejects.toThrow(/could not be installed/);
+    expect(adapter.addServer).not.toHaveBeenCalled();
+  });
+
+  // Regression: --dry-run is read-only — an invalid URL must NOT throw or exit
+  // non-zero; it is previewed as "would reject".
+  it("dry-run does not fail on an invalid url: server (regression)", async () => {
+    const stackPath = await writeStackAndLock(urlStack("http://10.0.0.5/mcp"), basicLock);
+    const adapter = makeAdapter();
+    const deps = makeDeps({
+      detectClients: vi.fn<() => Promise<ClientId[]>>().mockResolvedValue(["cursor"]),
+      getAdapter: vi.fn().mockReturnValue(adapter),
+    });
+
+    await expect(
+      handleUp({ stackFile: stackPath, dryRun: true }, deps)
+    ).resolves.toBeUndefined();
+    expect(adapter.addServer).not.toHaveBeenCalled();
+
+    const out = (deps.output as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[0]).join("\n");
+    expect(out).toMatch(/would reject URL/);
+  });
 });

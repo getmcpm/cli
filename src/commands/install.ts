@@ -43,6 +43,32 @@ export function validateRemoteUrl(url: string): void {
       `Remote URL must use http or https protocol, got: "${parsed.protocol}"`
     );
   }
+  // M4a: plaintext http to a non-loopback host is interceptable once written to an
+  // IDE config. Allow http only for loopback (local dev servers); require https for
+  // every other host. https is always allowed.
+  if (parsed.protocol === "http:" && !isLoopbackHost(parsed.hostname)) {
+    throw new Error(
+      `Remote URL must use https for non-loopback hosts (plaintext http is ` +
+        `vulnerable to interception), got: "${url}"`
+    );
+  }
+}
+
+/**
+ * True for localhost / loopback literals, where plaintext http is acceptable.
+ * Recognizes localhost / *.localhost / 127.0.0.1 / ::1. Exotic loopback spellings
+ * (IPv4-mapped `::ffff:127.0.0.1`, `127.x.x.x`, decimal/octal/hex IPs) are NOT
+ * recognized and fall through to the https requirement — over-rejection only, never
+ * a bypass (a non-loopback host can never be mistaken for loopback).
+ */
+function isLoopbackHost(hostname: string): boolean {
+  const h = hostname.toLowerCase().replace(/^\[|\]$/g, ""); // strip IPv6 brackets
+  return (
+    h === "localhost" ||
+    h.endsWith(".localhost") ||
+    h === "127.0.0.1" ||
+    h === "::1"
+  );
 }
 
 const NPM_IDENTIFIER_RE = /^(@[a-z0-9-~][a-z0-9-._~]*\/)?[a-z0-9-~][a-z0-9-._~]*$/;
@@ -126,6 +152,16 @@ const SAFE_ARG_PATTERNS: readonly RegExp[] = [
  */
 export function validateRuntimeArgs(args: string[]): void {
   for (const arg of args) {
+    // Layer 0 (M4b): reject a ".." path-traversal segment anywhere in the argument
+    // — "../x", "a/../../etc/passwd", "--config=../secret". A ".." segment is one
+    // bounded by start-of-arg, "=" (flag value), or a path separator on the left,
+    // and a separator or end-of-arg on the right. The Layer-2 allowlist permits "."
+    // and "/" inside values, so without this a traversal would slip through; a
+    // non-traversal double dot like "--range=1..10" is left untouched.
+    if (/(?:^|[=\\/])\.\.(?:[\\/]|$)/.test(arg)) {
+      throw new Error(`Rejected path traversal in runtime argument: "${arg}"`);
+    }
+
     // Layer 1: reject dangerous Node.js flags
     const isDangerous = DANGEROUS_FLAG_PREFIXES.some(
       (prefix) => arg === prefix || arg.startsWith(`${prefix}=`)
@@ -512,8 +548,11 @@ export async function handleInstall(
   if (!options.json) {
     if (secretsMode === "keychain" && storedSecretCount > 0) {
       output(
-        `\x1b[32mStored ${storedSecretCount} secret(s) encrypted at rest in ~/.mcpm ` +
-        "(protects against other-user/offline access, not same-user processes). " +
+        `\x1b[32mStored ${storedSecretCount} secret(s) encrypted at rest in ~/.mcpm. ` +
+        "With an OS keychain this protects against other-user/offline access (not " +
+        "same-user processes); without one a machine-derived key is used that guards " +
+        "casual local inspection only, NOT file exfiltration — run `mcpm secrets migrate` " +
+        "once a keychain is available. " +
         "Run `mcpm guard enable` (then restart your IDE) so they resolve at launch — " +
         "until guard wraps this server it receives the literal placeholder.\x1b[0m"
       );
