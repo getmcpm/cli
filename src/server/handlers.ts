@@ -490,6 +490,10 @@ export async function handleMcpUp(
         allowProcessEnv: false,
         allowUrlServers: false,
         allowEnvFile: false,
+        // M2: the batch `up` path must honor the same non-overridable trust floor
+        // the single-install MCP tool enforces (issue #24), so a low-trust server
+        // an agent could not install via mcpm_install can't slip in via mcpm_up.
+        minTrustFloor: HARD_TRUST_FLOOR,
       },
       {
         detectClients: deps.detectClients,

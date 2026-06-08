@@ -75,6 +75,15 @@ export interface UpOptions {
    * into an installed server config.
    */
   allowEnvFile?: boolean;
+  /**
+   * Hard, non-overridable trust-score floor (absolute, 0–100). When set, any
+   * server scoring below it is blocked regardless of the stack file's `policy`
+   * (which the caller controls). DEFAULT (undefined) = no floor = CLI behavior.
+   * The MCP surface passes the same hard floor the single-install tool enforces
+   * (issue #24), so a prompt-injected agent can't use the batch `up` path to
+   * install a low-trust server that `mcpm_install` would reject.
+   */
+  minTrustFloor?: number;
 }
 
 export interface UpDeps {
@@ -354,6 +363,21 @@ async function processServer(input: ProcessInput): Promise<ServerResult> {
     registryMeta: extractRegistryMeta(serverEntry),
   };
   const trustScore = deps.computeTrustScore(trustInput);
+
+  // M2: enforce the hard trust floor BEFORE the (caller-controlled) stack policy.
+  // The MCP surface sets this so the batch `up` path honors the same floor the
+  // single-install MCP tool enforces (issue #24) — a stack file with no policy (or
+  // `minTrustScore: 0`) can't lower it. The CLI leaves it undefined (no floor).
+  if (
+    options.minTrustFloor !== undefined &&
+    trustScore.score < options.minTrustFloor
+  ) {
+    return {
+      name,
+      status: "blocked",
+      message: `trust score ${trustScore.score}/${trustScore.maxPossible} is below the required floor of ${options.minTrustFloor}`,
+    };
+  }
 
   // Policy check
   const policyResult = checkTrustPolicy({
