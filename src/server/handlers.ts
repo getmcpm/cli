@@ -455,7 +455,13 @@ export async function handleMcpUp(
         throw new Error("stackFile must be within the working directory");
       }
     } catch (err) {
-      if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
+      // ENOENT (no such file), ELOOP (circular symlink), and ENOTDIR (a path
+      // component is a file) all mean "no real path to contain" — fall through and
+      // let handleUp report the missing/invalid file. Re-throwing them would leak a
+      // raw internal ErrnoException (with stack) to the untrusted caller. The
+      // containment Error thrown just above has no `.code`, so it still propagates.
+      const code = (err as NodeJS.ErrnoException).code ?? "";
+      if (!["ENOENT", "ELOOP", "ENOTDIR"].includes(code)) throw err;
     }
   }
 

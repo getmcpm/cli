@@ -170,13 +170,13 @@ servers:
     expect(result.error).toBeUndefined();
   });
 
-  // Fix F.3, corrected per review finding H2: handleMcpUp builds its OWN
-  // computeTrustScore (handlers.ts imports it directly from trust-score.js), so
-  // the previous `deps.computeTrustScore` override tested a DEAD copy that the
-  // handler never calls. This now exercises the REAL trust pipeline: the clean
-  // mock registry server's genuine score (no external scanner -> maxPossible 80,
-  // health check unrun, so it tops out near 50/80 = 62%) sits well below the 90%
-  // floor, so the real checkTrustPolicy blocks it. That proves the gate end-to-end.
+  // Fix F.3, corrected per review finding H2: handleMcpUp constructs its own
+  // handleUp deps with the REAL computeTrustScore (cts), so overriding
+  // deps.computeTrustScore (as the original test did) has no effect on this path.
+  // We instead drive the genuine pipeline: the clean mock server scores 55/80 = 69%
+  // (health-null 15 + static 40 + externalScan 0 + registryMeta 0; no scanner ->
+  // maxPossible 80), which is below the 90% policy floor (and the 94% lock snapshot
+  // also blocks it via score-drop), so the real checkTrustPolicy blocks it.
   it("blocked-by-policy: a server below the trust floor is blocked via the real pipeline", async () => {
     const stackWithPolicy = `
 version: "1"
@@ -220,8 +220,9 @@ servers:
       const result = await handleMcpUp({}, deps);
 
       // Fix A: a thrown failure is surfaced, not swallowed into a clean result.
+      // M1: the failed server lands in `failed` by NAME (not the error message).
       expect(result.error).toBeDefined();
-      expect(result.failed.length).toBeGreaterThan(0);
+      expect(result.failed).toContain("io.github.test/server-a");
       expect(result.installed).toEqual([]);
       // Fix C: the ambient secret was never written into a client config.
       expect(adapter.addServer).not.toHaveBeenCalled();

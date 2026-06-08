@@ -368,6 +368,9 @@ async function processServer(input: ProcessInput): Promise<ServerResult> {
   // The MCP surface sets this so the batch `up` path honors the same floor the
   // single-install MCP tool enforces (issue #24) — a stack file with no policy (or
   // `minTrustScore: 0`) can't lower it. The CLI leaves it undefined (no floor).
+  // Note: this is an ABSOLUTE score floor (matching the sibling handleInstall #24),
+  // whereas checkTrustPolicy below compares normalized percentages — intentional
+  // and consistent; revisit only if the hard floor is ever made percentage-based.
   if (
     options.minTrustFloor !== undefined &&
     trustScore.score < options.minTrustFloor
