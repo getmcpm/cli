@@ -67,6 +67,14 @@ export interface UpOptions {
    * `false` so URL servers are recorded as blocked instead of installed.
    */
   allowUrlServers?: boolean;
+  /**
+   * Whether declared env vars may be auto-read from the working-directory `.env`
+   * file. The `.env` is an ambient secret source just like `process.env`.
+   * DEFAULT (undefined/true) preserves CLI behavior. The MCP surface passes
+   * `false` so an attacker-controlled stack file can't siphon the host's `.env`
+   * into an installed server config.
+   */
+  allowEnvFile?: boolean;
 }
 
 export interface UpDeps {
@@ -168,8 +176,16 @@ export async function handleUp(
     return;
   }
 
-  // Step 5: Load .env file for env var resolution
-  const envFileVars = await parseEnvFile(".env");
+  // Step 5: Load .env file for env var resolution.
+  // MCP surface lockdown (fix H1): the working-directory `.env` is an ambient
+  // secret source just like process.env. When allowEnvFile === false (set by the
+  // MCP surface) we skip reading it entirely, so an attacker-controlled stack
+  // file can't harvest the host's `.env` into an installed server config. The CLI
+  // default (undefined/true) reads `.env` as before.
+  const envFileVars =
+    options.allowEnvFile === false
+      ? ({ vars: {}, warnings: [] } as Awaited<ReturnType<typeof parseEnvFile>>)
+      : await parseEnvFile(".env");
 
   // Step 6: Re-assess trust in parallel
   const scannerAvailable = await deps.checkScannerAvailable();
@@ -476,12 +492,15 @@ async function resolveEnvVars(
     const fromFile = envFileVars[key];
     const fromDefault = decl.default;
 
+    // L1: compare against undefined, not truthiness — an explicitly-set empty
+    // string ("") is a legitimate value and must not silently fall through to
+    // the next source (or to the required-var prompt/throw).
     let value: string | undefined;
-    if (fromEnv) {
+    if (fromEnv !== undefined) {
       value = fromEnv;
-    } else if (fromFile) {
+    } else if (fromFile !== undefined) {
       value = fromFile;
-    } else if (fromDefault) {
+    } else if (fromDefault !== undefined) {
       value = fromDefault;
     } else if (decl.required) {
       if (options.ci) {

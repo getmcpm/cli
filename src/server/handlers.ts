@@ -438,6 +438,26 @@ export async function handleMcpUp(
   ) {
     throw new Error("stackFile must be within the working directory");
   }
+  // M3: the lexical check above catches "../" and absolute escapes, but NOT a
+  // symlink that lives inside cwd yet points outside it — the file reader would
+  // follow it (arbitrary out-of-tree read). Resolve the REAL path and re-check.
+  // realpath throws ENOENT when the file does not exist yet; that's fine — handleUp
+  // reports the missing file. A containment failure thrown inside the try is not
+  // an ErrnoException, so the catch re-throws it.
+  {
+    const { realpath } = await import("node:fs/promises");
+    try {
+      const [realStack, realCwd] = await Promise.all([
+        realpath(resolved),
+        realpath(process.cwd()),
+      ]);
+      if (realStack !== realCwd && !realStack.startsWith(realCwd + path.sep)) {
+        throw new Error("stackFile must be within the working directory");
+      }
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
+    }
+  }
 
   const { handleUp } = await import("../commands/up.js");
   const { writeFile } = await import("fs/promises");
@@ -462,11 +482,14 @@ export async function handleMcpUp(
         dryRun: args.dryRun,
         ci: true,
         yes: false,
-        // MCP surface lockdown (fixes C & D): never auto-read ambient secrets
-        // from process.env, and never install URL servers (they bypass the
-        // registry trust gate). Both default to true on the CLI.
+        // MCP surface lockdown (fixes C, D & H1): never auto-read ambient
+        // secrets from process.env OR the working-directory .env file, and never
+        // install URL servers (they bypass the registry trust gate). All three
+        // default to true on the CLI; the MCP (untrusted-caller) surface opts in
+        // to the locked-down behavior.
         allowProcessEnv: false,
         allowUrlServers: false,
+        allowEnvFile: false,
       },
       {
         detectClients: deps.detectClients,
@@ -543,12 +566,12 @@ export async function handleMcpUp(
     }
   }
 
-  // Fix A: if handleUp threw, the failure MUST be signaled in the result \u2014 never
-  // an empty success. Surface the message via `error`, and ensure `failed` is
-  // non-empty (so a throw that produced no per-server failure can't read as clean).
-  if (thrownError !== undefined && failed.length === 0) {
-    failed.push(thrownError);
-  }
+  // Fix A, refined for M1: a thrown handleUp failure MUST be signaled \u2014 but only
+  // via the top-level `error` field (set in the return below). The previous
+  // version pushed the error *message* into `failed`, which is contracted to hold
+  // server NAMES; a consumer iterating it as names got a stray sentence. `error`
+  // is the authoritative batch-failure signal; `failed` stays names-only (genuine
+  // per-server failures are already recorded into it above via `records`).
 
   return {
     installed,
