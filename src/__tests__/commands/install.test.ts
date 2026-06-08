@@ -1215,6 +1215,8 @@ describe("validateRemoteUrl", () => {
     expect(() => validateRemoteUrl("http://localhost:3000/mcp")).not.toThrow();
     expect(() => validateRemoteUrl("http://127.0.0.1:8080/mcp")).not.toThrow();
     expect(() => validateRemoteUrl("http://app.localhost/mcp")).not.toThrow();
+    // IPv6 loopback — the bracket-strip in isLoopbackHost is load-bearing.
+    expect(() => validateRemoteUrl("http://[::1]:8080/mcp")).not.toThrow();
   });
 
   it("rejects plaintext http to non-loopback hosts (M4a)", () => {

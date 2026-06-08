@@ -429,7 +429,15 @@ async function processUrlServer(
   // M4a: validate the URL before it is written to any client config. The up path
   // previously wrote stack-file `url:` servers unvalidated; this rejects non-http(s)
   // schemes and non-loopback plaintext http (interceptable once in an IDE config).
-  validateRemoteUrl(url);
+  // Capture (don't throw): `--dry-run` must stay a read-only, exit-zero preview, and
+  // an invalid URL is categorized as `blocked` (mirroring trust-policy blocks) rather
+  // than crashing the per-server loop into a generic `failed`.
+  let urlError: string | undefined;
+  try {
+    validateRemoteUrl(url);
+  } catch (err) {
+    urlError = err instanceof Error ? err.message : String(err);
+  }
 
   const cursorClients = clients.filter((c) => c === "cursor");
 
@@ -442,7 +450,13 @@ async function processUrlServer(
   }
 
   if (options.dryRun) {
-    return { name, status: "skipped", message: `would install URL ${url} to Cursor` };
+    return urlError
+      ? { name, status: "skipped", message: `would reject URL ${url}: ${urlError}` }
+      : { name, status: "skipped", message: `would install URL ${url} to Cursor` };
+  }
+
+  if (urlError) {
+    return { name, status: "blocked", message: urlError };
   }
 
   for (const clientId of cursorClients) {

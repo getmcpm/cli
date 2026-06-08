@@ -54,7 +54,13 @@ export function validateRemoteUrl(url: string): void {
   }
 }
 
-/** True for localhost / loopback literals, where plaintext http is acceptable. */
+/**
+ * True for localhost / loopback literals, where plaintext http is acceptable.
+ * Recognizes localhost / *.localhost / 127.0.0.1 / ::1. Exotic loopback spellings
+ * (IPv4-mapped `::ffff:127.0.0.1`, `127.x.x.x`, decimal/octal/hex IPs) are NOT
+ * recognized and fall through to the https requirement — over-rejection only, never
+ * a bypass (a non-loopback host can never be mistaken for loopback).
+ */
 function isLoopbackHost(hostname: string): boolean {
   const h = hostname.toLowerCase().replace(/^\[|\]$/g, ""); // strip IPv6 brackets
   return (
