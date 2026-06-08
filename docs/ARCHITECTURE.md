@@ -104,7 +104,7 @@ mcpm/
 
 | Module | Purpose |
 |---|---|
-| `commands/` | 20 CLI commands (incl. `guard` subcommand group with 11 subcommands), each a self-contained Commander action |
+| `commands/` | 24 CLI commands (incl. `guard` subcommand group with 12 subcommands and `publish` with 3 subcommands), each a self-contained Commander action |
 | `server/` | MCP server (stdio): 9 tools wrapping CLI logic via injectable handlers |
 | `stack/` | Stack file schemas (mcpm.yaml/mcpm-lock.yaml), semver resolution, trust policy, .env parsing |
 | `guard/` | **v0.5.0 runtime defense.** Stdio MITM relay, OWASP MCP Top 10 pattern engine, schema pinning + drift detection, policy file editor, integrity sidecars, event log. See `docs/GUARD.md`. |
@@ -125,6 +125,7 @@ mcpm/
 | `mcpm remove <name>` | Remove a server from client config(s) |
 | `mcpm audit` | Scan all installed servers and produce a trust report |
 | `mcpm update` | Check for newer versions and update installed servers |
+| `mcpm outdated` | Show version drift and trust regression for installed servers |
 | `mcpm doctor` | Check MCP setup health (runtimes, configs, servers) |
 | `mcpm init <pack>` | Install a curated starter pack of MCP servers |
 | `mcpm disable <name>` | Disable a server without removing it from config |
@@ -137,6 +138,9 @@ mcpm/
 | `mcpm diff` | Compare installed servers against mcpm.yaml and lock file |
 | `mcpm completions <shell>` | Generate shell completion scripts (bash, zsh, fish) |
 | `mcpm serve` | Start mcpm as an MCP server (stdio transport) |
+| `mcpm why <name>` | Explain a server's trust score (breakdown of all scoring components) |
+| `mcpm secrets` | Manage encrypted credentials for MCP servers |
+| `mcpm publish` | Publish an MCP server to the official registry |
 | `mcpm guard enable / disable / status` | Wrap detected client configs with the inspection relay; restore; report state |
 | `mcpm guard demo` | Synthetic prompt-injection scenario (visible block in terminal) |
 | `mcpm guard accept-drift / mute / unmute / pause / cleanup` | Runtime tuning + escape hatches |
@@ -145,53 +149,135 @@ mcpm/
 
 ## Data Flow
 
+```mermaid
+flowchart TD
+Start["user: mcpm install &lt;name&gt;"]
+Start --> GetServer["Fetch from Registry<br/>(registry/client.ts)"]
+GetServer --> Tier1["Tier-1 Scanner<br/>(scanner/tier1.ts)<br/>Pattern detection:<br/>secrets, injection,<br/>typosquatting,<br/>exfil-args"]
+Tier1 --> CheckExt{"External scanner<br/>available?"}
+CheckExt -->|No| Trust["Compute Trust Score<br/>(scanner/trust-score.ts)<br/>health + static +<br/>registry meta"]
+CheckExt -->|Yes| Tier2["Tier-2 Scanner<br/>(scanner/tier2.ts)<br/>Run mcp-scan<br/>if available"]
+Tier2 --> Trust
+Trust --> CheckMinTrust{"Score ≥<br/>minTrust?"}
+CheckMinTrust -->|No| Fail["Throw Error<br/>min_trust gate"]
+Fail --> End1["Exit 1"]
+CheckMinTrust -->|Yes| Prompt["Display Trust<br/>Breakdown + Prompt<br/>User Confirm"]
+Prompt --> UserReject{"User<br/>accepts?"}
+UserReject -->|No| End2["Return<br/>(cancelled)"]
+UserReject -->|Yes| Detect["Detect Clients<br/>Claude Desktop,<br/>Cursor, VS Code,<br/>Windsurf"]
+Detect --> CheckExisting{"Server already<br/>installed<br/>(unless --force)?"}
+CheckExisting -->|Yes| FailExisting["Throw Error<br/>already installed"]
+FailExisting --> End3["Exit 1"]
+CheckExisting -->|No| PromptEnv["Prompt Env Vars<br/>(required/secret)"]
+PromptEnv --> ApplyKeychain["Apply Keychain<br/>Mode"]
+ApplyKeychain --> ResolveEntries["Resolve Entries<br/>npm/pypi/oci<br/>or HTTP remote"]
+ResolveEntries --> WriteConfig["Write Config<br/>(config/adapters/base.ts)<br/>atomic: O_EXCL,<br/>mode 0o600"]
+WriteConfig --> Store["Record in Store<br/>(~/.mcpm/servers.json<br/>with trust score)"]
+Store --> Output["Output Result<br/>JSON or human"]
+Output --> End4["Success"]
+
+style Fail fill:#ffcccc
+style End1 fill:#ffcccc
+style FailExisting fill:#ffcccc
+style End3 fill:#ffcccc
+style Trust fill:#ccffcc
+style WriteConfig fill:#ccffee
+style Store fill:#ccffee
 ```
-mcpm install io.github.domdomegg/filesystem-mcp
-  │
-  ▼
-RegistryClient.getServer(name)
-  │  GET https://registry.modelcontextprotocol.io/v0.1/servers/{name}
-  │  Response → Zod parse → typed Server object
-  ▼
-detectInstalledClients()
-  │  Check config file existence for each client on current OS
-  ▼
-resolveInstallEntry(server, client)
-  │  Pick transport: HTTP remote (if client supports) or stdio
-  │  stdio: npm → npx, pypi → uvx, oci → docker run
-  ▼
-scanner.computeTrustScore(server)
-  │  Tier 1: registry metadata (verified publisher, age, downloads)
-  │  Tier 2: static patterns (secrets, injection, typosquatting)
-  │  Optional: MCP-Scan external scanner
-  ▼
-Prompt for env vars + confirmation
-  ▼
-adapter.addServer(configPath, name, entry)
-  │  Read config → merge → write to .tmp → atomic rename
-  ▼
-store.recordInstall(name, clients, version)
-  │  Write to ~/.mcpm/servers.json
+
+### Secrets resolution data flow (`--secrets keychain`)
+
+Plaintext secrets exist only in the guarded child's in-memory env — never on disk. Resolution is a property of **guarded** servers only.
+
+```mermaid
+flowchart TD
+    A["User runs<br/>mcpm install<br/>with --secrets keychain"] -->|prompts for API key| B["Secret value entered"]
+    B -->|applyKeychainSecrets| C["Encrypt via AES-GCM<br/>HKDF-derived key from<br/>OS keychain master key<br/>or PBKDF2-derived<br/>machine key fallback"]
+    C -->|deriveKeychainId<br/>sanitizes + SHA256| D["Store in ~/.mcpm/secrets.enc.json<br/>Key: derived-id/KEY<br/>Value: k1:salt:iv:ct"]
+    C -->|create placeholder| E["Client config file<br/>env: API_KEY =<br/>mcpm:keychain:derived-id/KEY"]
+    E -->|plaintext not on disk| F["Plaintext secret<br/>never persists"]
+
+    G["User runs<br/>mcpm guard run --inner<br/>wraps server"] -->|at startup| H["resolveEnvPlaceholders<br/>reads declaredEnvKeys"]
+    H -->|parse &amp; match| I["Find mcpm:keychain:derived-id/KEY<br/>in child env"]
+    I -->|lookup in store| J["Read + decrypt<br/>from secrets.enc.json<br/>Route on k1: prefix<br/>keychain or machine scheme"]
+    J -->|inject into memory| K["Child process env<br/>API_KEY = decrypted_value<br/>in-memory only"]
+    K -->|pass to child| L["startRelay<br/>spawns guarded server<br/>with plaintext in memory"]
+    L -->|process exits| M["Plaintext discarded<br/>never written to disk"]
+
+    O["Without guard<br/>placeholder remains<br/>literal string"]
+    E -.->|if guard disabled| O
+
+    style D fill:#e1f5ff
+    style K fill:#c8e6c9
+    style F fill:#fff9c4
+    style M fill:#fff9c4
+    style O fill:#ffccbc
 ```
 
 ### Guard data flow (v0.5.0 — when `mcpm guard enable` is active)
 
-```
-IDE (Claude Desktop / Cursor / VS Code / Windsurf)
-  │  JSON-RPC over stdio
-  ▼
-mcpm guard run --inner --server-name <name> -- <orig> [args]
-  │  (spawned by the wrapped client config)
-  │
-  ├── ReadBuffer + serializeMessage (SDK framing helpers)
-  ├── per-message inspect:
-  │     • pattern engine (NFKC + signatures)
-  │     • schema-drift check vs ~/.mcpm/pins.json
-  │     • policy filter (signature_overrides, paused_until)
-  ├── on block: synthesize JSON-RPC error -32099, drop original
-  ├── on pass/warn: forward + append to ~/.mcpm/guard-events.jsonl
-  ▼
-child process: the real MCP server (e.g. servers-filesystem)
+```mermaid
+sequenceDiagram
+participant IDE as IDE<br/>(Claude Desktop)
+participant Relay as mcpm guard<br/>run --inner
+participant Child as Real MCP<br/>Server
+participant PinStore as ~/.mcpm/pins.json
+participant PolicyFile as ~/.mcpm/<br/>guard-policy.yaml
+participant EventLog as ~/.mcpm/<br/>guard-events.jsonl
+
+Note over IDE,EventLog: ENABLE PHASE (mcpm guard enable)<br/>Rewrites IDE config: real-server-cmd → mcpm guard run --inner -- real-server-cmd
+
+Note over IDE,EventLog: RUNTIME PHASE - JSON-RPC Inspection<br/>Load policy (muted signatures, paused_until)
+
+IDE->>Relay: JSON-RPC request<br/>(method: tool call)
+
+rect rgb(200, 150, 150)
+Note over Relay: PARENT→CHILD INSPECT
+Relay->>Relay: inspectMessage()<br/>Pattern engine<br/>(OWASP-MCP Top 10)
+Relay->>Relay: Check signatures vs<br/>tool_call_args<br/>(e.g., owasp-mcp-7-path-exfil)
+Relay->>Relay: applyPolicy()<br/>signature_overrides
+end
+
+alt BLOCK or WARN
+Relay->>EventLog: append event
+Relay->>IDE: JSON-RPC error<br/>(code: -32099)
+else PASS
+Relay->>Child: forward request
+end
+
+Child->>Relay: JSON-RPC response<br/>(e.g., tools/list)
+
+rect rgb(150, 200, 150)
+Note over Relay: CHILD→PARENT INSPECT
+Relay->>Relay: inspectMessage()<br/>Pattern engine<br/>(OWASP-MCP Top 10)
+
+alt hasToolsList()?
+Relay->>PinStore: Load pins
+Relay->>Relay: inspectForDriftSync():<br/>Hash live schema<br/>vs pinned hash
+Relay->>Relay: SECURITY F3:<br/>Check sessionFirstHashes<br/>for same-session drift
+alt Schema mismatch or in-session drift
+Relay->>EventLog: append finding<br/>(signature: schema-drift)
+Relay->>IDE: JSON-RPC error<br/>(block)
+else Schema matches
+Relay->>Relay: Off-thread:<br/>Async pin write +<br/>snapshot refresh
+end
+end
+end
+
+Relay->>Relay: applyPolicy()<br/>on pattern + drift findings
+Relay->>Relay: mergeInspect()<br/>Highest severity wins
+
+alt BLOCK
+Relay->>EventLog: append event
+Relay->>IDE: JSON-RPC error<br/>(code: -32099,<br/>remediation)
+else WARN (policy: log_only)
+Relay->>EventLog: append event
+Relay->>IDE: forward response<br/>(event logged)
+else PASS
+Relay->>IDE: forward response
+end
+
+Note over IDE,EventLog: Event log entry (if findings):<br/>{ts, server_name, direction,<br/>action, findings:[{signature_id,<br/>category, severity, target,<br/>matched_text_excerpt, remediation}]}
 ```
 
 ## Configuration
@@ -247,7 +333,7 @@ pnpm test:watch        # watch mode
 
 ### CI (`ci.yml`)
 
-Runs on push to `main` and pull requests. Matrix: Node 20, 22, 24. All GitHub Actions are SHA-pinned.
+Runs on push to `main` and pull requests. Matrix: Node 22, 24, 26. All GitHub Actions are SHA-pinned.
 
 Steps: `pnpm install --frozen-lockfile` → `typecheck` → `build` → `test:coverage`
 

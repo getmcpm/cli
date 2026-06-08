@@ -1,7 +1,7 @@
 # MCP Registry — Project Context
 
 > This file is automatically read by Claude Code on every session.
-> Keep it updated as decisions are made. Last updated: 2026-03-28.
+> Keep it updated as decisions are made. Last updated: 2026-06-03.
 
 ---
 
@@ -12,7 +12,7 @@ An open-source, CLI-first MCP package manager — **"npm for MCP servers"**.
 A registry where developers can search, install, audit, publish, and update MCP servers
 across all major clients (Claude Desktop, Cursor, VS Code, Windsurf) from a single tool.
 
-**npm package**: `@getmcpm/cli` (v0.2.0) | **bin command**: `mcpm` | **repo**: github.com/getmcpm/cli | **web UI**: deferred to V1+
+**npm package**: `@getmcpm/cli` (v0.8.0) | **bin command**: `mcpm` | **repo**: github.com/getmcpm/cli | **web UI**: deferred to V1+
 
 ---
 
@@ -120,20 +120,21 @@ Build the **open-source, community-owned npm+npm_audit** for MCP:
 
 ### CLI (`mcpm`) — V1 / MVP
 
-- **Runtime**: Node.js (>=20.0.0), TypeScript, ESM
+- **Runtime**: Node.js (>=22.0.0), TypeScript, ESM
 - **npm package**: `@getmcpm/cli` (bin command: `mcpm`)
 - **CLI framework**: Commander.js
 - **Schema validation**: Zod (single source of truth for all types)
 - **Prompts**: @inquirer/prompts (trust score UX, multi-select, confirmations)
 - **Output**: chalk + cli-table3
-- **Local storage**: JSON files in `~/.mcpm/` (servers.json, scans.json, cache/)
+- **Local storage**: JSON files in `~/.mcpm/` (servers.json, aliases.json, cache/)
 - **Testing**: Vitest + @vitest/coverage-v8 (80% line, 75% branch thresholds)
 - **Build**: tsup (TypeScript → JS)
 - **MCP server**: `mcpm serve` exposes 9 tools via `@modelcontextprotocol/sdk` (stdio transport)
 - **Commands**: `mcpm search`, `mcpm install`, `mcpm list`, `mcpm remove`, `mcpm info`,
-  `mcpm audit`, `mcpm update`, `mcpm doctor`, `mcpm init`, `mcpm import`, `mcpm serve`,
+  `mcpm audit`, `mcpm update`, `mcpm outdated`, `mcpm doctor`, `mcpm init`, `mcpm import`, `mcpm serve`,
   `mcpm disable`, `mcpm enable`, `mcpm alias`, `mcpm completions`,
-  `mcpm export`, `mcpm lock`, `mcpm up`, `mcpm diff`
+  `mcpm export`, `mcpm lock`, `mcpm up`, `mcpm diff`, `mcpm publish`, `mcpm guard`,
+  `mcpm secrets`, `mcpm why`
 
 ### Registry API (upstream, not ours)
 

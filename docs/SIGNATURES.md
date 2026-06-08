@@ -25,9 +25,9 @@ Policy overrides in `~/.mcpm/guard-policy.yaml` can promote, demote, or mute any
 For every JSON-RPC message:
 
 1. Extract the subtree matching each signature's `target`:
-   - `tool_response` → `result.content[*]` (only when present)
+   - `tool_response` → `result.content`, `result.structuredContent`, and JSON-RPC error objects (only when present) — errors are scanned to prevent injection evasion via error messages
    - `tool_call_args` → `params.arguments` of `tools/call`
-   - `tool_description` → `result.tools[*].description` (only when present)
+   - `tool_description` → `result.tools[*].description`, `result.tools[*].title`, and full `result.tools[*].inputSchema` including nested property descriptions/enums (only when present) — inputSchema is scanned because poison can hide in parameter descriptions
    - `tool_annotations` → `result.tools[*].annotations`
 2. Walk every string leaf in the subtree (depth-bounded at 32).
 3. NFKC-normalize the leaf + strip zero-width / bidi / Unicode-tag control chars (anti-evasion).

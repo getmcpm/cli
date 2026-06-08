@@ -177,7 +177,9 @@ Without an external scanner installed, the maximum possible score is 80/100. The
 | `mcpm update` | Check for newer versions and update installed servers |
 | `mcpm outdated` | Show version drift and trust regression for installed servers |
 | `mcpm secrets` | Manage MCP server credentials (AES-GCM encrypted at rest; key held in the OS keychain — macOS Keychain / libsecret / Windows DPAPI — so a copied store can't be decrypted off-machine, with a machine-derived-key fallback where no keychain is available). `mcpm secrets migrate` upgrades older entries |
-| `mcpm publish` | Publish an MCP server to the registry |
+| `mcpm publish scaffold` | Create a .mcpm-publish.yaml manifest interactively |
+| `mcpm publish check` | Dry-run: show trust score and what would be submitted |
+| `mcpm publish` | Submit to the official MCP registry (requires GITHUB_TOKEN) |
 | `mcpm doctor` | Check MCP setup health and report issues |
 | `mcpm init <pack>` | Install a curated starter pack of MCP servers |
 | `mcpm disable <name>` | Disable an MCP server without removing it from config |
@@ -189,6 +191,7 @@ Without an external scanner installed, the maximum possible score is 80/100. The
 | `mcpm up` | Install all servers from mcpm.yaml with trust verification |
 | `mcpm diff` | Compare installed servers against mcpm.yaml and lock file |
 | `mcpm completions <shell>` | Generate shell completion scripts (bash, zsh, fish) |
+| `mcpm why <name>` | Explain a server's trust score (breakdown of all components) |
 | `mcpm serve` | Start mcpm as an MCP server (stdio transport) |
 | `mcpm guard enable` | Wrap detected client configs with the inspection relay (v0.5.0) |
 | `mcpm guard disable` | Restore original client configs |
@@ -323,6 +326,86 @@ Linux and Windows paths are also supported. See `mcpm doctor` to verify which cl
 ## How it works
 
 mcpm is a local-first CLI. There is no mcpm backend or account system.
+
+```mermaid
+flowchart TD
+subgraph user["User / Terminal"]
+    CLI["mcpm CLI<br/>Commander entry point"]
+end
+
+subgraph commands["Commands (src/commands/)"]
+    SEARCH["search"]
+    INSTALL["install"]
+    AUDIT["audit"]
+    GUARD["guard<br/>enable/disable/status"]
+end
+
+subgraph registry["Registry API<br/>(Only Remote)"]
+    REGAPI["https://registry.<br/>modelcontextprotocol.io<br/>v0.1"]
+end
+
+subgraph scanning["Local Scanning & Trust<br/>(src/scanner/)"]
+    HEALTH["Health Check<br/>(0-30): spawn +<br/>verify response"]
+    TIER1["Tier 1: Static Patterns<br/>(0-40): secrets, injection,<br/>typosquatting, exfil"]
+    TIER2["Tier 2: External Scan<br/>(0-20): optional<br/>MCP-Scan"]
+    META["Registry Metadata<br/>(0-10): publisher,<br/>age, downloads"]
+    SCORE["Trust Score<br/>(max 80; 100 with<br/>external scan)"]
+end
+
+subgraph config["Config Management<br/>(src/config/adapters/)"]
+    DETECT["Detect AI clients<br/>Claude Desktop / Cursor<br/>VS Code / Windsurf"]
+    ATOMIC["Atomic writes<br/>0o600 + symlink-safe<br/>.tmp/.bak"]
+end
+
+subgraph guard_runtime["Guard Runtime v0.5.0<br/>(src/guard/)"]
+    WRAP["Config entry wrap<br/>via run --inner"]
+    RELAY["Stdio MITM Relay<br/>per-server"]
+    PATTERNS["Pattern Engine<br/>OWASP MCP Top 10"]
+    PINS["Schema Pins<br/>+ Drift Detection"]
+    FAILCLOSED["Fail-closed on<br/>pins.json error"]
+    EVENTS["Event Log<br/>guard-events.jsonl"]
+end
+
+subgraph local_state["Local State<br/>(~/.mcpm/)"]
+    SERVERS["servers.json"]
+    CACHE["cache/"]
+    PINS_STORE["pins.json"]
+    POLICY["guard-policy.yaml"]
+end
+
+subgraph clients["Native AI Clients"]
+    CD["Claude Desktop"]
+    CURSOR["Cursor"]
+    VSCODE["VS Code"]
+    WINDSURF["Windsurf"]
+end
+
+CLI --> commands
+commands -->|searchServers| REGAPI
+commands -->|scan| HEALTH
+commands -->|scan| TIER1
+commands -->|if available| TIER2
+commands -->|registry meta| META
+HEALTH --> SCORE
+TIER1 --> SCORE
+TIER2 --> SCORE
+META --> SCORE
+commands -->|detect| DETECT
+commands -->|merge & write| ATOMIC
+DETECT -->|config paths| clients
+ATOMIC -->|config| clients
+GUARD -->|wrap| WRAP
+WRAP -->|modifies config<br/>to invoke| clients
+WRAP -->|setup| RELAY
+RELAY -->|parse frames<br/>inspect msg| PATTERNS
+PATTERNS -->|check pins| PINS
+PINS -->|read| PINS_STORE
+PATTERNS -->|read policy| POLICY
+PINS -->|fail-closed| FAILCLOSED
+RELAY -->|record| EVENTS
+commands -->|store| SERVERS
+commands -->|cache| CACHE
+```
 
 1. **Search and install** query the [official MCP Registry API](https://registry.modelcontextprotocol.io) (v0.1) maintained by the Model Context Protocol project.
 2. **Trust assessment** runs locally using built-in scanners (regex-based pattern detection) and optionally wraps [MCP-Scan](https://github.com/invariantlabs-ai/mcp-scan) for deeper analysis.

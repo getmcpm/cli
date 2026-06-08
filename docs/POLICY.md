@@ -20,7 +20,7 @@ These commands edit `guard-policy.yaml` for you AND keep the integrity sidecar i
 If you edit the file directly:
 
 ```yaml
-signature_overrides:
+signature_overrides: # optional
   - id: owasp-mcp-2-instruction-injection-in-response
     action: ignore                   # one of: ignore | warn | block | log_only
     expires_at: 2026-06-01T00:00:00Z # optional ISO 8601 — auto-removed on next session
