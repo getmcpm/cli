@@ -389,18 +389,22 @@ describe("handleSetup", () => {
 // ---------------------------------------------------------------------------
 
 describe("handleMcpUp", () => {
+  // Fix B: the dead `if (args.stackFile !== undefined)` string-check guard was
+  // replaced with unconditional resolved-path containment. The traversal/absolute
+  // rejections still hold; only the error message changed (now references real
+  // working-directory containment), so these assertions are updated to match.
   it("validates stack file path: rejects traversal", async () => {
     const deps = makeDeps();
     await expect(
       handleMcpUp({ stackFile: "../evil.yaml" }, deps)
-    ).rejects.toThrow(/Invalid stack file path/i);
+    ).rejects.toThrow(/within the working directory/i);
   });
 
   it("validates stack file path: rejects absolute paths", async () => {
     const deps = makeDeps();
     await expect(
       handleMcpUp({ stackFile: "/etc/mcpm.yaml" }, deps)
-    ).rejects.toThrow(/Invalid stack file path/i);
+    ).rejects.toThrow(/within the working directory/i);
   });
 
   it("does not auto-confirm or mutate configs when no stack file exists", async () => {

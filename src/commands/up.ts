@@ -55,6 +55,18 @@ export interface UpOptions {
   strict?: boolean;
   yes?: boolean;
   secrets?: SecretsMode;
+  /**
+   * Whether declared env vars may be auto-read from `process.env`.
+   * DEFAULT (undefined/true) preserves CLI behavior. The MCP surface passes
+   * `false` so an attacker-controlled stack file can't harvest ambient secrets.
+   */
+  allowProcessEnv?: boolean;
+  /**
+   * Whether URL servers may be installed.
+   * DEFAULT (undefined/true) preserves CLI behavior. The MCP surface passes
+   * `false` so URL servers are recorded as blocked instead of installed.
+   */
+  allowUrlServers?: boolean;
 }
 
 export interface UpDeps {
@@ -72,7 +84,24 @@ export interface UpDeps {
   output: (text: string) => void;
   /** Optional; required only when options.secrets === "keychain". */
   setSecrets?: (server: string, values: Record<string, string>) => Promise<void>;
+  /**
+   * Optional structured per-server result sink. When provided, handleUp invokes
+   * it once per processed server (and per strict-mode removal) with the typed
+   * status — so callers like the MCP surface can categorize results
+   * deterministically instead of scraping emoji from `output` lines (which
+   * cannot distinguish "blocked" from "failed"). The CLI does not supply this,
+   * so its behavior is unchanged.
+   */
+  recordResult?: (result: { name: string; status: UpServerStatus }) => void;
 }
+
+/** Terminal per-server status reported via UpDeps.recordResult. */
+export type UpServerStatus =
+  | "installed"
+  | "skipped"
+  | "removed"
+  | "blocked"
+  | "failed";
 
 // ---------------------------------------------------------------------------
 // Per-server result types
@@ -174,6 +203,7 @@ export async function handleUp(
         deps,
       });
       results.push(result);
+      deps.recordResult?.({ name, status: result.status });
       deps.output(`  ${statusIcon(result.status)} ${name}: ${result.message}`);
     } catch (err) {
       const failure: ServerFailure = {
@@ -182,6 +212,7 @@ export async function handleUp(
         message: err instanceof Error ? err.message : String(err),
       };
       results.push(failure);
+      deps.recordResult?.({ name, status: "failed" });
       deps.output(`  ${statusIcon("failed")} ${name}: ${failure.message}`);
     }
   }
@@ -382,6 +413,16 @@ async function processUrlServer(
   options: UpOptions,
   deps: UpDeps
 ): Promise<ServerResult> {
+  // MCP surface lockdown (fix D): URL servers bypass the registry trust gate, so
+  // the untrusted MCP caller is not permitted to install them. Record as blocked.
+  if (options.allowUrlServers === false) {
+    return {
+      name,
+      status: "blocked",
+      message: "URL servers are not permitted via the MCP surface",
+    };
+  }
+
   const cursorClients = clients.filter((c) => c === "cursor");
 
   if (cursorClients.length === 0) {
@@ -426,8 +467,12 @@ async function resolveEnvVars(
   const secretKeys = new Set<string>();
 
   for (const [key, decl] of Object.entries(envDecl)) {
-    // Resolution order: process.env → .env file → default → prompt
-    const fromEnv = process.env[key];
+    // Resolution order: process.env → .env file → default → prompt.
+    // MCP surface lockdown (fix C): when allowProcessEnv === false, the
+    // process.env source is skipped so an attacker-controlled stack file can't
+    // harvest ambient secrets into installed server configs. The CLI default
+    // (allowProcessEnv undefined/true) keeps reading process.env as before.
+    const fromEnv = options.allowProcessEnv === false ? undefined : process.env[key];
     const fromFile = envFileVars[key];
     const fromDefault = decl.default;
 
@@ -505,6 +550,7 @@ async function handleStrictRemoval(
         status: "removed",
         message: `removed from ${clientId} (not in mcpm.yaml)`,
       });
+      deps.recordResult?.({ name, status: "removed" });
       deps.output(`  - ${name}: removed from ${clientId}`);
     }
   }
