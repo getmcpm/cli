@@ -58,12 +58,13 @@ Cursor and Windsurf are home-relative on ALL platforms (`~/.cursor/mcp.json`, `~
 
 ## Post-V1
 
-### 15. Encrypted Secret Storage for Stack Files
-**Priority:** P2
-**What:** Investigate alternatives to plaintext env var storage in client config files. Options: OS keychain integration, encrypted .env files, reference-only storage (pointer to secret manager).
-**Why:** Stack files scale team-wide. Every `mcpm up` writes secrets as plaintext JSON to client configs. With 5+ servers each needing API keys, that's 5+ plaintext secrets per developer per IDE.
-**Context:** Current approach (plaintext + chmod 600) is the npm/pip norm. But mcpm positions as a security tool. Plaintext secrets in 4 config files per machine is inconsistent with that positioning. Not blocking for V1.3 but matters for enterprise adoption.
-**Depends on:** V1.3 stack files (shipped).
+### 15. ~~Encrypted Secret Storage for Stack Files~~ DONE (v0.7.0–v0.8.1)
+**Resolution:** All three investigated alternatives shipped (opt-in via `--secrets keychain` on `install`/`up`; plaintext + chmod 600 remains the default for back-compat):
+- **OS keychain integration:** `store/os-keychain.ts` stores a random 32-byte master key in the native credential store (macOS `security`, Linux `secret-tool`, Windows DPAPI) with zero native deps.
+- **Encrypted at rest:** `store/keychain.ts` AES-GCM-encrypts each secret into `~/.mcpm/secrets.enc.json` under an HKDF-derived subkey (PBKDF2 machine-key fallback for headless/CI).
+- **Reference-only storage:** config files store `mcpm:keychain:server/KEY` placeholders that `guard/run-inner.ts:226` resolves into the child env at launch.
+
+The original grievance ("every `mcpm up` writes secrets as plaintext") is resolved: `applyKeychainSecrets` (`store/keychain.ts:509`) is the single no-plaintext enforcement point, wired into `up.ts:571` and `install.ts:503`. Full `mcpm secrets set/list/get/rm/migrate` command (`commands/secrets.ts`). 73 tests across 6 files (install→guard round-trip, master-key exfil-resistance, `--ci` rejection).
 
 ### 14. Optional Anonymous Telemetry
 **Priority:** P2
@@ -94,11 +95,8 @@ These came out of the security-reviewer agent's audit of the v0.5.0 guard subsys
 **Why:** Naive regex evasion. Attackers can base64-encode "ignore previous instructions" and slip past the engine.
 **Effort:** ~2 hrs (decoder + recursion guard + tests).
 
-### 19. Homoglyph normalization (Unicode TR39 skeleton) (security review F2 partial)
-**Priority:** P2 — v0.5.1
-**What:** NFKC + zero-width strip (done in v0.5.0) does NOT fold homoglyphs (Cyrillic `о` for Latin `o`, etc.). TR39 skeleton algorithm or a confusables library would close this gap.
-**Why:** "ignоre previоus instructiоns" (Cyrillic 'о' substitutions) evades every shipped signature today.
-**Effort:** ~3 hrs (vendor a confusables map, integrate into normalizeForMatch, add tests).
+### 19. ~~Homoglyph normalization (Unicode TR39 skeleton)~~ DONE (v0.8.0, #30 guard + #51 scanner)
+**Resolution:** `foldConfusables` (a TR39-skeleton-modeled Cyrillic/Greek→ASCII confusables map, `guard/patterns.ts:153`) is integrated into `normalizeForMatch` (`guard/patterns.ts:198`) after NFKC + zero-width strip, and runs on the live guard relay (`inspectMessage`→`inspectAgainstSignatures`) as well as the scanner (`scanner/patterns.ts` reuses it). 5 guard tests assert homoglyph injections block (verified the TODO's own `ignоre previоus instructiоns` Cyrillic-о example → `action: block`) while legitimate Cyrillic prose stays FP-safe. Scope is a deliberate Cyrillic/Greek allowlist (FP-safety) rather than the full ICU `confusables.txt` table — the original ask explicitly offered "TR39 skeleton OR a confusables library".
 
 ### 20. Direct test for ReadBuffer 64MB cap (security review F6 follow-up)
 **Priority:** P2 — v0.5.1
@@ -119,14 +117,15 @@ These came out of the security-reviewer agent's audit of the v0.5.0 guard subsys
 **Effort:** ~1 hr (schema + tests).
 
 ### 24. Single-atomic-write for pins.json + integrity (security F8, Step 6 audit)
-**Priority:** P2 — v0.5.1
+**Priority:** P1 — v0.5.1 (raised from P2; see audit note)
 **What:** `writePins` currently does two atomic renames (pins.json then pins.json.integrity). A concurrent reader between the two sees new content + old hash and fires `PinsIntegrityError`. With Step 6's fail-closed F1 fix, that brief window blocks all traffic transiently. Reformat to a single file where the integrity hash is embedded as the first line, or retry once on read-side mismatch before raising.
+**Audit note (2026-06-09):** Still OPEN and confirmed at `guard/pins.ts:276-277` (two sequential `writeFileAtomic` renames) + `guard/pins.ts:205-214` (throws on first sidecar mismatch, no retry). The proper-lockfile added by #52/#54 is acquired only by `writePins` (writer-vs-writer); `readPins` takes no lock, so the reader-vs-writer interleave is unmitigated. The #52/#54 fail-closed `readPins` change makes the transient block *worse*, not better — hence priority raised to P1.
 **Effort:** ~1.5 hrs (refactor + tests for race).
 
-### 25. Zod-validate PinsFile shape on read (security F10, Step 6 audit)
-**Priority:** P2 — v0.5.1
-**What:** `readPins` does `JSON.parse(content) as PinsFile`. A tampered or hand-corrupted pins.json with `current_hash: 42` slips past type-only validation and causes weird downstream behavior (always-drift or always-pass depending on shape). Add a Zod schema with strict hash regex (sha256:[0-9a-f]{64}) and reject malformed entries with a clear message.
-**Effort:** ~45 min.
+### 25. Add strict hash-format regex to PinsFileSchema (remainder of security F10)
+**Priority:** P3 — v0.5.1 (PARTIAL — schema-on-read half shipped in #54)
+**What:** The Zod-validate-on-read mechanism shipped: `readPins` now runs `PinsFileSchema.safeParse` and rejects structurally-malformed files (e.g. `current_hash: 42`) with a clear "invalid structure" error (`guard/pins.ts:222-247`). **Remaining:** `current_hash` is still plain `z.string().nullable()` and `previous_hashes` is `z.array(z.string())`, so a structurally-valid-but-garbage hash (`"sha256:x"`, `"garbage"`) passes. Wire the strict `/^sha256:[0-9a-f]{64}$/` regex — already present at `guard/drift.ts:225` but not referenced by the pins schema — into `PinEntrySchema` (`guard/pins.ts:69`), and add a malformed-hash-string rejection test (current `pins.test.ts` only rejects entries for *missing sibling fields*, not bad hash format).
+**Effort:** ~20 min.
 
 ### 26. NFC normalize before hashing tool definitions (security F12, Step 6 audit)
 **Priority:** P3 — v0.5.1
