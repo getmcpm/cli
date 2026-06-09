@@ -1,5 +1,10 @@
 # TODOS
 
+> **Forward roadmap (post-v0.8.1):** the next security + DevX feature plan — themes,
+> prioritized buckets, per-feature designs, and the "ship this slice first" guidance —
+> lives in [`docs/ROADMAP.md`](./docs/ROADMAP.md). The items below remain the granular
+> backlog; the roadmap is the strategic layer on top of them.
+
 ## Resolved Blockers
 
 ### 1. ~~Verify Official MCP Registry API~~ DONE (2026-03-28)
