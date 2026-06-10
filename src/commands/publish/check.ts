@@ -59,6 +59,14 @@ const MEDIUM_BLOCK_THRESHOLD = 3;
  * - any critical or high finding, OR
  * - any exfil-args finding (data-exfiltration-shaped argument), OR
  * - MEDIUM_BLOCK_THRESHOLD or more medium findings in aggregate.
+ *
+ * F4 note: medium install-script findings (publisher-declared dangerous
+ * launch flags in runtimeArguments) are DELIBERATELY counted toward
+ * MEDIUM_BLOCK_THRESHOLD — the publisher can remediate by removing the flag
+ * from their manifest. The unremediable launcher-class npm finding is
+ * severity LOW and can never reach this medium aggregation by construction
+ * (manifestToEntry also emits no runtimeArguments today, so the mediums
+ * cannot occur on this path yet).
  */
 export function assertTrustGate(findings: Finding[]): void {
   const criticalOrHigh = findings.filter(
@@ -67,6 +75,7 @@ export function assertTrustGate(findings: Finding[]): void {
   );
 
   const exfilArgs = findings.filter((f) => f.type === "exfil-args");
+  // Includes medium install-script findings by design — see the F4 note above.
   const mediums = findings.filter((f) => f.severity === "medium");
 
   const blockOnMediumCount = mediums.length >= MEDIUM_BLOCK_THRESHOLD;

@@ -21,6 +21,8 @@ import type { Finding } from "../scanner/tier1.js";
 import type { TrustScore, TrustScoreInput } from "../scanner/trust-score.js";
 import type { InstalledServer } from "../store/servers.js";
 import { scoreBar, levelColor, extractRegistryMeta } from "../utils/format-trust.js";
+import { assessReleaseAge, DEFAULT_MIN_RELEASE_AGE_HOURS } from "../scanner/cooldown.js";
+import { DANGEROUS_FLAG_PREFIXES } from "../scanner/patterns.js";
 import { applyKeychainSecrets, type SecretsMode, setSecrets as _setSecrets } from "../store/keychain.js";
 
 // ---------------------------------------------------------------------------
@@ -107,25 +109,6 @@ function normalizeRuntimeArgs(
 }
 
 /**
- * Node.js flags that enable arbitrary code execution.
- * These are rejected regardless of format (bare or with value).
- * This blocklist catches known-dangerous flags; the allowlist below
- * catches unknown/malformed arguments.
- */
-const DANGEROUS_FLAG_PREFIXES: readonly string[] = [
-  "--eval", "-e",
-  "--require", "-r",
-  "--import",
-  "--loader",
-  "--experimental-loader",
-  "--inspect",
-  "--inspect-brk",
-  "--experimental-policy",
-  "--experimental-network-imports",
-  "--input-type",
-];
-
-/**
  * Allowlist of safe runtime argument shapes.
  * After dangerous flags are rejected, arguments must match one of these
  * patterns. This blocks shell metacharacters and path traversal while
@@ -189,6 +172,8 @@ export interface InstallOptions {
   skipHealthCheck?: boolean;
   json?: boolean;
   minTrust?: number;
+  minReleaseAge?: number;
+  allowFresh?: boolean;
   secrets?: SecretsMode;
 }
 
@@ -207,6 +192,8 @@ export interface InstallDeps {
   output: (text: string) => void;
   /** Optional; required only when options.secrets === "keychain". */
   setSecrets?: (server: string, values: Record<string, string>) => Promise<void>;
+  /** Epoch-ms clock for release-age assessment; defaults to Date.now at the CLI boundary. */
+  now?: () => number;
 }
 
 // ---------------------------------------------------------------------------
@@ -365,11 +352,26 @@ export async function handleInstall(
     allFindings = [...allFindings, ...tier2Findings];
   }
 
+  // Release-age cooldown: assessed ONCE so the score finding and the Step 2c
+  // gate can never disagree — passing --min-release-age below 24 therefore also
+  // lowers the scoring cooldown threshold (documented in the flag help text).
+  // The medium finding lands unconditionally for fresh releases, with or
+  // without the gate — that is the inversion fix, independent of the gate.
+  const registryMeta = extractRegistryMeta(serverEntry);
+  const releaseAge = assessReleaseAge({
+    publishedAt: registryMeta.publishedAt,
+    now: (deps.now ?? Date.now)(),
+    minAgeHours: options.minReleaseAge ?? DEFAULT_MIN_RELEASE_AGE_HOURS,
+  });
+  if (releaseAge.finding) {
+    allFindings = [...allFindings, releaseAge.finding];
+  }
+
   const trustScoreInput: TrustScoreInput = {
     findings: allFindings,
     healthCheckPassed: null, // health check not yet run at this point
     hasExternalScanner: scannerAvailable,
-    registryMeta: extractRegistryMeta(serverEntry),
+    registryMeta,
   };
 
   const trustScore = computeTrustScore(trustScoreInput);
@@ -395,6 +397,45 @@ export async function handleInstall(
     }
     throw new Error(
       `Trust score ${trustScore.score}/100 is below the required minimum of ${options.minTrust}. Installation aborted.`
+    );
+  }
+
+  // -------------------------------------------------------------------------
+  // Step 2c: --min-release-age gate (checked before any output or confirmation)
+  // -------------------------------------------------------------------------
+  // Fail-closed when armed: a MISSING publish timestamp blocks too (blocksArmedGate)
+  // — otherwise a registry/compromised mirror could defeat the gate by omitting
+  // _meta (publishedAt is .optional() in OfficialMetaSchema). The score finding
+  // stays fail-open for absent; only the explicitly armed gate hardens.
+  if (
+    options.minReleaseAge !== undefined &&
+    options.allowFresh !== true &&
+    releaseAge.blocksArmedGate
+  ) {
+    if (options.json === true) {
+      output(
+        JSON.stringify(
+          {
+            name,
+            error: "release_age_not_met",
+            ageHours: releaseAge.ageHours,
+            required: options.minReleaseAge,
+            reason: releaseAge.status,
+          },
+          null,
+          2
+        )
+      );
+    }
+    const tail = "Installation aborted. Use --allow-fresh to bypass.";
+    throw new Error(
+      releaseAge.status === "future"
+        ? `Release publish timestamp is in the future (clock skew or forged metadata); treated as within the ${options.minReleaseAge}-hour minimum release age. ${tail}`
+        : releaseAge.status === "unparseable"
+          ? `Release publish timestamp could not be parsed; treated as within the ${options.minReleaseAge}-hour minimum release age. ${tail}`
+          : releaseAge.status === "absent"
+            ? `Release publish timestamp is missing from the registry metadata, so release age cannot be verified against the ${options.minReleaseAge}-hour minimum. ${tail}`
+            : `Release age ${releaseAge.ageHours}h is below the required minimum of ${options.minReleaseAge}h. ${tail}`
     );
   }
 
@@ -676,6 +717,17 @@ export function parseMinTrust(raw: string): number {
   return n;
 }
 
+export function parseMinReleaseAge(raw: string): number {
+  // Same regex-first discipline as parseMinTrust: blocks hex "0x18", "1e2",
+  // spaces, empty string, negatives. Safe-integer check guards absurd lengths.
+  if (!/^\d+$/.test(raw) || !Number.isSafeInteger(Number(raw))) {
+    throw new InvalidArgumentError(
+      `--min-release-age must be a non-negative integer number of hours, got: "${raw}"`
+    );
+  }
+  return Number(raw);
+}
+
 export function registerInstallCommand(program: Command): void {
   program
     .command("install <name>")
@@ -686,8 +738,10 @@ export function registerInstallCommand(program: Command): void {
     .option("--skip-health-check", "skip post-install health check")
     .option("--json", "output result as JSON")
     .option("--min-trust <n>", "abort install if pre-install trust score is below this threshold (0-100; health check runs after install)", parseMinTrust)
+    .option("--min-release-age <hours>", "abort install if the release is younger than this many hours OR its publish timestamp is missing/unparseable (fail-closed when set; also sets the scoring cooldown threshold; bypass with --allow-fresh)", parseMinReleaseAge)
+    .option("--allow-fresh", "bypass the --min-release-age gate (including the missing-timestamp block)")
     .option("--secrets <mode>", "where to store secret env vars: 'keychain' (encrypted in ~/.mcpm, resolved by mcpm guard at launch) or 'plaintext' (default)", parseSecretsMode)
-    .action(async (name: string, opts: { client?: string; yes?: boolean; force?: boolean; skipHealthCheck?: boolean; json?: boolean; minTrust?: number; secrets?: SecretsMode }) => {
+    .action(async (name: string, opts: { client?: string; yes?: boolean; force?: boolean; skipHealthCheck?: boolean; json?: boolean; minTrust?: number; minReleaseAge?: number; allowFresh?: boolean; secrets?: SecretsMode }) => {
       const { RegistryClient } = await import("../registry/client.js");
       const client = new RegistryClient();
 
@@ -698,6 +752,8 @@ export function registerInstallCommand(program: Command): void {
         skipHealthCheck: opts.skipHealthCheck,
         json: opts.json,
         minTrust: opts.minTrust,
+        minReleaseAge: opts.minReleaseAge,
+        allowFresh: opts.allowFresh,
         secrets: opts.secrets,
       };
 
@@ -715,6 +771,7 @@ export function registerInstallCommand(program: Command): void {
         promptEnvVars: promptEnvVarsDefault,
         output: stdoutOutput,
         setSecrets: _setSecrets,
+        now: () => Date.now(),
       };
 
       try {

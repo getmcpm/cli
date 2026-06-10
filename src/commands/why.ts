@@ -19,6 +19,7 @@ import type { ServerEntry, EnvVar } from "../registry/types.js";
 import type { Finding } from "../scanner/tier1.js";
 import type { TrustScore, TrustScoreInput } from "../scanner/trust-score.js";
 import { NotFoundError } from "../registry/errors.js";
+import { assessReleaseAge } from "../scanner/cooldown.js";
 import { scoreBar, levelColor, extractRegistryMeta } from "../utils/format-trust.js";
 import { stdoutOutput } from "../utils/output.js";
 
@@ -37,6 +38,8 @@ export interface WhyDeps {
   scanTier2: (name: string) => Promise<Finding[]>;
   computeTrustScore: (input: TrustScoreInput) => TrustScore;
   output: (text: string) => void;
+  /** Epoch-ms clock for release-age assessment; defaults to Date.now at the CLI boundary. */
+  now?: () => number;
 }
 
 // ---------------------------------------------------------------------------
@@ -100,9 +103,18 @@ export async function handleWhy(
 
   const tier1 = scanTier1(entry);
   const scannerAvailable = await checkScannerAvailable();
-  const findings: Finding[] = scannerAvailable
-    ? [...tier1, ...(await scanTier2(name))]
-    : [...tier1];
+  const registryMeta = extractRegistryMeta(entry);
+  // Default 24h threshold — why has no policy context; the medium finding is
+  // the unconditional soft penalty, rendered by the generic finding loop.
+  const releaseAge = assessReleaseAge({
+    publishedAt: registryMeta.publishedAt,
+    now: (deps.now ?? Date.now)(),
+  });
+  const findings: Finding[] = [
+    ...tier1,
+    ...(scannerAvailable ? await scanTier2(name) : []),
+    ...(releaseAge.finding ? [releaseAge.finding] : []),
+  ];
 
   spinner.stop();
 
@@ -110,7 +122,7 @@ export async function handleWhy(
     findings,
     healthCheckPassed: null, // health check only runs at install
     hasExternalScanner: scannerAvailable,
-    registryMeta: extractRegistryMeta(entry),
+    registryMeta,
   });
 
   const metaCapped = hasCriticalOrHigh(findings);
@@ -215,6 +227,7 @@ export function registerWhyCommand(program: Command): void {
             scanTier2: (serverName: string) => scanTier2(serverName),
             computeTrustScore,
             output: stdoutOutput,
+            now: () => Date.now(),
           }
         );
       } catch (err) {

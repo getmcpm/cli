@@ -15,6 +15,9 @@ import {
   detectPromptInjection,
   detectTyposquatting,
   detectExfilArgs,
+  detectInstallScriptShape,
+  DANGEROUS_FLAG_PREFIXES,
+  type PackageShapeInput,
 } from "./patterns.js";
 import type { Finding } from "./tier1.js";
 
@@ -550,5 +553,105 @@ describe("detectPromptInjection — new patterns", () => {
     const findings = detectPromptInjection("Normal ASCII text with no hidden chars.");
     const zwFindings = findings.filter((f) => f.message.includes("zero-width"));
     expect(zwFindings.length).toBe(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// detectInstallScriptShape (F4)
+// ---------------------------------------------------------------------------
+
+describe("detectInstallScriptShape", () => {
+  function makePkg(overrides: Partial<PackageShapeInput> = {}): PackageShapeInput {
+    return {
+      registryType: "npm",
+      identifier: "@acme/server",
+      ...overrides,
+    };
+  }
+
+  it("flags an npm package with exactly one low install-script finding", () => {
+    const findings = detectInstallScriptShape(makePkg());
+    expect(findings).toHaveLength(1);
+    expect(findings[0].severity).toBe("low");
+    expect(findings[0].type).toBe("install-script");
+    expect(findings[0].message.startsWith("This launcher runs install scripts:")).toBe(true);
+    expect(findings[0].message).toContain('"@acme/server"');
+    expect(findings[0].location).toBe("package: @acme/server");
+  });
+
+  it("emits no shape finding for pypi, oci, or unknown registry types", () => {
+    expect(detectInstallScriptShape(makePkg({ registryType: "pypi", identifier: "acme-server" }))).toEqual([]);
+    expect(detectInstallScriptShape(makePkg({ registryType: "oci", identifier: "acme/server:1.0" }))).toEqual([]);
+    expect(detectInstallScriptShape(makePkg({ registryType: "cargo", identifier: "acme-server" }))).toEqual([]);
+  });
+
+  it("npm package with a dangerous runtimeArgument yields both the low shape and a medium flag finding", () => {
+    const findings = detectInstallScriptShape(makePkg({ runtimeArguments: ["--eval=x"] }));
+    expect(findings).toHaveLength(2);
+    const medium = findings.find((f) => f.severity === "medium");
+    expect(medium?.type).toBe("install-script");
+    expect(medium?.location).toBe("runtime argument: --eval=x");
+  });
+
+  it("pypi package with a dangerous runtimeArgument yields exactly one medium finding and no low finding", () => {
+    const findings = detectInstallScriptShape(
+      makePkg({ registryType: "pypi", identifier: "acme-server", runtimeArguments: ["--eval=x"] }),
+    );
+    expect(findings).toHaveLength(1);
+    expect(findings[0].severity).toBe("medium");
+    expect(findings[0].type).toBe("install-script");
+  });
+
+  it("detects dangerous flags in both string-form and object-form runtimeArguments", () => {
+    const stringForm = detectInstallScriptShape(
+      makePkg({ registryType: "pypi", identifier: "x", runtimeArguments: ["--require=./x"] }),
+    );
+    expect(stringForm.some((f) => f.severity === "medium")).toBe(true);
+
+    const objectForm = detectInstallScriptShape(
+      makePkg({
+        registryType: "pypi",
+        identifier: "x",
+        runtimeArguments: [{ type: "positional", value: "--require=./x" }],
+      }),
+    );
+    expect(objectForm.some((f) => f.severity === "medium")).toBe(true);
+  });
+
+  it("interpolates the matched prefix into the message (first-match correctness)", () => {
+    const inspect = detectInstallScriptShape(
+      makePkg({ registryType: "pypi", identifier: "x", runtimeArguments: ["--inspect"] }),
+    );
+    expect(inspect[0].message).toContain('launch flag "--inspect"');
+
+    // --inspect-brk must be named as itself, never mislabeled as --inspect or
+    // an --eval-class flag.
+    const inspectBrk = detectInstallScriptShape(
+      makePkg({ registryType: "pypi", identifier: "x", runtimeArguments: ["--inspect-brk"] }),
+    );
+    expect(inspectBrk[0].message).toContain('launch flag "--inspect-brk"');
+  });
+
+  it("does not match prefix-extended arguments (--evaluate, -elephant)", () => {
+    const findings = detectInstallScriptShape(
+      makePkg({ registryType: "pypi", identifier: "x", runtimeArguments: ["--evaluate", "-elephant"] }),
+    );
+    expect(findings).toEqual([]);
+  });
+
+  it("exports DANGEROUS_FLAG_PREFIXES with the known-dangerous Node.js flags (guards the move from install.ts)", () => {
+    for (const flag of ["--eval", "-e", "--require", "-r", "--import", "--loader", "--inspect", "--inspect-brk"]) {
+      expect(DANGEROUS_FLAG_PREFIXES).toContain(flag);
+    }
+  });
+
+  it("returns a new array on each call and never mutates the input", () => {
+    const pkg = makePkg({ runtimeArguments: ["--eval"] });
+    const snapshot = JSON.parse(JSON.stringify(pkg));
+    const a = detectInstallScriptShape(pkg);
+    const b = detectInstallScriptShape(pkg);
+    expect(a).not.toBe(b);
+    expect(a).toEqual(b);
+    expect(pkg).toEqual(snapshot);
   });
 });

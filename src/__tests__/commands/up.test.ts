@@ -3,6 +3,7 @@ import { handleUp } from "../../commands/up.js";
 import type { UpDeps, UpOptions } from "../../commands/up.js";
 import type { ClientId } from "../../config/paths.js";
 import type { ServerEntry } from "../../registry/types.js";
+import type { Finding } from "../../scanner/tier1.js";
 import type { TrustScore } from "../../scanner/trust-score.js";
 import type { McpServerEntry } from "../../config/adapters/index.js";
 import { writeFile, mkdtemp } from "fs/promises";
@@ -599,5 +600,283 @@ servers:
 
     const out = (deps.output as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[0]).join("\n");
     expect(out).toMatch(/would reject URL/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// F4 — release-age + install-script policy gates
+// ---------------------------------------------------------------------------
+
+describe("handleUp — release-age and install-script policy gates (F4)", () => {
+  // Fixed clock — these tests never read the wall clock.
+  const NOW = new Date("2026-06-10T00:00:00Z").getTime();
+  const HOUR_MS = 60 * 60 * 1000;
+
+  /** Entry whose official meta carries the given publishedAt; undefined drops _meta entirely. */
+  function entryPublishedAt(
+    name: string,
+    version: string,
+    publishedAt: string | undefined
+  ): ServerEntry {
+    const base = makeServerEntry(name, version);
+    if (publishedAt === undefined) return base;
+    return {
+      ...base,
+      _meta: {
+        "io.modelcontextprotocol.registry/official": {
+          status: "active",
+          publishedAt,
+          isLatest: true,
+        },
+      },
+    };
+  }
+
+  function makeAgeDeps(
+    publishedAt: string | undefined,
+    overrides: Partial<UpDeps> = {}
+  ): UpDeps {
+    return makeDeps({
+      getServer: vi.fn().mockImplementation((name: string, version?: string) =>
+        Promise.resolve(entryPublishedAt(name, version ?? "1.0.0", publishedAt))
+      ),
+      now: () => NOW,
+      ...overrides,
+    });
+  }
+
+  function joinedOutput(deps: UpDeps): string {
+    return (deps.output as ReturnType<typeof vi.fn>).mock.calls
+      .map((c) => c[0])
+      .join("\n");
+  }
+
+  function findingsPassedToScore(deps: UpDeps): Finding[] {
+    const spy = deps.computeTrustScore as ReturnType<typeof vi.fn>;
+    return spy.mock.calls[0][0].findings;
+  }
+
+  const agePolicyStack = (hours: number) => `
+version: "1"
+policy:
+  minReleaseAgeHours: ${hours}
+servers:
+  io.github.test/server-a:
+    version: "^1.0.0"
+`;
+
+  it("blocks a fresh release when policy.minReleaseAgeHours is set", async () => {
+    const stackPath = await writeStackAndLock(agePolicyStack(24), basicLock);
+    const adapter = makeAdapter();
+    const deps = makeAgeDeps(new Date(NOW - 2 * HOUR_MS).toISOString(), {
+      getAdapter: vi.fn().mockReturnValue(adapter),
+    });
+
+    await expect(handleUp({ stackFile: stackPath }, deps)).rejects.toThrow(
+      /could not be installed/
+    );
+    expect(adapter.addServer).not.toHaveBeenCalled();
+    expect(joinedOutput(deps)).toContain("minimum release age");
+  });
+
+  it("blocks an ABSENT publish timestamp when the policy is armed (fail-closed)", async () => {
+    const stackPath = await writeStackAndLock(agePolicyStack(24), basicLock);
+    const adapter = makeAdapter();
+    const deps = makeAgeDeps(undefined, {
+      getAdapter: vi.fn().mockReturnValue(adapter),
+    });
+
+    await expect(handleUp({ stackFile: stackPath }, deps)).rejects.toThrow(
+      /could not be installed/
+    );
+    expect(adapter.addServer).not.toHaveBeenCalled();
+    const out = joinedOutput(deps);
+    expect(out).toContain("unverifiable age");
+    expect(out).toContain("missing from registry metadata");
+  });
+
+  it("blocks a future publish timestamp with the dedicated reason variant", async () => {
+    const stackPath = await writeStackAndLock(agePolicyStack(24), basicLock);
+    const deps = makeAgeDeps(new Date(NOW + 1 * HOUR_MS).toISOString());
+
+    await expect(handleUp({ stackFile: stackPath }, deps)).rejects.toThrow(
+      /could not be installed/
+    );
+    expect(joinedOutput(deps)).toContain("in the future");
+  });
+
+  it("applies the soft cooldown penalty without a policy, and absent stays clean", async () => {
+    // Fresh release, NO policy → installs, but the medium release-cooldown
+    // finding lands in the score input (the unconditional soft penalty).
+    const freshPath = await writeStackAndLock(basicStack, basicLock);
+    const freshDeps = makeAgeDeps(new Date(NOW - 2 * HOUR_MS).toISOString());
+    await handleUp({ stackFile: freshPath }, freshDeps);
+    const freshFindings = findingsPassedToScore(freshDeps);
+    expect(
+      freshFindings.some(
+        (f) => f.type === "release-cooldown" && f.severity === "medium"
+      )
+    ).toBe(true);
+
+    // Absent timestamp, NO policy → neither finding nor block (score fail-open).
+    const absentPath = await writeStackAndLock(basicStack, basicLock);
+    const absentDeps = makeAgeDeps(undefined);
+    await handleUp({ stackFile: absentPath }, absentDeps);
+    const absentFindings = findingsPassedToScore(absentDeps);
+    expect(absentFindings.some((f) => f.type === "release-cooldown")).toBe(false);
+  });
+
+  it("threads policy.minReleaseAgeHours as the assessment threshold", async () => {
+    // 48h-old release: aged under the 24h default, fresh under a 72h policy.
+    const stackPath = await writeStackAndLock(agePolicyStack(72), basicLock);
+    const deps = makeAgeDeps(new Date(NOW - 48 * HOUR_MS).toISOString());
+
+    await expect(handleUp({ stackFile: stackPath }, deps)).rejects.toThrow(
+      /could not be installed/
+    );
+    expect(joinedOutput(deps)).toContain("minimum release age");
+  });
+
+  it("blocks launchers with install-script findings when blockInstallScripts is set", async () => {
+    const scriptPolicyStack = `
+version: "1"
+policy:
+  blockInstallScripts: true
+servers:
+  io.github.test/server-a:
+    version: "^1.0.0"
+`;
+    const installScriptFinding = {
+      severity: "low" as const,
+      type: "install-script" as const,
+      message:
+        'This launcher runs install scripts: "@test/server-a" is launched via "npx -y", which executes npm lifecycle scripts on first run',
+      location: "package: @test/server-a",
+    };
+
+    const blockedPath = await writeStackAndLock(scriptPolicyStack, basicLock);
+    const blockedDeps = makeAgeDeps(undefined, {
+      scanTier1: vi.fn().mockReturnValue([installScriptFinding]),
+    });
+    await expect(handleUp({ stackFile: blockedPath }, blockedDeps)).rejects.toThrow(
+      /could not be installed/
+    );
+    expect(joinedOutput(blockedDeps)).toContain(
+      "resolves to a launcher that runs install scripts"
+    );
+
+    // Without the policy flag the same finding does not block.
+    const openPath = await writeStackAndLock(basicStack, basicLock);
+    const openDeps = makeAgeDeps(undefined, {
+      scanTier1: vi.fn().mockReturnValue([installScriptFinding]),
+    });
+    await handleUp({ stackFile: openPath }, openDeps);
+    expect(joinedOutput(openDeps)).toMatch(/1 installed/);
+  });
+
+  it("does not block under blockInstallScripts when the scan finds no install-script launcher", async () => {
+    // Pins that hasInstallScriptFindings reflects the actual scan results —
+    // a hardcoded `true` would block every server in a script-blocking stack.
+    const scriptPolicyStack = `
+version: "1"
+policy:
+  blockInstallScripts: true
+servers:
+  io.github.test/server-a:
+    version: "^1.0.0"
+`;
+    const stackPath = await writeStackAndLock(scriptPolicyStack, basicLock);
+    const adapter = makeAdapter();
+    const deps = makeAgeDeps(undefined, {
+      getAdapter: vi.fn().mockReturnValue(adapter),
+      scanTier1: vi.fn().mockReturnValue([]),
+    });
+
+    await handleUp({ stackFile: stackPath }, deps);
+    expect(adapter.addServer).toHaveBeenCalled();
+    expect(joinedOutput(deps)).toMatch(/1 installed/);
+  });
+
+  // UPGRADE TRANSITION (deliberate, documented): pre-F4 lockfile snapshots lack
+  // the new install-script deduction, so blockOnScoreDrop fires after upgrading
+  // until `mcpm lock` is re-run — the reason must carry the remediation hint.
+  it("blocks with the re-lock remediation hint when a pre-F4 snapshot drops", async () => {
+    const dropStack = `
+version: "1"
+policy:
+  blockOnScoreDrop: true
+servers:
+  io.github.test/server-a:
+    version: "^1.0.0"
+`;
+    // Locked pre-F4 at 75/80 (94%); re-score with the -2 launcher deduction → 73/80 (91%).
+    const stackPath = await writeStackAndLock(dropStack, basicLock);
+    const deps = makeAgeDeps(undefined, {
+      scanTier1: vi.fn().mockReturnValue([
+        {
+          severity: "low",
+          type: "install-script",
+          message:
+            'This launcher runs install scripts: "@test/server-a" is launched via "npx -y", which executes npm lifecycle scripts on first run',
+          location: "package: @test/server-a",
+        },
+      ]),
+      computeTrustScore: vi.fn().mockReturnValue({
+        ...goodTrust,
+        score: 73,
+      }),
+    });
+
+    await expect(handleUp({ stackFile: stackPath }, deps)).rejects.toThrow(
+      /could not be installed/
+    );
+    const out = joinedOutput(deps);
+    expect(out).toContain("dropped");
+    expect(out).toContain("re-run");
+    expect(out).toContain("mcpm lock");
+  });
+
+  it("still blocks in --dry-run when the armed policy fails (exit-1 preview)", async () => {
+    const stackPath = await writeStackAndLock(agePolicyStack(24), basicLock);
+    const adapter = makeAdapter();
+    const deps = makeAgeDeps(new Date(NOW - 2 * HOUR_MS).toISOString(), {
+      getAdapter: vi.fn().mockReturnValue(adapter),
+    });
+
+    await expect(
+      handleUp({ stackFile: stackPath, dryRun: true }, deps)
+    ).rejects.toThrow(/could not be installed/);
+    expect(adapter.addServer).not.toHaveBeenCalled();
+  });
+
+  it("evaluates minTrustFloor before the release-age policy gate (ordering regression)", async () => {
+    const stackPath = await writeStackAndLock(agePolicyStack(24), basicLock);
+    const deps = makeAgeDeps(new Date(NOW - 2 * HOUR_MS).toISOString(), {
+      computeTrustScore: vi.fn().mockReturnValue(lowTrust),
+    });
+
+    await expect(
+      handleUp({ stackFile: stackPath, minTrustFloor: 50 }, deps)
+    ).rejects.toThrow(/could not be installed/);
+    const out = joinedOutput(deps);
+    expect(out).toContain("below the required floor");
+    expect(out).not.toContain("minimum release age");
+  });
+
+  it("falls back to Date.now when deps.now is omitted (old release, no crash)", async () => {
+    const stackPath = await writeStackAndLock(basicStack, basicLock);
+    const deps = makeDeps({
+      getServer: vi.fn().mockImplementation((name: string, version?: string) =>
+        Promise.resolve(
+          entryPublishedAt(name, version ?? "1.0.0", "2025-01-15T00:00:00Z")
+        )
+      ),
+    });
+
+    await handleUp({ stackFile: stackPath }, deps);
+
+    const adapter = (deps.getAdapter as ReturnType<typeof vi.fn>).mock.results[0].value;
+    expect(adapter.addServer).toHaveBeenCalledTimes(1);
+    expect(findingsPassedToScore(deps).some((f) => f.type === "release-cooldown")).toBe(false);
   });
 });

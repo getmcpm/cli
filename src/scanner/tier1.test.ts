@@ -43,16 +43,21 @@ function makeServerEntry(overrides: Partial<ServerEntry["server"]> = {}): Server
 // ---------------------------------------------------------------------------
 
 describe("scanTier1 — clean server", () => {
-  it("returns empty findings for a well-formed server entry", () => {
+  // F4: the default fixture is an npm package, so a "clean" entry now carries
+  // exactly the one informational launcher-shape finding (npx -y runs npm
+  // lifecycle scripts) — deliberate, spec-driven update, never loosened.
+  it("returns only the informational install-script finding for a clean npm server", () => {
     const entry = makeServerEntry();
     const findings = scanTier1(entry);
-    expect(findings).toEqual([]);
+    expect(findings.map((f) => f.type)).toEqual(["install-script"]);
+    expect(findings[0].severity).toBe("low");
   });
 
-  it("returns empty findings when description is absent", () => {
+  it("returns only the informational install-script finding when description is absent", () => {
     const entry = makeServerEntry({ description: undefined });
     const findings = scanTier1(entry);
-    expect(findings).toEqual([]);
+    expect(findings.map((f) => f.type)).toEqual(["install-script"]);
+    expect(findings[0].severity).toBe("low");
   });
 
   it("returns empty findings when packages array is empty", () => {
@@ -339,6 +344,68 @@ describe("scanTier1 — runtimeArguments scanning", () => {
   });
 });
 
+// ---------------------------------------------------------------------------
+// Install-script launch-shape awareness (F4)
+// ---------------------------------------------------------------------------
+
+describe("scanTier1 — install-script launch shape", () => {
+  it("emits one install-script finding per npm package", () => {
+    const entry = makeServerEntry({
+      packages: [
+        { registryType: "npm", identifier: "@acme/one", environmentVariables: [] },
+        { registryType: "npm", identifier: "@acme/two", environmentVariables: [] },
+      ],
+    });
+    const findings = scanTier1(entry).filter((f) => f.type === "install-script");
+    expect(findings).toHaveLength(2);
+    expect(findings.every((f) => f.severity === "low")).toBe(true);
+  });
+
+  it("emits no install-script finding for a pypi-only entry", () => {
+    const entry = makeServerEntry({
+      packages: [
+        { registryType: "pypi", identifier: "acme-server", environmentVariables: [] },
+      ],
+    });
+    const findings = scanTier1(entry);
+    expect(findings.some((f) => f.type === "install-script")).toBe(false);
+  });
+
+  it("emits a medium install-script finding for a pypi entry declaring a dangerous flag", () => {
+    const entry = makeServerEntry({
+      packages: [
+        {
+          registryType: "pypi",
+          identifier: "acme-server",
+          environmentVariables: [],
+          runtimeArguments: ["--eval"],
+        },
+      ],
+    });
+    const findings = scanTier1(entry).filter((f) => f.type === "install-script");
+    expect(findings).toHaveLength(1);
+    expect(findings[0].severity).toBe("medium");
+  });
+
+  it("emits both the low shape and the medium flag finding for an npm package with a dangerous flag", () => {
+    const entry = makeServerEntry({
+      packages: [
+        {
+          registryType: "npm",
+          identifier: "@acme/server",
+          environmentVariables: [],
+          runtimeArguments: ["--eval"],
+        },
+      ],
+    });
+    const severities = scanTier1(entry)
+      .filter((f) => f.type === "install-script")
+      .map((f) => f.severity)
+      .sort();
+    expect(severities).toEqual(["low", "medium"]);
+  });
+});
+
 describe("scanTier1 — Finding shape", () => {
   it("each finding has all required fields", () => {
     const entry = makeServerEntry({
@@ -351,7 +418,9 @@ describe("scanTier1 — Finding shape", () => {
       expect(f).toHaveProperty("message");
       expect(f).toHaveProperty("location");
       expect(["critical", "high", "medium", "low"]).toContain(f.severity);
-      expect(["secrets", "prompt-injection", "typosquatting", "exfil-args"]).toContain(f.type);
+      // "release-cooldown" is deliberately NOT listed: scanTier1 can never
+      // emit it (it needs a clock; only assessReleaseAge produces it).
+      expect(["secrets", "prompt-injection", "typosquatting", "exfil-args", "install-script"]).toContain(f.type);
     }
   });
 });

@@ -6,7 +6,9 @@
 import { describe, it, expect, vi } from "vitest";
 import { handleWhy, type WhyDeps } from "../../commands/why.js";
 import type { ServerEntry, EnvVar } from "../../registry/types.js";
+import { scanTier1 } from "../../scanner/tier1.js";
 import type { Finding } from "../../scanner/tier1.js";
+import { computeTrustScore } from "../../scanner/trust-score.js";
 import type { TrustScore } from "../../scanner/trust-score.js";
 import { NotFoundError } from "../../registry/errors.js";
 
@@ -150,5 +152,80 @@ describe("mcpm why", () => {
     });
     await expect(handleWhy("ghost", {}, deps)).resolves.toBeUndefined();
     expect(out(deps)).toMatch(/not found/);
+  });
+});
+
+describe("mcpm why — release-age cooldown (F4)", () => {
+  const NOW = new Date("2026-06-10T00:00:00Z").getTime();
+  const FRESH_PUBLISHED_AT = new Date(NOW - 2 * 60 * 60 * 1000).toISOString();
+
+  function makeFreshEntry(): ServerEntry {
+    return {
+      ...makeServerEntry(),
+      _meta: {
+        "io.modelcontextprotocol.registry/official": {
+          status: "active",
+          publishedAt: FRESH_PUBLISHED_AT,
+          isLatest: true,
+        },
+      },
+    } as ServerEntry;
+  }
+
+  it("renders the medium release-cooldown finding for a fresh release (human + --json)", async () => {
+    const deps = makeDeps({
+      registryClient: { getServer: vi.fn().mockResolvedValue(makeFreshEntry()) },
+      now: () => NOW,
+    });
+    await handleWhy("x", {}, deps);
+    const o = out(deps);
+    expect(o).toMatch(/\[medium\]/);
+    expect(o).toMatch(/release-cooldown/);
+
+    const jsonDeps = makeDeps({
+      registryClient: { getServer: vi.fn().mockResolvedValue(makeFreshEntry()) },
+      now: () => NOW,
+    });
+    await handleWhy("x", { json: true }, jsonDeps);
+    const parsed = JSON.parse(out(jsonDeps));
+    expect(
+      parsed.findings.some(
+        (f: Finding) => f.type === "release-cooldown" && f.severity === "medium"
+      )
+    ).toBe(true);
+  });
+
+  it("shows no release-cooldown finding when publishedAt is absent (score fail-open; why has no gate)", async () => {
+    const entry = {
+      server: {
+        name: "io.github.test/clean-pypi",
+        version: "1.0.0",
+        description: "a plain server",
+        packages: [
+          { registryType: "pypi", identifier: "clean-pypi-server", environmentVariables: [], runtimeArguments: [] },
+        ],
+        remotes: [],
+      },
+      _meta: {},
+    } as unknown as ServerEntry;
+    const deps = makeDeps({
+      registryClient: { getServer: vi.fn().mockResolvedValue(entry) },
+      scanTier1,
+      now: () => NOW,
+    });
+    await handleWhy("x", {}, deps);
+    const o = out(deps);
+    expect(o).toMatch(/Findings: none/);
+    expect(o).not.toMatch(/release-cooldown/);
+  });
+
+  it("reflects the -5 static-scan deduction when the real computeTrustScore is injected", async () => {
+    const deps = makeDeps({
+      registryClient: { getServer: vi.fn().mockResolvedValue(makeFreshEntry()) },
+      computeTrustScore,
+      now: () => NOW,
+    });
+    await handleWhy("x", {}, deps);
+    expect(out(deps)).toMatch(/35\/40/);
   });
 });

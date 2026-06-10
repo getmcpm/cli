@@ -11,6 +11,7 @@ import {
   detectPromptInjection,
   detectTyposquatting,
   detectExfilArgs,
+  detectInstallScriptShape,
   type ArgSchema,
 } from "./patterns.js";
 
@@ -20,7 +21,14 @@ import {
 
 export interface Finding {
   severity: "critical" | "high" | "medium" | "low";
-  type: "secrets" | "prompt-injection" | "typosquatting" | "exfil-args" | "scanner-error";
+  type:
+    | "secrets"
+    | "prompt-injection"
+    | "typosquatting"
+    | "exfil-args"
+    | "scanner-error"
+    | "release-cooldown" // NEW — emitted only by assessReleaseAge (needs a clock; never by scanTier1)
+    | "install-script"; // NEW — emitted by scanTier1 via detectInstallScriptShape (deterministic)
   message: string;
   location: string;
   /**
@@ -108,6 +116,11 @@ export function scanTier1(entry: ServerEntry): Finding[] {
         allFindings.push(...detectSecrets(ev.description));
       }
     }
+  }
+
+  // --- 2b. Install-script launch-shape awareness (F4) ---
+  for (const pkg of server.packages) {
+    allFindings.push(...detectInstallScriptShape(pkg));
   }
 
   // --- 3. Typosquatting check on package name ---

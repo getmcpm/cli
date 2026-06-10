@@ -10,6 +10,9 @@ import {
 } from "../../stack/schema.js";
 import type { StackFile } from "../../stack/schema.js";
 import { parse as parseYaml } from "yaml";
+import { writeFile, mkdtemp } from "fs/promises";
+import path from "path";
+import os from "os";
 
 // ---------------------------------------------------------------------------
 // StackFileSchema validation
@@ -134,6 +137,87 @@ describe("StackFileSchema", () => {
         expect(server.env?.API_KEY.secret).toBe(true);
         expect(server.env?.DB_PATH.default).toBe("./data/app.db");
       }
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// PolicySchema — F4 keys (minReleaseAgeHours, blockInstallScripts)
+// ---------------------------------------------------------------------------
+
+describe("PolicySchema — F4 keys", () => {
+  it("parseStackFile accepts and preserves minReleaseAgeHours and blockInstallScripts", async () => {
+    const dir = await mkdtemp(path.join(os.tmpdir(), "mcpm-schema-test-"));
+    const filePath = path.join(dir, "mcpm.yaml");
+    await writeFile(
+      filePath,
+      `
+version: "1"
+policy:
+  minReleaseAgeHours: 24
+  blockInstallScripts: true
+servers: {}
+`,
+      "utf-8"
+    );
+
+    const stack = await parseStackFile(filePath);
+    expect(stack.policy?.minReleaseAgeHours).toBe(24);
+    expect(stack.policy?.blockInstallScripts).toBe(true);
+  });
+
+  it("rejects negative and non-integer minReleaseAgeHours", () => {
+    const negative = {
+      version: "1",
+      policy: { minReleaseAgeHours: -1 },
+      servers: {},
+    };
+    expect(StackFileSchema.safeParse(negative).success).toBe(false);
+
+    const fractional = {
+      version: "1",
+      policy: { minReleaseAgeHours: 24.5 },
+      servers: {},
+    };
+    expect(StackFileSchema.safeParse(fractional).success).toBe(false);
+  });
+
+  it("keeps backward compat and silently strips unknown policy keys (strip-mode footgun)", () => {
+    // Pre-F4 stack files keep parsing.
+    const preF4 = {
+      version: "1",
+      policy: { minTrustScore: 60, blockOnScoreDrop: true },
+      servers: {},
+    };
+    expect(StackFileSchema.safeParse(preF4).success).toBe(true);
+
+    // DOCUMENTED FOOTGUN: a typo'd key (minReleaseAgeHrs) parses fine and is
+    // silently dropped — which disarms the gate. Pre-existing PolicySchema
+    // strip-mode behavior; .strict() would break forward compat, so we pin the
+    // behavior here instead of "fixing" it.
+    const typoKey = {
+      version: "1",
+      policy: { minReleaseAgeHrs: 24 },
+      servers: {},
+    };
+    const result = StackFileSchema.safeParse(typoKey);
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.policy?.minReleaseAgeHours).toBeUndefined();
+      expect(result.data.policy).not.toHaveProperty("minReleaseAgeHrs");
+    }
+  });
+
+  it("leaves blockInstallScripts undefined when omitted (no default injection)", () => {
+    const input = {
+      version: "1",
+      policy: { minTrustScore: 60 },
+      servers: {},
+    };
+    const result = StackFileSchema.safeParse(input);
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.policy?.blockInstallScripts).toBeUndefined();
     }
   });
 });

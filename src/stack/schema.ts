@@ -50,6 +50,11 @@ const StackServerSchema = z.union([RegistryServerSchema, UrlServerSchema]);
 const PolicySchema = z.object({
   minTrustScore: z.number().int().min(0).max(100).optional(),
   blockOnScoreDrop: z.boolean().optional().default(false),
+  minReleaseAgeHours: z.number().int().min(0).optional(),
+  // Bare .optional() (NOT .default(false)): a default would make the inferred
+  // Policy output type require the field in every hand-built literal.
+  // Consumers check `=== true` (undefined ≡ false).
+  blockInstallScripts: z.boolean().optional(),
 });
 
 /** Top-level mcpm.yaml schema. */

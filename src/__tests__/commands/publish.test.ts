@@ -80,6 +80,34 @@ describe("handlePublishCheck", () => {
     readManifest.mockResolvedValue(null);
     await expect(runCheck()).rejects.toThrow(/mcpm-publish\.yaml|scaffold/i);
   });
+
+  // F4 fallout pinned: the real scanTier1 now emits one low "install-script"
+  // launcher finding for every npm manifest, so the dry-run score drops by 2
+  // (static 38/40) without tripping the trust gate.
+  it("dry-run with the real scanTier1 shows the low launcher finding and the -2 score (gate untripped)", async () => {
+    const { handlePublishCheck } = await import("../../commands/publish/check.js");
+    const { scanTier1 } = await import("../../scanner/tier1.js");
+    const { computeTrustScore } = await import("../../scanner/trust-score.js");
+    const lines: string[] = [];
+    const ctsSpy = vi.fn(computeTrustScore);
+
+    await handlePublishCheck({}, {
+      readManifest,
+      scanTier1,
+      computeTrustScore: ctsSpy,
+      output: (t) => lines.push(t),
+    });
+
+    const text = lines.join("");
+    expect(text).toMatch(/ready to publish/i);
+    // health 15 + static (40 - 2) + external 0 + meta 0 = 53
+    expect(text).toContain("53/100");
+
+    const findings = ctsSpy.mock.calls[0][0].findings;
+    expect(findings).toHaveLength(1);
+    expect(findings[0]).toMatchObject({ severity: "low", type: "install-script" });
+    expect(findings[0].message).toContain("This launcher runs install scripts:");
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -133,6 +161,30 @@ describe("assertTrustGate — medium-severity blind spot (issue #24)", () => {
 
   it("does not block on clean findings", async () => {
     await expect(gate([])).resolves.toBeUndefined();
+  });
+
+  // F4 decision pinned (see the assertTrustGate doc comment in check.ts): the
+  // low launcher-class finding can never reach the medium aggregation; medium
+  // install-script findings (publisher-remediable dangerous flags) DO count.
+  it("ignores the single low install-script launcher finding but blocks on three medium install-script findings", async () => {
+    const low: Finding = {
+      type: "install-script",
+      severity: "low",
+      message:
+        'This launcher runs install scripts: "@test/my-server" is launched via "npx -y", which executes npm lifecycle scripts on first run',
+      location: "package: @test/my-server",
+    };
+    await expect(gate([low])).resolves.toBeUndefined();
+
+    const med = (arg: string, prefix: string): Finding => ({
+      type: "install-script",
+      severity: "medium",
+      message: `Declared runtime argument "${arg}" matches the dangerous Node.js launch flag "${prefix}"`,
+      location: `runtime argument: ${arg}`,
+    });
+    await expect(
+      gate([med("--eval=x", "--eval"), med("--require=y", "--require"), med("--loader=z", "--loader")])
+    ).rejects.toThrow(/block/i);
   });
 });
 

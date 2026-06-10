@@ -19,6 +19,20 @@ export interface PolicyCheckInput {
   readonly currentMaxPossible: number;
   readonly lockedSnapshot: TrustSnapshot | undefined;
   readonly policy: Policy | undefined;
+  /**
+   * Precomputed by assessReleaseAge — the caller MUST compute it with
+   * minAgeHours = policy.minReleaseAgeHours when set, so the gate and the
+   * assessment use the same threshold. Keeps policy.ts pure and clock-free.
+   * `status` is an inlined structural copy of ReleaseAgeStatus (stack/ does
+   * not import from scanner/ — same local-shape pattern as ArgSchema).
+   */
+  readonly releaseAge?: {
+    readonly ageHours: number | null;
+    readonly status: "aged" | "fresh" | "future" | "unparseable" | "absent";
+    readonly blocksArmedGate: boolean;
+  };
+  /** findings.some(f => f.type === "install-script") computed by the caller. */
+  readonly hasInstallScriptFindings?: boolean;
 }
 
 export type PolicyResult =
@@ -63,9 +77,60 @@ export function checkTrustPolicy(input: PolicyCheckInput): PolicyResult {
         pass: false,
         reason:
           `"${serverName}" trust score dropped from ${lockedPct}% to ${currentPct}% ` +
-          `since the lock file was created.`,
+          `since the lock file was created. If you recently upgraded mcpm, new ` +
+          `scanner findings can lower scores — re-run \`mcpm lock\` to refresh ` +
+          `snapshots if the drop is expected.`,
       };
     }
+  }
+
+  // Check minimum release age (requires a caller-supplied assessment).
+  // Fail-closed when armed: blocksArmedGate is also true for absent/unparseable
+  // timestamps — there is no --allow-fresh for `up`; the policy itself is the
+  // control, consistent with minTrustScore.
+  if (
+    policy.minReleaseAgeHours !== undefined &&
+    input.releaseAge?.blocksArmedGate === true
+  ) {
+    const { ageHours, status } = input.releaseAge;
+    if (status === "future") {
+      return {
+        pass: false,
+        reason:
+          `"${serverName}" has a publish timestamp in the future; treated as ` +
+          `within the minimum release age of ${policy.minReleaseAgeHours} hour(s) ` +
+          `required by policy.`,
+      };
+    }
+    if (ageHours === null) {
+      return {
+        pass: false,
+        reason:
+          `"${serverName}" release is of unverifiable age (publish timestamp ` +
+          `${status === "absent" ? "missing from registry metadata" : "could not be parsed"}), ` +
+          `and the policy requires a minimum release age of ${policy.minReleaseAgeHours} hour(s).`,
+      };
+    }
+    return {
+      pass: false,
+      reason:
+        `"${serverName}" release is ${ageHours} hour(s) old, below the minimum ` +
+        `release age of ${policy.minReleaseAgeHours} hour(s) required by policy.`,
+    };
+  }
+
+  // Check install-script launchers (blunt by design: blocks every launcher
+  // class that runs scripts, the pnpm strictDepBuilds analog).
+  if (
+    policy.blockInstallScripts === true &&
+    input.hasInstallScriptFindings === true
+  ) {
+    return {
+      pass: false,
+      reason:
+        `"${serverName}" resolves to a launcher that runs install scripts, ` +
+        `and the policy blocks install scripts.`,
+    };
   }
 
   return { pass: true };
