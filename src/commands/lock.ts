@@ -31,6 +31,7 @@ import {
   isUrlServer,
 } from "../stack/schema.js";
 import { resolveVersion, resolveWithSingleVersion } from "../stack/resolve.js";
+import { assessReleaseAge, DEFAULT_MIN_RELEASE_AGE_HOURS } from "../scanner/cooldown.js";
 import { extractRegistryMeta } from "../utils/format-trust.js";
 
 // ---------------------------------------------------------------------------
@@ -48,6 +49,8 @@ export interface LockDeps {
   checkScannerAvailable: () => Promise<boolean>;
   scanTier2: (name: string) => Promise<Finding[]>;
   computeTrustScore: (input: TrustScoreInput) => TrustScore;
+  /** Epoch-ms clock for release-age assessment; defaults to Date.now at the CLI boundary. */
+  now?: () => number;
   writeLockFile: (path: string, content: string) => Promise<void>;
   output: (text: string) => void;
 }
@@ -83,10 +86,15 @@ export async function handleLock(
   const scannerAvailable = await deps.checkScannerAvailable();
   const entries = Object.entries(stackFile.servers);
 
+  // F4 lock/up symmetry: snapshots must be scored with the SAME cooldown
+  // threshold `up` re-scores with, or blockOnScoreDrop trips spuriously.
+  const minAgeHours =
+    stackFile.policy?.minReleaseAgeHours ?? DEFAULT_MIN_RELEASE_AGE_HOURS;
+
   // Resolve all servers in parallel
   const settlements = await Promise.all(
     entries.map(([name, server]) =>
-      resolveServer(name, server, scannerAvailable, deps)
+      resolveServer(name, server, scannerAvailable, minAgeHours, deps)
         .then((locked): LockResult => ({ name, locked }))
         .catch((err): LockError => ({
           name,
@@ -138,6 +146,7 @@ async function resolveServer(
   name: string,
   server: StackServer,
   scannerAvailable: boolean,
+  minAgeHours: number,
   deps: LockDeps
 ): Promise<LockedServer> {
   // URL-based servers: pin directly, no version resolution or trust
@@ -178,11 +187,23 @@ async function resolveServer(
     allFindings = [...allFindings, ...tier2Findings];
   }
 
+  // Release-age assessment (F4): the snapshot carries the same cooldown
+  // penalty `up` will re-score with (see handleLock's minAgeHours threading).
+  const registryMeta = extractRegistryMeta(serverEntry);
+  const releaseAge = assessReleaseAge({
+    publishedAt: registryMeta.publishedAt,
+    now: (deps.now ?? Date.now)(),
+    minAgeHours,
+  });
+  if (releaseAge.finding) {
+    allFindings = [...allFindings, releaseAge.finding];
+  }
+
   const trustInput: TrustScoreInput = {
     findings: allFindings,
     healthCheckPassed: null,
     hasExternalScanner: scannerAvailable,
-    registryMeta: extractRegistryMeta(serverEntry),
+    registryMeta,
   };
   const trustScore = deps.computeTrustScore(trustInput);
 
@@ -245,6 +266,7 @@ export function registerLockCommand(program: Command): void {
             checkScannerAvailable: _checkScannerAvailable,
             scanTier2: (name) => _scanTier2(name),
             computeTrustScore: _computeTrustScore,
+            now: () => Date.now(),
             writeLockFile: (path, content) =>
               writeFile(path, content, { encoding: "utf-8", mode: 0o600 }),
             output: stdoutOutput,

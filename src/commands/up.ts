@@ -40,6 +40,7 @@ import {
 import { checkTrustPolicy } from "../stack/policy.js";
 import { parseEnvFile } from "../stack/env.js";
 import { resolveInstallEntry, parseSecretsMode, validateRemoteUrl } from "./install.js";
+import { assessReleaseAge, DEFAULT_MIN_RELEASE_AGE_HOURS } from "../scanner/cooldown.js";
 import { extractRegistryMeta } from "../utils/format-trust.js";
 import { applyKeychainSecrets, type SecretsMode, setSecrets as _setSecrets } from "../store/keychain.js";
 
@@ -95,6 +96,8 @@ export interface UpDeps {
   checkScannerAvailable: () => Promise<boolean>;
   scanTier2: (name: string) => Promise<Finding[]>;
   computeTrustScore: (input: TrustScoreInput) => TrustScore;
+  /** Epoch-ms clock for release-age assessment; defaults to Date.now at the CLI boundary. */
+  now?: () => number;
   runLock: (stackFile: string) => Promise<void>;
   confirm: (message: string) => Promise<boolean>;
   promptEnvVar: (name: string, isSecret: boolean) => Promise<string>;
@@ -359,11 +362,24 @@ async function processServer(input: ProcessInput): Promise<ServerResult> {
     findings = [...findings, ...tier2];
   }
 
+  // Release-age assessment (F4): one assessment per server, with the policy
+  // threshold when set, so the soft-penalty finding and the policy gate below
+  // can never disagree.
+  const registryMeta = extractRegistryMeta(serverEntry);
+  const releaseAge = assessReleaseAge({
+    publishedAt: registryMeta.publishedAt,
+    now: (deps.now ?? Date.now)(),
+    minAgeHours: policy?.minReleaseAgeHours ?? DEFAULT_MIN_RELEASE_AGE_HOURS,
+  });
+  if (releaseAge.finding) {
+    findings = [...findings, releaseAge.finding];
+  }
+
   const trustInput: TrustScoreInput = {
     findings,
     healthCheckPassed: null,
     hasExternalScanner: scannerAvailable,
-    registryMeta: extractRegistryMeta(serverEntry),
+    registryMeta,
   };
   const trustScore = deps.computeTrustScore(trustInput);
 
@@ -392,6 +408,12 @@ async function processServer(input: ProcessInput): Promise<ServerResult> {
     currentMaxPossible: trustScore.maxPossible,
     lockedSnapshot: locked.trust,
     policy,
+    releaseAge: {
+      ageHours: releaseAge.ageHours,
+      status: releaseAge.status,
+      blocksArmedGate: releaseAge.blocksArmedGate,
+    },
+    hasInstallScriptFindings: findings.some((f) => f.type === "install-script"),
   });
 
   if (!policyResult.pass) {
@@ -703,6 +725,7 @@ export function registerUpCommand(program: Command): void {
               checkScannerAvailable: _checkScannerAvailable,
               scanTier2: (name) => _scanTier2(name),
               computeTrustScore: _computeTrustScore,
+              now: () => Date.now(),
               runLock: async (stackFile) => {
                 const { writeFile } = await import("fs/promises");
                 await handleLock(
@@ -714,6 +737,7 @@ export function registerUpCommand(program: Command): void {
                     checkScannerAvailable: _checkScannerAvailable,
                     scanTier2: (name) => _scanTier2(name),
                     computeTrustScore: _computeTrustScore,
+                    now: () => Date.now(),
                     writeLockFile: (path, content) =>
                       writeFile(path, content, { encoding: "utf-8", mode: 0o600 }),
                     output: stdoutOutput,

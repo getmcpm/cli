@@ -4,7 +4,10 @@ import type { ExportDeps, ExportOptions } from "../../commands/export.js";
 import type { ClientId } from "../../config/paths.js";
 import type { McpServerEntry } from "../../config/adapters/index.js";
 import { parse as parseYaml } from "yaml";
-import { StackFileSchema } from "../../stack/schema.js";
+import { StackFileSchema, parseStackFile } from "../../stack/schema.js";
+import { writeFile, mkdtemp } from "fs/promises";
+import path from "path";
+import os from "os";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -206,5 +209,46 @@ describe("handleExport", () => {
     const outputCall = (deps.output as ReturnType<typeof vi.fn>).mock.calls[0][0];
     const parsed = parseYaml(outputCall);
     expect(parsed.servers).toEqual({});
+  });
+
+  // --- F4: curated policy default ------------------------------------------
+
+  it("seeds the curated policy default (minReleaseAgeHours: 24)", async () => {
+    const servers: Record<string, McpServerEntry> = {
+      "my-server": { command: "npx", args: ["-y", "my-server"] },
+    };
+    const deps = makeDeps({
+      getAdapter: vi.fn().mockReturnValue(makeAdapter(servers)),
+    });
+
+    await handleExport({}, deps);
+
+    const outputCall = (deps.output as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    const parsed = parseYaml(outputCall);
+    expect(parsed.policy.minReleaseAgeHours).toBe(24);
+    expect(parsed.policy.blockOnScoreDrop).toBe(false);
+  });
+
+  it("round-trips the exported file through parseStackFile with the policy intact", async () => {
+    const servers: Record<string, McpServerEntry> = {
+      "my-server": { command: "npx", args: ["-y", "my-server"] },
+    };
+    const deps = makeDeps({
+      getAdapter: vi.fn().mockReturnValue(makeAdapter(servers)),
+    });
+
+    await handleExport({}, deps);
+
+    const outputCall = (deps.output as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    const dir = await mkdtemp(path.join(os.tmpdir(), "mcpm-export-test-"));
+    const filePath = path.join(dir, "mcpm.yaml");
+    await writeFile(filePath, outputCall, "utf-8");
+
+    const stack = await parseStackFile(filePath);
+    expect(stack.policy).toEqual({
+      blockOnScoreDrop: false,
+      minReleaseAgeHours: 24,
+    });
+    expect(Object.keys(stack.servers)).toHaveLength(1);
   });
 });

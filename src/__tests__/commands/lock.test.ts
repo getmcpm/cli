@@ -226,3 +226,120 @@ servers:
     expect(outputCalls).toContain("failed");
   });
 });
+
+// ---------------------------------------------------------------------------
+// F4 — release-age cooldown threading (lock/up snapshot symmetry)
+// ---------------------------------------------------------------------------
+
+describe("handleLock — release-age cooldown (F4)", () => {
+  // Fixed clock — these tests never read the wall clock.
+  const NOW = new Date("2026-06-10T00:00:00Z").getTime();
+  const HOUR_MS = 60 * 60 * 1000;
+
+  /** Entry whose official meta carries the given publishedAt; undefined drops _meta entirely. */
+  function entryPublishedAt(
+    name: string,
+    version: string,
+    publishedAt: string | undefined
+  ): ServerEntry {
+    const base = makeServerEntry(name, version);
+    if (publishedAt === undefined) return base;
+    return {
+      ...base,
+      _meta: {
+        "io.modelcontextprotocol.registry/official": {
+          status: "active",
+          publishedAt,
+          isLatest: true,
+        },
+      },
+    };
+  }
+
+  function makeAgeDeps(publishedAt: string | undefined): LockDeps {
+    return makeDeps({
+      getServer: vi.fn().mockImplementation((name: string, version?: string) =>
+        Promise.resolve(entryPublishedAt(name, version ?? "1.2.0", publishedAt))
+      ),
+      now: () => NOW,
+    });
+  }
+
+  function findingsPassedToScore(deps: LockDeps) {
+    const spy = deps.computeTrustScore as ReturnType<typeof vi.fn>;
+    return spy.mock.calls[0][0].findings as { type: string; severity: string }[];
+  }
+
+  const basicStack = `
+version: "1"
+servers:
+  io.github.test/my-server:
+    version: "^1.0.0"
+`;
+
+  it("includes the release-cooldown finding in the snapshot score for a fresh release", async () => {
+    // Symmetry: the lock-time snapshot must carry the same penalty `up`
+    // re-scores with, or blockOnScoreDrop trips spuriously on every up.
+    const stackPath = await writeTempStackFile(basicStack);
+    const deps = makeAgeDeps(new Date(NOW - 2 * HOUR_MS).toISOString());
+
+    await handleLock({ stackFile: stackPath }, deps);
+
+    expect(
+      findingsPassedToScore(deps).some(
+        (f) => f.type === "release-cooldown" && f.severity === "medium"
+      )
+    ).toBe(true);
+  });
+
+  it("threads stack policy minReleaseAgeHours into the assessment threshold", async () => {
+    const policyStack = `
+version: "1"
+policy:
+  minReleaseAgeHours: 72
+servers:
+  io.github.test/my-server:
+    version: "^1.0.0"
+`;
+    const publishedAt = new Date(NOW - 48 * HOUR_MS).toISOString();
+
+    // 48h-old release is within a 72h policy threshold → finding present.
+    const policyPath = await writeTempStackFile(policyStack);
+    const policyDeps = makeAgeDeps(publishedAt);
+    await handleLock({ stackFile: policyPath }, policyDeps);
+    expect(
+      findingsPassedToScore(policyDeps).some((f) => f.type === "release-cooldown")
+    ).toBe(true);
+
+    // Same release under the 24h default (no policy) → aged, no finding.
+    const defaultPath = await writeTempStackFile(basicStack);
+    const defaultDeps = makeAgeDeps(publishedAt);
+    await handleLock({ stackFile: defaultPath }, defaultDeps);
+    expect(
+      findingsPassedToScore(defaultDeps).some((f) => f.type === "release-cooldown")
+    ).toBe(false);
+  });
+
+  it("emits no finding for old or absent publishedAt and keeps the lockfile shape", async () => {
+    // Old release → aged, no finding.
+    const oldPath = await writeTempStackFile(basicStack);
+    const oldDeps = makeAgeDeps(new Date(NOW - 60 * 24 * HOUR_MS).toISOString());
+    await handleLock({ stackFile: oldPath }, oldDeps);
+    expect(
+      findingsPassedToScore(oldDeps).some((f) => f.type === "release-cooldown")
+    ).toBe(false);
+
+    // Absent timestamp → score fail-open, no finding (lock never gates).
+    const absentPath = await writeTempStackFile(basicStack);
+    const absentDeps = makeAgeDeps(undefined);
+    await handleLock({ stackFile: absentPath }, absentDeps);
+    expect(
+      findingsPassedToScore(absentDeps).some((f) => f.type === "release-cooldown")
+    ).toBe(false);
+
+    // Lockfile shape unchanged: still a valid LockFileSchema document.
+    const [, content] = (absentDeps.writeLockFile as ReturnType<typeof vi.fn>).mock.calls[0];
+    const result = LockFileSchema.safeParse(parseYaml(content));
+    expect(result.success).toBe(true);
+  });
+});

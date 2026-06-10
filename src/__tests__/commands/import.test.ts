@@ -820,6 +820,65 @@ describe("handleImport — trust assessment (#23)", () => {
 });
 
 // ---------------------------------------------------------------------------
+// handleImport — install-script shape findings (F4)
+// ---------------------------------------------------------------------------
+
+describe("handleImport — install-script shape findings (F4)", () => {
+  // toServerEntry emits registryType "unknown" (imports cannot reliably infer
+  // the registry from a bare command string), so the npm launcher-shape LOW
+  // finding never fires here — but the dangerous-flag check runs for EVERY
+  // registryType, giving imported configs the same audit visibility.
+  it("does not emit the npx launcher-shape finding for imported servers ('unknown' registryType)", async () => {
+    const scanSpy = vi.fn(scanTier1);
+    const lines: string[] = [];
+    const deps = makeDeps({
+      detectClients: vi.fn().mockResolvedValue(["claude-desktop"]),
+      getAdapter: vi.fn().mockReturnValue(
+        makeAdapter("claude-desktop", {
+          "filesystem": { command: "npx", args: ["-y", "@modelcontextprotocol/server-filesystem"] },
+        })
+      ),
+      getInstalledServers: vi.fn().mockResolvedValue([]),
+      confirm: vi.fn().mockResolvedValue(true),
+      scanTier1: scanSpy,
+      output: (t) => lines.push(t),
+    });
+    await handleImport({}, deps);
+    const findings = scanSpy.mock.results[0].value;
+    expect(findings.filter((f) => f.type === "install-script")).toEqual([]);
+    expect(lines.join("\n")).not.toMatch(/security finding/i);
+  });
+
+  it("flags a dangerous declared runtime argument on an imported server (medium install-script)", async () => {
+    const scanSpy = vi.fn(scanTier1);
+    const lines: string[] = [];
+    const deps = makeDeps({
+      detectClients: vi.fn().mockResolvedValue(["claude-desktop"]),
+      getAdapter: vi.fn().mockReturnValue(
+        makeAdapter("claude-desktop", {
+          "hooked": { command: "node", args: ["--require=./hook.js"] },
+        })
+      ),
+      getInstalledServers: vi.fn().mockResolvedValue([]),
+      confirm: vi.fn().mockResolvedValue(true),
+      scanTier1: scanSpy,
+      output: (t) => lines.push(t),
+    });
+    await handleImport({}, deps);
+    const installScript = scanSpy.mock.results[0].value.filter(
+      (f) => f.type === "install-script"
+    );
+    expect(installScript).toHaveLength(1);
+    expect(installScript[0]).toMatchObject({
+      severity: "medium",
+      location: "runtime argument: --require=./hook.js",
+    });
+    expect(installScript[0].message).toContain('"--require"');
+    expect(lines.join("\n")).toMatch(/security finding/i);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // handleImport — immutability
 // ---------------------------------------------------------------------------
 

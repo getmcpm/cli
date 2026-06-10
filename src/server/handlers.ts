@@ -70,6 +70,17 @@ export interface ServerDeps {
 // Helpers
 // ---------------------------------------------------------------------------
 
+/**
+ * F4 scope note: this helper deliberately does NOT include the
+ * release-cooldown finding (ServerDeps has no injectable clock; the F4 spec
+ * file list excludes server/). Consequence: mcpm_install / mcpm_search score
+ * a fresh (<24h) package up to 5 points higher than CLI install/why AND than
+ * the sibling mcpm_up tool (which inherits the finding via up.ts
+ * processServer), and HARD_TRUST_FLOOR evaluates that inflated score — do NOT
+ * compensate by raising the floor. Fast-follow is mechanical:
+ * ServerDeps += now?: () => number, then append
+ * assessReleaseAge({...}).finding here; no schema changes.
+ */
 function computeTrust(entry: ServerEntry, deps: ServerDeps): TrustScore {
   const findings = deps.scanTier1(entry);
   return deps.computeTrustScore({

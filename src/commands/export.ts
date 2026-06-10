@@ -15,6 +15,7 @@ import type { ClientId } from "../config/paths.js";
 import type { ConfigAdapter, McpServerEntry } from "../config/adapters/index.js";
 import type { StackFile, StackEnvVar } from "../stack/schema.js";
 import { serializeYaml } from "../stack/schema.js";
+import { DEFAULT_MIN_RELEASE_AGE_HOURS } from "../scanner/cooldown.js";
 
 // ---------------------------------------------------------------------------
 // Secret inference
@@ -124,6 +125,13 @@ function buildStackFile(
 
   return {
     version: "1",
+    // F4 curated default: 24h release cooldown for newly generated stacks. NOTE: arming
+    // minReleaseAgeHours also fail-closes `up` on servers with NO publish timestamp
+    // (deliberate — see cooldown.ts split semantics); the policy reason names the fix.
+    policy: {
+      blockOnScoreDrop: false,
+      minReleaseAgeHours: DEFAULT_MIN_RELEASE_AGE_HOURS,
+    },
     servers: stackServers,
   };
 }

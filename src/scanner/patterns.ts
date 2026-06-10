@@ -305,3 +305,96 @@ export function detectExfilArgs(args: readonly ArgSchema[]): Finding[] {
 
   return findings;
 }
+
+// ---------------------------------------------------------------------------
+// detectInstallScriptShape
+// ---------------------------------------------------------------------------
+
+/**
+ * Node.js flags that enable arbitrary code execution.
+ * These are rejected regardless of format (bare or with value).
+ * This blocklist catches known-dangerous flags; the SAFE_ARG_PATTERNS
+ * allowlist in src/commands/install.ts (validateRuntimeArgs) catches
+ * unknown/malformed arguments at resolve time.
+ */
+export const DANGEROUS_FLAG_PREFIXES: readonly string[] = [
+  "--eval", "-e",
+  "--require", "-r",
+  "--import",
+  "--loader",
+  "--experimental-loader",
+  "--inspect",
+  "--inspect-brk",
+  "--experimental-policy",
+  "--experimental-network-imports",
+  "--input-type",
+];
+
+/**
+ * Structural input for detectInstallScriptShape (mirrors ArgSchema's
+ * local-shape pattern above) — ServerEntry packages are assignable.
+ */
+export interface PackageShapeInput {
+  registryType: string;
+  identifier: string;
+  runtimeArguments?: ReadonlyArray<string | { type: string; value: string }>;
+}
+
+/**
+ * Deterministic launch-shape awareness (metadata-only; honors the
+ * no-source-scan decision).
+ *
+ * - registryType "npm" → ONE low "install-script" finding per package
+ *   (npm-gated: only `npx -y` auto-runs lifecycle scripts on first run; uvx
+ *   and docker-run do not). Low = a property of the launcher class, true for
+ *   the whole npm ecosystem — awareness, not anomaly.
+ * - For EVERY registryType (matching validateRuntimeArgs' resolve-time
+ *   coverage in install.ts — a pypi/oci package declaring --eval-class args
+ *   hard-throws at install and gets the same audit visibility in why/lock/up):
+ *   each runtimeArgument matching a DANGEROUS_FLAG_PREFIXES entry yields a
+ *   medium "install-script" finding naming the matched prefix. Medium, not
+ *   high: validateRuntimeArgs already hard-throws at resolve time; this is the
+ *   why/audit visibility signal, and high would zero the registryMeta bucket
+ *   via the trust-score cap rule.
+ * - oci: docker-run-without---rm is unsatisfiable from registry metadata —
+ *   resolveInstallEntry (install.ts) always injects --rm into mcpm-built
+ *   launchers; revisit if launch shapes ever come from declared metadata.
+ *
+ * Returns a new Finding[] (never mutates input).
+ */
+export function detectInstallScriptShape(pkg: PackageShapeInput): Finding[] {
+  const findings: Finding[] = [];
+
+  if (pkg.registryType === "npm") {
+    findings.push(
+      makeFinding(
+        "low",
+        "install-script",
+        `This launcher runs install scripts: "${pkg.identifier}" is launched via "npx -y", which executes npm lifecycle scripts on first run`,
+        `package: ${pkg.identifier}`,
+      ),
+    );
+  }
+
+  for (const rawArg of pkg.runtimeArguments ?? []) {
+    const arg = typeof rawArg === "string" ? rawArg : rawArg.value;
+    // First-match prefix is interpolated into the message — list order makes
+    // this safe ("--inspect-brk" neither equals "--inspect" nor starts with
+    // "--inspect=", so it is always named as itself).
+    const prefix = DANGEROUS_FLAG_PREFIXES.find(
+      (p) => arg === p || arg.startsWith(`${p}=`),
+    );
+    if (prefix !== undefined) {
+      findings.push(
+        makeFinding(
+          "medium",
+          "install-script",
+          `Declared runtime argument "${arg}" matches the dangerous Node.js launch flag "${prefix}"`,
+          `runtime argument: ${arg}`,
+        ),
+      );
+    }
+  }
+
+  return findings;
+}

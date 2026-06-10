@@ -1614,6 +1614,279 @@ describe("handleInstall — --min-trust gate", () => {
 });
 
 // ---------------------------------------------------------------------------
+// --min-release-age / --allow-fresh flags (F4)
+// ---------------------------------------------------------------------------
+
+import { parseMinReleaseAge } from "../../commands/install.js";
+
+describe("parseMinReleaseAge — valid inputs", () => {
+  it("accepts '0' and returns 0", () => {
+    expect(parseMinReleaseAge("0")).toBe(0);
+  });
+
+  it("accepts '24' and returns 24", () => {
+    expect(parseMinReleaseAge("24")).toBe(24);
+  });
+
+  it("accepts '8760' and returns 8760", () => {
+    expect(parseMinReleaseAge("8760")).toBe(8760);
+  });
+});
+
+describe("parseMinReleaseAge — invalid inputs", () => {
+  it("throws InvalidArgumentError for empty string", () => {
+    expect(() => parseMinReleaseAge("")).toThrow(InvalidArgumentError);
+  });
+
+  it("throws InvalidArgumentError for '-1'", () => {
+    expect(() => parseMinReleaseAge("-1")).toThrow(InvalidArgumentError);
+  });
+
+  it("throws InvalidArgumentError for scientific notation '1e2' (would silently become 100)", () => {
+    expect(() => parseMinReleaseAge("1e2")).toThrow(InvalidArgumentError);
+  });
+
+  it("throws InvalidArgumentError for hex '0x18' (would silently become 24)", () => {
+    expect(() => parseMinReleaseAge("0x18")).toThrow(InvalidArgumentError);
+  });
+
+  it("throws InvalidArgumentError for '24.5' (non-integer)", () => {
+    expect(() => parseMinReleaseAge("24.5")).toThrow(InvalidArgumentError);
+  });
+
+  it("throws InvalidArgumentError for string with leading space ' 24'", () => {
+    expect(() => parseMinReleaseAge(" 24")).toThrow(InvalidArgumentError);
+  });
+});
+
+describe("handleInstall — --min-release-age gate", () => {
+  beforeEach(() => {
+    vi.resetAllMocks();
+  });
+
+  // Fixed clock — these tests never read the wall clock.
+  const NOW = new Date("2026-06-10T00:00:00Z").getTime();
+  const HOUR_MS = 60 * 60 * 1000;
+  const DAY_MS = 24 * HOUR_MS;
+
+  /** Entry whose official meta carries the given publishedAt; undefined drops _meta entirely. */
+  function makeEntryPublishedAt(publishedAt: string | undefined): ServerEntry {
+    const base = makeServerEntry();
+    if (publishedAt === undefined) {
+      return { server: base.server };
+    }
+    return {
+      ...base,
+      _meta: {
+        "io.modelcontextprotocol.registry/official": {
+          status: "active",
+          publishedAt,
+          isLatest: true,
+        },
+      },
+    };
+  }
+
+  function makeGateDeps(
+    publishedAt: string | undefined,
+    overrides: Partial<InstallDeps> = {}
+  ): InstallDeps {
+    return makeDeps({
+      registryClient: {
+        getServer: vi.fn().mockResolvedValue(makeEntryPublishedAt(publishedAt)),
+      },
+      now: () => NOW,
+      ...overrides,
+    });
+  }
+
+  function findingsPassedToScore(deps: InstallDeps): Finding[] {
+    const spy = deps.computeTrustScore as ReturnType<typeof vi.fn>;
+    return (spy.mock.calls[0][0] as TrustScoreInput).findings;
+  }
+
+  it("blocks a fresh release before any output or confirmation", async () => {
+    const adapter = makeAdapter("claude-desktop");
+    const deps = makeGateDeps(new Date(NOW - 2 * HOUR_MS).toISOString(), {
+      getAdapter: vi.fn().mockReturnValue(adapter),
+    });
+    await expect(
+      handleInstall("io.github.test/my-server", { minReleaseAge: 24, json: false }, deps)
+    ).rejects.toThrow(/below the required minimum of 24h.*Use --allow-fresh/);
+    // Gate precedes Step 3: no trust display, no confirmation, nothing written.
+    expect(deps.output).not.toHaveBeenCalled();
+    expect(deps.confirm).not.toHaveBeenCalled();
+    expect(adapter.addServer).not.toHaveBeenCalled();
+    expect(deps.addToStore).not.toHaveBeenCalled();
+  });
+
+  it("emits the release_age_not_met JSON envelope in --json mode (dual-channel)", async () => {
+    const captured: string[] = [];
+    const deps = makeGateDeps(new Date(NOW - 2 * HOUR_MS).toISOString(), {
+      output: (t: string) => captured.push(t),
+    });
+    await expect(
+      handleInstall("io.github.test/my-server", { json: true, minReleaseAge: 24 }, deps)
+    ).rejects.toThrow(/below the required minimum of 24h/);
+    const jsonOutput = JSON.parse(captured.join("\n")) as Record<string, unknown>;
+    expect(jsonOutput).toMatchObject({
+      name: "io.github.test/my-server",
+      error: "release_age_not_met",
+      ageHours: 2,
+      required: 24,
+      reason: "fresh",
+    });
+  });
+
+  it("blocks an ABSENT publish timestamp when armed (omit-_meta bypass closed)", async () => {
+    const adapter = makeAdapter("claude-desktop");
+    const deps = makeGateDeps(undefined, {
+      getAdapter: vi.fn().mockReturnValue(adapter),
+    });
+    await expect(
+      handleInstall("io.github.test/my-server", { minReleaseAge: 24 }, deps)
+    ).rejects.toThrow(/missing from the registry metadata/);
+    expect(adapter.addServer).not.toHaveBeenCalled();
+  });
+
+  it("emits ageHours null and reason 'absent' in --json mode for a missing timestamp", async () => {
+    const captured: string[] = [];
+    const deps = makeGateDeps(undefined, {
+      output: (t: string) => captured.push(t),
+    });
+    await expect(
+      handleInstall("io.github.test/my-server", { json: true, minReleaseAge: 24 }, deps)
+    ).rejects.toThrow(/missing from the registry metadata/);
+    const jsonOutput = JSON.parse(captured.join("\n")) as Record<string, unknown>;
+    expect(jsonOutput).toMatchObject({
+      error: "release_age_not_met",
+      ageHours: null,
+      required: 24,
+      reason: "absent",
+    });
+  });
+
+  it("blocks a future timestamp with the dedicated 'in the future' variant (never 'Release age 0h')", async () => {
+    const captured: string[] = [];
+    const deps = makeGateDeps(new Date(NOW + HOUR_MS).toISOString(), {
+      output: (t: string) => captured.push(t),
+    });
+    let thrown: Error | undefined;
+    try {
+      await handleInstall("io.github.test/my-server", { json: true, minReleaseAge: 24 }, deps);
+    } catch (err) {
+      thrown = err as Error;
+    }
+    expect(thrown?.message).toMatch(/in the future/);
+    expect(thrown?.message).not.toMatch(/Release age 0h/);
+    const jsonOutput = JSON.parse(captured.join("\n")) as Record<string, unknown>;
+    expect(jsonOutput).toMatchObject({ error: "release_age_not_met", reason: "future" });
+  });
+
+  it("blocks an unparseable timestamp with the 'could not be parsed' variant", async () => {
+    const captured: string[] = [];
+    const deps = makeGateDeps("not-a-date", {
+      output: (t: string) => captured.push(t),
+    });
+    await expect(
+      handleInstall("io.github.test/my-server", { json: true, minReleaseAge: 24 }, deps)
+    ).rejects.toThrow(/could not be parsed/);
+    const jsonOutput = JSON.parse(captured.join("\n")) as Record<string, unknown>;
+    expect(jsonOutput).toMatchObject({
+      error: "release_age_not_met",
+      ageHours: null,
+      reason: "unparseable",
+    });
+  });
+
+  it("--allow-fresh bypasses the gate for a fresh release (soft penalty still scored)", async () => {
+    const adapter = makeAdapter("claude-desktop");
+    const deps = makeGateDeps(new Date(NOW - 2 * HOUR_MS).toISOString(), {
+      getAdapter: vi.fn().mockReturnValue(adapter),
+    });
+    await handleInstall(
+      "io.github.test/my-server",
+      { minReleaseAge: 24, allowFresh: true },
+      deps
+    );
+    expect(adapter.addServer).toHaveBeenCalled();
+    // ONLY the gate is bypassed — the medium release-cooldown finding still lands in the score.
+    expect(findingsPassedToScore(deps).some((f) => f.type === "release-cooldown")).toBe(true);
+  });
+
+  it("--allow-fresh also bypasses the absent-timestamp block (escape hatch covers the whole gate)", async () => {
+    const adapter = makeAdapter("claude-desktop");
+    const deps = makeGateDeps(undefined, {
+      getAdapter: vi.fn().mockReturnValue(adapter),
+    });
+    await handleInstall(
+      "io.github.test/my-server",
+      { minReleaseAge: 24, allowFresh: true },
+      deps
+    );
+    expect(adapter.addServer).toHaveBeenCalled();
+  });
+
+  it("-y/--yes does NOT bypass the gate", async () => {
+    const deps = makeGateDeps(new Date(NOW - 2 * HOUR_MS).toISOString());
+    await expect(
+      handleInstall("io.github.test/my-server", { yes: true, minReleaseAge: 24 }, deps)
+    ).rejects.toThrow(/below the required minimum of 24h/);
+    expect(deps.confirm).not.toHaveBeenCalled();
+  });
+
+  it("is OFF by default: fresh release installs, but the medium release-cooldown finding lands in the score", async () => {
+    const adapter = makeAdapter("claude-desktop");
+    const deps = makeGateDeps(new Date(NOW - 2 * HOUR_MS).toISOString(), {
+      getAdapter: vi.fn().mockReturnValue(adapter),
+    });
+    await handleInstall("io.github.test/my-server", {}, deps);
+    expect(adapter.addServer).toHaveBeenCalled();
+    const cooldown = findingsPassedToScore(deps).filter((f) => f.type === "release-cooldown");
+    expect(cooldown).toHaveLength(1);
+    expect(cooldown[0].severity).toBe("medium");
+  });
+
+  it("absent publishedAt without the flag → no finding AND no throw (score fail-open)", async () => {
+    const adapter = makeAdapter("claude-desktop");
+    const deps = makeGateDeps(undefined, {
+      getAdapter: vi.fn().mockReturnValue(adapter),
+    });
+    await handleInstall("io.github.test/my-server", {}, deps);
+    expect(adapter.addServer).toHaveBeenCalled();
+    expect(findingsPassedToScore(deps).some((f) => f.type === "release-cooldown")).toBe(false);
+  });
+
+  it("threshold coupling: --min-release-age 6 passes a 12h-old release AND removes the soft-penalty finding", async () => {
+    const adapter = makeAdapter("claude-desktop");
+    const deps = makeGateDeps(new Date(NOW - 12 * HOUR_MS).toISOString(), {
+      getAdapter: vi.fn().mockReturnValue(adapter),
+    });
+    await handleInstall("io.github.test/my-server", { minReleaseAge: 6 }, deps);
+    expect(adapter.addServer).toHaveBeenCalled();
+    // The flag also sets the scoring cooldown threshold (documented in the help
+    // text) — the finding and the gate can never disagree.
+    expect(findingsPassedToScore(deps).some((f) => f.type === "release-cooldown")).toBe(false);
+  });
+
+  it("old release (60 days) passes an armed gate with no finding", async () => {
+    const adapter = makeAdapter("claude-desktop");
+    const deps = makeGateDeps(new Date(NOW - 60 * DAY_MS).toISOString(), {
+      getAdapter: vi.fn().mockReturnValue(adapter),
+    });
+    await handleInstall("io.github.test/my-server", { minReleaseAge: 24 }, deps);
+    expect(adapter.addServer).toHaveBeenCalled();
+    expect(findingsPassedToScore(deps).some((f) => f.type === "release-cooldown")).toBe(false);
+  });
+
+  it("deps.now defaults to Date.now: legacy fixture (2024 publishedAt) gets no finding without injection", async () => {
+    const deps = makeDeps(); // no `now` injected; default fixture publishedAt is 2024-01-01
+    await handleInstall("io.github.test/my-server", {}, deps);
+    expect(findingsPassedToScore(deps).some((f) => f.type === "release-cooldown")).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Plaintext secret warning (FINDING-08)
 // ---------------------------------------------------------------------------
 
