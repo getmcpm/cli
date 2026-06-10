@@ -36,6 +36,27 @@ export const TransportSchema = z.object({
 });
 
 /**
+ * Argument — the official MCP Registry Argument type, shared by runtimeArguments
+ * (and packageArguments). Two forms: named ({type:"named",name:"--rm",value?,...})
+ * and positional ({type:"positional",valueHint:"directory",value?,...}). Every
+ * field is optional so the live named shape ({type:"named",name:"-i"} — no `value`)
+ * parses; .passthrough() keeps unmodeled fields (description, format, default,
+ * isRepeated, isRequired) and lets unknown future arg types pass through rather
+ * than hard-failing (same forward-compat philosophy as registryType above).
+ */
+export const ArgumentSchema = z.union([
+  z.string(),
+  z
+    .object({
+      type: z.string().optional(),
+      name: z.string().optional(),
+      value: z.string().optional(),
+      valueHint: z.string().optional(),
+    })
+    .passthrough(),
+]);
+
+/**
  * Package entry — discriminated union on registryType.
  * We use z.string() for registryType so unknown future types pass through
  * rather than hard-failing, while still retaining the typed field.
@@ -46,12 +67,7 @@ export const PackageSchema = z.object({
   version: z.string().optional(),
   transport: TransportSchema.optional(),
   environmentVariables: z.array(EnvVarSchema).default([]),
-  runtimeArguments: z.array(
-    z.union([
-      z.string(),
-      z.object({ type: z.string(), value: z.string() }).passthrough(),
-    ])
-  ).optional(),
+  runtimeArguments: z.array(ArgumentSchema).optional(),
 });
 
 export const RemoteHeaderSchema = z.object({

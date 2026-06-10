@@ -7,6 +7,7 @@
 
 import type { Finding } from "./tier1.js";
 import { normalizeForMatch } from "../guard/patterns.js";
+import { argvTokens, type RuntimeArgument } from "../registry/argument-tokens.js";
 
 // ---------------------------------------------------------------------------
 // Arg schema shape used by detectExfilArgs
@@ -337,7 +338,7 @@ export const DANGEROUS_FLAG_PREFIXES: readonly string[] = [
 export interface PackageShapeInput {
   registryType: string;
   identifier: string;
-  runtimeArguments?: ReadonlyArray<string | { type: string; value: string }>;
+  runtimeArguments?: ReadonlyArray<RuntimeArgument>;
 }
 
 /**
@@ -377,22 +378,30 @@ export function detectInstallScriptShape(pkg: PackageShapeInput): Finding[] {
   }
 
   for (const rawArg of pkg.runtimeArguments ?? []) {
-    const arg = typeof rawArg === "string" ? rawArg : rawArg.value;
-    // First-match prefix is interpolated into the message — list order makes
-    // this safe ("--inspect-brk" neither equals "--inspect" nor starts with
-    // "--inspect=", so it is always named as itself).
-    const prefix = DANGEROUS_FLAG_PREFIXES.find(
-      (p) => arg === p || arg.startsWith(`${p}=`),
-    );
-    if (prefix !== undefined) {
-      findings.push(
-        makeFinding(
-          "medium",
-          "install-script",
-          `Declared runtime argument "${arg}" matches the dangerous Node.js launch flag "${prefix}"`,
-          `runtime argument: ${arg}`,
-        ),
+    // Match over the ARGV-bearing tokens (name + value) — closing the evasion
+    // where a dangerous flag declared as {type:"named",name:"--eval"} (name, no
+    // value) slipped past the old value-only check. valueHint is deliberately
+    // excluded (argvTokens, not argumentTokens): it is a documentation
+    // placeholder that never reaches the launch argv, so matching it would
+    // falsely flag a server that merely documents a slot as valueHint:"--import".
+    // `token` is the matched name OR value, so the copy stays correct under named args.
+    for (const token of argvTokens(rawArg)) {
+      // First-match prefix is interpolated into the message — list order makes
+      // this safe ("--inspect-brk" neither equals "--inspect" nor starts with
+      // "--inspect=", so it is always named as itself).
+      const prefix = DANGEROUS_FLAG_PREFIXES.find(
+        (p) => token === p || token.startsWith(`${p}=`),
       );
+      if (prefix !== undefined) {
+        findings.push(
+          makeFinding(
+            "medium",
+            "install-script",
+            `Declared runtime argument "${token}" matches the dangerous Node.js launch flag "${prefix}"`,
+            `runtime argument: ${token}`,
+          ),
+        );
+      }
     }
   }
 

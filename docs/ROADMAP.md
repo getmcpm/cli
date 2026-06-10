@@ -1,6 +1,13 @@
 # mcpm Roadmap — Security & Developer Experience
 
-> Status: draft for review · Baseline: **v0.8.1** · Drafted: 2026-06-09
+> Status: in delivery · Baseline: **v0.8.1** · Drafted: 2026-06-09
+>
+> **Delivery log:**
+> - ✅ **F4 — Release-age cooldown + install-script-shape awareness** — shipped (PR #70,
+>   2026-06-10). Fixes the live trust-score inversion bug below. Dogfooding it surfaced a
+>   pre-existing registry-parse bug (`mcpm search` rejected the real MCP registry Argument
+>   shape), fixed in a follow-up PR. Next up: **F2** (name-collision slice) + **F3** (digest
+>   lockfile) to complete the v0.9 trio.
 >
 > This roadmap was produced by a grounded research-and-planning pass: six parallel
 > web-research lenses (threat landscape, competitors, MCP protocol evolution, DevX,
@@ -40,7 +47,7 @@ Scoring: `composite = impact + differentiation + alignment + 0.5·effort_cheapne
 | 1 | `guard --confine` — OS-native sandbox (standard tier) | sec | L | **16.5** | v1.0 major |
 | 2 | Cross-server tool-shadowing detection (name-collision v1) | sec | S→M | **16.0** | v0.9 minor |
 | 3 | Content-pinned lockfile (digest tier) + `up --frozen` | both | M | **15.5** | v0.9 minor |
-| 4 | Release-age cooldown + install-script-shape awareness | sec | S→M | **15.5** | v0.9 minor |
+| 4 | Release-age cooldown + install-script-shape awareness ✅ **shipped (PR #70)** | sec | S→M | **15.5** | v0.9 minor |
 | 5 | Reject exfil-named schema params (DENY-tier, list-time) | sec | M | **15.5** | v0.9 minor |
 | 6 | Guard inspection of server-initiated channels (elicitation wedge) | sec | M | **15.0** | v1.0 major |
 | 7 | `mcpm sync --check` — cross-client drift dashboard | devx | M | **14.5** | v0.9 minor |
@@ -51,9 +58,11 @@ Scoring: `composite = impact + differentiation + alignment + 0.5·effort_cheapne
 
 ---
 
-## ⚠️ A live bug this audit surfaced
+## ✅ A live bug this audit surfaced — now fixed
 
-`scoreRegistryMeta` (`src/scanner/trust-score.ts:93-98`) only **adds +3** for versions older than 30 days and **never penalizes a fresh republish**. A poisoned same-version-name backdoor therefore scores **identically** to a 29-day-old version today — the trust signal is inverted for exactly the postmark/Shai-Hulud window. Fixed by **Feature 4** (emit a release-cooldown finding *unconditionally* when age < threshold, so recency is an always-on soft penalty; the fail-closed block stays opt-in).
+`scoreRegistryMeta` (`src/scanner/trust-score.ts:93-98`) only **added +3** for versions older than 30 days and **never penalized a fresh republish**. A poisoned same-version-name backdoor therefore scored **identically** to a 29-day-old version — the trust signal was inverted for exactly the postmark/Shai-Hulud window. **Fixed by Feature 4 (PR #70):** a release-cooldown finding now fires *unconditionally* when age < threshold, so recency is an always-on soft penalty; the fail-closed block stays opt-in.
+
+> **Bonus bug found while dogfooding F4 — also fixed.** `mcpm search` (and `getServer`/`versions`) threw `Invalid search response` against the live registry: the schema modeled `runtimeArguments` entries as `{type, value}` with `value` **required**, but the official MCP registry Argument type makes `value` optional and uses named (`{type:"named", name:"--rm"}`) / positional (`{type:"positional", valueHint:"…"}`) forms — so any server declaring a named arg was rejected. Fixed by widening the schema to the real Argument shape and making every consumer (install render/validate, tier1 injection scan, F4 dangerous-flag match) total over it. A `{type:"named", name:"--eval"}` evasion and a bundled `-eCODE` short flag are both still rejected.
 
 ---
 

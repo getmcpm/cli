@@ -620,6 +620,72 @@ describe("resolveInstallEntry — npm package", () => {
   });
 });
 
+describe("resolveInstallEntry — named/positional runtimeArguments", () => {
+  it("renders a named-only arg without an undefined slot (regression for ['-y', id, undefined])", () => {
+    const server = makeServerEntry({
+      packages: [
+        {
+          registryType: "npm",
+          identifier: "@test/my-server",
+          environmentVariables: [],
+          runtimeArguments: [{ type: "named", name: "-i" }],
+        },
+      ],
+    });
+    const entry = resolveInstallEntry(server, "claude-desktop");
+    expect(entry.args).toContain("-i");
+    expect(entry.args).not.toContain(undefined);
+    expect(entry.args!.every((a) => typeof a === "string")).toBe(true);
+  });
+
+  it("renders a named arg with value as [name, value] in order", () => {
+    const server = makeServerEntry({
+      packages: [
+        {
+          registryType: "npm",
+          identifier: "@test/my-server",
+          environmentVariables: [],
+          runtimeArguments: [{ type: "named", name: "--port", value: "8089" }],
+        },
+      ],
+    });
+    const entry = resolveInstallEntry(server, "claude-desktop");
+    const args = entry.args!;
+    expect(args.indexOf("--port")).toBeGreaterThanOrEqual(0);
+    expect(args.indexOf("8089")).toBe(args.indexOf("--port") + 1);
+  });
+
+  it("renders a positional arg with value", () => {
+    const server = makeServerEntry({
+      packages: [
+        {
+          registryType: "npm",
+          identifier: "@test/my-server",
+          environmentVariables: [],
+          runtimeArguments: [{ type: "positional", value: "-y" }],
+        },
+      ],
+    });
+    const entry = resolveInstallEntry(server, "claude-desktop");
+    expect(entry.args).toContain("-y");
+  });
+
+  it("skips a positional placeholder that carries only a valueHint", () => {
+    const server = makeServerEntry({
+      packages: [
+        {
+          registryType: "npm",
+          identifier: "@test/my-server",
+          environmentVariables: [],
+          runtimeArguments: [{ type: "positional", valueHint: "directory" }],
+        },
+      ],
+    });
+    const entry = resolveInstallEntry(server, "claude-desktop");
+    expect(entry.args).not.toContain("directory");
+  });
+});
+
 describe("resolveInstallEntry — pypi package", () => {
   it("produces uvx command for pypi packages", () => {
     const server = makeServerEntry({
@@ -1195,6 +1261,37 @@ describe("validateRuntimeArgs", () => {
 
   it("accepts empty array", () => {
     expect(() => validateRuntimeArgs([])).not.toThrow();
+  });
+
+  it("accepts single-dash short flags the live registry declares (-i, -y, --rm)", () => {
+    // Live filesystem search declares -i / --rm (oci) and -y (positional npm).
+    // The Layer-2 allowlist must not over-reject these structural short flags.
+    expect(() => validateRuntimeArgs(["-i", "-y", "--rm"])).not.toThrow();
+    expect(() => validateRuntimeArgs(["-p"])).not.toThrow();
+  });
+
+  it("still rejects dangerous short flags before the allowlist (Layer-1 first)", () => {
+    expect(() => validateRuntimeArgs(["-e"])).toThrow(/dangerous/i);
+    expect(() => validateRuntimeArgs(["-r"])).toThrow(/dangerous/i);
+  });
+
+  it("does not accept a bare dash or a short flag with an '=' value form", () => {
+    expect(() => validateRuntimeArgs(["-"])).toThrow(/unrecognized/i);
+    // short flags don't take '=' values; the surface stays minimal
+    expect(() => validateRuntimeArgs(["-x=$(whoami)"])).toThrow(/unrecognized/i);
+  });
+
+  it("still rejects a short flag with shell metacharacters in it", () => {
+    expect(() => validateRuntimeArgs(["-i; rm -rf /"])).toThrow(/unrecognized/i);
+  });
+
+  it("rejects bundled multi-char short flags that could smuggle a dangerous payload", () => {
+    // -eCODE / -rmodule bundle a dangerous flag with its argument; Layer-1 only
+    // rejects the exact -e / -r token, so the Layer-2 short-flag allowlist must
+    // be exactly one alpha char to refuse the bundled form.
+    expect(() => validateRuntimeArgs(["-econsole.log(1)"])).toThrow(/unrecognized/i);
+    expect(() => validateRuntimeArgs(["-rmalicious-module"])).toThrow(/unrecognized/i);
+    expect(() => validateRuntimeArgs(["-rm"])).toThrow(/unrecognized/i);
   });
 });
 

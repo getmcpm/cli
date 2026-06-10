@@ -618,6 +618,65 @@ describe("detectInstallScriptShape", () => {
     expect(objectForm.some((f) => f.severity === "medium")).toBe(true);
   });
 
+  it("closes the named-arg evasion: a dangerous flag declared as {name} is still flagged", () => {
+    // On main only `value` is checked, so {type:"named",name:"--eval"} (name, no
+    // value) slips past F4 — this asserts the value-only blindspot is closed.
+    const findings = detectInstallScriptShape(
+      makePkg({ registryType: "pypi", identifier: "x", runtimeArguments: [{ type: "named", name: "--eval" }] }),
+    );
+    const medium = findings.find((f) => f.severity === "medium");
+    expect(medium?.type).toBe("install-script");
+    expect(medium?.message).toContain('"--eval"');
+    expect(medium?.location).toBe("runtime argument: --eval");
+  });
+
+  it("closes the named-arg evasion for the -e short form", () => {
+    const findings = detectInstallScriptShape(
+      makePkg({ registryType: "pypi", identifier: "x", runtimeArguments: [{ type: "named", name: "-e" }] }),
+    );
+    const medium = findings.find((f) => f.severity === "medium");
+    expect(medium?.message).toContain('"-e"');
+  });
+
+  it("does not flag a benign named arg from the dangerous-flag loop", () => {
+    expect(
+      detectInstallScriptShape(
+        makePkg({ registryType: "pypi", identifier: "x", runtimeArguments: [{ type: "named", name: "--rm" }] }),
+      ),
+    ).toEqual([]);
+    expect(
+      detectInstallScriptShape(
+        makePkg({ registryType: "pypi", identifier: "x", runtimeArguments: [{ type: "named", name: "-i" }] }),
+      ),
+    ).toEqual([]);
+  });
+
+  it("does not flag a positional placeholder whose valueHint resembles a dangerous flag", () => {
+    // valueHint is documentation ("pass --import path here"), never rendered into
+    // argv — F4 scans argvTokens (name + value), so a valueHint that happens to
+    // match a dangerous prefix must NOT produce a finding (no false positive).
+    expect(
+      detectInstallScriptShape(
+        makePkg({
+          registryType: "pypi",
+          identifier: "x",
+          runtimeArguments: [{ type: "positional", valueHint: "--import" }],
+        }),
+      ),
+    ).toEqual([]);
+  });
+
+  it("F4 finding copy is unchanged and contains no 'malicious'", () => {
+    const findings = detectInstallScriptShape(
+      makePkg({ registryType: "pypi", identifier: "x", runtimeArguments: [{ type: "named", name: "--eval" }] }),
+    );
+    const medium = findings.find((f) => f.severity === "medium")!;
+    expect(medium.message).toBe(
+      'Declared runtime argument "--eval" matches the dangerous Node.js launch flag "--eval"',
+    );
+    expect(medium.message).not.toContain("malicious");
+  });
+
   it("interpolates the matched prefix into the message (first-match correctness)", () => {
     const inspect = detectInstallScriptShape(
       makePkg({ registryType: "pypi", identifier: "x", runtimeArguments: ["--inspect"] }),
