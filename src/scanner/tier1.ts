@@ -6,6 +6,7 @@
  */
 
 import type { ServerEntry } from "../registry/types.js";
+import { argumentTokens } from "../registry/argument-tokens.js";
 import {
   detectSecrets,
   detectPromptInjection,
@@ -93,10 +94,14 @@ export function scanTier1(entry: ServerEntry): Finding[] {
   }
 
   // --- 1c. Scan runtimeArguments for injection ---
+  // Scan every security-relevant token (name + value + valueHint), not just
+  // value — so injection text hidden in a named arg's `name` or a positional
+  // `valueHint` is no longer a blindspot.
   for (const pkg of server.packages) {
     for (const arg of pkg.runtimeArguments ?? []) {
-      const value = typeof arg === "string" ? arg : arg.value;
-      allFindings.push(...detectPromptInjection(value));
+      for (const token of argumentTokens(arg)) {
+        allFindings.push(...detectPromptInjection(token));
+      }
     }
   }
 

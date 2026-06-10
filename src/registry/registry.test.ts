@@ -10,8 +10,10 @@
  * - Immutability: returned objects are frozen/spread copies (spot-checked).
  */
 
+import { readFileSync } from "node:fs";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { RegistryClient } from "./client.js";
+import { SearchResponseSchema } from "./schemas.js";
 import {
   RegistryError,
   NetworkError,
@@ -20,6 +22,16 @@ import {
 } from "./errors.js";
 import { paginateServers } from "./pagination.js";
 import type { SearchResult, ServerEntry, ServerVersion } from "./types.js";
+
+// Real captured /v0.1/servers?search=filesystem payload (10 servers; named -i/--rm
+// args, positional -y) — deterministic offline regression fixture for THE bug:
+// named runtimeArguments (name, no value) were rejected by the old union.
+const SEARCH_FILESYSTEM_FIXTURE = JSON.parse(
+  readFileSync(
+    new URL("./__fixtures__/search-filesystem.json", import.meta.url),
+    "utf8"
+  )
+) as unknown;
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -370,6 +382,79 @@ describe("RegistryClient.searchServers — package variants", () => {
     expect(envVars[0].isSecret).toBe(true);
     expect(envVars[1].isRequired).toBe(false);
     expect(envVars[1].isSecret).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// searchServers — live registry fixture (THE bug: named/positional Argument)
+// ---------------------------------------------------------------------------
+
+describe("RegistryClient.searchServers — live filesystem fixture", () => {
+  it("SearchResponseSchema accepts the captured live payload (named args)", () => {
+    // RED on main: named runtimeArguments ({type:"named",name:"-i"} — no `value`)
+    // fail the old union, so the whole response is rejected.
+    const parsed = SearchResponseSchema.safeParse(SEARCH_FILESYSTEM_FIXTURE);
+    expect(parsed.success).toBe(true);
+  });
+
+  it("searchServers resolves the fixture without 'Invalid search response' and returns all 10 servers", async () => {
+    const fetchImpl = mockFetch(SEARCH_FILESYSTEM_FIXTURE);
+    const client = new RegistryClient({ fetchImpl });
+
+    const result = await client.searchServers("filesystem");
+
+    expect(result.servers).toHaveLength(10);
+  });
+
+  it("preserves a named runtimeArgument (name present, value absent, passthrough fields kept)", async () => {
+    const fetchImpl = mockFetch(SEARCH_FILESYSTEM_FIXTURE);
+    const client = new RegistryClient({ fetchImpl });
+
+    const result = await client.searchServers("filesystem");
+    const ociEntry = result.servers.find(
+      (e) => e.server.name === "io.github.j0hanz/filesystem-mcp"
+    )!;
+    const ociPkg = ociEntry.server.packages.find((p) => p.registryType === "oci")!;
+    const args = ociPkg.runtimeArguments!;
+
+    const stdinArg = args.find(
+      (a) => typeof a === "object" && a.name === "-i"
+    ) as { type?: string; name?: string; value?: string; description?: string };
+    expect(stdinArg).toBeDefined();
+    expect(stdinArg.name).toBe("-i");
+    expect(stdinArg.value).toBeUndefined();
+    expect(stdinArg.description).toBe("Keep stdin open for stdio transport.");
+
+    const rmArg = args.find(
+      (a) => typeof a === "object" && a.name === "--rm"
+    ) as { name?: string; value?: string };
+    expect(rmArg).toBeDefined();
+    expect(rmArg.value).toBeUndefined();
+  });
+
+  it("preserves a positional-with-value runtimeArgument", async () => {
+    const fetchImpl = mockFetch(SEARCH_FILESYSTEM_FIXTURE);
+    const client = new RegistryClient({ fetchImpl });
+
+    const result = await client.searchServers("filesystem");
+    const pulseEntry = result.servers.find(
+      (e) => e.server.name === "com.pulsemcp/remote-filesystem"
+    )!;
+    const args = pulseEntry.server.packages[0].runtimeArguments!;
+
+    expect(args).toEqual([{ value: "-y", type: "positional" }]);
+  });
+
+  it("getServer parses a fixture entry carrying named oci args (transitive PackageSchema fix)", async () => {
+    const ociEntry = (SEARCH_FILESYSTEM_FIXTURE as { servers: unknown[] }).servers.find(
+      (e) => (e as ServerEntry).server.name === "io.github.j0hanz/filesystem-mcp"
+    )!;
+    const fetchImpl = mockFetch(ociEntry);
+    const client = new RegistryClient({ fetchImpl });
+
+    const entry = await client.getServer("io.github.j0hanz/filesystem-mcp");
+
+    expect(entry.server.name).toBe("io.github.j0hanz/filesystem-mcp");
   });
 });
 

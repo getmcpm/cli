@@ -17,6 +17,7 @@ import { CLIENT_IDS } from "../config/paths.js";
 import type { ClientId } from "../config/paths.js";
 import type { ConfigAdapter, McpServerEntry } from "../config/adapters/index.js";
 import type { ServerEntry, EnvVar } from "../registry/types.js";
+import { argvTokens, type RuntimeArgument } from "../registry/argument-tokens.js";
 import type { Finding } from "../scanner/tier1.js";
 import type { TrustScore, TrustScoreInput } from "../scanner/trust-score.js";
 import type { InstalledServer } from "../store/servers.js";
@@ -97,15 +98,20 @@ export function validateIdentifier(identifier: string, registryType: string): vo
 }
 
 /**
- * Normalize runtimeArguments from the registry.
- * The registry may return plain strings or {type, value} objects.
+ * Render runtimeArguments from the registry into a launch argv slice.
+ *
+ * Delegates to argvTokens (name + value, never valueHint) so the SAME function
+ * defines both what gets executed here and what the F4 dangerous-flag scan
+ * matches in scanner/patterns.ts — they cannot diverge. valueHint (a
+ * documentation placeholder like "directory") is deliberately not rendered:
+ * emitting it would inject a bogus literal argument. The injection scanner
+ * (scanner/tier1.ts) uses argumentTokens instead, which DOES read valueHint as
+ * user-facing text; that divergence is intentional and documented there.
  */
 function normalizeRuntimeArgs(
-  args: ReadonlyArray<string | { type: string; value: string }>
+  args: ReadonlyArray<RuntimeArgument>
 ): string[] {
-  return args.map((arg) =>
-    typeof arg === "string" ? arg : arg.value
-  );
+  return args.flatMap(argvTokens);
 }
 
 /**
@@ -117,6 +123,13 @@ function normalizeRuntimeArgs(
 const SAFE_ARG_PATTERNS: readonly RegExp[] = [
   // Generic boolean flags (--allow-write, --read-only, --no-sandbox, etc.)
   /^--[a-zA-Z][\w-]*$/,
+  // Single-dash short flags the live registry legitimately declares (-i, -y, -p).
+  // EXACTLY one alpha char — no bundled tail. Allowing a tail (-rmodule, -eCODE)
+  // would let a dangerous flag bundle its payload and slip past the Layer-1
+  // DANGEROUS_FLAG_PREFIXES check, which only rejects the exact token (-e/-r) or
+  // its '=' form. The live registry's short flags are all single-letter, so the
+  // narrow form loses no real coverage while closing the bundling bypass.
+  /^-[a-zA-Z]$/,
   // Generic --key=value flags with safe value characters
   // Blocks shell metacharacters: ; | $ ` & ( ) { } < > ! ' "
   /^--[a-zA-Z][\w-]+=[\w./@:, -]+$/,
