@@ -13,7 +13,7 @@
 [![npm version](https://img.shields.io/npm/v/@getmcpm/cli)](https://www.npmjs.com/package/@getmcpm/cli)
 [![license](https://img.shields.io/github/license/getmcpm/cli)](./LICENSE)
 [![tests](https://img.shields.io/github/actions/workflow/status/getmcpm/cli/ci.yml?label=tests)](https://github.com/getmcpm/cli/actions)
-[![Known Vulnerabilities](https://snyk.io/test/github/getmcpm/cli/badge.svg)](https://snyk.io/test/github/getmcpm/cli)
+[![Known Vulnerabilities](https://snyk.io/advisor/npm-package/@getmcpm/cli/badge.svg)](https://snyk.io/advisor/npm-package/@getmcpm/cli)
 
 ---
 
