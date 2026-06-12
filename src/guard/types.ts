@@ -12,7 +12,10 @@ export type SignatureTarget =
   | "tool_response"
   | "tool_call_args"
   | "tool_description"
-  | "tool_annotations";
+  | "tool_annotations"
+  | "resource_content"
+  | "prompt_content"
+  | "initialize_instructions";
 
 export interface Signature {
   readonly id: string;

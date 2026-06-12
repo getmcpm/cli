@@ -97,6 +97,51 @@ function targetSubtree(msg: JSONRPCMessage, target: SignatureTarget): unknown {
     }
     return null;
   }
+  if (target === "resource_content") {
+    // resources/read response → result.contents[*].text. Text-only for the first
+    // slice: base64 `blob` decoding is deferred (binary blobs are noise + an FP /
+    // perf risk). Retrieved DATA carrier — the warn-only clamp in inspectMessage
+    // degrades a match here to `warn` so a poisoned README is annotated, not dropped.
+    if ("result" in msg) {
+      const result = (msg as { result?: { contents?: Array<{ text?: unknown }> } }).result;
+      const contents = result?.contents;
+      if (!Array.isArray(contents)) return null;
+      return contents.map((c) => c.text ?? null);
+    }
+    return null;
+  }
+  if (target === "prompt_content") {
+    // prompts/get response → result.messages[*].content. Return the whole
+    // `content` and let stringLeaves recurse it: content may be a single
+    // `{type:"text", text:"…"}` object OR an ARRAY of such blocks. Extracting
+    // only `content.text` would yield null for the array shape, silently
+    // bypassing inspection of a server-provided prompt. stringLeaves skips the
+    // non-string base64 image/audio `data` leaves on its own (they're strings,
+    // but only injection-shaped text matches a signature; the perf cost is
+    // bounded by normalizeForMatch's cap). Retrieved DATA carrier — warn-only
+    // via the inspectMessage clamp. (security: H1 array-content bypass)
+    if ("result" in msg) {
+      const result = (msg as { result?: { messages?: Array<{ content?: unknown }> } }).result;
+      const messages = result?.messages;
+      if (!Array.isArray(messages)) return null;
+      return messages.map((m) => m.content ?? null);
+    }
+    return null;
+  }
+  if (target === "initialize_instructions") {
+    // initialize response → result.instructions + result.serverInfo. Pre-invocation
+    // CONTEXT (block-capable). Gated on result.protocolVersion (the reliable
+    // initialize discriminator) so a stray `instructions` key in a tools/call
+    // result is NOT mislabeled as block-capable context. (security: H1 #1)
+    if ("result" in msg) {
+      const result = (msg as {
+        result?: { protocolVersion?: unknown; instructions?: unknown; serverInfo?: unknown };
+      }).result;
+      if (typeof result?.protocolVersion !== "string") return null;
+      return [result.instructions ?? null, result.serverInfo ?? null];
+    }
+    return null;
+  }
   return null;
 }
 
@@ -236,19 +281,184 @@ function inspectAgainstSignatures(
   return findings;
 }
 
-function severityRank(s: Severity): number {
-  switch (s) {
-    case "critical": return 3;
-    case "high":     return 2;
-    case "medium":   return 1;
-    case "low":      return 0;
+// ---------------------------------------------------------------------------
+// H2 — hidden-character PRESENCE detector (tool-poisoning malice indicator)
+// ---------------------------------------------------------------------------
+
+/**
+ * Targets H2 inspects. METADATA carriers only: a hidden/control char in a tool
+ * description / title / inputSchema text / annotations hides content from human
+ * review (OWASP-MCP-1 tool poisoning). H2 deliberately does NOT run on
+ * tool_response / retrieved data — an invisible char in a fetched log, source
+ * file, or email is common and benign, so scanning there is an FP generator.
+ * Explicit allowlist so the scope can't silently expand.
+ */
+const HIDDEN_CHAR_TARGETS: ReadonlySet<SignatureTarget> = new Set<SignatureTarget>([
+  "tool_description",
+  "tool_annotations",
+  // initialize.instructions is block-capable PRE-INVOCATION context (H1). An
+  // invisible separator embedded there to obfuscate keywords would otherwise go
+  // unreported, so it's in scope. resource_content / prompt_content stay OUT of
+  // scope — invisible chars in fetched files/emails are common and benign. (H2)
+  "initialize_instructions",
+]);
+
+/**
+ * Dangerous invisible / control characters. Distinct from PATTERN_BREAKERS:
+ * H2 must also catch C0/C1 controls and ANSI ESC, which PATTERN_BREAKERS omits.
+ *
+ * Matches: zero-width (ZWSP/ZWNJ/ZWJ/word-joiner/BOM), bidi overrides &
+ * embeddings (U+202A–U+202E, U+2066–U+2069), soft hyphen, C0 controls EXCEPT
+ * tab/newline/CR plus DEL, C1 controls, and the Unicode tag block.
+ *
+ * Deliberately enumerated (no broad \p{Cf}) so legitimate non-Latin metadata —
+ * e.g. an Arabic tool description carrying U+0600-class format chars — does not
+ * false-positive. Broaden only if an attack fixture demonstrates a gap. The
+ * \t \n \r whitespace bytes (0x09/0x0A/0x0D) are intentionally excluded.
+ */
+const HIDDEN_CHAR_CLASS =
+  /[\u200b-\u200f\u2060-\u2064\ufeff\u00ad\u202a-\u202e\u2066-\u2069]|[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]|[\u0080-\u009f]|[\u{E0000}-\u{E007F}]/gu;
+
+// Human-readable classification per matched codepoint. Never echoes the raw
+// (invisible) char into the excerpt — that would be unreadable in logs and
+// could carry the payload forward. Reports the codepoint by hex + class name.
+function classifyHiddenChar(ch: string): string {
+  const cp = ch.codePointAt(0) ?? 0;
+  const hex = `U+${cp.toString(16).toUpperCase().padStart(4, "0")}`;
+  let kind: string;
+  if (cp === 0x1b) kind = "ANSI-ESC";
+  else if (cp === 0xfeff || cp === 0x2060) kind = "zero-width";
+  else if (cp === 0x200b || cp === 0x200c || cp === 0x200d) kind = "zero-width";
+  else if (cp >= 0x2061 && cp <= 0x2064) kind = "invisible-math";
+  else if (cp === 0x00ad) kind = "soft-hyphen";
+  else if (cp === 0x200e || cp === 0x200f) kind = "bidi-control";
+  else if ((cp >= 0x202a && cp <= 0x202e) || (cp >= 0x2066 && cp <= 0x2069)) kind = "bidi-control";
+  else if (cp >= 0xe0000 && cp <= 0xe007f) kind = "unicode-tag";
+  else if (cp >= 0x80 && cp <= 0x9f) kind = "C1-control";
+  else kind = "control";
+  return `${kind} (${hex})`;
+}
+
+/**
+ * True if the codepoint is an emoji/pictograph component that a ZWJ legitimately
+ * joins: Extended_Pictographic, an emoji modifier (skin tone), or VS16. A ZWJ
+ * (U+200D) flanked by two such codepoints is a benign composite-emoji join
+ * (family, profession, pride flag, couple), not a hidden-char poisoning attempt.
+ * (security: H2 ZWJ false-positive)
+ */
+function isEmojiJoinComponent(cp: number | undefined): boolean {
+  if (cp === undefined) return false;
+  if (cp === 0xfe0f) return true; // VS16 (emoji presentation selector)
+  if (cp >= 0x1f3fb && cp <= 0x1f3ff) return true; // emoji skin-tone modifiers
+  return /\p{Extended_Pictographic}/u.test(String.fromCodePoint(cp));
+}
+
+/**
+ * Scans a RAW leaf (pre-normalization) for a hidden/control character. Presence
+ * is binary: returns at most one HIGH finding per leaf. Must be called BEFORE
+ * normalizeForMatch() runs, since that pipeline strips exactly these chars.
+ *
+ * Exported for direct unit testing.
+ */
+export function detectHiddenChars(leaf: string, target: SignatureTarget): InspectFinding[] {
+  // Bound the scan to the same head+tail window as signature matching so a
+  // pathological giant metadata leaf can't stall the relay. Metadata is small
+  // in practice; this is symmetry with normalizeForMatch's cap. (security #27)
+  const scanned =
+    leaf.length <= MATCH_SEGMENT_CAP * 2
+      ? leaf
+      : leaf.slice(0, MATCH_SEGMENT_CAP) + leaf.slice(-MATCH_SEGMENT_CAP);
+
+  // Iterate matches (the class is a global regex) so a benign composite-emoji
+  // ZWJ can be skipped while still reporting a later genuine hidden char in the
+  // same leaf. Presence is binary: return on the FIRST non-benign match.
+  HIDDEN_CHAR_CLASS.lastIndex = 0; // reset stateful global regex
+  for (let m = HIDDEN_CHAR_CLASS.exec(scanned); m !== null; m = HIDDEN_CHAR_CLASS.exec(scanned)) {
+    // U+200D (ZWJ) is the standard joiner for composite emoji. When it is flanked
+    // on BOTH sides by emoji/pictograph (or modifier/VS16) codepoints it is a
+    // benign sequence (family, profession, flag) — not a poisoning indicator.
+    if (m[0].codePointAt(0) === 0x200d) {
+      const before = codePointBefore(scanned, m.index);
+      const after = scanned.codePointAt(m.index + 1);
+      if (isEmojiJoinComponent(before) && isEmojiJoinComponent(after)) continue;
+    }
+    return [
+      {
+        signature_id: "hidden-chars-in-metadata",
+        category: "OWASP-MCP-1",
+        severity: "high",
+        target,
+        matched_text_excerpt: `${classifyHiddenChar(m[0])} in ${target}`,
+        remediation:
+          "Tool metadata contains invisible/control characters that hide content from " +
+          "human review (tool-poisoning indicator). Inspect the server's source; if " +
+          "legitimate (rare), mute via `mcpm guard mute hidden-chars-in-metadata`.",
+      },
+    ];
   }
+  return [];
+}
+
+/** Codepoint immediately before `index` in `s`, surrogate-pair aware. */
+function codePointBefore(s: string, index: number): number | undefined {
+  if (index <= 0) return undefined;
+  const prev = s.charCodeAt(index - 1);
+  // Low surrogate: combine with the preceding high surrogate for the real cp.
+  if (prev >= 0xdc00 && prev <= 0xdfff && index >= 2) {
+    return s.codePointAt(index - 2);
+  }
+  return prev;
+}
+
+/**
+ * Action ordering (pass < warn < block). Exported so run-inner.ts can compare
+ * per-finding actions with the same scale instead of re-declaring a duplicate map.
+ */
+export const ACTION_RANK = { pass: 0, warn: 1, block: 2 } as const;
+
+/**
+ * Carriers of RETRIEVED DATA. A signature match here is annotate-and-forward:
+ * the action is clamped to `warn` even when the finding is critical, because
+ * BLOCKING retrieved data corrupts the very READMEs / emails / source / logs the
+ * user asked to read. Pre-invocation CONTEXT (tool metadata, initialize
+ * instructions) is NOT in this set and stays block-capable.
+ *
+ * Note: `tool_response` (tools/call result) is deliberately NOT warn-only — it
+ * keeps its existing block-capable policy.
+ */
+const WARN_ONLY_TARGETS: ReadonlySet<SignatureTarget> = new Set<SignatureTarget>([
+  "resource_content",
+  "prompt_content",
+]);
+
+/** Native (pre-clamp) action a finding's severity maps to. */
+function severityToAction(sev: Severity): InspectResult["action"] {
+  if (sev === "critical") return "block";
+  if (sev === "high") return "warn";
+  return "pass";
+}
+
+/**
+ * A finding's effective DEFAULT action: native severity mapping, then clamped to
+ * `warn` if the finding sits on a warn-only (retrieved-data) carrier. The
+ * finding's `severity` is left untouched — only the action is degraded.
+ *
+ * Shared with run-inner.ts applyPolicy so the carrier clamp is enforced
+ * consistently across the inspect pipeline and the policy pass (no second
+ * severity→action recompute can silently re-block a warn-only finding).
+ */
+export function defaultActionForFinding(f: InspectFinding): InspectResult["action"] {
+  const native = severityToAction(f.severity);
+  if (WARN_ONLY_TARGETS.has(f.target) && ACTION_RANK[native] > ACTION_RANK.warn) {
+    return "warn";
+  }
+  return native;
 }
 
 /**
  * Inspect a JSON-RPC message against a set of signatures, all targets.
- * Highest-severity finding decides the action:
- *   - critical  → block
+ * Highest effective action across findings decides the result:
+ *   - critical  → block        (warn-only carriers clamp to warn)
  *   - high      → warn (policy can promote to block)
  *   - medium/low → pass with log
  */
@@ -261,20 +471,30 @@ export function inspectMessage(
     "tool_call_args",
     "tool_description",
     "tool_annotations",
+    "resource_content",
+    "prompt_content",
+    "initialize_instructions",
   ];
   const findings: InspectFinding[] = [];
   for (const target of targets) {
     const subtree = targetSubtree(msg, target);
     if (subtree === null || subtree === undefined) continue;
     for (const leaf of stringLeaves(subtree)) {
+      // H2: scan the RAW leaf for hidden/control chars BEFORE the signature
+      // pipeline normalizes them away. Metadata carriers only.
+      if (HIDDEN_CHAR_TARGETS.has(target)) {
+        findings.push(...detectHiddenChars(leaf, target));
+      }
       findings.push(...inspectAgainstSignatures(leaf, signatures, target));
     }
   }
   if (findings.length === 0) return { action: "pass", findings: [] };
-  const topSeverity = findings.reduce<Severity>(
-    (acc, f) => (severityRank(f.severity) > severityRank(acc) ? f.severity : acc),
-    "low",
-  );
-  const action = topSeverity === "critical" ? "block" : topSeverity === "high" ? "warn" : "pass";
+  // Max action across findings AFTER each is clamped by its carrier policy. A
+  // warn-only resource finding can't be elevated by — and doesn't suppress — a
+  // block-capable finding in the same message. (security: H1 finding-level clamp)
+  const action = findings.reduce<InspectResult["action"]>((acc, f) => {
+    const a = defaultActionForFinding(f);
+    return ACTION_RANK[a] > ACTION_RANK[acc] ? a : acc;
+  }, "pass");
   return { action, findings };
 }

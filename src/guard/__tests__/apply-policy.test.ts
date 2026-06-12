@@ -10,54 +10,26 @@
  */
 
 import { describe, expect, test } from "vitest";
-import type { InspectFinding, InspectResult } from "../types.js";
+import type { InspectFinding, InspectResult, SignatureTarget } from "../types.js";
 import type { GuardPolicyFile } from "../policy.js";
+import { applyPolicy } from "../run-inner.js";
 
-// Re-export applyPolicy from run-inner.ts for testing. Since run-inner.ts
-// doesn't export it directly, we replicate the function here to test the
-// same logic. (Alternative: refactor applyPolicy into its own module — done
-// inline below to avoid widening the public API for a regression test only.)
+// applyPolicy is exported from run-inner.ts and tested directly here — NOT a
+// local copy. A previous version of this test replicated the function inline,
+// which made it structurally blind to behavioral changes in the real one (e.g.
+// the warn-only carrier clamp). Import the production function so a regression
+// in run-inner.ts is actually caught.
 
-const rank = { pass: 0, warn: 1, block: 2 } as const;
-const fromSeverity = (sev: InspectFinding["severity"]): InspectResult["action"] => {
-  if (sev === "critical") return "block";
-  if (sev === "high") return "warn";
-  return "pass";
-};
-
-function applyPolicy(result: InspectResult, policy: GuardPolicyFile): InspectResult {
-  const overrides = policy.signature_overrides ?? [];
-  if (overrides.length === 0) return result;
-  const byId = new Map(overrides.map((o) => [o.id, o]));
-
-  let highest: InspectResult["action"] = "pass";
-  const kept: InspectFinding[] = [];
-  for (const f of result.findings) {
-    const o = byId.get(f.signature_id);
-    let perFindingAction: InspectResult["action"];
-    if (o === undefined) {
-      perFindingAction = fromSeverity(f.severity);
-      kept.push(f);
-    } else if (o.action === "ignore") {
-      continue;
-    } else if (o.action === "log_only") {
-      perFindingAction = "pass";
-      kept.push(f);
-    } else {
-      perFindingAction = o.action;
-      kept.push(f);
-    }
-    if (rank[perFindingAction] > rank[highest]) highest = perFindingAction;
-  }
-  return { action: highest, findings: kept };
-}
-
-function finding(sigId: string, severity: InspectFinding["severity"] = "critical"): InspectFinding {
+function finding(
+  sigId: string,
+  severity: InspectFinding["severity"] = "critical",
+  target: SignatureTarget = "tool_response",
+): InspectFinding {
   return {
     signature_id: sigId,
     category: "TEST",
     severity,
-    target: "tool_response",
+    target,
     matched_text_excerpt: `m-${sigId}`,
     remediation: `r-${sigId}`,
   };
@@ -154,5 +126,24 @@ describe("applyPolicy — security review F1 regression guard", () => {
     const out = applyPolicy(result, policy);
     expect(out.action).toBe("pass");
     expect(out.findings).toHaveLength(0);
+  });
+
+  test("warn-only carrier clamp: critical resource_content finding via non-matching policy → warn", () => {
+    // Covers run-inner's `o === undefined → defaultActionForFinding(f)` clamp
+    // line directly. A CRITICAL finding on a warn-only (retrieved-data) carrier
+    // must degrade to `warn`, not re-block via a severity→action recompute.
+    // The policy is non-empty (clears the early-return) but does NOT match the
+    // finding's id, so the clamp branch runs. Reverting the clamp to the old
+    // `severity==='critical'?'block'` recompute makes this assert "block" and fail.
+    const result: InspectResult = {
+      action: "warn",
+      findings: [finding("res-crit", "critical", "resource_content")],
+    };
+    const policy: GuardPolicyFile = {
+      signature_overrides: [{ id: "unrelated-id", action: "block" }],
+    };
+    const out = applyPolicy(result, policy);
+    expect(out.action).toBe("warn");
+    expect(out.findings).toHaveLength(1);
   });
 });
