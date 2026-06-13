@@ -43,6 +43,18 @@ export const PINS_FORMAT_VERSION = 1;
 
 export type CapturedVia = "install" | "first-session" | "backfill";
 
+/**
+ * H4: per-field SHA-256 hashes of the SAME canonical leaves that feed
+ * {@link hashToolDefinition}. Lets drift detection classify a whole-hash change
+ * by WHICH field moved (description-only is cosmetic; schema/annotations is a
+ * security-relevant capability change).
+ */
+export interface FieldHashes {
+  description: string;
+  schema: string;
+  annotations: string;
+}
+
 export interface PinEntry {
   /** SHA-256 of JSON.stringify({description, schema, annotations}). null in first-session mode awaiting first session. */
   current_hash: string | null;
@@ -52,6 +64,13 @@ export interface PinEntry {
   captured_at: string;
   captured_via: CapturedVia;
   signature_list_version: string;
+  /**
+   * H4: per-field hashes (description / schema / annotations). OPTIONAL and
+   * backward-compatible — pins captured before H4 lack this and fall back to
+   * coarse whole-hash drift (treated conservatively as a security block). No
+   * format_version bump: absence is a valid, known state.
+   */
+  field_hashes?: FieldHashes;
 }
 
 export interface PinsFile {
@@ -66,12 +85,20 @@ export interface PinsFile {
 // Validate the shape with Zod (mirrors policy.ts's GuardPolicyFileSchema) and
 // throw a descriptive (NON-PinsIntegrityError) error so the user knows the file
 // is structurally invalid, not tampered.
+const FieldHashesSchema = z.object({
+  description: z.string(),
+  schema: z.string(),
+  annotations: z.string(),
+});
 const PinEntrySchema = z.object({
   current_hash: z.string().nullable(),
   previous_hashes: z.array(z.string()),
   captured_at: z.string(),
   captured_via: z.enum(["install", "first-session", "backfill"]),
   signature_list_version: z.string(),
+  // H4: optional + last field. A present-but-malformed value (non-object,
+  // missing string fields) fails the schema → readPins rejects (fail closed).
+  field_hashes: FieldHashesSchema.optional(),
 });
 const PinsFileSchema = z.object({
   format_version: z.number(),
@@ -99,6 +126,29 @@ export function hashToolDefinition(input: {
     },
     sortedReplacer,
   );
+  return `sha256:${createHash("sha256").update(canonical, "utf8").digest("hex")}`;
+}
+
+/**
+ * H4: hash EACH tool-definition field separately, using the SAME canonical
+ * (sorted-key) form + leaf defaults as {@link hashToolDefinition}. The whole-hash
+ * and these field hashes derive from identical canonical leaves, so a whole-hash
+ * change implies (and is implied by) at least one field-hash change.
+ */
+export function fieldHashesOf(input: {
+  description?: string | null;
+  schema?: unknown;
+  annotations?: unknown;
+}): FieldHashes {
+  return {
+    description: hashLeaf(input.description ?? ""),
+    schema: hashLeaf(input.schema ?? null),
+    annotations: hashLeaf(input.annotations ?? null),
+  };
+}
+
+function hashLeaf(value: unknown): string {
+  const canonical = JSON.stringify(value, sortedReplacer);
   return `sha256:${createHash("sha256").update(canonical, "utf8").digest("hex")}`;
 }
 
@@ -360,8 +410,13 @@ export function acceptDrift(
 ): PinsFile {
   const existing = pins.servers[serverName]?.[toolName];
   if (!existing) return pins;
+  // H4: drop the stale field_hashes (they describe the OLD definition; keeping
+  // them past a current_hash rewrite breaks the whole⟺field invariant and can
+  // mis-tier a later drift toward less-safe). The entry reverts to coarse
+  // SECURITY tiering until a fresh first-session capture re-derives them.
+  const { field_hashes: _staleFieldHashes, ...rest } = existing;
   const updated: PinEntry = {
-    ...existing,
+    ...rest,
     current_hash: newHash,
     previous_hashes: existing.current_hash
       ? [...existing.previous_hashes, existing.current_hash]

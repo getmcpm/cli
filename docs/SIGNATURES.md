@@ -10,7 +10,7 @@ The shipped signature catalog + how to add one. See `docs/GUARD.md` for the runt
 | `owasp-mcp-7-path-exfil-in-args` | OWASP-MCP-7 | high | tool_call_args | Sensitive file paths in tool arguments (.ssh / .aws/credentials / .env / id_rsa / .gnupg / .kube/config) |
 | `owasp-mcp-1-tool-description-injection` | OWASP-MCP-1 | critical | tool_description | Instruction-shaped text in tool descriptions (poisoning / rug-pull patterns) |
 
-Plus the runtime drift detector (`schema-drift`, `schema-drift-in-session`) — emitted by the relay, not by the signature engine.
+Plus the runtime drift detectors (`schema-drift`, `schema-drift-cosmetic`, `schema-drift-in-session`) — emitted by the relay, not by the signature engine. Drift is classified per changed field (H4): a **description-only** change is `schema-drift-cosmetic` (severity high → warn, forwarded — the parallel `tool_description` pattern scan still blocks any regex-detectable injection on the same frame, since the relay takes the MAX action); a **schema or annotations** change — or any pre-H4 pin with no stored field hashes — is `schema-drift` (critical → block). A server→client `notifications/tools/list_changed` arms a single-shot re-validation so an *announced* upgrade is classified against the pin rather than tripping the same-session guard. Cosmetic warn is bounded by the pattern-engine regex floor (a paraphrased poison the regexes miss degrades to a forwarded warn — the opt-in LLM-judge tier is the V2 answer, not the drift tier).
 
 ## Action mapping
 

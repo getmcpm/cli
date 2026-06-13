@@ -18,6 +18,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   hashToolDefinition,
+  fieldHashesOf,
   emptyPinsFile,
   upsertToolPin,
   clearServerPins,
@@ -86,6 +87,72 @@ describe("hashToolDefinition", () => {
     const a = hashToolDefinition({ description: null, schema: null });
     const b = hashToolDefinition({});
     expect(a).toBe(b);
+  });
+});
+
+describe("fieldHashesOf (H4)", () => {
+  test("each field is a sha256: hex string", () => {
+    const fh = fieldHashesOf({
+      description: "x",
+      schema: { type: "object" },
+      annotations: { readOnlyHint: true },
+    });
+    expect(fh.description).toMatch(/^sha256:[0-9a-f]{64}$/);
+    expect(fh.schema).toMatch(/^sha256:[0-9a-f]{64}$/);
+    expect(fh.annotations).toMatch(/^sha256:[0-9a-f]{64}$/);
+  });
+
+  test("stable under schema key reordering (same canonical leaves)", () => {
+    const a = fieldHashesOf({ description: "x", schema: { a: 1, b: 2 } });
+    const b = fieldHashesOf({ description: "x", schema: { b: 2, a: 1 } });
+    expect(a).toEqual(b);
+  });
+
+  test("null/undefined fields collapse to the empty/null canonical form", () => {
+    const a = fieldHashesOf({ description: null, schema: null, annotations: null });
+    const b = fieldHashesOf({});
+    expect(a).toEqual(b);
+  });
+
+  // INVARIANT: hashToolDefinition(x) changes ⟺ at least one fieldHashesOf(x)
+  // field changes. Both derive from the SAME canonical leaves (description ?? "",
+  // schema ?? null, annotations ?? null) via sortedReplacer, so a whole-hash
+  // change cannot exist without a field-hash change and vice versa.
+  test("whole-hash ⟺ field-hash invariant over varied tool defs", () => {
+    const variants: Array<{ description?: string | null; schema?: unknown; annotations?: unknown }> = [
+      { description: "a" },
+      { description: "b" },
+      { description: "a", schema: { type: "object" } },
+      { description: "a", schema: { type: "string" } },
+      { description: "a", schema: { type: "object", properties: { x: { type: "number" } } } },
+      { description: "a", annotations: { readOnlyHint: true } },
+      { description: "a", annotations: { readOnlyHint: false } },
+      { description: "a", annotations: { destructiveHint: true } },
+      { description: "", schema: null, annotations: null },
+      { description: null },
+      { description: "long ".repeat(50) },
+      { description: "a", schema: { enum: ["x", "y", "z"] } },
+      { description: "a", schema: { enum: ["x", "y"] } },
+      { description: "a", schema: [1, 2, 3] },
+      { description: "a", schema: [3, 2, 1] },
+      { description: "c", schema: { nested: { deep: { value: 1 } } } },
+      { description: "c", schema: { nested: { deep: { value: 2 } } } },
+      { description: "d", annotations: { title: "Read" } },
+      { description: "d", annotations: { title: "Write" } },
+      { description: "unicode 日本語", schema: { type: "object" } },
+    ];
+    for (let i = 0; i < variants.length; i++) {
+      for (let j = 0; j < variants.length; j++) {
+        const wholeEq = hashToolDefinition(variants[i]!) === hashToolDefinition(variants[j]!);
+        const fa = fieldHashesOf(variants[i]!);
+        const fb = fieldHashesOf(variants[j]!);
+        const fieldsEq =
+          fa.description === fb.description &&
+          fa.schema === fb.schema &&
+          fa.annotations === fb.annotations;
+        expect(wholeEq).toBe(fieldsEq);
+      }
+    }
   });
 });
 
@@ -272,6 +339,64 @@ describe("readPins / writePins", () => {
     // pins.json is a symlink pointing outside the store.
     symlinkSync(outside, path.join(dir, "pins.json"));
     await expect(writePins(emptyPinsFile())).rejects.toThrow(/symlink/);
+  });
+
+  // H4: field_hashes is backward-compatible (optional). A pre-H4 pins.json
+  // (entries without field_hashes) must still validate + round-trip.
+  test("pins.json with entries lacking field_hashes round-trips (backward-compat)", async () => {
+    const dir = path.join(tmpHome, ".mcpm");
+    mkdirSync(dir, { recursive: true, mode: 0o700 });
+    writeFileSync(
+      path.join(dir, "pins.json"),
+      JSON.stringify({
+        format_version: PINS_FORMAT_VERSION,
+        servers: {
+          fs: {
+            read: {
+              current_hash: "sha256:" + "a".repeat(64),
+              previous_hashes: [],
+              captured_at: "2026-05-17T00:00:00Z",
+              captured_via: "install",
+              signature_list_version: "v0.5.0",
+            },
+          },
+        },
+      }),
+      { mode: 0o600 },
+    );
+    const pins = await readPins();
+    expect(pins.servers.fs?.read?.current_hash).toBe("sha256:" + "a".repeat(64));
+    expect(pins.servers.fs?.read?.field_hashes).toBeUndefined();
+  });
+
+  // H4: a present-but-malformed field_hashes (non-object, or prototype-pollution
+  // shaped) must FAIL CLOSED in the schema, not slip through as a valid pin.
+  test("rejects a non-object field_hashes (fails closed)", async () => {
+    const dir = path.join(tmpHome, ".mcpm");
+    mkdirSync(dir, { recursive: true, mode: 0o700 });
+    writeFileSync(
+      path.join(dir, "pins.json"),
+      '{"format_version": 1, "servers": {"fs": {"read": {"current_hash": "sha256:x", ' +
+        '"previous_hashes": [], "captured_at": "x", "captured_via": "install", ' +
+        '"signature_list_version": "v", "field_hashes": "not-an-object"}}}}',
+      { mode: 0o600 },
+    );
+    await expect(readPins()).rejects.toThrow(/invalid structure/);
+  });
+
+  test("rejects a __proto__-shaped field_hashes (fails closed)", async () => {
+    const dir = path.join(tmpHome, ".mcpm");
+    mkdirSync(dir, { recursive: true, mode: 0o700 });
+    // field_hashes is missing the required string fields (description/schema/
+    // annotations) — a {"__proto__":{}}-shaped object does not satisfy the schema.
+    writeFileSync(
+      path.join(dir, "pins.json"),
+      '{"format_version": 1, "servers": {"fs": {"read": {"current_hash": "sha256:x", ' +
+        '"previous_hashes": [], "captured_at": "x", "captured_via": "install", ' +
+        '"signature_list_version": "v", "field_hashes": {"__proto__": {}}}}}}',
+      { mode: 0o600 },
+    );
+    await expect(readPins()).rejects.toThrow(/invalid structure/);
   });
 });
 

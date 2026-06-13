@@ -14,43 +14,55 @@
 
 import { describe, expect, test, vi, beforeEach, afterEach } from "vitest";
 import type { JSONRPCMessage } from "@modelcontextprotocol/sdk/types.js";
-import { inspectForDriftSync } from "../run-inner.js";
-import { hashToolDefinition, emptyPinsFile, type PinsFile } from "../pins.js";
+import { inspectForDriftSync, isToolsListChangedNotification, type SessionDriftState } from "../run-inner.js";
+import {
+  hashToolDefinition,
+  fieldHashesOf,
+  emptyPinsFile,
+  upsertToolPin,
+  type PinsFile,
+} from "../pins.js";
 
 // ──────────────────────── helpers ────────────────────────
 
 const toolsListMsg = (
   toolName: string,
   description: string,
+  extra: { inputSchema?: unknown; annotations?: unknown } = {},
 ): JSONRPCMessage =>
   ({
     jsonrpc: "2.0",
     id: 1,
-    result: { tools: [{ name: toolName, description }] },
+    result: { tools: [{ name: toolName, description, ...extra }] },
   }) as JSONRPCMessage;
+
+const freshState = (): SessionDriftState => ({
+  firstHashes: new Map<string, string>(),
+  revalidationArmed: false,
+});
 
 // ─────────────── Fix 7a: same-session drift guard (SECURITY F3) ───────────────
 
 describe("inspectForDriftSync — same-session guard (SECURITY F3)", () => {
   test("first tools/list passes and records its hash; second matching hash passes", () => {
     const pins = emptyPinsFile();
-    const seen = new Map<string, string>();
+    const state = freshState();
 
-    const first = inspectForDriftSync(toolsListMsg("read", "v1"), "srv", pins, seen);
+    const first = inspectForDriftSync(toolsListMsg("read", "v1"), "srv", pins, state);
     expect(first.action).toBe("pass");
     // The hash was recorded for the (server, tool) pair.
-    expect(seen.get("srv::read")).toBe(hashToolDefinition({ description: "v1" }));
+    expect(state.firstHashes.get("srv::read")).toBe(hashToolDefinition({ description: "v1" }));
 
-    const secondSame = inspectForDriftSync(toolsListMsg("read", "v1"), "srv", pins, seen);
+    const secondSame = inspectForDriftSync(toolsListMsg("read", "v1"), "srv", pins, state);
     expect(secondSame.action).toBe("pass");
   });
 
   test("a second tools/list with a DIFFERENT hash in the same session blocks", () => {
     const pins = emptyPinsFile();
-    const seen = new Map<string, string>();
+    const state = freshState();
 
-    inspectForDriftSync(toolsListMsg("read", "v1"), "srv", pins, seen);
-    const drifted = inspectForDriftSync(toolsListMsg("read", "v2-POISONED"), "srv", pins, seen);
+    inspectForDriftSync(toolsListMsg("read", "v1"), "srv", pins, state);
+    const drifted = inspectForDriftSync(toolsListMsg("read", "v2-POISONED"), "srv", pins, state);
 
     expect(drifted.action).toBe("block");
     expect(drifted.findings).toHaveLength(1);
@@ -59,16 +71,111 @@ describe("inspectForDriftSync — same-session guard (SECURITY F3)", () => {
 
   test("two different server names are independent (no cross-server bleed)", () => {
     const pins = emptyPinsFile();
-    const seen = new Map<string, string>();
+    const state = freshState();
 
-    inspectForDriftSync(toolsListMsg("read", "v1"), "alpha", pins, seen);
+    inspectForDriftSync(toolsListMsg("read", "v1"), "alpha", pins, state);
     // beta sends a different schema for the same tool name — must NOT block,
     // because the session key is namespaced by server name.
-    const beta = inspectForDriftSync(toolsListMsg("read", "totally-different"), "beta", pins, seen);
+    const beta = inspectForDriftSync(toolsListMsg("read", "totally-different"), "beta", pins, state);
     expect(beta.action).toBe("pass");
-    expect(seen.get("alpha::read")).toBeDefined();
-    expect(seen.get("beta::read")).toBeDefined();
+    expect(state.firstHashes.get("alpha::read")).toBeDefined();
+    expect(state.firstHashes.get("beta::read")).toBeDefined();
   });
+});
+
+// ─────────────── H4: list_changed re-validation arm + tiered drift ───────────────
+
+describe("inspectForDriftSync — H4 tiered drift against a pin", () => {
+  // Pin against the SAME normalized fields the runtime will derive from the
+  // tools/list frame (it reads inputSchema as the schema field).
+  const pinnedForTool = (
+    description: string,
+    inputSchema?: unknown,
+    annotations?: unknown,
+  ): PinsFile => {
+    const fields = { description, schema: inputSchema, annotations };
+    return upsertToolPin(emptyPinsFile(), "srv", "read", {
+      current_hash: hashToolDefinition(fields),
+      previous_hashes: [],
+      captured_at: "2026-05-17T00:00:00Z",
+      captured_via: "install",
+      signature_list_version: "v0.5.0",
+      field_hashes: fieldHashesOf(fields),
+    });
+  };
+
+  test("description-only drift vs pin → WARN (schema-drift-cosmetic)", () => {
+    const pins = pinnedForTool("old", { type: "object" });
+    const state = freshState();
+    const msg = toolsListMsg("read", "new wording", { inputSchema: { type: "object" } });
+    const result = inspectForDriftSync(msg, "srv", pins, state);
+    expect(result.action).toBe("warn");
+    expect(result.findings[0]?.signature_id).toBe("schema-drift-cosmetic");
+    expect(result.findings[0]?.matched_text_excerpt).toContain("description");
+  });
+
+  test("schema drift vs pin → BLOCK (schema-drift)", () => {
+    const pins = pinnedForTool("d", { type: "object" });
+    const state = freshState();
+    const msg = toolsListMsg("read", "d", { inputSchema: { type: "string" } });
+    const result = inspectForDriftSync(msg, "srv", pins, state);
+    expect(result.action).toBe("block");
+    expect(result.findings[0]?.signature_id).toBe("schema-drift");
+  });
+});
+
+describe("inspectForDriftSync — single-shot re-validation arm", () => {
+  test("when armed, an in-session schema change is NOT F3-blocked, but classified vs pin", () => {
+    // Pin description="old"; same-session first list seeds description="v1".
+    const pins = pinnedFor("old");
+    const state = freshState();
+    // Seed the same-session hash with the first list.
+    inspectForDriftSync(toolsListMsg("read", "v1"), "srv", pins, state);
+    // Arm re-validation (as a list_changed notification would).
+    state.revalidationArmed = true;
+    // A different description arrives → would normally F3-block; armed lets it
+    // through F3 and classifies against the pin (description-only → cosmetic warn).
+    const result = inspectForDriftSync(toolsListMsg("read", "v2-rebaselined"), "srv", pins, state);
+    expect(result.findings.some((f) => f.signature_id === "schema-drift-in-session")).toBe(false);
+    expect(result.action).toBe("warn");
+    expect(result.findings[0]?.signature_id).toBe("schema-drift-cosmetic");
+    // The arm was consumed (single-shot).
+    expect(state.revalidationArmed).toBe(false);
+  });
+
+  test("single-shot: a SECOND changed frame after consuming the arm reverts to F3 block", () => {
+    const pins = emptyPinsFile();
+    const state = freshState();
+    inspectForDriftSync(toolsListMsg("read", "v1"), "srv", pins, state);
+    state.revalidationArmed = true;
+    // First changed frame consumes the arm (rebaselines, no F3 block).
+    const first = inspectForDriftSync(toolsListMsg("read", "v2"), "srv", pins, state);
+    expect(first.findings.some((f) => f.signature_id === "schema-drift-in-session")).toBe(false);
+    // Second changed frame in the same chunk → arm already consumed → F3 block.
+    const second = inspectForDriftSync(toolsListMsg("read", "v3-POISON"), "srv", pins, state);
+    expect(second.action).toBe("block");
+    expect(second.findings[0]?.signature_id).toBe("schema-drift-in-session");
+  });
+
+  test("no preceding list_changed: a changed second list is still F3-blocked (unchanged)", () => {
+    const pins = emptyPinsFile();
+    const state = freshState();
+    inspectForDriftSync(toolsListMsg("read", "v1"), "srv", pins, state);
+    const drifted = inspectForDriftSync(toolsListMsg("read", "v2-POISON"), "srv", pins, state);
+    expect(drifted.action).toBe("block");
+    expect(drifted.findings[0]?.signature_id).toBe("schema-drift-in-session");
+  });
+
+  function pinnedFor(description: string): PinsFile {
+    return upsertToolPin(emptyPinsFile(), "srv", "read", {
+      current_hash: hashToolDefinition({ description }),
+      previous_hashes: [],
+      captured_at: "x",
+      captured_via: "install",
+      signature_list_version: "v0.5.0",
+      field_hashes: fieldHashesOf({ description }),
+    });
+  }
 });
 
 // ─────────────── Fix 2 + 3: fail-safe loading in runInner ───────────────
@@ -214,5 +321,67 @@ describe("runInner fail-safe loading", () => {
     expect(stderr).not.toContain("POLICY-INTEGRITY-ERROR:");
     // The {} fallback is the safe state — do NOT fail closed.
     expect(exitSpy).not.toHaveBeenCalled();
+  });
+});
+
+// ─────────────── H4: list_changed arm predicate + spoof guard ───────────────
+
+describe("isToolsListChangedNotification (H4 list_changed arm predicate)", () => {
+  test("a real notifications/tools/list_changed → true", () => {
+    expect(
+      isToolsListChangedNotification({
+        jsonrpc: "2.0",
+        method: "notifications/tools/list_changed",
+      } as JSONRPCMessage),
+    ).toBe(true);
+  });
+
+  test("SPOOF GUARD: method paired with a result is NOT a notification → false", () => {
+    // A crafted frame pairing the notification method with a result must NOT arm
+    // re-validation — otherwise an attacker frame could relax the F3 same-session guard.
+    expect(
+      isToolsListChangedNotification({
+        jsonrpc: "2.0",
+        method: "notifications/tools/list_changed",
+        result: { tools: [] },
+      } as unknown as JSONRPCMessage),
+    ).toBe(false);
+  });
+
+  test("a different notification method → false", () => {
+    expect(
+      isToolsListChangedNotification({
+        jsonrpc: "2.0",
+        method: "notifications/initialized",
+      } as JSONRPCMessage),
+    ).toBe(false);
+  });
+
+  test("a tools/list response (no method) → false", () => {
+    expect(
+      isToolsListChangedNotification({
+        jsonrpc: "2.0",
+        id: 1,
+        result: { tools: [] },
+      } as JSONRPCMessage),
+    ).toBe(false);
+  });
+
+  test("arming wiring: a real notification arms; the announced list isn't F3-blocked; single-shot reverts", () => {
+    const pins = emptyPinsFile();
+    const state: SessionDriftState = { firstHashes: new Map(), revalidationArmed: false };
+    // First list establishes the same-session baseline.
+    inspectForDriftSync(toolsListMsg("read", "v1"), "srv", pins, state);
+    // A real list_changed arrives → arm (exactly what inspectChild does on a true predicate).
+    const notif = { jsonrpc: "2.0", method: "notifications/tools/list_changed" } as JSONRPCMessage;
+    if (isToolsListChangedNotification(notif)) state.revalidationArmed = true;
+    // The announced follow-up legitimately differs → classified (no pin here), NOT F3-blocked.
+    const followup = inspectForDriftSync(toolsListMsg("read", "v2"), "srv", pins, state);
+    expect(followup.action).toBe("pass");
+    expect(followup.findings).toHaveLength(0);
+    // Single-shot: a SECOND unannounced change reverts to the strict F3 block.
+    const second = inspectForDriftSync(toolsListMsg("read", "v3"), "srv", pins, state);
+    expect(second.action).toBe("block");
+    expect(second.findings[0]?.signature_id).toBe("schema-drift-in-session");
   });
 });

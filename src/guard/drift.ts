@@ -16,16 +16,69 @@
  */
 
 import type { JSONRPCMessage } from "@modelcontextprotocol/sdk/types.js";
-import type { InspectResult } from "./types.js";
+import type { InspectFinding, InspectResult } from "./types.js";
+import { defaultActionForFinding, ACTION_RANK } from "./patterns.js";
 import {
   PinsIntegrityError,
   hashToolDefinition,
+  fieldHashesOf,
   readPins,
   upsertToolPin,
   writePins,
+  type FieldHashes,
   type PinEntry,
   type PinsFile,
 } from "./pins.js";
+
+// ---------------------------------------------------------------------------
+// H4: field-level drift classification
+// ---------------------------------------------------------------------------
+
+export type ChangedField = "description" | "schema" | "annotations";
+
+export interface DriftClass {
+  readonly kind: "none" | "cosmetic" | "security";
+  readonly changedFields: ChangedField[];
+}
+
+/**
+ * Compare the three tool-definition fields by EXPLICIT NAMED access (never
+ * dynamic bracket-indexing of attacker-influenced keys). Returns the changed
+ * fields in fixed order. If `pinned` is undefined (a pre-H4 pin) returns `[]` —
+ * the caller treats absence as a coarse (whole-hash) comparison.
+ */
+export function diffToolDefinition(
+  pinned: FieldHashes | undefined,
+  live: FieldHashes,
+): ChangedField[] {
+  if (pinned === undefined) return [];
+  const changed: ChangedField[] = [];
+  if (pinned.description !== live.description) changed.push("description");
+  if (pinned.schema !== live.schema) changed.push("schema");
+  if (pinned.annotations !== live.annotations) changed.push("annotations");
+  return changed;
+}
+
+/**
+ * Classify a drift (PRECONDITION, caller-enforced: pinned.current_hash !== null
+ * and the live whole-hash already differs from it).
+ *
+ *  - pre-H4 pin (no field_hashes)        → coarse SECURITY block (never less safe
+ *                                           than today; old pins stay strict).
+ *  - description-only change             → COSMETIC (warn, non-blocking wording).
+ *  - schema and/or annotations (or any   → SECURITY (block: a capability change).
+ *    multi-field change)
+ */
+export function classifyDrift(pinned: PinEntry, liveFields: FieldHashes): DriftClass {
+  if (pinned.field_hashes === undefined) {
+    return { kind: "security", changedFields: [] };
+  }
+  const changed = diffToolDefinition(pinned.field_hashes, liveFields);
+  if (changed.length === 1 && changed[0] === "description") {
+    return { kind: "cosmetic", changedFields: changed };
+  }
+  return { kind: "security", changedFields: changed };
+}
 
 /** Strip control + ANSI escape sequences from tool/server names (security F9). */
 function sanitizeLabel(s: string): string {
@@ -42,6 +95,63 @@ function lookupPin(pins: PinsFile, serverName: string, toolName: string): PinEnt
   const server = pins.servers[serverName];
   if (server === undefined || !Object.hasOwn(server, toolName)) return undefined;
   return server[toolName];
+}
+
+/**
+ * H4: build the tiered drift finding for a drifted tool, shared by the async
+ * {@link inspectForDrift} and the sync run-inner path so both agree.
+ *
+ *  - cosmetic → `schema-drift-cosmetic`, severity high (→ warn). Non-blocking
+ *    wording change; still requires `accept-drift` to silence. NOT auto-re-pinned.
+ *  - security/coarse → `schema-drift`, severity critical (→ block). Carries which
+ *    fields changed + the accept-drift / --new-hash remediation.
+ *
+ * `cls.changedFields` is a fixed-vocabulary enum list (never attacker keys), so
+ * naming it in the excerpt is safe. `safeServer` / `safeTool` are pre-sanitized.
+ */
+export function buildDriftFinding(args: {
+  cls: DriftClass;
+  safeServer: string;
+  safeTool: string;
+  expected: string;
+  actual: string;
+  /**
+   * H4 structured audit: the NEW description, already sanitized + truncated by
+   * the caller (the pin only stores hashes, so the OLD description is not
+   * recoverable here — we surface the new wording so the guard-events.jsonl
+   * entry is self-contained for review). Optional: the off-thread drift.ts path
+   * does not pass it.
+   */
+  newDescriptionExcerpt?: string;
+}): InspectFinding {
+  const { cls, safeServer, safeTool, expected, actual, newDescriptionExcerpt } = args;
+  if (cls.kind === "cosmetic") {
+    const fields = cls.changedFields.join(",");
+    const newExcerpt = newDescriptionExcerpt ? ` new="${newDescriptionExcerpt}"` : "";
+    return {
+      signature_id: "schema-drift-cosmetic",
+      category: "OWASP-MCP-1",
+      severity: "high",
+      target: "tool_description",
+      matched_text_excerpt: `${safeTool}: ${fields} changed (cosmetic)${newExcerpt}`,
+      remediation:
+        `Tool "${safeTool}" ${fields} wording changed since install — a non-blocking ` +
+        `change (schema + annotations unchanged).${newExcerpt ? ` New wording:${newExcerpt}.` : ""} ` +
+        `If intended, run \`mcpm guard accept-drift ${safeServer} --tool ${safeTool} --new-hash ${actual}\` to silence it.`,
+    };
+  }
+  const fields = cls.changedFields.length > 0 ? cls.changedFields.join(",") : "definition";
+  return {
+    signature_id: "schema-drift",
+    category: "OWASP-MCP-1",
+    severity: "critical",
+    target: "tool_description",
+    matched_text_excerpt: `${safeTool}: ${fields} changed (${expected.slice(7, 19)}… → ${actual.slice(7, 19)}…)`,
+    remediation:
+      `Tool "${safeTool}" schema changed since install (rug-pull suspected). ` +
+      `If this is a legitimate server upgrade, run \`mcpm guard accept-drift ${safeServer} --tool ${safeTool} --new-hash ${actual}\` ` +
+      `(or \`--remove\` to drop the pin entirely).`,
+  };
 }
 
 interface ToolDefinition {
@@ -115,52 +225,66 @@ export async function inspectForDrift(
     return { action: "pass", findings: [] };
   }
 
-  const driftedTools: { toolName: string; expected: string; actual: string }[] = [];
+  const driftedTools: {
+    toolName: string;
+    expected: string;
+    actual: string;
+    cls: DriftClass;
+  }[] = [];
   let pinsAfter = pins;
 
   for (const tool of tools) {
     const toolName = typeof tool.name === "string" ? tool.name : null;
     if (toolName === null) continue;
 
-    const liveHash = hashToolDefinition({
+    const fields = {
       description: typeof tool.description === "string" ? tool.description : null,
       schema: tool.inputSchema ?? tool.schema,
       annotations: tool.annotations,
-    });
+    };
+    const liveHash = hashToolDefinition(fields);
+    const liveFields = fieldHashesOf(fields);
 
     const existing = lookupPin(pins, serverName, toolName);
 
     if (!existing) {
-      // First-session capture. Write the pin and let traffic through.
+      // First-session capture. Write the pin (with H4 field hashes) and let
+      // traffic through.
       const entry: PinEntry = {
         current_hash: liveHash,
         previous_hashes: [],
         captured_at: new Date().toISOString(),
         captured_via: "first-session",
         signature_list_version: deps.signatureListVersion,
+        field_hashes: liveFields,
       };
       pinsAfter = upsertToolPin(pinsAfter, serverName, toolName, entry);
       continue;
     }
 
     if (existing.current_hash === null) {
-      // Placeholder entry from a failed install-time capture. Fill it in now.
+      // Placeholder entry from a failed install-time capture. Fill it in now,
+      // including H4 field hashes.
       const entry: PinEntry = {
         ...existing,
         current_hash: liveHash,
         captured_at: new Date().toISOString(),
         captured_via: "first-session",
         signature_list_version: deps.signatureListVersion,
+        field_hashes: liveFields,
       };
       pinsAfter = upsertToolPin(pinsAfter, serverName, toolName, entry);
       continue;
     }
 
     if (existing.current_hash !== liveHash) {
+      // Drift. Classify by field (cosmetic vs security). Do NOT auto-re-pin —
+      // the durable baseline only moves via an explicit `accept-drift`.
       driftedTools.push({
         toolName,
         expected: existing.current_hash,
         actual: liveHash,
+        cls: classifyDrift(existing, liveFields),
       });
     }
   }
@@ -175,24 +299,21 @@ export async function inspectForDrift(
     return { action: "pass", findings: [] };
   }
 
-  return {
-    action: "block",
-    findings: driftedTools.map((d) => {
-      const safeServer = sanitizeLabel(serverName);
-      const safeTool = sanitizeLabel(d.toolName);
-      return {
-        signature_id: "schema-drift",
-        category: "OWASP-MCP-1",
-        severity: "critical" as const,
-        target: "tool_description" as const,
-        matched_text_excerpt: `${safeTool}: ${d.expected.slice(7, 19)}… → ${d.actual.slice(7, 19)}…`,
-        remediation:
-          `Tool "${safeTool}" schema changed since install (rug-pull suspected). ` +
-          `If this is a legitimate server upgrade, run \`mcpm guard accept-drift ${safeServer} --tool ${safeTool} --new-hash ${d.actual}\` ` +
-          `(or \`--remove\` to drop the pin entirely).`,
-      };
+  const findings: InspectFinding[] = driftedTools.map((d) =>
+    buildDriftFinding({
+      cls: d.cls,
+      safeServer: sanitizeLabel(serverName),
+      safeTool: sanitizeLabel(d.toolName),
+      expected: d.expected,
+      actual: d.actual,
     }),
-  };
+  );
+  // Action = MAX over findings (cosmetic-only → warn; any security → block).
+  const action = findings.reduce<InspectResult["action"]>((acc, f) => {
+    const a = defaultActionForFinding(f);
+    return ACTION_RANK[a] > ACTION_RANK[acc] ? a : acc;
+  }, "pass");
+  return { action, findings };
 }
 
 /**
@@ -237,8 +358,16 @@ export function applyAcceptDrift(
   for (const t of targets) {
     const existing = server[t];
     if (!existing) continue;
+    // H4: drop the stale field_hashes. They describe the OLD definition, but
+    // current_hash is being rewritten to the accepted one — keeping them would
+    // break the whole-hash⟺field-hash invariant and let a LATER drift be
+    // mis-tiered (cosmetic/warn) against fields that no longer match. Reverting
+    // to no-field_hashes makes the entry classify as coarse SECURITY (block) on
+    // the next change until a fresh first-session capture re-derives consistent
+    // field hashes — fail-safe, matches the pre-H4-pin → coarse-security rule.
+    const { field_hashes: _staleFieldHashes, ...rest } = existing;
     next = upsertToolPin(next, serverName, t, {
-      ...existing,
+      ...rest,
       current_hash: options.newHash,
       previous_hashes: existing.current_hash
         ? [...existing.previous_hashes, existing.current_hash]
