@@ -170,6 +170,38 @@ describe("handleInstall", () => {
     ).rejects.toThrow(/below the minimum threshold/i);
     expect(addServer).not.toHaveBeenCalled();
   });
+
+  // H9: the MCP surface has no human + no --allow-unguarded opt-in, so a
+  // URL/HTTP-transport server (which runs UNGUARDED) must be hard-denied here —
+  // never written to a client config via the untrusted agent path.
+  it("hard-denies a URL/HTTP-transport (unguarded) server install", async () => {
+    // url-only server (no packages) → resolveInstallEntry returns { url } on Cursor.
+    const urlEntry = {
+      server: {
+        name: "io.github.acme/remote",
+        version: "1.0.0",
+        description: "remote http server",
+        packages: [],
+        remotes: [{ type: "streamable-http", url: "https://api.example.com/mcp", headers: [] }],
+      },
+    } as ServerEntry;
+    const addServer = vi.fn().mockResolvedValue(undefined);
+    const deps = makeDeps({
+      registryGetServer: vi.fn().mockResolvedValue(urlEntry),
+      computeTrustScore: vi.fn().mockReturnValue(GOOD_TRUST),
+      getAdapter: vi.fn().mockReturnValue({
+        clientId: "cursor",
+        read: vi.fn().mockResolvedValue({}),
+        addServer,
+        removeServer: vi.fn(),
+      }),
+    });
+
+    await expect(
+      handleInstall({ name: "io.github.acme/remote", client: "cursor" }, deps)
+    ).rejects.toThrow(/UNGUARDED|not permitted via the MCP surface/i);
+    expect(addServer).not.toHaveBeenCalled();
+  });
 });
 
 // ---------------------------------------------------------------------------

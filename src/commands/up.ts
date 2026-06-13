@@ -43,6 +43,7 @@ import { resolveInstallEntry, parseSecretsMode, validateRemoteUrl } from "./inst
 import { assessReleaseAge, DEFAULT_MIN_RELEASE_AGE_HOURS } from "../scanner/cooldown.js";
 import { extractRegistryMeta } from "../utils/format-trust.js";
 import { applyKeychainSecrets, type SecretsMode, setSecrets as _setSecrets } from "../store/keychain.js";
+import { isNewUnguarded } from "../guard/unguarded.js";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -85,6 +86,15 @@ export interface UpOptions {
    * install a low-trust server that `mcpm_install` would reject.
    */
   minTrustFloor?: number;
+  /**
+   * H9 (fail-closed): per-invocation consent (`--allow-unguarded`) to install
+   * URL/HTTP-transport servers that run UNGUARDED (no relay wraps a non-stdio
+   * transport). When neither this nor `policy.allowUrlServers` is set, such a
+   * server is DENIED (recorded `blocked`). DISTINCT from `allowUrlServers`,
+   * which is the MCP-surface kill-switch: `allowUrlServers === false` ALWAYS
+   * wins — an untrusted caller can never set `allowUnguarded`.
+   */
+  allowUnguarded?: boolean;
 }
 
 export interface UpDeps {
@@ -113,6 +123,18 @@ export interface UpDeps {
    * so its behavior is unchanged.
    */
   recordResult?: (result: { name: string; status: UpServerStatus }) => void;
+  /**
+   * H9: read the persistent set of server names previously consented to run
+   * unguarded. Injectable for tests; defaults to the real store at the CLI
+   * boundary. When omitted, no server is treated as previously-consented.
+   */
+  readUnguardedConsent?: () => Promise<string[]>;
+  /**
+   * H9: persist (union into the store) the names newly consented this run.
+   * Injectable for tests; defaults to the real store. Called once after the
+   * per-server loop with the newly-consented set (additions only).
+   */
+  recordUnguardedConsent?: (names: readonly string[]) => Promise<void>;
 }
 
 /** Terminal per-server status reported via UpDeps.recordResult. */
@@ -215,6 +237,12 @@ export async function handleUp(
   // Step 8: Process each server
   const results: ServerResult[] = [];
 
+  // H9: pre-read the persistent unguarded-consent set so a previously-consented
+  // url server is permitted without re-supplying `--allow-unguarded`, and so we
+  // can warn ONCE (only when this run ADDS a server — anti-rubber-stamp).
+  const previousConsented = deps.readUnguardedConsent ? await deps.readUnguardedConsent() : [];
+  const consentedUnguarded = new Set(previousConsented);
+
   for (const [name, server] of serverEntries) {
     const locked = lockFile.servers[name];
 
@@ -227,6 +255,7 @@ export async function handleUp(
         clients,
         scannerAvailable,
         envFileVars: envFileVars.vars,
+        consentedUnguarded,
         options,
         deps,
       });
@@ -250,16 +279,57 @@ export async function handleUp(
     await handleStrictRemoval(stackFile, clients, options, deps, results);
   }
 
+  // H9: the set of url servers that installed UNGUARDED this run (consent was
+  // given). Warn ONCE — full warning only when this run ADDS a server to the
+  // consented set (additions re-warn; unchanged/removed stay quiet). Then
+  // persist the newly-consented names so the next `up` stays quiet.
+  const urlServerNames = new Set(
+    serverEntries.filter(([, s]) => isUrlServer(s)).map(([n]) => n)
+  );
+  const installedUnguarded = results
+    .filter((r) => r.status === "installed" && urlServerNames.has(r.name))
+    .map((r) => r.name)
+    .sort();
+  if (installedUnguarded.length > 0 && !options.dryRun) {
+    // Use the canonical additions-only check so `up` and `guard enable` (cli.ts)
+    // share ONE implementation of the anti-rubber-stamp warn-once semantics.
+    const newlyConsented = installedUnguarded.filter((n) => !consentedUnguarded.has(n));
+    if (isNewUnguarded(installedUnguarded, previousConsented)) {
+      // List only the NEWLY-consented delta as the servers being rubber-stamped
+      // (re-listing already-consented A,B alongside the new C dilutes the "this
+      // one is the new risk" signal). Append a quiet count of the rest.
+      const alreadyCount = installedUnguarded.length - newlyConsented.length;
+      const alreadyNote =
+        alreadyCount > 0 ? ` (+${alreadyCount} previously consented)` : "";
+      deps.output(
+        "\n⚠ UNGUARDED: the following URL/HTTP-transport server(s) now run WITHOUT runtime " +
+          `inspection (no relay wraps a non-stdio transport): ${newlyConsented.join(", ")}${alreadyNote}. ` +
+          "This grants consent — it does NOT add protection. The only true fix is a streamable-HTTP " +
+          "relay (not yet implemented). Future `up` runs stay quiet unless a NEW unguarded server appears."
+      );
+      if (deps.recordUnguardedConsent) {
+        await deps.recordUnguardedConsent(newlyConsented).catch(() => undefined);
+      }
+    } else {
+      deps.output(
+        `\n${installedUnguarded.length} server(s) running unguarded (previously consented): ` +
+          `${installedUnguarded.join(", ")}`
+      );
+    }
+  }
+
   // Step 10: Summary
   const installed = results.filter((r) => r.status === "installed").length;
   const blocked = results.filter((r) => r.status === "blocked").length;
   const failed = results.filter((r) => r.status === "failed").length;
   const skipped = results.filter((r) => r.status === "skipped").length;
   const removed = results.filter((r) => r.status === "removed").length;
+  const unguarded = installedUnguarded.length;
 
   deps.output(
     `\n${installed} installed, ${skipped} skipped, ${blocked} blocked, ${failed} failed` +
-      (removed > 0 ? `, ${removed} removed` : "")
+      (removed > 0 ? `, ${removed} removed` : "") +
+      (unguarded > 0 ? `, ${unguarded} unguarded` : "")
   );
 
   const totalSecretsStored = results.reduce(
@@ -337,6 +407,8 @@ interface ProcessInput {
   clients: ClientId[];
   scannerAvailable: boolean;
   envFileVars: Readonly<Record<string, string>>;
+  /** H9: server names already consented to run unguarded (persistent store). */
+  consentedUnguarded: ReadonlySet<string>;
   options: UpOptions;
   deps: UpDeps;
 }
@@ -346,7 +418,7 @@ async function processServer(input: ProcessInput): Promise<ServerResult> {
 
   // URL servers: install on Cursor only
   if (isUrlServer(server)) {
-    return processUrlServer(name, server.url, clients, options, deps);
+    return processUrlServer(name, server.url, clients, policy, input.consentedUnguarded, options, deps);
   }
 
   if (!locked || !isLockedRegistryServer(locked)) {
@@ -478,16 +550,41 @@ async function processUrlServer(
   name: string,
   url: string,
   clients: ClientId[],
+  policy: Policy | undefined,
+  consentedUnguarded: ReadonlySet<string>,
   options: UpOptions,
   deps: UpDeps
 ): Promise<ServerResult> {
   // MCP surface lockdown (fix D): URL servers bypass the registry trust gate, so
   // the untrusted MCP caller is not permitted to install them. Record as blocked.
+  // H9: this kill-switch ALWAYS wins — an untrusted caller can never opt in via
+  // `--allow-unguarded` or a (caller-controlled) policy bit.
   if (options.allowUrlServers === false) {
     return {
       name,
       status: "blocked",
       message: "URL servers are not permitted via the MCP surface",
+    };
+  }
+
+  // H9 (fail-closed): a URL/HTTP-transport server runs UNGUARDED — the guard
+  // relay only wraps stdio servers, so it gets ZERO runtime inspection. DENY by
+  // default; permit only with explicit informed consent: `--allow-unguarded`
+  // this run, `policy.allowUrlServers: true` in the stack file, or a name
+  // already in the persistent consent store. This is informed consent, NOT
+  // protection — the only true fix is a streamable-HTTP relay (out of scope).
+  const consented =
+    options.allowUnguarded === true ||
+    policy?.allowUrlServers === true ||
+    consentedUnguarded.has(name);
+  if (!consented) {
+    return {
+      name,
+      status: "blocked",
+      message:
+        "URL/HTTP-transport server runs UNGUARDED — no runtime inspection is possible " +
+        "(mcpm's guard relay only wraps stdio servers). Re-run with --allow-unguarded or set " +
+        "policy.allowUrlServers: true to install it WITHOUT protection.",
     };
   }
 
@@ -693,6 +790,7 @@ export function registerUpCommand(program: Command): void {
     .option("--strict", "remove servers not declared in mcpm.yaml")
     .option("-y, --yes", "skip confirmation prompts (required with --strict --ci)")
     .option("--secrets <mode>", "where to store secret env vars: 'keychain' (encrypted in ~/.mcpm, resolved by mcpm guard at launch) or 'plaintext' (default); 'keychain' is rejected with --ci", parseSecretsMode)
+    .option("--allow-unguarded", "permit URL/HTTP-transport servers to run WITHOUT runtime guard inspection (no relay wraps a non-stdio transport); records consent so future runs stay quiet")
     .action(
       async (opts: {
         file?: string;
@@ -702,8 +800,12 @@ export function registerUpCommand(program: Command): void {
         strict?: boolean;
         yes?: boolean;
         secrets?: SecretsMode;
+        allowUnguarded?: boolean;
       }) => {
         const client = new RegistryClient();
+        const { readUnguardedConsent, writeUnguardedConsent, mergeUnguarded } = await import(
+          "../guard/unguarded.js"
+        );
 
         try {
           await handleUp(
@@ -715,6 +817,7 @@ export function registerUpCommand(program: Command): void {
               strict: opts.strict,
               yes: opts.yes,
               secrets: opts.secrets,
+              allowUnguarded: opts.allowUnguarded,
             },
             {
               detectClients: detectInstalledClients,
@@ -753,6 +856,11 @@ export function registerUpCommand(program: Command): void {
               },
               output: stdoutOutput,
               setSecrets: _setSecrets,
+              readUnguardedConsent,
+              recordUnguardedConsent: async (names) => {
+                const previous = await readUnguardedConsent();
+                await writeUnguardedConsent(mergeUnguarded(previous, names));
+              },
             }
           );
         } catch (err) {

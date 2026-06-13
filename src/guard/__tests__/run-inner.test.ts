@@ -120,6 +120,29 @@ describe("runInner fail-safe loading", () => {
     expect(stderr).toContain("mcpm guard reset-integrity");
   });
 
+  test("H9: pins structural corruption (generic Error) also fails closed (exit 1)", async () => {
+    vi.resetModules();
+    // A non-PinsIntegrityError (e.g. Zod-shape failure / corrupt JSON) thrown by
+    // readPins must ALSO fail closed — refusing to start the relay with drift
+    // protection silently off. Pins exits (unlike policy, whose {} fallback is
+    // the safe state); an empty pins snapshot is the UNSAFE state.
+    vi.doMock("../pins.js", async () => {
+      const actual = await vi.importActual<typeof import("../pins.js")>("../pins.js");
+      return {
+        ...actual,
+        readPins: async () => {
+          throw new Error("pins.json has an invalid structure: servers: Expected object");
+        },
+      };
+    });
+
+    const { runInner } = await import("../run-inner.js");
+    await expect(runInner(runInnerArgs)).rejects.toThrow("__EXIT__");
+    expect(exitSpy).toHaveBeenCalledWith(1);
+    const stderr = stderrSpy.mock.calls.flat().join("");
+    expect(stderr).toContain("[mcpm-guard] PINS-READ-ERROR:");
+  });
+
   test("Fix 3: a PolicyIntegrityError is surfaced on stderr, then falls back to {}", async () => {
     vi.resetModules();
     // pins reads fine (empty), so the relay would otherwise proceed.

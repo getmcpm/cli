@@ -24,7 +24,11 @@ export interface ClientReport {
   /** Servers visited in this client's config. */
   readonly servers: ReadonlyArray<{
     readonly name: string;
-    readonly status: "wrapped" | "unwrapped" | "skipped";
+    // "unguarded" (H9): a URL/HTTP-transport server the user CONSENTED to run
+    // without the relay. It is NOT "wrapped" (no relay covers it) and NOT a
+    // silent "skipped" — a distinct, visible status so the operator sees that a
+    // server runs with zero runtime inspection.
+    readonly status: "wrapped" | "unwrapped" | "skipped" | "unguarded";
     readonly reason?: string;
   }>;
   readonly error?: string;
@@ -35,6 +39,11 @@ export interface EnableDisableSummary {
   readonly clients: readonly ClientReport[];
   readonly totalChanged: number;
   readonly totalSkipped: number;
+  // H9: consented-'unguarded' servers counted DISTINCTLY from totalSkipped.
+  // Running unguarded is an explicit security-posture decision, not "not acted
+  // on" — folding it into "skipped" understates that a server runs with zero
+  // runtime inspection.
+  readonly totalUnguarded: number;
   readonly errors: number;
 }
 
@@ -43,6 +52,24 @@ export interface OrchestratorDeps {
   readonly getAdapter: (clientId: ClientId) => ConfigAdapter;
   readonly getConfigPath: (clientId: ClientId) => string;
   readonly wrapContext: WrapContext;
+  /**
+   * H9: per-invocation consent to run URL/HTTP-transport (unwrappable) servers
+   * UNGUARDED. Set from the `--allow-unguarded` flag. When absent/false, a url
+   * server is permitted only if the persistent consent store already lists it.
+   */
+  readonly allowUnguarded?: boolean;
+  /**
+   * H9: read the persistent set of server names previously consented to run
+   * unguarded. Injectable for tests; defaults to the real store at the CLI
+   * boundary. When omitted, no server is treated as previously-consented.
+   */
+  readonly readUnguardedConsent?: () => Promise<string[]>;
+  /**
+   * H9: record (union into the store) the server names consented to run
+   * unguarded this run. Injectable for tests; defaults to the real store.
+   * Called only when at least one server is newly consented.
+   */
+  readonly recordUnguardedConsent?: (names: readonly string[]) => Promise<void>;
 }
 
 // ---------------------------------------------------------------------------
@@ -70,9 +97,17 @@ async function runAcrossClients(
 ): Promise<EnableDisableSummary> {
   const targetClients = await selectTargetClients(deps, filter?.client);
 
+  // H9: pre-read the persistent unguarded-consent set once so every client's
+  // plan can recognise a previously-consented url server without per-invocation
+  // `--allow-unguarded`. Only relevant on enable (disable never wraps).
+  const consentedUnguarded =
+    action === "enable" && deps.readUnguardedConsent ? await deps.readUnguardedConsent() : [];
+
   // Phase 1: read all + compute plans (no writes yet).
   const plans = await Promise.all(
-    targetClients.map((clientId) => planForClient(clientId, deps, action, filter?.server)),
+    targetClients.map((clientId) =>
+      planForClient(clientId, deps, action, filter?.server, consentedUnguarded),
+    ),
   );
 
   // SECURITY F7: pre-batch snapshot of each touched client's config to
@@ -106,6 +141,24 @@ async function runAcrossClients(
     }
   }
 
+  // H9: persist consent for any server newly consented this run (a NEW url
+  // server not already in the store). Union into the store; the warn-once
+  // anti-rubber-stamp logic lives at the CLI layer (cli.ts) which compares the
+  // current set against the previous one. Recording is best-effort and never
+  // turns an otherwise-successful enable into a failure.
+  if (deps.recordUnguardedConsent) {
+    const nowUnguarded = [
+      ...new Set(
+        reports.flatMap((r) => r.servers.filter((s) => s.status === "unguarded").map((s) => s.name)),
+      ),
+    ];
+    const previous = new Set(consentedUnguarded);
+    const newlyConsented = nowUnguarded.filter((n) => !previous.has(n));
+    if (newlyConsented.length > 0) {
+      await deps.recordUnguardedConsent(newlyConsented).catch(() => undefined);
+    }
+  }
+
   return summarize(action, reports);
 }
 
@@ -118,7 +171,10 @@ export interface StatusReport {
     readonly clientId: ClientId;
     readonly wrapped: number;
     readonly unwrapped: number;
-    readonly servers: ReadonlyArray<{ name: string; wrapped: boolean }>;
+    // H9: `unguarded` is true for a URL/HTTP-transport server (no command) that
+    // the relay cannot wrap. Surfaced distinctly so status output never implies
+    // an unwrappable server is "just unwrapped" (a coverage gap, not a toggle).
+    readonly servers: ReadonlyArray<{ name: string; wrapped: boolean; unguarded: boolean }>;
     readonly error?: string;
   }[];
   readonly totalWrapped: number;
@@ -135,6 +191,9 @@ export async function statusAcrossClients(deps: OrchestratorDeps): Promise<Statu
         const servers = Object.entries(entries).map(([name, entry]) => ({
           name,
           wrapped: isWrapped(entry),
+          // A non-stdio (url-transport) entry has no command — it cannot be
+          // wrapped, so even when "not wrapped" it is specifically UNGUARDED.
+          unguarded: !isWrapped(entry) && !entry.command,
         }));
         return {
           clientId,
@@ -187,6 +246,8 @@ interface ClientPlan {
     readonly nextEntry: McpServerEntry;
   }>;
   readonly skipped: ReadonlyArray<{ readonly name: string; readonly reason: string }>;
+  /** H9: url servers the user CONSENTED to run unguarded (reported visibly). */
+  readonly unguarded: ReadonlyArray<{ readonly name: string; readonly reason: string }>;
   readonly readError?: string;
 }
 
@@ -195,6 +256,7 @@ async function planForClient(
   deps: OrchestratorDeps,
   action: "enable" | "disable",
   serverFilter: string | undefined,
+  consentedUnguarded: readonly string[],
 ): Promise<ClientPlan> {
   const adapter = deps.getAdapter(clientId);
   let entries: Record<string, McpServerEntry>;
@@ -206,12 +268,15 @@ async function planForClient(
       action,
       transforms: [],
       skipped: [],
+      unguarded: [],
       readError: err instanceof Error ? err.message : String(err),
     };
   }
 
   const transforms: { name: string; nextEntry: McpServerEntry }[] = [];
   const skipped: { name: string; reason: string }[] = [];
+  const unguarded: { name: string; reason: string }[] = [];
+  const consentedSet = new Set(consentedUnguarded);
 
   for (const [name, entry] of Object.entries(entries)) {
     if (serverFilter !== undefined && name !== serverFilter) continue;
@@ -221,7 +286,29 @@ async function planForClient(
         continue;
       }
       if (!entry.command) {
-        skipped.push({ name, reason: "no command (HTTP-transport server; deferred to V2)" });
+        // H9: a URL/HTTP-transport server has no stdio process to wrap, so the
+        // relay can give it ZERO runtime inspection. DENY by default; permit
+        // only with explicit informed consent (`--allow-unguarded` this run, or
+        // a name already in the persistent consent store). Even when consented
+        // it CANNOT be wrapped (no relay) — it stays out of `transforms` and is
+        // reported with a distinct `unguarded` status, never silently dropped.
+        if (deps.allowUnguarded === true || consentedSet.has(name)) {
+          unguarded.push({
+            name,
+            reason:
+              "unguarded (consented) — runs WITHOUT runtime inspection; this grants " +
+              "consent, it does not add protection. The only true fix is a streamable-HTTP " +
+              "relay (not yet implemented).",
+          });
+        } else {
+          skipped.push({
+            name,
+            reason:
+              "DENIED: URL/HTTP-transport server runs UNGUARDED — no runtime inspection is " +
+              "possible (the guard relay only wraps stdio servers). Re-run `mcpm guard enable " +
+              "--allow-unguarded` to permit it without protection.",
+          });
+        }
         continue;
       }
       transforms.push({ name, nextEntry: wrapEntry(name, entry, deps.wrapContext) });
@@ -239,7 +326,7 @@ async function planForClient(
     }
   }
 
-  return { clientId, action, transforms, skipped };
+  return { clientId, action, transforms, skipped, unguarded };
 }
 
 async function applyPlan(plan: ClientPlan, deps: OrchestratorDeps): Promise<ClientReport> {
@@ -253,7 +340,11 @@ async function applyPlan(plan: ClientPlan, deps: OrchestratorDeps): Promise<Clie
 
   const adapter = deps.getAdapter(plan.clientId);
   const configPath = deps.getConfigPath(plan.clientId);
-  const servers: Array<{ name: string; status: "wrapped" | "unwrapped" | "skipped"; reason?: string }> = [];
+  const servers: Array<{
+    name: string;
+    status: "wrapped" | "unwrapped" | "skipped" | "unguarded";
+    reason?: string;
+  }> = [];
 
   for (const { name, nextEntry } of plan.transforms) {
     try {
@@ -272,6 +363,12 @@ async function applyPlan(plan: ClientPlan, deps: OrchestratorDeps): Promise<Clie
     servers.push({ name: skip.name, status: "skipped", reason: skip.reason });
   }
 
+  // H9: consented-unguarded servers are reported with a distinct status (no
+  // config write — there is no relay to wrap them with).
+  for (const u of plan.unguarded) {
+    servers.push({ name: u.name, status: "unguarded", reason: u.reason });
+  }
+
   return { clientId: plan.clientId, servers };
 }
 
@@ -281,13 +378,15 @@ function summarize(
 ): EnableDisableSummary {
   let totalChanged = 0;
   let totalSkipped = 0;
+  let totalUnguarded = 0;
   let errors = 0;
   for (const report of reports) {
     if (report.error) errors++;
     for (const server of report.servers) {
       if (server.status === "wrapped" || server.status === "unwrapped") totalChanged++;
+      else if (server.status === "unguarded") totalUnguarded++;
       else totalSkipped++;
     }
   }
-  return { action, clients: reports, totalChanged, totalSkipped, errors };
+  return { action, clients: reports, totalChanged, totalSkipped, totalUnguarded, errors };
 }

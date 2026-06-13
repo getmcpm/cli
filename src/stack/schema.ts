@@ -55,6 +55,16 @@ const PolicySchema = z.object({
   // Policy output type require the field in every hand-built literal.
   // Consumers check `=== true` (undefined ≡ false).
   blockInstallScripts: z.boolean().optional(),
+  // H9 (fail-closed): durable consent to install URL/HTTP-transport servers
+  // that run UNGUARDED (no relay can wrap a non-stdio transport). When true, a
+  // url: server is permitted without the per-invocation `--allow-unguarded`
+  // flag. This is the ONE place a policy bit grants an explicit DOWNGRADE the
+  // user wrote into their own stack file (principle 1 only forbids
+  // server-declared metadata lowering scrutiny; this is user intent). The
+  // MCP-surface kill-switch `UpOptions.allowUrlServers === false` still wins —
+  // an untrusted caller can never opt in. Bare .optional(): consumers check
+  // `=== true`.
+  allowUrlServers: z.boolean().optional(),
 });
 
 /** Top-level mcpm.yaml schema. */

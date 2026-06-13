@@ -541,7 +541,7 @@ servers:
     url: "${url}"
 `;
 
-  it("installs a valid https url: server to Cursor", async () => {
+  it("installs a valid https url: server to Cursor (with H9 consent)", async () => {
     const stackPath = await writeStackAndLock(urlStack("https://api.example.com/mcp"), basicLock);
     const adapter = makeAdapter();
     const deps = makeDeps({
@@ -549,7 +549,9 @@ servers:
       getAdapter: vi.fn().mockReturnValue(adapter),
     });
 
-    await handleUp({ stackFile: stackPath }, deps);
+    // H9: url servers run UNGUARDED and are now deny-by-default; opt in to
+    // reach the install path this test exercises.
+    await handleUp({ stackFile: stackPath, allowUnguarded: true }, deps);
 
     expect(adapter.addServer).toHaveBeenCalledWith(
       "/mock/config.json",
@@ -593,8 +595,10 @@ servers:
       getAdapter: vi.fn().mockReturnValue(adapter),
     });
 
+    // H9: opt in so the dry-run reaches URL validation (the behavior under
+    // test) rather than the unguarded deny-gate.
     await expect(
-      handleUp({ stackFile: stackPath, dryRun: true }, deps)
+      handleUp({ stackFile: stackPath, dryRun: true, allowUnguarded: true }, deps)
     ).resolves.toBeUndefined();
     expect(adapter.addServer).not.toHaveBeenCalled();
 

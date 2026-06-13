@@ -80,7 +80,7 @@ describe("enableGuardAcrossClients", () => {
     expect(summary.clients[0]?.servers[0]?.reason).toBe("already wrapped");
   });
 
-  test("skips HTTP-transport servers (no command field)", async () => {
+  test("H9: DENIES HTTP-transport servers (no command field) by default", async () => {
     const state: Record<string, McpServerEntry> = {
       "http-mcp": { url: "https://example.com/mcp" },
     };
@@ -89,7 +89,11 @@ describe("enableGuardAcrossClients", () => {
     const summary = await enableGuardAcrossClients(deps);
     expect(summary.totalChanged).toBe(0);
     expect(summary.totalSkipped).toBe(1);
-    expect(summary.clients[0]?.servers[0]?.reason).toContain("HTTP-transport");
+    const server = summary.clients[0]?.servers[0];
+    expect(server?.status).toBe("skipped");
+    // No longer a silent "deferred to V2" — an explicit informed-consent DENY.
+    expect(server?.reason).toContain("DENIED");
+    expect(server?.reason).toContain("UNGUARDED");
   });
 
   test("--server filter limits to one server", async () => {
@@ -184,7 +188,7 @@ describe("statusAcrossClients", () => {
     const status = await statusAcrossClients(deps);
     expect(status.totalWrapped).toBe(1);
     expect(status.totalUnwrapped).toBe(1);
-    expect(status.clients[0]?.servers).toContainEqual({ name: "fs-mcp", wrapped: true });
-    expect(status.clients[0]?.servers).toContainEqual({ name: "git-mcp", wrapped: false });
+    expect(status.clients[0]?.servers).toContainEqual({ name: "fs-mcp", wrapped: true, unguarded: false });
+    expect(status.clients[0]?.servers).toContainEqual({ name: "git-mcp", wrapped: false, unguarded: false });
   });
 });

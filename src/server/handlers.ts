@@ -185,6 +185,18 @@ export async function handleInstall(
     const adapter = deps.getAdapter(clientId);
     const configPath = deps.getConfigPath(clientId);
     const mcpEntry = resolveInstallEntry(entry, clientId);
+    // H9 (fail-closed): a URL/HTTP-transport entry (url, no command) runs
+    // UNGUARDED — the guard relay only wraps a stdio process. The MCP surface is
+    // driven by an untrusted agent with no human in the loop and no
+    // `--allow-unguarded` opt-in, so url-transport installs are HARD-DENIED here
+    // (mirrors the batch `up` MCP wiring's allowUrlServers:false kill-switch).
+    if (mcpEntry.url !== undefined && mcpEntry.command === undefined) {
+      throw new Error(
+        `Server "${args.name}" uses a URL/HTTP transport and runs UNGUARDED ` +
+        `(the guard relay only wraps stdio servers). Installing it is not permitted ` +
+        `via the MCP surface. Use the mcpm CLI with --allow-unguarded after manual review.`
+      );
+    }
     await adapter.addServer(configPath, args.name, mcpEntry);
     installedClients.push(clientId);
   }
