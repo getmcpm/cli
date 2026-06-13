@@ -23,6 +23,7 @@ import type {
   LockFile,
   LockedServer,
   TrustSnapshot,
+  NpmIntegritySnapshot,
 } from "../stack/schema.js";
 import {
   parseStackFile,
@@ -31,6 +32,7 @@ import {
   isUrlServer,
 } from "../stack/schema.js";
 import { resolveVersion, resolveWithSingleVersion } from "../stack/resolve.js";
+import { valid as semverValid } from "semver";
 import { assessReleaseAge, DEFAULT_MIN_RELEASE_AGE_HOURS } from "../scanner/cooldown.js";
 import { extractRegistryMeta } from "../utils/format-trust.js";
 
@@ -53,6 +55,15 @@ export interface LockDeps {
   now?: () => number;
   writeLockFile: (path: string, content: string) => Promise<void>;
   output: (text: string) => void;
+  /**
+   * H11 slice 1: fetch npm's published dist.integrity for an exact package
+   * coordinate. FAIL-OPEN: returns undefined on any error. When undefined the
+   * snapshot is omitted and lock never blocks.
+   */
+  fetchNpmIntegrity: (
+    identifier: string,
+    npmVersion: string
+  ) => Promise<NpmIntegritySnapshot | undefined>;
 }
 
 // ---------------------------------------------------------------------------
@@ -221,11 +232,27 @@ async function resolveServer(
     assessedAt: new Date().toISOString(),
   };
 
+  // Step 5: H11 slice 1 — capture npm artifact integrity snapshot.
+  // Only for npm packages whose pkg.version is a concrete exact semver
+  // (not "latest", a dist-tag, or a range). Using pkg.version (the npm
+  // coordinate) — NOT the resolved MCP server version — because the npm
+  // per-version endpoint uses the npm package version, not the registry's
+  // MCP server version field. Fail-open: if fetchNpmIntegrity returns
+  // undefined, omit the snapshot and proceed; lock never blocks on this.
+  let npmIntegritySnap: NpmIntegritySnapshot | undefined;
+  if (pkg?.registryType === "npm" && semverValid(pkg.version ?? null) !== null) {
+    npmIntegritySnap = await deps.fetchNpmIntegrity(
+      pkg.identifier,
+      pkg.version as string
+    );
+  }
+
   return {
     version: resolvedVersion,
     registryType: pkg?.registryType ?? "unknown",
     identifier: pkg?.identifier ?? name,
     trust: snapshot,
+    ...(npmIntegritySnap ? { npmIntegrity: npmIntegritySnap } : {}),
   };
 }
 
@@ -242,6 +269,7 @@ import {
   scanTier2 as _scanTier2,
 } from "../scanner/tier2.js";
 import { computeTrustScore as _computeTrustScore } from "../scanner/trust-score.js";
+import { fetchNpmIntegrity as _fetchNpmIntegrity } from "../registry/npm-integrity.js";
 import { stdoutOutput } from "../utils/output.js";
 
 export function registerLockCommand(program: Command): void {
@@ -269,6 +297,7 @@ export function registerLockCommand(program: Command): void {
             now: () => Date.now(),
             writeLockFile: (path, content) =>
               writeFile(path, content, { encoding: "utf-8", mode: 0o600 }),
+            fetchNpmIntegrity: _fetchNpmIntegrity,
             output: stdoutOutput,
           }
         );

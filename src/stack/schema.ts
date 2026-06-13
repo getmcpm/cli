@@ -80,6 +80,23 @@ export const StackFileSchema = z.object({
 // mcpm-lock.yaml — Lock file schema
 // ---------------------------------------------------------------------------
 
+/**
+ * Npm artifact integrity snapshot captured at lock time (H11 slice 1).
+ *
+ * Records the npm registry's published `dist.integrity` (SRI) for the exact
+ * npm package coordinate so `mcpm up` can re-check whether the published record
+ * changed (supply-chain drift detection). This checks the *registry's published
+ * record*, NOT the bytes the agent runs (npx/uvx handle artifact execution).
+ */
+const NpmIntegritySnapshotSchema = z.object({
+  /** The npm package version coordinate used to fetch the integrity (e.g. "1.3.0"). */
+  npmVersion: z.string(),
+  /** SRI string from npm's dist.integrity (e.g. "sha512-...=="). */
+  integrity: z.string(),
+});
+
+export type NpmIntegritySnapshot = z.infer<typeof NpmIntegritySnapshotSchema>;
+
 /** Trust snapshot as recorded at lock time. */
 const TrustSnapshotSchema = z.object({
   score: z.number(),
@@ -94,6 +111,13 @@ const LockedRegistryServerSchema = z.object({
   registryType: z.string(),
   identifier: z.string(),
   trust: TrustSnapshotSchema,
+  /**
+   * Npm artifact integrity snapshot (H11 slice 1). Optional: absent on old
+   * lockfiles (backward-compatible) and when the npm coordinate was not a
+   * concrete exact version at lock time. Old lockfiles parse fine because the
+   * schema is non-strict and this field is bare .optional().
+   */
+  npmIntegrity: NpmIntegritySnapshotSchema.optional(),
 });
 
 /** A locked URL server entry (no version resolution). */
