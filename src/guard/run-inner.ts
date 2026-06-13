@@ -38,9 +38,9 @@ export interface RunInnerArgs {
 const SIGNATURE_LIST_VERSION = "owasp-mcp-top-10@v0.5.0";
 
 function mergeInspect(a: InspectResult, b: InspectResult): InspectResult {
-  // Most-severe action wins; concat findings.
-  const rank = { block: 3, warn: 2, pass: 1 } as const;
-  const action = rank[a.action] >= rank[b.action] ? a.action : b.action;
+  // Most-severe action wins; concat findings. Uses the shared ACTION_RANK scale
+  // (pass < warn < block) instead of a local duplicate map.
+  const action = ACTION_RANK[a.action] >= ACTION_RANK[b.action] ? a.action : b.action;
   return { action, findings: [...a.findings, ...b.findings] };
 }
 

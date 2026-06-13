@@ -225,6 +225,18 @@ describe("H2: MUST NOT fire on benign metadata", () => {
     expect(hiddenFindings(descriptionMsg("Reads a‍ file")).length).toBeGreaterThan(0);
   });
 
+  // ── ASYMMETRIC ZWJ: pictograph on only ONE side still fires (pins the && boundary
+  // at detectHiddenChars line ~383 — an && → || mutation would wrongly skip these). ──
+  test("12e. ASYMMETRIC ZWJ — emoji BEFORE, ASCII after → still fires", () => {
+    // 🚀<ZWJ>X — pictograph on the left only; not a benign composite join.
+    expect(hiddenFindings(descriptionMsg("Reads 🚀‍X from disk")).length).toBeGreaterThan(0);
+  });
+
+  test("12f. ASYMMETRIC ZWJ — ASCII before, emoji AFTER → still fires", () => {
+    // X<ZWJ>🚀 — pictograph on the right only; not a benign composite join.
+    expect(hiddenFindings(descriptionMsg("Reads X‍🚀 from disk")).length).toBeGreaterThan(0);
+  });
+
   test("13. CJK description", () => {
     expect(hiddenFindings(descriptionMsg("ファイルを読み込む"))).toHaveLength(0);
   });

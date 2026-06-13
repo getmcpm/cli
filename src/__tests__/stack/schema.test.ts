@@ -223,6 +223,38 @@ servers: {}
 });
 
 // ---------------------------------------------------------------------------
+// PolicySchema — H9 allowUrlServers (durable unguarded consent)
+// ---------------------------------------------------------------------------
+
+describe("PolicySchema — H9 allowUrlServers", () => {
+  it("accepts and preserves policy.allowUrlServers: true", () => {
+    const input = {
+      version: "1",
+      policy: { allowUrlServers: true },
+      servers: {},
+    };
+    const result = StackFileSchema.safeParse(input);
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.policy?.allowUrlServers).toBe(true);
+    }
+  });
+
+  it("leaves allowUrlServers undefined when omitted (bare optional, no default)", () => {
+    const input = {
+      version: "1",
+      policy: { minTrustScore: 60 },
+      servers: {},
+    };
+    const result = StackFileSchema.safeParse(input);
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.policy?.allowUrlServers).toBeUndefined();
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
 // LockFileSchema validation
 // ---------------------------------------------------------------------------
 

@@ -39,15 +39,28 @@ export function registerGuardCommand(program: Command): void {
     .option("--client <name>", "limit to one client (claude-desktop|cursor|vscode|windsurf)")
     .option("--server <name>", "limit to one server name")
     .option("--dry-run", "print the planned changes without writing")
-    .action(async (rawOpts: { client?: string; server?: string; dryRun?: boolean }) => {
-      const { runEnableCommand } = await import("../guard/cli.js");
-      const opts = parseClientServer(rawOpts);
-      await runEnableCommand({
-        ...opts,
-        dryRun: rawOpts.dryRun === true,
-        write: (s) => process.stdout.write(s),
-      });
-    });
+    .option(
+      "--allow-unguarded",
+      "permit URL/HTTP-transport servers to run WITHOUT runtime guard inspection " +
+        "(no MITM relay exists for non-stdio transports); records consent so future runs stay quiet",
+    )
+    .action(
+      async (rawOpts: {
+        client?: string;
+        server?: string;
+        dryRun?: boolean;
+        allowUnguarded?: boolean;
+      }) => {
+        const { runEnableCommand } = await import("../guard/cli.js");
+        const opts = parseClientServer(rawOpts);
+        await runEnableCommand({
+          ...opts,
+          dryRun: rawOpts.dryRun === true,
+          allowUnguarded: rawOpts.allowUnguarded === true,
+          write: (s) => process.stdout.write(s),
+        });
+      },
+    );
 
   guard
     .command("disable")

@@ -188,6 +188,22 @@ export interface InstallOptions {
   minReleaseAge?: number;
   allowFresh?: boolean;
   secrets?: SecretsMode;
+  /**
+   * H9 (fail-closed): per-invocation consent (`--allow-unguarded`) to install a
+   * URL/HTTP-transport server that runs UNGUARDED (the guard relay only wraps a
+   * stdio transport — a non-stdio remote gets ZERO runtime inspection). When
+   * neither this nor a name already in the persistent consent store grants it,
+   * such a server is DENIED. DISTINCT from `allowUrlServers`, the MCP-surface
+   * kill-switch: `allowUrlServers === false` ALWAYS wins.
+   */
+  allowUnguarded?: boolean;
+  /**
+   * Whether URL/HTTP-transport servers may be installed at all. DEFAULT
+   * (undefined/true) preserves CLI behavior. The MCP surface passes `false` so a
+   * url-transport server is recorded as blocked instead of written to a config —
+   * an untrusted caller can never reach the unguarded run path.
+   */
+  allowUrlServers?: boolean;
 }
 
 export interface InstallDeps {
@@ -207,6 +223,18 @@ export interface InstallDeps {
   setSecrets?: (server: string, values: Record<string, string>) => Promise<void>;
   /** Epoch-ms clock for release-age assessment; defaults to Date.now at the CLI boundary. */
   now?: () => number;
+  /**
+   * H9: read the persistent set of server names previously consented to run
+   * unguarded. Injectable for tests; defaults to the real store at the CLI
+   * boundary. When omitted, no server is treated as previously-consented.
+   */
+  readUnguardedConsent?: () => Promise<string[]>;
+  /**
+   * H9: persist (union into the store) the name newly consented to run
+   * unguarded. Injectable for tests; defaults to the real store. Called once
+   * after a url server is installed under fresh consent.
+   */
+  recordUnguardedConsent?: (names: readonly string[]) => Promise<void>;
 }
 
 // ---------------------------------------------------------------------------
@@ -574,6 +602,52 @@ export async function handleInstall(
   }
 
   // -------------------------------------------------------------------------
+  // Step 7b: H9 fail-closed gate for URL/HTTP-transport servers
+  // -------------------------------------------------------------------------
+  // A resolved entry with a `url` and no `command` runs UNGUARDED — the guard
+  // relay only wraps a stdio process, so a non-stdio remote gets ZERO runtime
+  // inspection. Mirror processUrlServer (up.ts): the MCP-surface kill-switch
+  // (allowUrlServers === false) ALWAYS wins; otherwise DENY unless explicit
+  // informed consent (`--allow-unguarded` this run, or a name already in the
+  // persistent consent store). This is informed consent, NOT protection.
+  const isUnguardedEntry = [...resolvedEntries.values()].some(
+    (e) => e.url !== undefined && e.command === undefined
+  );
+  if (isUnguardedEntry) {
+    if (options.allowUrlServers === false) {
+      throw new Error(
+        `Server '${name}' uses a URL/HTTP transport and is not permitted via the MCP surface.`
+      );
+    }
+    const previousConsented = deps.readUnguardedConsent
+      ? await deps.readUnguardedConsent()
+      : [];
+    const alreadyConsented = previousConsented.includes(name);
+    const consented = options.allowUnguarded === true || alreadyConsented;
+    if (!consented) {
+      throw new Error(
+        `Server '${name}' uses a URL/HTTP transport and runs UNGUARDED — no runtime ` +
+          `inspection is possible (mcpm's guard relay only wraps stdio servers). ` +
+          `Re-run with --allow-unguarded to install it WITHOUT protection.`
+      );
+    }
+    // First-time consent: warn once and persist so a future install stays quiet.
+    if (!alreadyConsented) {
+      if (!jsonMode) {
+        output(
+          "\x1b[33m⚠ UNGUARDED: this URL/HTTP-transport server runs WITHOUT runtime " +
+            "inspection (the guard relay only wraps stdio servers). This grants consent — " +
+            "it does NOT add protection. The only true fix is a streamable-HTTP relay " +
+            "(not yet implemented).\x1b[0m"
+        );
+      }
+      if (deps.recordUnguardedConsent) {
+        await deps.recordUnguardedConsent([name]).catch(() => undefined);
+      }
+    }
+  }
+
+  // -------------------------------------------------------------------------
   // Step 8: Write config to each client and record in store
   // -------------------------------------------------------------------------
   const installedClients: ClientId[] = [];
@@ -754,9 +828,13 @@ export function registerInstallCommand(program: Command): void {
     .option("--min-release-age <hours>", "abort install if the release is younger than this many hours OR its publish timestamp is missing/unparseable (fail-closed when set; also sets the scoring cooldown threshold; bypass with --allow-fresh)", parseMinReleaseAge)
     .option("--allow-fresh", "bypass the --min-release-age gate (including the missing-timestamp block)")
     .option("--secrets <mode>", "where to store secret env vars: 'keychain' (encrypted in ~/.mcpm, resolved by mcpm guard at launch) or 'plaintext' (default)", parseSecretsMode)
-    .action(async (name: string, opts: { client?: string; yes?: boolean; force?: boolean; skipHealthCheck?: boolean; json?: boolean; minTrust?: number; minReleaseAge?: number; allowFresh?: boolean; secrets?: SecretsMode }) => {
+    .option("--allow-unguarded", "permit a URL/HTTP-transport server to run WITHOUT runtime guard inspection (no relay wraps a non-stdio transport); records consent so future installs stay quiet")
+    .action(async (name: string, opts: { client?: string; yes?: boolean; force?: boolean; skipHealthCheck?: boolean; json?: boolean; minTrust?: number; minReleaseAge?: number; allowFresh?: boolean; secrets?: SecretsMode; allowUnguarded?: boolean }) => {
       const { RegistryClient } = await import("../registry/client.js");
       const client = new RegistryClient();
+      const { readUnguardedConsent, writeUnguardedConsent, mergeUnguarded } = await import(
+        "../guard/unguarded.js"
+      );
 
       const installOptions: InstallOptions = {
         client: opts.client,
@@ -768,6 +846,7 @@ export function registerInstallCommand(program: Command): void {
         minReleaseAge: opts.minReleaseAge,
         allowFresh: opts.allowFresh,
         secrets: opts.secrets,
+        allowUnguarded: opts.allowUnguarded,
       };
 
       const installDeps: InstallDeps = {
@@ -785,6 +864,11 @@ export function registerInstallCommand(program: Command): void {
         output: stdoutOutput,
         setSecrets: _setSecrets,
         now: () => Date.now(),
+        readUnguardedConsent,
+        recordUnguardedConsent: async (names) => {
+          const previous = await readUnguardedConsent();
+          await writeUnguardedConsent(mergeUnguarded(previous, names));
+        },
       };
 
       try {

@@ -108,6 +108,12 @@ export interface RelayOptions {
   readonly inspectParentRequest?: InspectFn;
   /** Optional sink for inspection events (block / warn). Defaults to noop. */
   readonly onEvent?: (event: GuardEvent) => void;
+  /**
+   * Test seam (H9 B.2): factory that produces the child process. Defaults to a
+   * real `spawn`. Injected by the relay unit test to drive the `'error'` path
+   * (spawn failure) without forking a real subprocess. Production never sets it.
+   */
+  readonly spawnChild?: (command: string, args: readonly string[], env: NodeJS.ProcessEnv) => ChildProcess;
 }
 
 export interface RelayHandle {
@@ -122,16 +128,78 @@ export interface GuardEvent {
   readonly findings: InspectResult["findings"];
 }
 
-/* c8 ignore start — subprocess production path: behavior verified via E2E
- * smoke (mcpm guard run --inner with real spawned echo-bot), not unit-testable
- * without forking child processes in CI. The shared logic (frame parsing,
- * inspection, block synthesis) is covered via startInProcessRelay. */
 export function startRelay(opts: RelayOptions): RelayHandle {
-  const child = spawn(opts.command, [...opts.args], {
-    env: opts.env ?? buildSafeEnv(),
-    stdio: ["pipe", "pipe", "inherit"], // stderr passthrough — preserves IDE diagnostics
+  const env = opts.env ?? buildSafeEnv();
+  const child = opts.spawnChild
+    ? opts.spawnChild(opts.command, opts.args, env)
+    : spawn(opts.command, [...opts.args], {
+        env,
+        stdio: ["pipe", "pipe", "inherit"], // stderr passthrough — preserves IDE diagnostics
+      });
+
+  // Signal forwarding handlers are removed both on a clean exit and on a
+  // spawn-failure ('error'); hoist them so both settle paths can detach.
+  const forwardSignal = (sig: NodeJS.Signals): void => {
+    if (!child.killed) child.kill(sig);
+  };
+
+  // H9 (B.2): fail CLOSED on a child-spawn failure. `spawn` succeeds
+  // synchronously even when the binary is missing — Node then emits an async
+  // `'error'` event on the child (ENOENT/EACCES/…). Without a handler this
+  // either crashes the guard process (unhandled exception) or hangs forever
+  // (the `'exit'` promise never resolves), and the IDE is left with a half-open
+  // channel or a dead session. Instead: detach signal handlers, log a `block`
+  // event so the failure is visible in ~/.mcpm/guard-events.jsonl, forward NO
+  // bytes (none were exchanged), and resolve `exit` nonzero so the guard
+  // process exits cleanly. A dead server cannot serve UNGUARDED.
+  let settled = false;
+  let resolveExit!: (code: number) => void;
+  const exit = new Promise<number>((resolve) => {
+    resolveExit = resolve;
+  });
+  child.on("error", (err: NodeJS.ErrnoException) => {
+    if (settled) return;
+    settled = true;
+    process.off("SIGTERM", forwardSignal);
+    process.off("SIGINT", forwardSignal);
+    // Forensics: record WHY the channel closed (ENOENT/EACCES + message), so an
+    // operator triaging guard-events.jsonl can tell a missing-binary spawn
+    // failure apart from a content-level block. The finding carries the cause in
+    // a valid InspectFinding shape (no type change to GuardEvent).
+    const code = err.code ?? "SPAWN-FAILED";
+    opts.onEvent?.({
+      ts: new Date().toISOString(),
+      direction: "child->parent",
+      action: "block",
+      findings: [
+        {
+          signature_id: "spawn-failure",
+          category: "RELAY",
+          severity: "critical",
+          target: "tool_response",
+          matched_text_excerpt: `${code}: ${err.message}`,
+          remediation:
+            "The wrapped MCP server binary failed to start. Verify the command exists and is executable.",
+        },
+      ],
+    });
+    // Attributable stderr line so the closed channel reads as guard-intercepted
+    // rather than an opaque crash (mirrors the PINS-READ-ERROR pattern).
+    process.stderr.write(`[mcpm-guard] SPAWN-FAILED ${opts.command}: ${code}\n`);
+    // Defensive: detach/destroy the child streams so no late data listener (e.g.
+    // a wrapper that prints then dies, or a late-resolving symlink) can forward
+    // uninspected bytes to parentOut after settlement. Matches the buffer-cap
+    // path's source.destroy() discipline.
+    child.stdout?.destroy();
+    child.stdin?.destroy();
+    resolveExit(1);
   });
 
+  /* c8 ignore start — subprocess production path: behavior verified via E2E
+   * smoke (mcpm guard run --inner with real spawned echo-bot), not unit-testable
+   * without forking child processes in CI. The shared logic (frame parsing,
+   * inspection, block synthesis) is covered via startInProcessRelay; the
+   * spawn-failure 'error' path above is covered via an injected fake child. */
   // Swallow write-after-close errors when the child has already exited.
   // Without this listener, Node throws an uncaught exception on the relay
   // process, which a malicious child can exploit by crashing intentionally.
@@ -177,23 +245,20 @@ export function startRelay(opts: RelayOptions): RelayHandle {
   // Signal forwarding — IDE-originated SIGTERM / SIGINT propagates to child.
   // Use named handlers + explicit removal on exit so repeated startRelay calls
   // don't accumulate listeners (would emit MaxListenersExceededWarning at 11+).
-  const forwardSignal = (sig: NodeJS.Signals): void => {
-    if (!child.killed) child.kill(sig);
-  };
   process.on("SIGTERM", forwardSignal);
   process.on("SIGINT", forwardSignal);
 
-  const exit = new Promise<number>((resolve) => {
-    child.on("exit", (code) => {
-      process.off("SIGTERM", forwardSignal);
-      process.off("SIGINT", forwardSignal);
-      resolve(code ?? 0);
-    });
+  child.on("exit", (code) => {
+    if (settled) return;
+    settled = true;
+    process.off("SIGTERM", forwardSignal);
+    process.off("SIGINT", forwardSignal);
+    resolveExit(code ?? 0);
   });
+  /* c8 ignore stop */
 
   return { child, exit };
 }
-/* c8 ignore stop */
 
 // ---------------------------------------------------------------------------
 // In-process relay (unit tests + demo)

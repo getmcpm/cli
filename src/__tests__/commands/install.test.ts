@@ -434,6 +434,105 @@ describe("handleInstall — --force flag", () => {
 });
 
 // ---------------------------------------------------------------------------
+// H9 — URL/HTTP-transport server runs UNGUARDED: deny-by-default consent gate
+// ---------------------------------------------------------------------------
+
+/** A url-only server (no packages) → resolveInstallEntry returns a `{ url }` entry on Cursor. */
+function makeUrlServerEntry(): ServerEntry {
+  return makeServerEntry({
+    packages: [],
+    remotes: [{ type: "streamable-http", url: "https://api.example.com/mcp", headers: [] }],
+  });
+}
+
+function makeUrlDeps(overrides: Partial<InstallDeps> = {}): InstallDeps {
+  return makeDeps({
+    registryClient: { getServer: vi.fn().mockResolvedValue(makeUrlServerEntry()) },
+    detectClients: vi.fn().mockResolvedValue(["cursor"] as ClientId[]),
+    ...overrides,
+  });
+}
+
+describe("handleInstall — H9 url-server deny-by-default", () => {
+  beforeEach(() => {
+    vi.resetAllMocks();
+  });
+
+  it("DENIES a url server by default (no addServer, message names UNGUARDED)", async () => {
+    const adapter = makeAdapter("cursor");
+    const deps = makeUrlDeps({
+      getAdapter: vi.fn().mockReturnValue(adapter),
+      readUnguardedConsent: vi.fn().mockResolvedValue([]),
+    });
+    await expect(
+      handleInstall("io.github.test/my-server", { client: "cursor" }, deps)
+    ).rejects.toThrow(/UNGUARDED/);
+    expect(adapter.addServer).not.toHaveBeenCalled();
+  });
+
+  it("--allow-unguarded installs, records consent, and warns once", async () => {
+    const adapter = makeAdapter("cursor");
+    const recordConsent = vi.fn().mockResolvedValue(undefined);
+    const deps = makeUrlDeps({
+      getAdapter: vi.fn().mockReturnValue(adapter),
+      readUnguardedConsent: vi.fn().mockResolvedValue([]),
+      recordUnguardedConsent: recordConsent,
+    });
+    await handleInstall(
+      "io.github.test/my-server",
+      { client: "cursor", allowUnguarded: true },
+      deps
+    );
+    expect(adapter.addServer).toHaveBeenCalled();
+    expect(recordConsent).toHaveBeenCalledWith(["io.github.test/my-server"]);
+    const out = (deps.output as ReturnType<typeof vi.fn>).mock.calls.flat().join("\n");
+    expect(out).toMatch(/does NOT add protection/);
+  });
+
+  it("a previously-consented url server installs without the flag (store hit, no re-warn)", async () => {
+    const adapter = makeAdapter("cursor");
+    const recordConsent = vi.fn().mockResolvedValue(undefined);
+    const deps = makeUrlDeps({
+      getAdapter: vi.fn().mockReturnValue(adapter),
+      readUnguardedConsent: vi.fn().mockResolvedValue(["io.github.test/my-server"]),
+      recordUnguardedConsent: recordConsent,
+    });
+    await handleInstall("io.github.test/my-server", { client: "cursor" }, deps);
+    expect(adapter.addServer).toHaveBeenCalled();
+    // Already consented → no re-record, no re-warn.
+    expect(recordConsent).not.toHaveBeenCalled();
+    const out = (deps.output as ReturnType<typeof vi.fn>).mock.calls.flat().join("\n");
+    expect(out).not.toMatch(/does NOT add protection/);
+  });
+
+  it("allowUrlServers:false (MCP kill-switch) overrides allowUnguarded:true", async () => {
+    const adapter = makeAdapter("cursor");
+    const deps = makeUrlDeps({
+      getAdapter: vi.fn().mockReturnValue(adapter),
+      readUnguardedConsent: vi.fn().mockResolvedValue([]),
+    });
+    await expect(
+      handleInstall(
+        "io.github.test/my-server",
+        { client: "cursor", allowUnguarded: true, allowUrlServers: false },
+        deps
+      )
+    ).rejects.toThrow(/not permitted via the MCP surface/);
+    expect(adapter.addServer).not.toHaveBeenCalled();
+  });
+
+  it("a normal stdio (npm) server is unaffected by the gate", async () => {
+    const adapter = makeAdapter("claude-desktop");
+    const deps = makeDeps({
+      getAdapter: vi.fn().mockReturnValue(adapter),
+      readUnguardedConsent: vi.fn().mockResolvedValue([]),
+    });
+    await handleInstall("io.github.test/my-server", {}, deps);
+    expect(adapter.addServer).toHaveBeenCalled();
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Server with no packages and no remotes
 // ---------------------------------------------------------------------------
 

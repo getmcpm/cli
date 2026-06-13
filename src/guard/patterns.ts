@@ -53,96 +53,106 @@ function* stringLeaves(node: unknown, depth = 0, maxDepth = 32): Iterable<string
  * cleanly scoped — a `tool_response` signature won't accidentally fire
  * against a `tools/list` description leaf and vice versa.
  */
-function targetSubtree(msg: JSONRPCMessage, target: SignatureTarget): unknown {
-  if (target === "tool_response") {
-    // tools/call response → result.content, result.structuredContent, AND the
-    // JSON-RPC error object. Injection placed in structuredContent or an error
-    // message would otherwise evade every tool_response signature. (security #16)
-    const error = (msg as { error?: unknown }).error ?? null;
-    if ("result" in msg) {
-      const result = (msg as { result?: { content?: unknown; structuredContent?: unknown } }).result;
-      return [result?.content ?? null, result?.structuredContent ?? null, error];
-    }
-    return error;
-  }
-  if (target === "tool_call_args") {
-    // tools/call request → params.arguments
-    if ("method" in msg && msg.method === "tools/call" && "params" in msg) {
-      const params = (msg as { params?: { arguments?: unknown } }).params;
-      return params?.arguments ?? null;
-    }
-    return null;
-  }
-  if (target === "tool_description") {
-    // tools/list response → per tool: description + title + the FULL inputSchema.
-    // Poison in inputSchema.properties.*.description / enum / title is a known
-    // tool-poisoning vector that scanning only `description` would miss. (#16)
-    if ("result" in msg) {
-      const result = (msg as {
-        result?: { tools?: Array<{ description?: unknown; title?: unknown; inputSchema?: unknown }> };
-      }).result;
-      const tools = result?.tools;
-      if (!tools) return null;
-      return tools.map((t) => [t.description ?? "", t.title ?? "", t.inputSchema ?? null]);
-    }
-    return null;
-  }
-  if (target === "tool_annotations") {
-    // tools/list response → result.tools[*].annotations
-    if ("result" in msg) {
-      const result = (msg as { result?: { tools?: Array<{ annotations?: unknown }> } }).result;
-      const tools = result?.tools;
-      if (!tools) return null;
-      return tools.map((t) => t.annotations ?? null);
-    }
-    return null;
-  }
-  if (target === "resource_content") {
-    // resources/read response → result.contents[*].text. Text-only for the first
-    // slice: base64 `blob` decoding is deferred (binary blobs are noise + an FP /
-    // perf risk). Retrieved DATA carrier — the warn-only clamp in inspectMessage
-    // degrades a match here to `warn` so a poisoned README is annotated, not dropped.
-    if ("result" in msg) {
-      const result = (msg as { result?: { contents?: Array<{ text?: unknown }> } }).result;
-      const contents = result?.contents;
-      if (!Array.isArray(contents)) return null;
-      return contents.map((c) => c.text ?? null);
-    }
-    return null;
-  }
-  if (target === "prompt_content") {
-    // prompts/get response → result.messages[*].content. Return the whole
-    // `content` and let stringLeaves recurse it: content may be a single
-    // `{type:"text", text:"…"}` object OR an ARRAY of such blocks. Extracting
-    // only `content.text` would yield null for the array shape, silently
-    // bypassing inspection of a server-provided prompt. stringLeaves skips the
-    // non-string base64 image/audio `data` leaves on its own (they're strings,
-    // but only injection-shaped text matches a signature; the perf cost is
-    // bounded by normalizeForMatch's cap). Retrieved DATA carrier — warn-only
-    // via the inspectMessage clamp. (security: H1 array-content bypass)
-    if ("result" in msg) {
-      const result = (msg as { result?: { messages?: Array<{ content?: unknown }> } }).result;
-      const messages = result?.messages;
-      if (!Array.isArray(messages)) return null;
-      return messages.map((m) => m.content ?? null);
-    }
-    return null;
-  }
-  if (target === "initialize_instructions") {
-    // initialize response → result.instructions + result.serverInfo. Pre-invocation
-    // CONTEXT (block-capable). Gated on result.protocolVersion (the reliable
-    // initialize discriminator) so a stray `instructions` key in a tools/call
-    // result is NOT mislabeled as block-capable context. (security: H1 #1)
-    if ("result" in msg) {
-      const result = (msg as {
-        result?: { protocolVersion?: unknown; instructions?: unknown; serverInfo?: unknown };
-      }).result;
-      if (typeof result?.protocolVersion !== "string") return null;
-      return [result.instructions ?? null, result.serverInfo ?? null];
-    }
-    return null;
-  }
+/** Compile-time exhaustiveness guard: reaching this means a SignatureTarget
+ *  case is unhandled in targetSubtree, which becomes a type error here. */
+function unhandledTarget(_: never): null {
   return null;
+}
+
+function targetSubtree(msg: JSONRPCMessage, target: SignatureTarget): unknown {
+  switch (target) {
+    case "tool_response": {
+      // tools/call response → result.content, result.structuredContent, AND the
+      // JSON-RPC error object. Injection placed in structuredContent or an error
+      // message would otherwise evade every tool_response signature. (security #16)
+      const error = (msg as { error?: unknown }).error ?? null;
+      if ("result" in msg) {
+        const result = (msg as { result?: { content?: unknown; structuredContent?: unknown } }).result;
+        return [result?.content ?? null, result?.structuredContent ?? null, error];
+      }
+      return error;
+    }
+    case "tool_call_args": {
+      // tools/call request → params.arguments
+      if ("method" in msg && msg.method === "tools/call" && "params" in msg) {
+        const params = (msg as { params?: { arguments?: unknown } }).params;
+        return params?.arguments ?? null;
+      }
+      return null;
+    }
+    case "tool_description": {
+      // tools/list response → per tool: description + title + the FULL inputSchema.
+      // Poison in inputSchema.properties.*.description / enum / title is a known
+      // tool-poisoning vector that scanning only `description` would miss. (#16)
+      if ("result" in msg) {
+        const result = (msg as {
+          result?: { tools?: Array<{ description?: unknown; title?: unknown; inputSchema?: unknown }> };
+        }).result;
+        const tools = result?.tools;
+        if (!tools) return null;
+        return tools.map((t) => [t.description ?? "", t.title ?? "", t.inputSchema ?? null]);
+      }
+      return null;
+    }
+    case "tool_annotations": {
+      // tools/list response → result.tools[*].annotations
+      if ("result" in msg) {
+        const result = (msg as { result?: { tools?: Array<{ annotations?: unknown }> } }).result;
+        const tools = result?.tools;
+        if (!tools) return null;
+        return tools.map((t) => t.annotations ?? null);
+      }
+      return null;
+    }
+    case "resource_content": {
+      // resources/read response → result.contents[*].text. Text-only for the first
+      // slice: base64 `blob` decoding is deferred (binary blobs are noise + an FP /
+      // perf risk). Retrieved DATA carrier — the warn-only clamp in inspectMessage
+      // degrades a match here to `warn` so a poisoned README is annotated, not dropped.
+      if ("result" in msg) {
+        const result = (msg as { result?: { contents?: Array<{ text?: unknown }> } }).result;
+        const contents = result?.contents;
+        if (!Array.isArray(contents)) return null;
+        return contents.map((c) => c.text ?? null);
+      }
+      return null;
+    }
+    case "prompt_content": {
+      // prompts/get response → result.messages[*].content. Return the whole
+      // `content` and let stringLeaves recurse it: content may be a single
+      // `{type:"text", text:"…"}` object OR an ARRAY of such blocks. Extracting
+      // only `content.text` would yield null for the array shape, silently
+      // bypassing inspection of a server-provided prompt. stringLeaves skips the
+      // non-string base64 image/audio `data` leaves on its own (they're strings,
+      // but only injection-shaped text matches a signature; the perf cost is
+      // bounded by normalizeForMatch's cap). Retrieved DATA carrier — warn-only
+      // via the inspectMessage clamp. (security: H1 array-content bypass)
+      if ("result" in msg) {
+        const result = (msg as { result?: { messages?: Array<{ content?: unknown }> } }).result;
+        const messages = result?.messages;
+        if (!Array.isArray(messages)) return null;
+        return messages.map((m) => m.content ?? null);
+      }
+      return null;
+    }
+    case "initialize_instructions": {
+      // initialize response → result.instructions + result.serverInfo. Pre-invocation
+      // CONTEXT (block-capable). Gated on result.protocolVersion (the reliable
+      // initialize discriminator) so a stray `instructions` key in a tools/call
+      // result is NOT mislabeled as block-capable context. (security: H1 #1)
+      if ("result" in msg) {
+        const result = (msg as {
+          result?: { protocolVersion?: unknown; instructions?: unknown; serverInfo?: unknown };
+        }).result;
+        if (typeof result?.protocolVersion !== "string") return null;
+        return [result.instructions ?? null, result.serverInfo ?? null];
+      }
+      return null;
+    }
+    default:
+      // Adding a new SignatureTarget without a case above is a compile error here.
+      return unhandledTarget(target);
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -286,12 +296,13 @@ function inspectAgainstSignatures(
 // ---------------------------------------------------------------------------
 
 /**
- * Targets H2 inspects. METADATA carriers only: a hidden/control char in a tool
- * description / title / inputSchema text / annotations hides content from human
- * review (OWASP-MCP-1 tool poisoning). H2 deliberately does NOT run on
- * tool_response / retrieved data — an invisible char in a fetched log, source
- * file, or email is common and benign, so scanning there is an FP generator.
- * Explicit allowlist so the scope can't silently expand.
+ * Targets H2 inspects: tool METADATA plus block-capable PRE-INVOCATION CONTEXT.
+ * A hidden/control char in a tool description / title / inputSchema text /
+ * annotations — or in initialize.instructions — hides content from human review
+ * (OWASP-MCP-1 tool poisoning). H2 deliberately does NOT run on tool_response /
+ * retrieved data (resource_content / prompt_content): an invisible char in a
+ * fetched log, source file, or email is common and benign, so scanning there is
+ * an FP generator. Explicit allowlist so the scope can't silently expand.
  */
 const HIDDEN_CHAR_TARGETS: ReadonlySet<SignatureTarget> = new Set<SignatureTarget>([
   "tool_description",
@@ -379,6 +390,8 @@ export function detectHiddenChars(leaf: string, target: SignatureTarget): Inspec
     // benign sequence (family, profession, flag) — not a poisoning indicator.
     if (m[0].codePointAt(0) === 0x200d) {
       const before = codePointBefore(scanned, m.index);
+      // ZWJ (U+200D) is in the BMP → one UTF-16 code unit, so the next codepoint
+      // starts at m.index + 1 (no surrogate-pair offset needed here).
       const after = scanned.codePointAt(m.index + 1);
       if (isEmojiJoinComponent(before) && isEmojiJoinComponent(after)) continue;
     }

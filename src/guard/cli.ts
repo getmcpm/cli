@@ -5,6 +5,7 @@
  * filesystem I/O outside the orchestrator's adapter calls.
  */
 
+import chalk from "chalk";
 import type { ClientId } from "../config/paths.js";
 import { getConfigPath } from "../config/paths.js";
 import { detectInstalledClients } from "../config/detector.js";
@@ -20,6 +21,12 @@ import {
 } from "./orchestrator.js";
 import { defaultWrapContext } from "./wrap.js";
 import { placeholderEnvKeys } from "../store/keychain.js";
+import {
+  readUnguardedConsent,
+  writeUnguardedConsent,
+  mergeUnguarded,
+  isNewUnguarded,
+} from "./unguarded.js";
 
 const CLIENT_LABELS: Record<ClientId, string> = {
   "claude-desktop": "Claude Desktop",
@@ -36,12 +43,19 @@ interface CommandIO {
   readonly write: (s: string) => void;
 }
 
-function buildDeps(): OrchestratorDeps {
+function buildDeps(extra: Partial<OrchestratorDeps> = {}): OrchestratorDeps {
   return {
     detectClients: detectInstalledClients,
     getAdapter,
     getConfigPath,
     wrapContext: defaultWrapContext(),
+    readUnguardedConsent,
+    recordUnguardedConsent: async (names) => {
+      // Union the newly-consented names into the persistent store.
+      const previous = await readUnguardedConsent();
+      await writeUnguardedConsent(mergeUnguarded(previous, names));
+    },
+    ...extra,
   };
 }
 
@@ -53,10 +67,16 @@ export interface EnableOpts extends CommandIO {
   readonly client?: ClientId;
   readonly server?: string;
   readonly dryRun?: boolean;
+  /** H9: `--allow-unguarded` — consent to run url servers without the relay. */
+  readonly allowUnguarded?: boolean;
 }
 
 export async function runEnableCommand(opts: EnableOpts): Promise<void> {
-  const deps = buildDeps();
+  // H9: capture the previous consent set BEFORE the run so we can warn-once
+  // (full UNGUARDED warning only when the set GAINS a server — additions
+  // re-warn; removals/unchanged stay quiet — anti-rubber-stamp, §5 H9).
+  const previousConsented = await readUnguardedConsent();
+  const deps = buildDeps({ allowUnguarded: opts.allowUnguarded });
 
   if (opts.dryRun === true) {
     const status = await statusAcrossClients(deps);
@@ -75,7 +95,58 @@ export async function runEnableCommand(opts: EnableOpts): Promise<void> {
 
   const summary = await enableGuardAcrossClients(deps, opts);
   printEnableDisable(summary, opts);
+  printUnguardedWarning(summary, previousConsented, opts);
   printRestartReminder(opts);
+}
+
+/**
+ * H9 (A.4): "warn once unless the set changes". Emit the full multi-line
+ * UNGUARDED warning only when this run ADDS a server to the consented-unguarded
+ * set (additions = new risk). When the set is unchanged (or only shrank), emit
+ * at most a single quiet line. Removals never re-warn.
+ */
+export function printUnguardedWarning(
+  summary: EnableDisableSummary,
+  previousConsented: readonly string[],
+  opts: CommandIO,
+): void {
+  const current = [
+    ...new Set(
+      summary.clients.flatMap((c) =>
+        c.servers.filter((s) => s.status === "unguarded").map((s) => s.name),
+      ),
+    ),
+  ].sort();
+  if (current.length === 0) return;
+
+  if (isNewUnguarded(current, previousConsented)) {
+    // List only the NEWLY-consented delta as the servers being rubber-stamped;
+    // re-listing already-consented names dilutes the "this one is the new risk"
+    // signal the warn-once design exists to sharpen.
+    const prev = new Set(previousConsented);
+    const newlyConsented = current.filter((n) => !prev.has(n));
+    const alreadyCount = current.length - newlyConsented.length;
+    opts.write(
+      chalk.yellow(
+        "\n⚠ UNGUARDED: the following server(s) run WITHOUT runtime inspection — " +
+          "the guard relay cannot wrap a non-stdio (URL/HTTP) transport:",
+      ) + "\n",
+    );
+    for (const name of newlyConsented) opts.write(`  ⚠ ${sanitize(name)}\n`);
+    if (alreadyCount > 0) {
+      opts.write(`  (+${alreadyCount} previously consented)\n`);
+    }
+    opts.write(
+      "This grants consent to run them UNGUARDED — it does NOT add protection. The only " +
+        "true fix is a streamable-HTTP relay (not yet implemented). Future `enable` runs " +
+        "stay quiet unless a NEW unguarded server appears.\n",
+    );
+  } else {
+    opts.write(
+      `\n${current.length} server(s) running unguarded (previously consented): ` +
+        `${current.map((n) => sanitize(n)).join(", ")}\n`,
+    );
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -200,7 +271,11 @@ export async function runStatusCommand(opts: StatusOpts): Promise<void> {
 function printEnableDisable(summary: EnableDisableSummary, opts: CommandIO): void {
   const verb = summary.action === "enable" ? "wrapped" : "unwrapped";
   opts.write(`mcpm guard ${summary.action}: ${summary.totalChanged} ${verb}, `);
-  opts.write(`${summary.totalSkipped} skipped, ${summary.errors} error(s)\n\n`);
+  opts.write(`${summary.totalSkipped} skipped`);
+  if (summary.totalUnguarded > 0) {
+    opts.write(`, ${summary.totalUnguarded} unguarded`);
+  }
+  opts.write(`, ${summary.errors} error(s)\n\n`);
   for (const client of summary.clients) {
     printClientReport(client, opts);
   }
@@ -217,7 +292,14 @@ function printClientReport(report: ClientReport, opts: CommandIO): void {
     return;
   }
   for (const s of report.servers) {
-    const symbol = s.status === "wrapped" ? "+" : s.status === "unwrapped" ? "-" : "·";
+    const symbol =
+      s.status === "wrapped"
+        ? "+"
+        : s.status === "unwrapped"
+          ? "-"
+          : s.status === "unguarded"
+            ? "⚠"
+            : "·";
     const reason = s.reason !== undefined ? ` (${sanitize(s.reason)})` : "";
     opts.write(`    ${symbol} ${sanitize(s.name)}${reason}\n`);
   }
@@ -232,7 +314,10 @@ function printStatus(status: StatusReport, opts: CommandIO): void {
       continue;
     }
     for (const s of c.servers) {
-      opts.write(`    ${s.wrapped ? "+" : "·"} ${sanitize(s.name)}\n`);
+      // H9: a url/HTTP-transport server cannot be wrapped — mark it UNGUARDED
+      // distinctly rather than letting it read as a plain unwrapped stdio server.
+      const marker = s.wrapped ? "+" : s.unguarded ? "⚠ UNGUARDED" : "·";
+      opts.write(`    ${marker} ${sanitize(s.name)}\n`);
     }
   }
 }

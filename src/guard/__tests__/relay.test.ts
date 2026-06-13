@@ -11,10 +11,12 @@
  */
 
 import { describe, expect, test } from "vitest";
+import { EventEmitter } from "node:events";
 import { PassThrough } from "node:stream";
+import type { ChildProcess } from "node:child_process";
 import { ReadBuffer, serializeMessage } from "@modelcontextprotocol/sdk/shared/stdio.js";
 import type { JSONRPCMessage } from "@modelcontextprotocol/sdk/types.js";
-import { buildSafeEnv, startInProcessRelay, type GuardEvent } from "../relay.js";
+import { buildSafeEnv, startInProcessRelay, startRelay, type GuardEvent } from "../relay.js";
 import type { InspectResult } from "../types.js";
 
 // ──────────────────────── helpers ────────────────────────
@@ -346,5 +348,114 @@ describe("relay inspection + block behavior", () => {
     await new Promise((r) => setImmediate(r));
     expect(captured.output).toHaveLength(0);
     expect(captured.events).toHaveLength(1);
+  });
+});
+
+// ─────────────── H9 (B.2): child-spawn failure fails closed ───────────────
+
+/**
+ * A fake ChildProcess that lets the test drive a `'error'` event (the async
+ * signal Node emits when spawn fails — e.g. ENOENT command-not-found) without
+ * forking a real subprocess. Only the surface startRelay touches is modelled.
+ */
+function makeFakeChild(): ChildProcess & { emitError: (err: Error) => void } {
+  const emitter = new EventEmitter() as EventEmitter & {
+    stdin: PassThrough;
+    stdout: PassThrough;
+    killed: boolean;
+    kill: () => boolean;
+    emitError: (err: Error) => void;
+  };
+  emitter.stdin = new PassThrough();
+  emitter.stdout = new PassThrough();
+  emitter.killed = false;
+  emitter.kill = () => true;
+  emitter.emitError = (err: Error) => emitter.emit("error", err);
+  return emitter as unknown as ChildProcess & { emitError: (err: Error) => void };
+}
+
+describe("startRelay — child-spawn failure fails closed (H9 B.2)", () => {
+  test("a child 'error' event resolves exit nonzero, forwards no bytes, emits a block event", async () => {
+    const fakeChild = makeFakeChild();
+    const parentIn = new PassThrough();
+    const parentOut = new PassThrough();
+
+    let parentOutBytes = 0;
+    parentOut.on("data", (c: Buffer) => {
+      parentOutBytes += c.byteLength;
+    });
+
+    const events: GuardEvent[] = [];
+    const handle = startRelay({
+      command: "definitely-not-a-real-binary-xyz",
+      args: [],
+      parentIn,
+      parentOut,
+      onEvent: (e) => events.push(e),
+      // Test seam: inject the fake child instead of a real spawn.
+      spawnChild: () => fakeChild,
+    });
+
+    // Simulate the OS failing to spawn the binary (async 'error' on the child).
+    fakeChild.emitError(
+      Object.assign(new Error("spawn ENOENT"), { code: "ENOENT" }),
+    );
+
+    const code = await handle.exit;
+    expect(code).not.toBe(0); // fail closed — nonzero exit
+    expect(parentOutBytes).toBe(0); // no half-open channel: nothing forwarded
+    // A block event is logged so the failure is visible in the event log.
+    expect(events.some((e) => e.action === "block")).toBe(true);
+  });
+
+  test("the block event carries the spawn-failure cause (code + message), not an empty finding", async () => {
+    const fakeChild = makeFakeChild();
+    const events: GuardEvent[] = [];
+    const handle = startRelay({
+      command: "definitely-not-a-real-binary-xyz",
+      args: [],
+      parentIn: new PassThrough(),
+      parentOut: new PassThrough(),
+      onEvent: (e) => events.push(e),
+      spawnChild: () => fakeChild,
+    });
+
+    fakeChild.emitError(Object.assign(new Error("spawn ENOENT"), { code: "ENOENT" }));
+    await handle.exit;
+
+    const blockEvent = events.find((e) => e.action === "block");
+    const finding = blockEvent?.findings[0];
+    expect(finding?.signature_id).toBe("spawn-failure");
+    // The cause is attributable: ENOENT code + the error message are recorded.
+    expect(finding?.matched_text_excerpt).toContain("ENOENT");
+    expect(finding?.matched_text_excerpt).toContain("spawn ENOENT");
+  });
+
+  test("after spawn-failure the child stdout is destroyed — no late bytes reach parentOut", async () => {
+    const fakeChild = makeFakeChild();
+    const parentOut = new PassThrough();
+    let parentOutBytes = 0;
+    parentOut.on("data", (c: Buffer) => {
+      parentOutBytes += c.byteLength;
+    });
+
+    const handle = startRelay({
+      command: "x",
+      args: [],
+      parentIn: new PassThrough(),
+      parentOut,
+      onEvent: () => undefined,
+      spawnChild: () => fakeChild,
+    });
+
+    fakeChild.emitError(Object.assign(new Error("spawn EACCES"), { code: "EACCES" }));
+    await handle.exit;
+
+    // The source stream must be destroyed so a late emit can't forward bytes.
+    expect(fakeChild.stdout.destroyed).toBe(true);
+    // Attempting to push after destroy must not reach parentOut.
+    expect(fakeChild.stdout.write("late uninspected bytes\n")).toBe(false);
+    await new Promise((r) => setImmediate(r));
+    expect(parentOutBytes).toBe(0);
   });
 });
