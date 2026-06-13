@@ -216,18 +216,25 @@ export function startRelay(opts: RelayOptions): RelayHandle {
     }
   });
 
+  // Shared child-stdin writer: child.stdin can be destroyed after child exit;
+  // .write returns false when not writable but does not throw thanks to the
+  // error handler above. Reused by the parent->child `target` and the
+  // child->parent `replyToSource` (H7 block-to-origin → write back to server).
+  const writeToChild = (bytes: string): void => {
+    if (child.stdin && !child.stdin.destroyed) child.stdin.write(bytes);
+  };
+
   wireDirection({
     source: opts.parentIn,
-    target: (bytes) => {
-      // child.stdin can be destroyed after child exit; .write returns false
-      // when not writable but does not throw thanks to the error handler above.
-      if (child.stdin && !child.stdin.destroyed) child.stdin.write(bytes);
-    },
+    target: writeToChild,
     targetEnd: () => child.stdin?.end(),
     parentOut: opts.parentOut,
     inspect: opts.inspectParentRequest,
     direction: "parent->child",
     onEvent: opts.onEvent,
+    // Symmetry only — a parent-INITIATED block replies to the client (parentOut),
+    // so this is unused for this direction (no replyToOrigin on parent requests).
+    replyToSource: (bytes) => opts.parentOut.write(bytes),
   });
 
   if (child.stdout) {
@@ -239,6 +246,9 @@ export function startRelay(opts: RelayOptions): RelayHandle {
       inspect: opts.inspectChildResponse,
       direction: "child->parent",
       onEvent: opts.onEvent,
+      // H7: a blocked server-INITIATED request (sampling/elicitation) errors
+      // back to the SERVER (child.stdin), not the client.
+      replyToSource: writeToChild,
     });
   }
 
@@ -272,9 +282,38 @@ export interface InProcessRelayOptions {
   readonly inspectChildResponse?: InspectFn;
   readonly inspectParentRequest?: InspectFn;
   readonly onEvent?: (event: GuardEvent) => void;
+  /**
+   * H7: server-stdin analogue. When a server-INITIATED request (pushed via
+   * {@link InProcessRelayHandle.pushServerRequest}) is blocked with
+   * `replyToOrigin: true`, the synthetic JSON-RPC error is written HERE — back
+   * to the origin server — not to `parentOut` (the client). The server-side
+   * production wiring binds this to `child.stdin`. Undefined keeps the legacy
+   * client-directed routing.
+   */
+  readonly toServer?: (bytes: string) => void;
 }
 
-export function startInProcessRelay(opts: InProcessRelayOptions): void {
+/**
+ * Handle returned by {@link startInProcessRelay}. `pushServerRequest` models an
+ * UNSOLICITED server→client request (sampling/createMessage, elicitation/create)
+ * flowing through the child→parent inspection path — the seam the H7 relay
+ * block-to-origin invariant needs but the parent→child `respond` round-trip
+ * cannot express.
+ */
+export interface InProcessRelayHandle {
+  /**
+   * Inject a server-initiated request. A pass/warn forwards it to `parentOut`
+   * (the client); a `replyToOrigin: true` block routes the synthetic error to
+   * `toServer` (the origin) and forwards NOTHING to the client.
+   */
+  readonly pushServerRequest: (msg: JSONRPCMessage) => void;
+}
+
+export function startInProcessRelay(opts: InProcessRelayOptions): InProcessRelayHandle {
+  // Returns true if the message was BLOCKED (so the round-trip must not continue).
+  // H7: when the decision carries `replyToOrigin`, the synthetic error is routed
+  // to `opts.toServer` (the origin server) instead of `parentOut` (the client) —
+  // and the original request is NOT forwarded (the caller returns on `true`).
   const inspectAndWrite = (
     msg: JSONRPCMessage,
     direction: GuardEvent["direction"],
@@ -284,7 +323,13 @@ export function startInProcessRelay(opts: InProcessRelayOptions): void {
     logEvent(decision, direction, opts.onEvent);
     if (decision?.action === "block") {
       const errResp = makeBlockResponse(msg, decision);
-      if (errResp !== null) opts.parentOut.write(serializeMessage(errResp));
+      if (errResp !== null) {
+        const sink =
+          decision.replyToOrigin === true && opts.toServer !== undefined
+            ? opts.toServer
+            : (bytes: string) => opts.parentOut.write(bytes);
+        sink(serializeMessage(errResp));
+      }
       return true; // blocked — don't continue the round-trip
     }
     return false;
@@ -306,6 +351,16 @@ export function startInProcessRelay(opts: InProcessRelayOptions): void {
       parentMsg = buffer.readMessage();
     }
   });
+
+  return {
+    pushServerRequest: (msg: JSONRPCMessage) => {
+      const blocked = inspectAndWrite(msg, "child->parent", opts.inspectChildResponse);
+      // INVARIANT: a replyToOrigin block already wrote the error to toServer and
+      // returns `true` here, so the forward below is skipped — the client sees
+      // nothing for this id. A pass/warn forwards the request to the client.
+      if (!blocked) opts.parentOut.write(serializeMessage(msg));
+    },
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -322,6 +377,15 @@ interface DirectionWiring {
   readonly inspect: InspectFn | undefined;
   readonly direction: GuardEvent["direction"];
   readonly onEvent: ((event: GuardEvent) => void) | undefined;
+  /**
+   * H7: sink for a block-to-origin error reply. When a blocked decision carries
+   * `replyToOrigin: true` (a server-INITIATED sampling/elicitation request), the
+   * synthetic error is written HERE — back to the request's ORIGIN (the source's
+   * own counterpart sink) — instead of `parentOut` (the client). For the
+   * child->parent wiring this is `child.stdin`; for parent->child it is
+   * `parentOut` (symmetry; unused for parent-initiated blocks).
+   */
+  readonly replyToSource: (bytes: string) => void;
 }
 
 function wireDirection(w: DirectionWiring): void {
@@ -353,7 +417,16 @@ function wireDirection(w: DirectionWiring): void {
         // IDE waiting on a request — synthesized error responses cover the
         // common (id-bearing) case; notifications have no reply channel.
         const errResp = makeBlockResponse(msg, decision);
-        if (errResp !== null) w.parentOut.write(serializeMessage(errResp));
+        if (errResp !== null) {
+          // H7 two-part invariant: on a replyToOrigin block we (a) write the
+          // error to the request's ORIGIN via replyToSource — NOT parentOut —
+          // and (b) DO NOT forward the request (the forward lives ONLY in the
+          // else branch below). So the client sink receives nothing for this id:
+          // no error AND no forwarded request. Otherwise keep the legacy routing
+          // (error → client / parentOut).
+          if (decision.replyToOrigin === true) w.replyToSource(serializeMessage(errResp));
+          else w.parentOut.write(serializeMessage(errResp));
+        }
       } else {
         logEvent(decision, w.direction, w.onEvent);
         w.target(serializeMessage(msg));

@@ -351,6 +351,116 @@ describe("relay inspection + block behavior", () => {
   });
 });
 
+// ─────────────── H7: block-to-origin invariant (server-initiated request) ───────────────
+
+/**
+ * H7: a server-INITIATED request (sampling/createMessage, elicitation/create)
+ * that inspection blocks with replyToOrigin:true must error BACK to the SERVER
+ * (the request's origin), and the CLIENT must receive NOTHING for that id —
+ * not the error and not the forwarded request.
+ *
+ * The two-part invariant under test:
+ *   (a) the error lands on the origin/server sink (toServer) with the request id;
+ *   (b) the client sink (parentOut) receives NOTHING for that id.
+ */
+describe("relay block-to-origin invariant (H7 server-initiated request)", () => {
+  const injectionFinding = (sigId: string): InspectResult["findings"][number] => ({
+    signature_id: sigId,
+    category: "OWASP-MCP-2",
+    severity: "critical",
+    target: "prompt_content",
+    matched_text_excerpt: "ignore previous instructions",
+    remediation: "block it",
+  });
+
+  function setupServerInitiated(
+    inspectChildResponse: (msg: JSONRPCMessage) => InspectResult,
+  ): {
+    handle: ReturnType<typeof startInProcessRelay>;
+    clientOut: JSONRPCMessage[];
+    serverOut: JSONRPCMessage[];
+  } {
+    const parentIn = new PassThrough();
+    const parentOut = new PassThrough();
+    const clientOut: JSONRPCMessage[] = [];
+    const serverOut: JSONRPCMessage[] = [];
+
+    const outBuffer = new ReadBuffer();
+    parentOut.on("data", (chunk: Buffer) => {
+      outBuffer.append(chunk);
+      let msg = outBuffer.readMessage();
+      while (msg !== null) {
+        clientOut.push(msg);
+        msg = outBuffer.readMessage();
+      }
+    });
+
+    const serverBuffer = new ReadBuffer();
+    const handle = startInProcessRelay({
+      parentIn,
+      parentOut,
+      respond: () => null,
+      inspectChildResponse,
+      toServer: (bytes) => {
+        serverBuffer.append(Buffer.from(bytes, "utf8"));
+        let msg = serverBuffer.readMessage();
+        while (msg !== null) {
+          serverOut.push(msg);
+          msg = serverBuffer.readMessage();
+        }
+      },
+    });
+    return { handle, clientOut, serverOut };
+  }
+
+  test("replyToOrigin block: error to SERVER with the id; CLIENT gets nothing", async () => {
+    const { handle, clientOut, serverOut } = setupServerInitiated((msg) => {
+      if (!("method" in msg)) return { action: "pass", findings: [] };
+      return { action: "block", findings: [injectionFinding("inj")], replyToOrigin: true };
+    });
+    handle.pushServerRequest(makeRequest(42, "sampling/createMessage"));
+    await new Promise((r) => setImmediate(r));
+
+    // (a) the server sink received the JSON-RPC error with the request id.
+    expect(serverOut).toHaveLength(1);
+    const err = serverOut[0] as { id?: number; error?: { code: number } };
+    expect(err.id).toBe(42);
+    expect(err.error?.code).toBe(-32099);
+    // (b) the client sink received NOTHING — no error AND no forwarded request.
+    expect(clientOut).toHaveLength(0);
+  });
+
+  test("non-replyToOrigin block keeps existing client-directed behavior (regression)", async () => {
+    const { handle, clientOut, serverOut } = setupServerInitiated(() => ({
+      action: "block",
+      findings: [injectionFinding("inj")],
+      // replyToOrigin undefined → error goes to the client (parentOut), as before.
+    }));
+    handle.pushServerRequest(makeRequest(43, "sampling/createMessage"));
+    await new Promise((r) => setImmediate(r));
+
+    // Error routed to the client sink (legacy behavior), server sink untouched.
+    expect(clientOut).toHaveLength(1);
+    expect((clientOut[0] as { error?: { code: number } }).error?.code).toBe(-32099);
+    expect(serverOut).toHaveLength(0);
+  });
+
+  test("pass: the server-initiated request is forwarded to the CLIENT untouched", async () => {
+    const { handle, clientOut, serverOut } = setupServerInitiated(() => ({
+      action: "pass",
+      findings: [],
+    }));
+    handle.pushServerRequest(makeRequest(44, "sampling/createMessage", { hello: "world" }));
+    await new Promise((r) => setImmediate(r));
+
+    expect(clientOut).toHaveLength(1);
+    const fwd = clientOut[0] as { id?: number; method?: string };
+    expect(fwd.id).toBe(44);
+    expect(fwd.method).toBe("sampling/createMessage");
+    expect(serverOut).toHaveLength(0);
+  });
+});
+
 // ─────────────── H9 (B.2): child-spawn failure fails closed ───────────────
 
 /**
