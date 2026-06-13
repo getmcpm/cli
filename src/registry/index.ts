@@ -20,3 +20,12 @@ export type { PaginateOptions } from "./pagination.js";
 
 export * from "./schemas.js";
 export * from "./types.js";
+
+export {
+  fetchNpmIntegrity,
+  compareIntegrity,
+} from "./npm-integrity.js";
+export type {
+  NpmIntegritySnapshot,
+  IntegrityComparison,
+} from "./npm-integrity.js";

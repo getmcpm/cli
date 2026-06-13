@@ -17,6 +17,7 @@ import type { TrustScore, TrustScoreInput } from "../scanner/trust-score.js";
 import { extractRegistryMeta } from "../utils/format-trust.js";
 import { formatMcpEntryCommand } from "../utils/format-entry.js";
 import { resolveInstallEntry } from "../commands/install.js";
+import { fetchNpmIntegrity as _fetchNpmIntegrity } from "../registry/npm-integrity.js";
 
 // ---------------------------------------------------------------------------
 // Input validation for MCP server tool arguments
@@ -545,6 +546,7 @@ export async function handleMcpUp(
               computeTrustScore: cts,
               writeLockFile: (path, content) =>
                 writeFile(path, content, { encoding: "utf-8", mode: 0o600 }),
+              fetchNpmIntegrity: _fetchNpmIntegrity,
               output: (text) => outputLines.push(text),
             }
           );
@@ -558,6 +560,7 @@ export async function handleMcpUp(
         confirm: async () => false,
         promptEnvVar: async () => "",
         output: (text) => outputLines.push(text),
+        fetchNpmIntegrity: _fetchNpmIntegrity,
         recordResult: (r) => records.push(r),
       }
     );
