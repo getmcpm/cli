@@ -8,7 +8,7 @@
 
 # mcpm
 
-**MCP package manager -- search, install, audit, and guard MCP servers from your terminal.**
+**The MCP package manager that guards your AI's tools at runtime -- search, install, audit, and inspect every MCP server from your terminal.**
 
 [![npm version](https://img.shields.io/npm/v/@getmcpm/cli)](https://www.npmjs.com/package/@getmcpm/cli)
 [![license](https://img.shields.io/github/license/getmcpm/cli)](./LICENSE)
@@ -17,7 +17,7 @@
 
 ---
 
-66% of MCP servers have security findings ([AgentSeal scan](https://agentseal.org/blog/mcp-server-security-findings)). Most registries don't tell you that. mcpm runs a trust assessment on every install -- checking for hardcoded secrets, prompt injection patterns, typosquatting, and suspicious argument schemas -- so you know what you're adding to your AI tools before it runs.
+The risky part of an MCP server doesn't show up at install -- it shows up while your agent is running: prompt injection hidden in a tool's output, a server that quietly rewrites its tools after you approved them, a sampling request that smuggles instructions into your model. mcpm scores every install for hardcoded secrets, prompt injection, and typosquatting ([66% of MCP servers have security findings](https://agentseal.org/blog/mcp-server-security-findings)) -- then runs a live guard between your AI client and each server, pinning tool definitions against rug-pulls and blocking injection before it reaches the model.
 
 <p align="center">
   <img src="./assets/demo.gif" alt="mcpm demo" width="680">
