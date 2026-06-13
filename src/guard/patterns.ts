@@ -149,6 +149,11 @@ function targetSubtree(msg: JSONRPCMessage, target: SignatureTarget): unknown {
       }
       return null;
     }
+    case "sampling_prompt":
+      // H7: a finding-LABEL only — applied by re-tagging in inspectServerInitiated
+      // AFTER it scans the synthetic prompts/get frame. No signature targets it
+      // directly, so there is no subtree to extract here.
+      return null;
     default:
       // Adding a new SignatureTarget without a case above is a compile error here.
       return unhandledTarget(target);
