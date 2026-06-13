@@ -37,6 +37,7 @@ function inspectFrame(msg: JSONRPCMessage, pins: PinsFile, state: SessionDriftSt
 const freshState = (): SessionDriftState => ({
   firstHashes: new Map<string, string>(),
   revalidationArmed: false,
+  handshakeSeenHash: null,
 });
 
 const toolsListMsg = (description: string): JSONRPCMessage =>

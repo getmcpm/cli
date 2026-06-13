@@ -29,8 +29,14 @@ import {
   resetIntegrity,
   PinsIntegrityError,
   PINS_FORMAT_VERSION,
+  handshakeFieldHashesOf,
+  handshakeCapabilityKeys,
+  hashHandshake,
+  upsertHandshakePin,
+  lookupHandshake,
   type PinEntry,
   type PinsFile,
+  type HandshakePinEntry,
 } from "../pins.js";
 import { _resetCachedStorePath } from "../../store/index.js";
 
@@ -161,6 +167,130 @@ describe("emptyPinsFile", () => {
     const pins = emptyPinsFile();
     expect(pins.format_version).toBe(PINS_FORMAT_VERSION);
     expect(pins.servers).toEqual({});
+  });
+});
+
+// ─────────────────────── H5: handshake-pin helpers ───────────────────────
+
+describe("handshakeFieldHashesOf (H5)", () => {
+  test("capabilities + serverName are each a sha256: hex string", () => {
+    const fh = handshakeFieldHashesOf({
+      capabilities: { tools: {}, resources: {} },
+      serverInfo: { name: "fs" },
+    });
+    expect(fh.capabilities).toMatch(/^sha256:[0-9a-f]{64}$/);
+    expect(fh.serverName).toMatch(/^sha256:[0-9a-f]{64}$/);
+  });
+
+  // BOUNDARY: serverInfo.version is DELIBERATELY excluded — pinning it would warn
+  // on every benign release. Two handshakes differing ONLY in version must hash equal.
+  test("excludes serverInfo.version (a version-only bump produces identical field hashes)", () => {
+    const a = handshakeFieldHashesOf({
+      capabilities: { tools: {} },
+      serverInfo: { name: "fs", version: "1.0.0" },
+    });
+    const b = handshakeFieldHashesOf({
+      capabilities: { tools: {} },
+      serverInfo: { name: "fs", version: "9.9.9" },
+    });
+    expect(a).toEqual(b);
+  });
+
+  test("capability change moves the capabilities hash, leaves serverName hash", () => {
+    const a = handshakeFieldHashesOf({ capabilities: { tools: {} }, serverInfo: { name: "fs" } });
+    const b = handshakeFieldHashesOf({
+      capabilities: { tools: {}, sampling: {} },
+      serverInfo: { name: "fs" },
+    });
+    expect(a.capabilities).not.toBe(b.capabilities);
+    expect(a.serverName).toBe(b.serverName);
+  });
+
+  test("identity change moves the serverName hash, leaves capabilities hash", () => {
+    const a = handshakeFieldHashesOf({ capabilities: { tools: {} }, serverInfo: { name: "fs" } });
+    const b = handshakeFieldHashesOf({ capabilities: { tools: {} }, serverInfo: { name: "evil" } });
+    expect(a.serverName).not.toBe(b.serverName);
+    expect(a.capabilities).toBe(b.capabilities);
+  });
+
+  test("missing capabilities / non-string name collapse to canonical defaults (null / empty)", () => {
+    const a = handshakeFieldHashesOf({});
+    const b = handshakeFieldHashesOf({ capabilities: null, serverInfo: { name: 42 } });
+    expect(a).toEqual(b);
+  });
+});
+
+describe("handshakeCapabilityKeys (H5)", () => {
+  test("returns sorted top-level capability keys", () => {
+    const keys = handshakeCapabilityKeys({
+      capabilities: { tools: {}, sampling: {}, resources: {} },
+    });
+    expect(keys).toEqual(["resources", "sampling", "tools"]);
+  });
+
+  test("non-object / missing capabilities → []", () => {
+    expect(handshakeCapabilityKeys({})).toEqual([]);
+    expect(handshakeCapabilityKeys({ capabilities: null })).toEqual([]);
+    expect(handshakeCapabilityKeys({ capabilities: "nope" as unknown })).toEqual([]);
+  });
+});
+
+describe("hashHandshake (H5)", () => {
+  test("derives a stable whole-hash from the field hashes", () => {
+    const f = handshakeFieldHashesOf({ capabilities: { tools: {} }, serverInfo: { name: "fs" } });
+    expect(hashHandshake(f)).toMatch(/^sha256:[0-9a-f]{64}$/);
+    expect(hashHandshake(f)).toBe(hashHandshake(f));
+  });
+
+  test("a field-hash change changes the whole-hash", () => {
+    const a = handshakeFieldHashesOf({ capabilities: { tools: {} }, serverInfo: { name: "fs" } });
+    const b = handshakeFieldHashesOf({ capabilities: { tools: {}, sampling: {} }, serverInfo: { name: "fs" } });
+    expect(hashHandshake(a)).not.toBe(hashHandshake(b));
+  });
+});
+
+describe("upsertHandshakePin / lookupHandshake (H5)", () => {
+  const makeHandshakeEntry = (): HandshakePinEntry => {
+    const fields = handshakeFieldHashesOf({ capabilities: { tools: {} }, serverInfo: { name: "fs" } });
+    return {
+      current_hash: hashHandshake(fields),
+      previous_hashes: [],
+      captured_at: "2026-06-14T00:00:00Z",
+      captured_via: "first-session",
+      signature_list_version: "v0.5.0",
+      field_hashes: fields,
+      capability_keys: ["tools"],
+    };
+  };
+
+  test("upsertHandshakePin adds without mutating input", () => {
+    const orig = emptyPinsFile();
+    const next = upsertHandshakePin(orig, "fs", makeHandshakeEntry());
+    expect(next.handshakes?.fs?.current_hash).toMatch(/^sha256:/);
+    expect(orig.handshakes).toBeUndefined();
+  });
+
+  test("lookupHandshake returns the entry for a known server", () => {
+    const pins = upsertHandshakePin(emptyPinsFile(), "fs", makeHandshakeEntry());
+    expect(lookupHandshake(pins, "fs")?.capability_keys).toEqual(["tools"]);
+    expect(lookupHandshake(pins, "absent")).toBeUndefined();
+  });
+
+  // F13: a `__proto__`-named server key must be contained via Object.hasOwn —
+  // no prototype-pollution, and a lookup of an UNRELATED server must not resolve
+  // Object.prototype's inherited members.
+  test("lookupHandshake resists prototype pollution via Object.hasOwn (F13)", () => {
+    const pins = upsertHandshakePin(emptyPinsFile(), "__proto__", makeHandshakeEntry());
+    // The entry is an OWN property, not poured onto the prototype.
+    expect(Object.hasOwn(pins.handshakes ?? {}, "__proto__")).toBe(true);
+    // A lookup of an unrelated key must NOT resolve via the prototype chain.
+    expect(lookupHandshake(pins, "constructor")).toBeUndefined();
+    expect(lookupHandshake(pins, "toString")).toBeUndefined();
+    expect(({} as Record<string, unknown>).polluted).toBeUndefined();
+  });
+
+  test("lookupHandshake on a pre-H5 pins file (no handshakes key) returns undefined", () => {
+    expect(lookupHandshake(emptyPinsFile(), "fs")).toBeUndefined();
   });
 });
 
@@ -397,6 +527,50 @@ describe("readPins / writePins", () => {
       { mode: 0o600 },
     );
     await expect(readPins()).rejects.toThrow(/invalid structure/);
+  });
+
+  // H5: `handshakes` is additive + optional (no format bump). A pre-H5 pins.json
+  // (no `handshakes` key) must still validate + round-trip.
+  test("pre-H5 pins.json with no handshakes key round-trips (backward-compat)", async () => {
+    const dir = path.join(tmpHome, ".mcpm");
+    mkdirSync(dir, { recursive: true, mode: 0o700 });
+    writeFileSync(
+      path.join(dir, "pins.json"),
+      JSON.stringify({
+        format_version: PINS_FORMAT_VERSION,
+        servers: { fs: {} },
+      }),
+      { mode: 0o600 },
+    );
+    const pins = await readPins();
+    expect(pins.handshakes).toBeUndefined();
+    // And a fresh write of a handshakes-bearing file round-trips.
+    const fields = handshakeFieldHashesOf({ capabilities: { tools: {} }, serverInfo: { name: "fs" } });
+    const withHandshake = upsertHandshakePin(pins, "fs", {
+      current_hash: hashHandshake(fields),
+      previous_hashes: [],
+      captured_at: "2026-06-14T00:00:00Z",
+      captured_via: "first-session",
+      signature_list_version: "v0.5.0",
+      field_hashes: fields,
+      capability_keys: ["tools"],
+    });
+    await writePins(withHandshake);
+    const back = await readPins();
+    expect(back.handshakes?.fs?.capability_keys).toEqual(["tools"]);
+  });
+
+  // H5: a present-but-malformed handshakes entry must FAIL CLOSED in the schema.
+  test("rejects a malformed handshakes entry (fails closed)", async () => {
+    const dir = path.join(tmpHome, ".mcpm");
+    mkdirSync(dir, { recursive: true, mode: 0o700 });
+    writeFileSync(
+      path.join(dir, "pins.json"),
+      '{"format_version": 1, "servers": {}, "handshakes": {"fs": {"current_hash": "sha256:x"}}}',
+      { mode: 0o600 },
+    );
+    await expect(readPins()).rejects.toThrow(/invalid structure/);
+    await expect(readPins()).rejects.not.toBeInstanceOf(PinsIntegrityError);
   });
 });
 
