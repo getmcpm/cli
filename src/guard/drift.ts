@@ -22,10 +22,17 @@ import {
   PinsIntegrityError,
   hashToolDefinition,
   fieldHashesOf,
+  handshakeFieldHashesOf,
+  handshakeCapabilityKeys,
+  hashHandshake,
+  lookupHandshake,
+  upsertHandshakePin,
   readPins,
   upsertToolPin,
   writePins,
   type FieldHashes,
+  type HandshakeFieldHashes,
+  type HandshakePinEntry,
   type PinEntry,
   type PinsFile,
 } from "./pins.js";
@@ -152,6 +159,116 @@ export function buildDriftFinding(args: {
       `If this is a legitimate server upgrade, run \`mcpm guard accept-drift ${safeServer} --tool ${safeTool} --new-hash ${actual}\` ` +
       `(or \`--remove\` to drop the pin entirely).`,
   };
+}
+
+// ---------------------------------------------------------------------------
+// H5: initialize-handshake drift classification (capabilities + identity)
+// ---------------------------------------------------------------------------
+
+export interface HandshakeDriftClass {
+  readonly kind: "none" | "capability" | "identity" | "both";
+  /** Capability keys present LIVE but not in the pin (set semantics). */
+  readonly addedCaps: string[];
+  /** Capability keys present in the pin but not LIVE. */
+  readonly removedCaps: string[];
+  readonly identityChanged: boolean;
+}
+
+/**
+ * Classify a handshake drift by EXPLICIT named field (never bracket attacker
+ * keys). PRECONDITION (caller-enforced): the live whole-hash already differs from
+ * pinned.current_hash, so at least one dimension moved.
+ *
+ *  - capabilities-hash differs → capability dimension (addedCaps = live \ pinned,
+ *    removedCaps = pinned \ live).
+ *  - serverName-hash differs   → identity dimension.
+ */
+export function classifyHandshakeDrift(
+  pinned: HandshakePinEntry,
+  liveFields: HandshakeFieldHashes,
+  liveCapKeys: string[],
+): HandshakeDriftClass {
+  const capabilityChanged = pinned.field_hashes.capabilities !== liveFields.capabilities;
+  const identityChanged = pinned.field_hashes.serverName !== liveFields.serverName;
+
+  const pinnedKeys = new Set(pinned.capability_keys);
+  const liveKeys = new Set(liveCapKeys);
+  const addedCaps = capabilityChanged ? liveCapKeys.filter((k) => !pinnedKeys.has(k)) : [];
+  const removedCaps = capabilityChanged ? pinned.capability_keys.filter((k) => !liveKeys.has(k)) : [];
+
+  let kind: HandshakeDriftClass["kind"] = "none";
+  if (capabilityChanged && identityChanged) kind = "both";
+  else if (capabilityChanged) kind = "capability";
+  else if (identityChanged) kind = "identity";
+
+  return { kind, addedCaps, removedCaps, identityChanged };
+}
+
+// Capability grants that hand the server an active channel to the model/user —
+// not just a passive surface change. Named in the warn copy as an escalation.
+const ESCALATION_CAPS = new Set(["sampling", "elicitation"]);
+
+/**
+ * Build the warn-tier handshake-drift findings (one per changed dimension). ALL
+ * findings are severity "high" → warn via severityToAction, so they NEVER block
+ * (blocking an initialize result kills the session). Carried on the
+ * `initialize_instructions` target (the handshake carrier); high is already warn,
+ * so the carrier choice does not re-clamp it.
+ *
+ * Remediation copy says "since FIRST OBSERVED" (TOFU — there is no approval
+ * moment until H3), never "since you approved". `safeServer` is pre-sanitized;
+ * capability keys come from the live/pinned key lists (server-influenced) so they
+ * are sanitized here before being named.
+ */
+export function buildHandshakeDriftFinding(args: {
+  cls: HandshakeDriftClass;
+  safeServer: string;
+}): InspectFinding[] {
+  const { cls, safeServer } = args;
+  const findings: InspectFinding[] = [];
+
+  if (cls.kind === "capability" || cls.kind === "both") {
+    const added = cls.addedCaps.map(sanitizeLabel);
+    const removed = cls.removedCaps.map(sanitizeLabel);
+    const escalations = added.filter((k) => ESCALATION_CAPS.has(k));
+    const addedStr = added.length > 0 ? `added [${added.join(", ")}]` : "";
+    const removedStr = removed.length > 0 ? `removed [${removed.join(", ")}]` : "";
+    const change = [addedStr, removedStr].filter(Boolean).join(", ") || "capabilities changed";
+    const escalationNote =
+      escalations.length > 0
+        ? ` Granting [${escalations.join(", ")}] is a capability/grant escalation — the ` +
+          `server can now drive sampling/elicitation prompts (their CONTENT is separately ` +
+          `injection-scanned by the relay; this is the change-observability layer).`
+        : "";
+    findings.push({
+      signature_id: "handshake-drift-capability",
+      category: "OWASP-MCP-8",
+      severity: "high",
+      target: "initialize_instructions",
+      matched_text_excerpt: `${safeServer}: capabilities ${change}`,
+      remediation:
+        `Server "${safeServer}" declares different capabilities (${change}) than first observed.` +
+        escalationNote +
+        ` If this is an intended upgrade, no action is needed — this warning auto-quiets once ` +
+        `surfaced. If unexpected, inspect the wrapped command.`,
+    });
+  }
+
+  if (cls.kind === "identity" || cls.kind === "both") {
+    findings.push({
+      signature_id: "handshake-drift-identity",
+      category: "OWASP-MCP-1",
+      severity: "high",
+      target: "initialize_instructions",
+      matched_text_excerpt: `${safeServer}: serverInfo.name changed since first observed`,
+      remediation:
+        `Server "${safeServer}" reports a different serverInfo.name than first observed — ` +
+        `possible impersonation or the wrong binary wrapped. Verify the wrapped command. ` +
+        `This warning auto-quiets once surfaced.`,
+    });
+  }
+
+  return findings;
 }
 
 interface ToolDefinition {
@@ -309,6 +426,124 @@ export async function inspectForDrift(
     }),
   );
   // Action = MAX over findings (cosmetic-only → warn; any security → block).
+  const action = findings.reduce<InspectResult["action"]>((acc, f) => {
+    const a = defaultActionForFinding(f);
+    return ACTION_RANK[a] > ACTION_RANK[acc] ? a : acc;
+  }, "pass");
+  return { action, findings };
+}
+
+// ---------------------------------------------------------------------------
+// H5: async initialize-handshake capture + cross-session warn-once dedup
+// ---------------------------------------------------------------------------
+
+export interface HandshakeDriftDeps {
+  readonly read: () => Promise<PinsFile>;
+  readonly write: (pins: PinsFile) => Promise<void>;
+  readonly signatureListVersion: string;
+}
+
+interface InitializeResult {
+  capabilities?: unknown;
+  serverInfo?: { name?: unknown };
+}
+
+function extractInitializeResult(msg: JSONRPCMessage): InitializeResult | null {
+  if (!("result" in msg)) return null;
+  const result = (msg as { result?: { protocolVersion?: unknown } }).result;
+  if (result === null || typeof result !== "object") return null;
+  if (typeof (result as { protocolVersion?: unknown }).protocolVersion !== "string") return null;
+  return result as InitializeResult;
+}
+
+/** Shared fail-closed-on-integrity finding, reused by the tools/list + handshake arms. */
+function pinsIntegrityBlock(): InspectResult {
+  return {
+    action: "block",
+    findings: [
+      {
+        signature_id: "pins-integrity-failure",
+        category: "OWASP-MCP-1",
+        severity: "critical",
+        target: "tool_description",
+        matched_text_excerpt: "pins.json integrity check failed",
+        remediation:
+          "Schema-drift enforcement is offline. Review ~/.mcpm/pins.json " +
+          "for unauthorized edits, then run `mcpm guard reset-integrity` to " +
+          "re-acknowledge the file contents.",
+      },
+    ],
+  };
+}
+
+/**
+ * Async handshake inspection against the pin store. Mirrors {@link inspectForDrift}:
+ *   - no pin   → first-session capture (write a `first-session` HandshakePinEntry,
+ *                pass).
+ *   - matches  → pass.
+ *   - already-surfaced (live whole-hash ∈ previous_hashes) → pass (warn-once).
+ *   - new drift → WARN findings; append the live whole-hash to previous_hashes so
+ *                 the NEXT session's sync dedup skips it, WITHOUT moving
+ *                 current_hash (NO auto-re-pin of the durable baseline).
+ *
+ * A PinsIntegrityError fails CLOSED (block); transient I/O fails open (pass).
+ */
+export async function inspectHandshakeForDrift(
+  msg: JSONRPCMessage,
+  serverName: string,
+  deps: HandshakeDriftDeps,
+): Promise<InspectResult> {
+  const result = extractInitializeResult(msg);
+  if (result === null) return { action: "pass", findings: [] };
+
+  let pins: PinsFile;
+  try {
+    pins = await deps.read();
+  } catch (err) {
+    if (err instanceof PinsIntegrityError) return pinsIntegrityBlock();
+    return { action: "pass", findings: [] };
+  }
+
+  const liveFields = handshakeFieldHashesOf(result);
+  const liveCapKeys = handshakeCapabilityKeys(result);
+  const liveWhole = hashHandshake(liveFields);
+
+  const pinned = lookupHandshake(pins, serverName);
+
+  // First-session capture (TOFU). Write the pin + pass.
+  if (pinned === undefined) {
+    const entry: HandshakePinEntry = {
+      current_hash: liveWhole,
+      previous_hashes: [],
+      captured_at: new Date().toISOString(),
+      captured_via: "first-session",
+      signature_list_version: deps.signatureListVersion,
+      field_hashes: liveFields,
+      capability_keys: liveCapKeys,
+    };
+    await deps.write(upsertHandshakePin(pins, serverName, entry)).catch(() => undefined);
+    return { action: "pass", findings: [] };
+  }
+
+  // Matches the durable baseline, or already surfaced once → no warn.
+  if (liveWhole === pinned.current_hash || pinned.previous_hashes.includes(liveWhole)) {
+    return { action: "pass", findings: [] };
+  }
+
+  // New drift. Append the live whole-hash to previous_hashes (warn-once durable
+  // dedup) WITHOUT moving current_hash — the baseline only moves via an explicit
+  // re-pin (deferred to H3). Best-effort persist.
+  const updated: HandshakePinEntry = {
+    ...pinned,
+    previous_hashes: [...pinned.previous_hashes, liveWhole],
+  };
+  await deps.write(upsertHandshakePin(pins, serverName, updated)).catch(() => undefined);
+
+  const cls = classifyHandshakeDrift(pinned, liveFields, liveCapKeys);
+  const findings = buildHandshakeDriftFinding({
+    cls,
+    safeServer: sanitizeLabel(serverName),
+  });
   const action = findings.reduce<InspectResult["action"]>((acc, f) => {
     const a = defaultActionForFinding(f);
     return ACTION_RANK[a] > ACTION_RANK[acc] ? a : acc;

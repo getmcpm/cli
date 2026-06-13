@@ -16,6 +16,8 @@ import { describe, expect, test, vi, beforeEach, afterEach } from "vitest";
 import type { JSONRPCMessage } from "@modelcontextprotocol/sdk/types.js";
 import {
   inspectForDriftSync,
+  inspectHandshakeDriftSync,
+  isInitializeResult,
   isToolsListChangedNotification,
   isSamplingRequest,
   isElicitationRequest,
@@ -29,6 +31,10 @@ import {
   fieldHashesOf,
   emptyPinsFile,
   upsertToolPin,
+  handshakeFieldHashesOf,
+  hashHandshake,
+  upsertHandshakePin,
+  type HandshakePinEntry,
   type PinsFile,
 } from "../pins.js";
 import type { InspectResult } from "../types.js";
@@ -49,6 +55,7 @@ const toolsListMsg = (
 const freshState = (): SessionDriftState => ({
   firstHashes: new Map<string, string>(),
   revalidationArmed: false,
+  handshakeSeenHash: null,
 });
 
 // ─────────────── Fix 7a: same-session drift guard (SECURITY F3) ───────────────
@@ -379,7 +386,11 @@ describe("isToolsListChangedNotification (H4 list_changed arm predicate)", () =>
 
   test("arming wiring: a real notification arms; the announced list isn't F3-blocked; single-shot reverts", () => {
     const pins = emptyPinsFile();
-    const state: SessionDriftState = { firstHashes: new Map(), revalidationArmed: false };
+    const state: SessionDriftState = {
+      firstHashes: new Map(),
+      revalidationArmed: false,
+      handshakeSeenHash: null,
+    };
     // First list establishes the same-session baseline.
     inspectForDriftSync(toolsListMsg("read", "v1"), "srv", pins, state);
     // A real list_changed arrives → arm (exactly what inspectChild does on a true predicate).
@@ -599,5 +610,144 @@ describe("mergeInspect / applyPolicy — replyToOrigin propagation (H7)", () => 
     });
     expect(out.action).toBe("pass");
     expect(out.replyToOrigin).toBeUndefined();
+  });
+});
+
+// ─────────────── H5: initialize-handshake drift (capabilities + identity) ───────────────
+
+const initializeMsg = (result: {
+  capabilities?: unknown;
+  serverInfo?: { name?: unknown; version?: unknown };
+}): JSONRPCMessage =>
+  ({
+    jsonrpc: "2.0",
+    id: 1,
+    result: { protocolVersion: "2024-11-05", ...result },
+  }) as JSONRPCMessage;
+
+const handshakePin = (result: {
+  capabilities?: unknown;
+  serverInfo?: { name?: unknown };
+}): HandshakePinEntry => {
+  const fields = handshakeFieldHashesOf(result);
+  return {
+    current_hash: hashHandshake(fields),
+    previous_hashes: [],
+    captured_at: "2026-06-14T00:00:00Z",
+    captured_via: "first-session",
+    signature_list_version: "v0.5.0",
+    field_hashes: fields,
+    capability_keys:
+      result.capabilities !== null && typeof result.capabilities === "object"
+        ? Object.keys(result.capabilities as Record<string, unknown>).sort()
+        : [],
+  };
+};
+
+describe("isInitializeResult (H5 discriminator)", () => {
+  test("a real initialize result (result.protocolVersion is a string) → true", () => {
+    expect(isInitializeResult(initializeMsg({ capabilities: {}, serverInfo: { name: "fs" } }))).toBe(true);
+  });
+
+  test("a tools/list result → false", () => {
+    expect(
+      isInitializeResult({ jsonrpc: "2.0", id: 1, result: { tools: [] } } as JSONRPCMessage),
+    ).toBe(false);
+  });
+
+  // It must key off protocolVersion, NOT a stray `instructions` key on an
+  // arbitrary tools/call result.
+  test("a tools/call result that happens to carry an `instructions` key → false", () => {
+    expect(
+      isInitializeResult({
+        jsonrpc: "2.0",
+        id: 1,
+        result: { content: [{ type: "text", text: "x" }], instructions: "do a thing" },
+      } as unknown as JSONRPCMessage),
+    ).toBe(false);
+  });
+});
+
+describe("inspectHandshakeDriftSync (H5)", () => {
+  test("no handshake pin in the baseline → pass (first session; async captures)", () => {
+    const baseline = emptyPinsFile();
+    const state = freshState();
+    const msg = initializeMsg({ capabilities: { tools: {} }, serverInfo: { name: "fs" } });
+    expect(inspectHandshakeDriftSync(msg, "fs", baseline, state).action).toBe("pass");
+  });
+
+  test("matching handshake → pass", () => {
+    const baseline = upsertHandshakePin(
+      emptyPinsFile(),
+      "fs",
+      handshakePin({ capabilities: { tools: {} }, serverInfo: { name: "fs" } }),
+    );
+    const state = freshState();
+    const msg = initializeMsg({ capabilities: { tools: {} }, serverInfo: { name: "fs" } });
+    expect(inspectHandshakeDriftSync(msg, "fs", baseline, state).action).toBe("pass");
+  });
+
+  test("capability drift against the frozen baseline → WARN (never block)", () => {
+    const baseline = upsertHandshakePin(
+      emptyPinsFile(),
+      "fs",
+      handshakePin({ capabilities: { tools: {} }, serverInfo: { name: "fs" } }),
+    );
+    const state = freshState();
+    const msg = initializeMsg({ capabilities: { tools: {}, sampling: {} }, serverInfo: { name: "fs" } });
+    const result = inspectHandshakeDriftSync(msg, "fs", baseline, state);
+    expect(result.action).toBe("warn");
+    expect(result.findings.map((f) => f.signature_id)).toContain("handshake-drift-capability");
+  });
+
+  test("warn-once: a hash already in previous_hashes → pass (no re-warn)", () => {
+    const base = handshakePin({ capabilities: { tools: {} }, serverInfo: { name: "fs" } });
+    const driftedLive = { capabilities: { tools: {}, sampling: {} }, serverInfo: { name: "fs" } };
+    const driftedHash = hashHandshake(handshakeFieldHashesOf(driftedLive));
+    const baseline = upsertHandshakePin(emptyPinsFile(), "fs", {
+      ...base,
+      previous_hashes: [driftedHash],
+    });
+    const state = freshState();
+    expect(inspectHandshakeDriftSync(initializeMsg(driftedLive), "fs", baseline, state).action).toBe("pass");
+  });
+
+  test("a SECOND differing initialize in one session → handshake-drift-in-session WARN", () => {
+    const baseline = emptyPinsFile(); // no pin — isolate the in-session guard
+    const state = freshState();
+    // First initialize seeds the session hash.
+    inspectHandshakeDriftSync(
+      initializeMsg({ capabilities: { tools: {} }, serverInfo: { name: "fs" } }),
+      "fs",
+      baseline,
+      state,
+    );
+    // A second, DIFFERENT initialize result in the same session is anomalous.
+    const second = inspectHandshakeDriftSync(
+      initializeMsg({ capabilities: { tools: {}, sampling: {} }, serverInfo: { name: "fs" } }),
+      "fs",
+      baseline,
+      state,
+    );
+    expect(second.action).toBe("warn");
+    expect(second.findings.map((f) => f.signature_id)).toContain("handshake-drift-in-session");
+  });
+
+  test("a user signature_override on the handshake sig still applies via applyPolicy", () => {
+    const baseline = upsertHandshakePin(
+      emptyPinsFile(),
+      "fs",
+      handshakePin({ capabilities: { tools: {} }, serverInfo: { name: "fs" } }),
+    );
+    const state = freshState();
+    const msg = initializeMsg({ capabilities: { tools: {}, sampling: {} }, serverInfo: { name: "fs" } });
+    const raw = inspectHandshakeDriftSync(msg, "fs", baseline, state);
+    expect(raw.action).toBe("warn");
+    // User mutes the capability-drift signature → dropped, action falls to pass.
+    const muted = applyPolicy(raw, {
+      signature_overrides: [{ id: "handshake-drift-capability", action: "ignore" }],
+    });
+    expect(muted.action).toBe("pass");
+    expect(muted.findings.map((f) => f.signature_id)).not.toContain("handshake-drift-capability");
   });
 });

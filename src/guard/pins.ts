@@ -73,9 +73,47 @@ export interface PinEntry {
   field_hashes?: FieldHashes;
 }
 
+/**
+ * H5: per-dimension SHA-256 hashes of the `initialize` handshake leaves we pin —
+ * the declared `capabilities` object and `serverInfo.name`. Lets handshake-drift
+ * detection tell a capability change from an identity change. NOTE: `instructions`
+ * (free prose; already content-scanned by H1) and `serverInfo.version` (churns
+ * every benign release) are DELIBERATELY excluded.
+ */
+export interface HandshakeFieldHashes {
+  capabilities: string;
+  serverName: string;
+}
+
+/**
+ * H5: TOFU baseline of an MCP server's `initialize` handshake. Warn-tier only —
+ * handshake drift NEVER blocks (blocking an initialize result kills the whole
+ * session). Mirrors {@link PinEntry} but for the per-server handshake.
+ */
+export interface HandshakePinEntry {
+  /** {@link hashHandshake} of the first-observed handshake field hashes. */
+  current_hash: string;
+  /** Whole-hashes already SURFACED to the user (warn-once cross-session dedup). */
+  previous_hashes: string[];
+  captured_at: string;
+  /** "first-session" (TOFU). H3 install-pin capture is deferred. */
+  captured_via: CapturedVia;
+  signature_list_version: string;
+  /** Per-dimension hashes — to tell capability-change from identity-change. */
+  field_hashes: HandshakeFieldHashes;
+  /** Sorted top-level keys of result.capabilities — for ADD vs REMOVE diffing. */
+  capability_keys: string[];
+}
+
 export interface PinsFile {
   format_version: number;
   servers: Record<string, Record<string, PinEntry>>;
+  /**
+   * H5: per-server initialize-handshake pins. ADDITIVE + optional (no
+   * format_version bump, mirrors H4's field_hashes): absence is a valid pre-H5
+   * state; a present-but-malformed value fails the schema → readPins fails closed.
+   */
+  handshakes?: Record<string, HandshakePinEntry>;
 }
 
 // The integrity sidecar proves the BYTES are unchanged; it says nothing about
@@ -100,9 +138,27 @@ const PinEntrySchema = z.object({
   // missing string fields) fails the schema → readPins rejects (fail closed).
   field_hashes: FieldHashesSchema.optional(),
 });
+// H5: handshake-pin schema, mirrors PinEntrySchema. A present-but-malformed
+// `handshakes` value (missing fields, non-object field_hashes) fails the schema
+// → readPins rejects (fail closed). Absence parses fine for pre-H5 files.
+const HandshakeFieldHashesSchema = z.object({
+  capabilities: z.string(),
+  serverName: z.string(),
+});
+const HandshakePinEntrySchema = z.object({
+  current_hash: z.string(),
+  previous_hashes: z.array(z.string()),
+  captured_at: z.string(),
+  captured_via: z.enum(["install", "first-session", "backfill"]),
+  signature_list_version: z.string(),
+  field_hashes: HandshakeFieldHashesSchema,
+  capability_keys: z.array(z.string()),
+});
 const PinsFileSchema = z.object({
   format_version: z.number(),
   servers: z.record(z.string(), z.record(z.string(), PinEntrySchema)),
+  // H5: optional + additive. Same backward-compat discipline as field_hashes.
+  handshakes: z.record(z.string(), HandshakePinEntrySchema).optional(),
 });
 
 // ---------------------------------------------------------------------------
@@ -150,6 +206,38 @@ export function fieldHashesOf(input: {
 function hashLeaf(value: unknown): string {
   const canonical = JSON.stringify(value, sortedReplacer);
   return `sha256:${createHash("sha256").update(canonical, "utf8").digest("hex")}`;
+}
+
+/**
+ * H5: per-dimension hashes of the pinned `initialize` handshake leaves. Reuses
+ * {@link hashLeaf} (same canonical sorted form). DELIBERATELY excludes
+ * `instructions` and `serverInfo.version`: a non-string name collapses to "" and
+ * a missing `capabilities` collapses to null, so a version-only bump (or a name
+ * that is absent vs. an empty string) produces identical field hashes.
+ */
+export function handshakeFieldHashesOf(result: {
+  capabilities?: unknown;
+  serverInfo?: { name?: unknown };
+}): HandshakeFieldHashes {
+  return {
+    capabilities: hashLeaf(result.capabilities ?? null),
+    serverName: hashLeaf(typeof result.serverInfo?.name === "string" ? result.serverInfo.name : ""),
+  };
+}
+
+/**
+ * H5: sorted top-level capability keys (e.g. ["resources","sampling","tools"]).
+ * Empty list when `capabilities` is missing or not a plain object.
+ */
+export function handshakeCapabilityKeys(result: { capabilities?: unknown }): string[] {
+  const caps = result.capabilities;
+  if (caps === null || typeof caps !== "object" || Array.isArray(caps)) return [];
+  return Object.keys(caps as Record<string, unknown>).sort();
+}
+
+/** H5: stable whole-hash of the handshake field hashes (the durable baseline value). */
+export function hashHandshake(f: HandshakeFieldHashes): string {
+  return hashLeaf({ capabilities: f.capabilities, serverName: f.serverName });
 }
 
 function sortedReplacer(_key: string, value: unknown): unknown {
@@ -375,6 +463,32 @@ export function upsertToolPin(
       [serverName]: { ...server, [toolName]: newEntry },
     },
   };
+}
+
+/**
+ * H5: immutably set a server's handshake pin. Parity with {@link upsertToolPin}.
+ * Spreads `pins.handshakes ?? {}` so a pre-H5 file (no `handshakes` key) is
+ * upgraded in place without mutating the input.
+ */
+export function upsertHandshakePin(
+  pins: PinsFile,
+  serverName: string,
+  entry: HandshakePinEntry,
+): PinsFile {
+  return {
+    ...pins,
+    handshakes: { ...(pins.handshakes ?? {}), [serverName]: entry },
+  };
+}
+
+/**
+ * H5: safe handshake lookup via Object.hasOwn (F13) — defeats `__proto__` /
+ * `constructor` confusion and never resolves an inherited prototype member.
+ */
+export function lookupHandshake(pins: PinsFile, serverName: string): HandshakePinEntry | undefined {
+  const handshakes = pins.handshakes ?? {};
+  if (!Object.hasOwn(handshakes, serverName)) return undefined;
+  return handshakes[serverName];
 }
 
 export function clearServerPins(pins: PinsFile, serverName: string): PinsFile {

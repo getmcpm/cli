@@ -14,7 +14,7 @@ import type { JSONRPCMessage } from "@modelcontextprotocol/sdk/types.js";
 import { inspectMessage, defaultActionForFinding, ACTION_RANK } from "./patterns.js";
 import { OWASP_MCP_TOP_10 } from "./signatures.js";
 import { startRelay, buildSafeEnv, type GuardEvent } from "./relay.js";
-import { inspectForDrift, classifyDrift, buildDriftFinding } from "./drift.js";
+import { inspectForDrift, inspectHandshakeForDrift, classifyDrift, buildDriftFinding } from "./drift.js";
 import { readPins, writePins } from "./pins.js";
 import { readPolicy, expireStale, PolicyIntegrityError, type GuardPolicyFile } from "./policy.js";
 import { appendEvent } from "./event-log.js";
@@ -296,7 +296,11 @@ export async function runInner(parsed: RunInnerArgs): Promise<number> {
   // single-shot re-validation arm. Closes the double-tools/list bypass (a server
   // sending two tools/list within a session must hash-match or block) while
   // letting an ANNOUNCED list_changed legitimately re-baseline once.
-  const sessionState: SessionDriftState = { firstHashes: new Map(), revalidationArmed: false };
+  const sessionState: SessionDriftState = {
+    firstHashes: new Map(),
+    revalidationArmed: false,
+    handshakeSeenHash: null,
+  };
 
   // FROZEN session-start baseline. The off-thread refresh may keep reassigning
   // pinsSnapshot for its own fallback, but the sync classifier must compare
@@ -334,6 +338,21 @@ export async function runInner(parsed: RunInnerArgs): Promise<number> {
       // Off-thread: refresh snapshot + apply first-session pin capture.
       void (async () => {
         await inspectForDrift(msg, parsed.serverName, {
+          read: () => readPins().catch(() => pinsSnapshot),
+          write: writePins,
+          signatureListVersion: SIGNATURE_LIST_VERSION,
+        });
+        pinsSnapshot = await readPins().catch(() => pinsSnapshot);
+      })();
+    } else if (isInitializeResult(msg)) {
+      // H5: handshake-drift inspection (capabilities + identity). WARN-tier —
+      // never blocks (blocking an initialize result kills the session). The sync
+      // pass compares against the FROZEN baseline; the off-thread async path does
+      // first-session capture + the cross-session warn-once previous_hashes append.
+      driftResult = inspectHandshakeDriftSync(msg, parsed.serverName, baselineForDrift, sessionState);
+
+      void (async () => {
+        await inspectHandshakeForDrift(msg, parsed.serverName, {
           read: () => readPins().catch(() => pinsSnapshot),
           write: writePins,
           signatureListVersion: SIGNATURE_LIST_VERSION,
@@ -397,7 +416,19 @@ export async function runInner(parsed: RunInnerArgs): Promise<number> {
 // is the sync variant the per-message inspect callback uses.
 // ---------------------------------------------------------------------------
 
-import { hashToolDefinition, fieldHashesOf, type PinsFile } from "./pins.js";
+import {
+  hashToolDefinition,
+  fieldHashesOf,
+  handshakeFieldHashesOf,
+  handshakeCapabilityKeys,
+  hashHandshake,
+  lookupHandshake,
+  type PinsFile,
+} from "./pins.js";
+import {
+  classifyHandshakeDrift,
+  buildHandshakeDriftFinding,
+} from "./drift.js";
 
 /**
  * Per-session drift state. `firstHashes` is the SECURITY F3 same-session "first
@@ -406,10 +437,15 @@ import { hashToolDefinition, fieldHashesOf, type PinsFile } from "./pins.js";
  * `notifications/tools/list_changed`: the next tools/list frame is allowed to
  * legitimately change definitions, after which the flag reverts to the strict
  * F3 guard.
+ *
+ * `handshakeSeenHash` is the H5 same-session guard: `initialize` should happen
+ * once, so a SECOND initialize result whose whole-hash differs is anomalous and
+ * warns (`handshake-drift-in-session`) — never blocks.
  */
 export interface SessionDriftState {
   firstHashes: Map<string, string>;
   revalidationArmed: boolean;
+  handshakeSeenHash: string | null;
 }
 
 function sanitizeLabel(s: string): string {
@@ -547,4 +583,98 @@ export function isToolsListChangedNotification(msg: JSONRPCMessage): boolean {
   // A notification has no `result` (and no `id`); guard against a crafted frame
   // that pairs the method with a result.
   return !("result" in msg);
+}
+
+// ---------------------------------------------------------------------------
+// H5: sync initialize-handshake drift inspection (no I/O).
+// ---------------------------------------------------------------------------
+
+/**
+ * H5: true if `msg` is an MCP `initialize` RESULT. Discriminates on
+ * `result.protocolVersion` being a string — the SAME reliable discriminator the
+ * pattern engine's `initialize_instructions` case uses — NOT the presence of an
+ * optional `instructions`/`capabilities` key (which a tools/call result could
+ * also carry).
+ */
+export function isInitializeResult(msg: JSONRPCMessage): boolean {
+  if (!("result" in msg)) return false;
+  const result = (msg as { result?: { protocolVersion?: unknown } }).result;
+  return result !== null && typeof result === "object" && typeof result.protocolVersion === "string";
+}
+
+/**
+ * Sync, pure-ish (mutates only the session cache) handshake-drift inspection
+ * against the FROZEN session-start `baseline`. WARN-tier only — never blocks.
+ *
+ *  - same-session guard: a SECOND differing initialize whole-hash → warn
+ *    (`handshake-drift-in-session`); a second IDENTICAL one is a no-op.
+ *  - no handshake pin in the baseline → pass (first session; the async path
+ *    captures off-thread).
+ *  - live whole-hash === pinned.current_hash → pass.
+ *  - live whole-hash ∈ pinned.previous_hashes → pass (warn-once: already surfaced).
+ *  - else → classify + build warn findings.
+ */
+export function inspectHandshakeDriftSync(
+  msg: JSONRPCMessage,
+  serverName: string,
+  baseline: PinsFile,
+  state: SessionDriftState,
+): InspectResult {
+  const result = (msg as { result?: { capabilities?: unknown; serverInfo?: { name?: unknown } } }).result;
+  if (result === null || typeof result !== "object") return { action: "pass", findings: [] };
+
+  const liveFields = handshakeFieldHashesOf(result);
+  const liveCapKeys = handshakeCapabilityKeys(result);
+  const liveWhole = hashHandshake(liveFields);
+
+  // Same-session guard: initialize should happen once. A second, DIFFERING
+  // initialize is anomalous → warn (never block). Record on first sight.
+  const seen = state.handshakeSeenHash;
+  if (seen !== null && seen !== liveWhole) {
+    return warnResult(handshakeInSessionFinding(serverName, seen, liveWhole));
+  }
+  if (seen === null) state.handshakeSeenHash = liveWhole;
+
+  const pinned = lookupHandshake(baseline, serverName);
+  if (pinned === undefined) return { action: "pass", findings: [] };
+  if (liveWhole === pinned.current_hash || pinned.previous_hashes.includes(liveWhole)) {
+    return { action: "pass", findings: [] };
+  }
+
+  const cls = classifyHandshakeDrift(pinned, liveFields, liveCapKeys);
+  const findings = buildHandshakeDriftFinding({
+    cls,
+    safeServer: sanitizeLabel(serverName),
+  });
+  const action = findings.reduce<InspectResult["action"]>((acc, f) => {
+    const a = defaultActionForFinding(f);
+    return ACTION_RANK[a] > ACTION_RANK[acc] ? a : acc;
+  }, "pass");
+  return { action, findings };
+}
+
+function warnResult(finding: InspectFinding): InspectResult {
+  return { action: defaultActionForFinding(finding), findings: [finding] };
+}
+
+/**
+ * H5 same-session anomaly: two differing initialize results in one session. WARN
+ * (severity high) — never block. Hashes are not attacker-named keys, safe to slice.
+ */
+function handshakeInSessionFinding(
+  serverName: string,
+  firstSeen: string,
+  liveWhole: string,
+): InspectFinding {
+  return {
+    signature_id: "handshake-drift-in-session",
+    category: "OWASP-MCP-1",
+    severity: "high",
+    target: "initialize_instructions",
+    matched_text_excerpt: `${sanitizeLabel(serverName)}: ${firstSeen.slice(7, 19)}… → ${liveWhole.slice(7, 19)}… (same session)`,
+    remediation:
+      `Server "${sanitizeLabel(serverName)}" delivered two different initialize handshakes ` +
+      `in the same session — initialize should occur once. Inspect the wrapped command; ` +
+      `this is a warn-only signal and does not block the session.`,
+  };
 }
