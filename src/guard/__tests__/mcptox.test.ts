@@ -100,6 +100,29 @@ describe(`MCPTox benign corpus (${benigns.length} fixtures — FP-rate seed)`, (
   }
 });
 
+// ─────────────────── warn-and-forward (retrieved-data carriers) ───────────────────
+// Neither a clean attack-block nor a clean benign-pass: a signature match in
+// retrieved resource/prompt data is annotated and FORWARDED (warn), never
+// dropped. These fixtures assert the warn-only carrier clamp (H1).
+
+const warns = loadJsonFixtures<AttackOrBenignFixture>("warn");
+
+describe(`MCPTox warn-and-forward fixtures (${warns.length} — retrieved-data clamp)`, () => {
+  for (const { file, fixture } of warns) {
+    test(`${file}: ${fixture.name}`, () => {
+      const result = inspectMessage(fixture.message, OWASP_MCP_TOP_10);
+      expect(result.action, `expected action warn for ${file}`).toBe("warn");
+      expect(result.action, `${file} must NOT block retrieved data`).not.toBe("block");
+      if (fixture.expected_signature_id !== undefined) {
+        const sigIds = result.findings.map((f) => f.signature_id);
+        expect(sigIds, `expected signature ${fixture.expected_signature_id} for ${file}`).toContain(
+          fixture.expected_signature_id,
+        );
+      }
+    });
+  }
+});
+
 // ─────────────────────── drift (separate pin-aware path) ───────────────────────
 
 const drifts = loadJsonFixtures<DriftFixture>("drift");

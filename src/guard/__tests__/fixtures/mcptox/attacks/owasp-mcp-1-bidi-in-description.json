@@ -1,0 +1,22 @@
+{
+  "name": "Bidi RLO override (U+202E) hidden in a tool description",
+  "category": "OWASP-MCP-1",
+  "expected_action": "warn",
+  "expected_signature_id": "hidden-chars-in-metadata",
+  "notes": "Right-to-left override in tool metadata can visually reorder text to disguise malicious content. Presence is a poisoning indicator.",
+  "message": {
+    "jsonrpc": "2.0",
+    "id": 302,
+    "result": {
+      "tools": [
+        {
+          "name": "read_file",
+          "description": "Reads a file‮ from disk.",
+          "inputSchema": {
+            "type": "object"
+          }
+        }
+      ]
+    }
+  }
+}

@@ -11,7 +11,7 @@
  */
 
 import type { JSONRPCMessage } from "@modelcontextprotocol/sdk/types.js";
-import { inspectMessage } from "./patterns.js";
+import { inspectMessage, defaultActionForFinding, ACTION_RANK } from "./patterns.js";
 import { OWASP_MCP_TOP_10 } from "./signatures.js";
 import { startRelay, buildSafeEnv, type GuardEvent } from "./relay.js";
 import { inspectForDrift } from "./drift.js";
@@ -58,18 +58,18 @@ function mergeInspect(a: InspectResult, b: InspectResult): InspectResult {
  * override on one finding cannot suppress a block from another unmuted
  * finding — security review Step 7 F1 caught this as the previous code's
  * critical bug.
+ *
+ * With no override, a finding's default action comes from {@link defaultActionForFinding}
+ * — which applies the warn-only carrier clamp (a critical match in retrieved
+ * resource/prompt data degrades to `warn`). This keeps the clamp from being
+ * silently undone by a second severity→action recompute here. An EXPLICIT user
+ * override (warn/block/log_only/ignore) still wins: user intent outranks the
+ * default carrier policy, so a user can choose to block even retrieved data.
  */
-function applyPolicy(result: InspectResult, policy: GuardPolicyFile): InspectResult {
+export function applyPolicy(result: InspectResult, policy: GuardPolicyFile): InspectResult {
   const overrides = policy.signature_overrides ?? [];
   if (overrides.length === 0) return result;
   const byId = new Map(overrides.map((o) => [o.id, o]));
-
-  const rank = { pass: 0, warn: 1, block: 2 } as const;
-  const fromSeverity = (sev: InspectFinding["severity"]): InspectResult["action"] => {
-    if (sev === "critical") return "block";
-    if (sev === "high") return "warn";
-    return "pass";
-  };
 
   let highest: InspectResult["action"] = "pass";
   const kept: InspectFinding[] = [];
@@ -77,7 +77,7 @@ function applyPolicy(result: InspectResult, policy: GuardPolicyFile): InspectRes
     const o = byId.get(f.signature_id);
     let perFindingAction: InspectResult["action"];
     if (o === undefined) {
-      perFindingAction = fromSeverity(f.severity);
+      perFindingAction = defaultActionForFinding(f);
       kept.push(f);
     } else if (o.action === "ignore") {
       continue; // drop entirely
@@ -88,7 +88,7 @@ function applyPolicy(result: InspectResult, policy: GuardPolicyFile): InspectRes
       perFindingAction = o.action; // "warn" or "block"
       kept.push(f);
     }
-    if (rank[perFindingAction] > rank[highest]) highest = perFindingAction;
+    if (ACTION_RANK[perFindingAction] > ACTION_RANK[highest]) highest = perFindingAction;
   }
 
   return { action: highest, findings: kept };

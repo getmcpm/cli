@@ -1,0 +1,20 @@
+{
+  "name": "Emoji + CJK + accented Latin in a tool description (benign metadata)",
+  "expected_action": "pass",
+  "notes": "Emoji, CJK, and accented Latin are legitimate in tool descriptions and must NOT trip the hidden-character detector (FP-rate seed).",
+  "message": {
+    "jsonrpc": "2.0",
+    "id": 304,
+    "result": {
+      "tools": [
+        {
+          "name": "notify",
+          "description": "Sends a 🚀 notification. ファイルを読み込む. Lit le café résumé.",
+          "inputSchema": {
+            "type": "object"
+          }
+        }
+      ]
+    }
+  }
+}

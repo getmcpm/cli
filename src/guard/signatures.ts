@@ -66,4 +66,65 @@ export const OWASP_MCP_TOP_10: readonly Signature[] = [
       "Tool-poisoning pattern (Invariant Labs disclosure, 2025). Re-review the server; " +
       "if legitimate, run `mcpm guard accept-drift <server>`.",
   },
+  {
+    id: "owasp-mcp-2-instruction-injection-in-resource",
+    category: "OWASP-MCP-2",
+    severity: "critical",
+    description: "Imperative instructions embedded in retrieved resource content",
+    // resources/read content is RETRIEVED DATA — inspectMessage clamps a match
+    // here to `warn` (annotate + forward), so a poisoned/quoted README is flagged
+    // but never dropped. Severity stays critical (pattern confidence is honest).
+    target: "resource_content",
+    patterns: [
+      /(?:^|[\s.,;:!?])ignore[\s]+(?:all[\s]+|any[\s]+|the[\s]+)?(?:previous|prior|above)[\s]+instructions?/i,
+      /(?:disregard|forget)[\s]+(?:all[\s]+|any[\s]+|the[\s]+)?(?:previous|prior|above)[\s]+instructions?/i,
+      /you[\s]+are[\s]+now[\s]+(?:in[\s]+|operating[\s]+in[\s]+|entering[\s]+)?(?:developer|debug|admin|jailbreak|dan)[\s]+mode/i,
+      /<\|system\|>|<\|im_start\|>system/,
+    ],
+    remediation:
+      "Retrieved resource content contained injection-shaped text. This is annotated " +
+      "and forwarded (not blocked) so legitimate documents aren't corrupted. Review the " +
+      "source resource; if hostile, stop reading from it.",
+  },
+  {
+    id: "owasp-mcp-2-instruction-injection-in-prompt",
+    category: "OWASP-MCP-2",
+    severity: "critical",
+    description: "Imperative instructions embedded in a server-provided prompt",
+    // prompts/get content is RETRIEVED DATA — warn-only via the inspectMessage clamp.
+    target: "prompt_content",
+    patterns: [
+      /(?:^|[\s.,;:!?])ignore[\s]+(?:all[\s]+|any[\s]+|the[\s]+)?(?:previous|prior|above)[\s]+instructions?/i,
+      /(?:disregard|forget)[\s]+(?:all[\s]+|any[\s]+|the[\s]+)?(?:previous|prior|above)[\s]+instructions?/i,
+      /you[\s]+are[\s]+now[\s]+(?:in[\s]+|operating[\s]+in[\s]+|entering[\s]+)?(?:developer|debug|admin|jailbreak|dan)[\s]+mode/i,
+      /<\|system\|>|<\|im_start\|>system/,
+    ],
+    remediation:
+      "A server-provided prompt template contained injection-shaped text. Annotated and " +
+      "forwarded (not blocked). Review the prompt's source server.",
+  },
+  {
+    id: "owasp-mcp-1-initialize-instruction-injection",
+    category: "OWASP-MCP-1",
+    severity: "critical",
+    description: "Instruction-shaped text in initialize instructions / serverInfo (line-jumping)",
+    // initialize instructions + serverInfo are PRE-INVOCATION CONTEXT injected
+    // into the agent before any tool call — block-capable (T2 line-jumping).
+    target: "initialize_instructions",
+    // Use genuine prompt-delimiter tokens (<|system|>, <|im_start|>system) like the
+    // resource/prompt signatures — NOT a bare `<important>`/`<system>` tag. This
+    // carrier is block-capable, so a loose emphasis tag in legitimate instruction
+    // prose would hard-fail the server connection with an opaque JSON-RPC error.
+    // (security: FP-2 over-block)
+    patterns: [
+      /(?:^|[\s.,;:!?])ignore[\s]+(?:all[\s]+|any[\s]+|the[\s]+)?(?:previous|prior|above)[\s]+instructions?/i,
+      /(?:disregard|forget)[\s]+(?:all[\s]+|any[\s]+|the[\s]+)?(?:previous|prior|above)[\s]+instructions?/i,
+      /<\|system\|>|<\|im_start\|>system/,
+      /you[\s]+are[\s]+now[\s]+(?:in[\s]+|operating[\s]+in[\s]+|entering[\s]+)?(?:developer|debug|admin|jailbreak|dan)[\s]+mode/i,
+    ],
+    remediation:
+      "A server's initialize instructions/serverInfo contain imperative or system-prompt-" +
+      "style text — a line-jumping attack that injects context before any tool runs. " +
+      "Re-review the server; if legitimate, run `mcpm guard accept-drift <server>`.",
+  },
 ];
