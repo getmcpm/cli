@@ -14,7 +14,7 @@ import type { JSONRPCMessage } from "@modelcontextprotocol/sdk/types.js";
 import { inspectMessage, defaultActionForFinding, ACTION_RANK } from "./patterns.js";
 import { OWASP_MCP_TOP_10 } from "./signatures.js";
 import { startRelay, buildSafeEnv, type GuardEvent } from "./relay.js";
-import { inspectForDrift } from "./drift.js";
+import { inspectForDrift, classifyDrift, buildDriftFinding } from "./drift.js";
 import { readPins, writePins } from "./pins.js";
 import { readPolicy, expireStale, PolicyIntegrityError, type GuardPolicyFile } from "./policy.js";
 import { appendEvent } from "./event-log.js";
@@ -37,7 +37,7 @@ export interface RunInnerArgs {
 
 const SIGNATURE_LIST_VERSION = "owasp-mcp-top-10@v0.5.0";
 
-function mergeInspect(a: InspectResult, b: InspectResult): InspectResult {
+export function mergeInspect(a: InspectResult, b: InspectResult): InspectResult {
   // Most-severe action wins; concat findings. Uses the shared ACTION_RANK scale
   // (pass < warn < block) instead of a local duplicate map.
   const action = ACTION_RANK[a.action] >= ACTION_RANK[b.action] ? a.action : b.action;
@@ -169,21 +169,35 @@ export async function runInner(parsed: RunInnerArgs): Promise<number> {
   const pausedUntilFuture =
     policy.paused_until !== undefined && new Date(policy.paused_until) > new Date();
 
-  // SECURITY F3: per-session "first hash seen" map. Closes the double-
-  // tools/list bypass — if a server sends two tools/list within the same
-  // session, the second must hash-match the first or it blocks. Without this,
-  // a malicious server could deliver benign-then-poisoned tools/list back-to-
-  // back before the off-thread pin write completes; both would pass sync
-  // inspection because pinsSnapshot has no pin for the tool yet.
-  const sessionFirstHashes = new Map<string, string>();
+  // SECURITY F3: per-session drift state — the "first hash seen" cache + the H4
+  // single-shot re-validation arm. Closes the double-tools/list bypass (a server
+  // sending two tools/list within a session must hash-match or block) while
+  // letting an ANNOUNCED list_changed legitimately re-baseline once.
+  const sessionState: SessionDriftState = { firstHashes: new Map(), revalidationArmed: false };
+
+  // FROZEN session-start baseline. The off-thread refresh may keep reassigning
+  // pinsSnapshot for its own fallback, but the sync classifier must compare
+  // against the immutable session-start pins so a mid-session pin rewrite can't
+  // retroactively launder a drift.
+  const baselineForDrift = pinsSnapshot;
 
   const inspectChild = (msg: JSONRPCMessage): InspectResult => {
     if (pausedUntilFuture) return { action: "pass", findings: [] };
+
+    // H4: a server→client list_changed notification ARMS single-shot
+    // re-validation. Forward it silently (no stderr noise) — the follow-up
+    // list's classification is the logged event. No pattern/drift on the bare
+    // notification.
+    if (isToolsListChangedNotification(msg)) {
+      sessionState.revalidationArmed = true;
+      return { action: "pass", findings: [] };
+    }
+
     const patternResult = inspectMessage(msg, OWASP_MCP_TOP_10);
     let driftResult: InspectResult = { action: "pass", findings: [] };
 
     if (hasToolsList(msg)) {
-      driftResult = inspectForDriftSync(msg, parsed.serverName, pinsSnapshot, sessionFirstHashes);
+      driftResult = inspectForDriftSync(msg, parsed.serverName, baselineForDrift, sessionState);
 
       // Off-thread: refresh snapshot + apply first-session pin capture.
       void (async () => {
@@ -251,83 +265,154 @@ export async function runInner(parsed: RunInnerArgs): Promise<number> {
 // is the sync variant the per-message inspect callback uses.
 // ---------------------------------------------------------------------------
 
-import { hashToolDefinition, type PinsFile } from "./pins.js";
+import { hashToolDefinition, fieldHashesOf, type PinsFile } from "./pins.js";
 
 /**
- * Sync, pure (no I/O) drift inspection against an in-memory pin snapshot.
- * Exported for unit testing the SECURITY F3 same-session guard in isolation;
- * the async {@link inspectForDrift} in drift.ts also writes first-session pins.
+ * Per-session drift state. `firstHashes` is the SECURITY F3 same-session "first
+ * hash seen" cache (the ONE deliberately-mutable in-memory session cache).
+ * `revalidationArmed` is a SINGLE-SHOT flag set by an announced
+ * `notifications/tools/list_changed`: the next tools/list frame is allowed to
+ * legitimately change definitions, after which the flag reverts to the strict
+ * F3 guard.
+ */
+export interface SessionDriftState {
+  firstHashes: Map<string, string>;
+  revalidationArmed: boolean;
+}
+
+function sanitizeLabel(s: string): string {
+  return sanitizeForTerminal(s, 128);
+}
+
+/**
+ * Sync, pure-ish (no I/O) drift inspection against an in-memory pin snapshot.
+ * The ONLY mutation is the session-state cache (firstHashes / revalidationArmed)
+ * — a deliberate in-memory session store. Exported for unit testing the
+ * SECURITY F3 same-session guard + the H4 tiered classification; the async
+ * {@link inspectForDrift} in drift.ts also writes first-session pins.
  */
 export function inspectForDriftSync(
   msg: JSONRPCMessage,
   serverName: string,
-  pins: PinsFile,
-  sessionFirstHashes: Map<string, string>,
+  baseline: PinsFile,
+  state: SessionDriftState,
 ): InspectResult {
+  // Frame-scoped single-shot arm: read then immediately disarm so a SECOND
+  // frame in the same buffer chunk reverts to the strict F3 guard.
+  const armed = state.revalidationArmed;
+  state.revalidationArmed = false;
+
   const result = (msg as { result?: { tools?: unknown } }).result;
   const tools = Array.isArray(result?.tools) ? result.tools : [];
 
   const findings: InspectFinding[] = [];
   for (const rawTool of tools) {
-    if (rawTool === null || typeof rawTool !== "object") continue;
-    const tool = rawTool as {
-      name?: unknown;
-      description?: unknown;
-      schema?: unknown;
-      inputSchema?: unknown;
-      annotations?: unknown;
-    };
-    const toolName = typeof tool.name === "string" ? tool.name : null;
-    if (toolName === null) continue;
-
-    const liveHash = hashToolDefinition({
-      description: typeof tool.description === "string" ? tool.description : null,
-      schema: tool.inputSchema ?? tool.schema,
-      annotations: tool.annotations,
-    });
-
-    // SECURITY F13: lookup via Object.hasOwn to avoid prototype/constructor confusion.
-    const serverPins = Object.hasOwn(pins.servers, serverName) ? pins.servers[serverName] : undefined;
-    const pinned = serverPins && Object.hasOwn(serverPins, toolName) ? serverPins[toolName] : undefined;
-
-    // SECURITY F3: same-session bypass check. If we've already seen a hash
-    // for (server, tool) in this session, any subsequent tools/list for the
-    // same pair must match — otherwise the server is trying to rug-pull
-    // within a single session before the off-thread pin write commits.
-    const sessionKey = `${serverName}::${toolName}`;
-    const firstSeen = sessionFirstHashes.get(sessionKey);
-    if (firstSeen !== undefined && firstSeen !== liveHash) {
-      findings.push({
-        signature_id: "schema-drift-in-session",
-        category: "OWASP-MCP-1",
-        severity: "critical",
-        target: "tool_description",
-        matched_text_excerpt: `${toolName}: ${firstSeen.slice(7, 19)}… → ${liveHash.slice(7, 19)}… (same session)`,
-        remediation:
-          `Server "${serverName}" delivered two different schemas for tool "${toolName}" ` +
-          `in the same session. This is a rug-pull attempt; restart the IDE and reinspect ` +
-          `the server's source.`,
-      });
-      continue;
-    }
-    if (firstSeen === undefined) sessionFirstHashes.set(sessionKey, liveHash);
-
-    if (!pinned || pinned.current_hash === null) continue;
-
-    if (liveHash !== pinned.current_hash) {
-      findings.push({
-        signature_id: "schema-drift",
-        category: "OWASP-MCP-1",
-        severity: "critical",
-        target: "tool_description",
-        matched_text_excerpt: `${toolName}: ${pinned.current_hash.slice(7, 19)}… → ${liveHash.slice(7, 19)}…`,
-        remediation:
-          `Tool "${toolName}" schema changed since install (rug-pull suspected). ` +
-          `Run \`mcpm guard accept-drift ${serverName} --tool ${toolName} --new-hash ${liveHash}\` if legitimate.`,
-      });
-    }
+    const finding = inspectToolDrift(rawTool, serverName, baseline, state, armed);
+    if (finding !== null) findings.push(finding);
   }
-  return findings.length > 0
-    ? { action: "block", findings }
-    : { action: "pass", findings: [] };
+  // Action = MAX over findings via defaultActionForFinding (no hardcoded block):
+  // a cosmetic-only result is warn; any security finding makes it block.
+  const action = findings.reduce<InspectResult["action"]>((acc, f) => {
+    const a = defaultActionForFinding(f);
+    return ACTION_RANK[a] > ACTION_RANK[acc] ? a : acc;
+  }, "pass");
+  return { action, findings };
+}
+
+interface RawTool {
+  name?: unknown;
+  description?: unknown;
+  schema?: unknown;
+  inputSchema?: unknown;
+  annotations?: unknown;
+}
+
+/**
+ * Inspect ONE tool from a tools/list frame. Mutates the session `firstHashes`
+ * cache (records on first sight, rebaselines when `armed`). Returns at most one
+ * finding (F3 same-session block, OR a tiered pin-drift finding), or null.
+ */
+function inspectToolDrift(
+  rawTool: unknown,
+  serverName: string,
+  baseline: PinsFile,
+  state: SessionDriftState,
+  armed: boolean,
+): InspectFinding | null {
+  if (rawTool === null || typeof rawTool !== "object") return null;
+  const tool = rawTool as RawTool;
+  const toolName = typeof tool.name === "string" ? tool.name : null;
+  if (toolName === null) return null;
+
+  const fields = {
+    description: typeof tool.description === "string" ? tool.description : null,
+    schema: tool.inputSchema ?? tool.schema,
+    annotations: tool.annotations,
+  };
+  const liveWhole = hashToolDefinition(fields);
+  const liveFields = fieldHashesOf(fields);
+
+  // SECURITY F13: lookup via Object.hasOwn to avoid prototype/constructor confusion.
+  const serverPins = Object.hasOwn(baseline.servers, serverName) ? baseline.servers[serverName] : undefined;
+  const pinned = serverPins && Object.hasOwn(serverPins, toolName) ? serverPins[toolName] : undefined;
+
+  // SECURITY F3: same-session bypass check. If we've already seen a hash for
+  // (server, tool) this session, a subsequent differing tools/list is a rug-pull
+  // attempt — UNLESS `armed` (an announced list_changed legitimately changes
+  // definitions). When armed we skip F3 and rebaseline instead.
+  const sessionKey = `${serverName}::${toolName}`;
+  const firstSeen = state.firstHashes.get(sessionKey);
+  if (!armed && firstSeen !== undefined && firstSeen !== liveWhole) {
+    return inSessionDriftFinding(serverName, toolName, firstSeen, liveWhole);
+  }
+  // Record on first sight, or rebaseline when an announced list_changed armed us.
+  if (firstSeen === undefined || armed) state.firstHashes.set(sessionKey, liveWhole);
+
+  if (!pinned || pinned.current_hash === null) return null;
+  if (liveWhole === pinned.current_hash) return null;
+
+  // Tier the drift by field (cosmetic description-only → warn; schema /
+  // annotations / coarse → block). Same finding shapes as drift.ts. For a
+  // cosmetic warn, carry a sanitized + truncated NEW description so the
+  // guard-events.jsonl entry is self-contained for review.
+  const cls = classifyDrift(pinned, liveFields);
+  const newDescriptionExcerpt =
+    typeof tool.description === "string" ? sanitizeForTerminal(tool.description, 80) : undefined;
+  return buildDriftFinding({
+    cls,
+    safeServer: sanitizeLabel(serverName),
+    safeTool: sanitizeLabel(toolName),
+    expected: pinned.current_hash,
+    actual: liveWhole,
+    newDescriptionExcerpt,
+  });
+}
+
+/** SECURITY F3: same-session double-tools/list rug-pull finding (critical block). */
+function inSessionDriftFinding(
+  serverName: string,
+  toolName: string,
+  firstSeen: string,
+  liveWhole: string,
+): InspectFinding {
+  return {
+    signature_id: "schema-drift-in-session",
+    category: "OWASP-MCP-1",
+    severity: "critical",
+    target: "tool_description",
+    matched_text_excerpt: `${sanitizeLabel(toolName)}: ${firstSeen.slice(7, 19)}… → ${liveWhole.slice(7, 19)}… (same session)`,
+    remediation:
+      `Server "${sanitizeLabel(serverName)}" delivered two different schemas for tool "${sanitizeLabel(toolName)}" ` +
+      `in the same session. This is a rug-pull attempt; restart the IDE and reinspect ` +
+      `the server's source.`,
+  };
+}
+
+/** True if `msg` is a server→client `notifications/tools/list_changed`. */
+export function isToolsListChangedNotification(msg: JSONRPCMessage): boolean {
+  if (!("method" in msg)) return false;
+  if ((msg as { method?: unknown }).method !== "notifications/tools/list_changed") return false;
+  // A notification has no `result` (and no `id`); guard against a crafted frame
+  // that pairs the method with a result.
+  return !("result" in msg);
 }
