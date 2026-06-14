@@ -39,4 +39,15 @@ describe("registerTools (fix F.1)", () => {
     const registeredNames = registerTool.mock.calls.map((c) => c[0] as string);
     expect(registeredNames).toContain("mcpm_up");
   });
+
+  it("annotates read-only tools with readOnlyHint (mcpm_search must not be left unhinted)", () => {
+    const registerTool = vi.fn();
+    registerTools({ registerTool } as never, {} as ServerDeps);
+    const configByName = new Map(
+      registerTool.mock.calls.map((c) => [c[0] as string, c[1] as { annotations?: { readOnlyHint?: boolean } }])
+    );
+    for (const name of ["mcpm_search", "mcpm_info", "mcpm_list", "mcpm_audit", "mcpm_doctor"]) {
+      expect(configByName.get(name)?.annotations?.readOnlyHint).toBe(true);
+    }
+  });
 });

@@ -81,6 +81,7 @@ export function registerTools(
   server.registerTool("mcpm_search", {
     description: "Search the MCP registry for servers with trust scores",
     inputSchema: SearchInput.shape,
+    annotations: { readOnlyHint: true },
   }, async (args) => {
     const result = await handleSearch(args, deps);
     return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
