@@ -39,6 +39,33 @@ describe("handleCompletions", () => {
     expect(script).toContain("disable");
   });
 
+  it("includes the newer top-level commands in every shell (no stale command list)", () => {
+    // Regression guard: completions historically omitted guard/secrets/lock/up/
+    // diff/export/outdated/alias/why/publish. Each must appear in all 3 shells.
+    const newer = ["guard", "secrets", "lock", "up", "diff", "export", "outdated", "alias", "why", "publish"];
+    const shells: ShellType[] = ["bash", "zsh", "fish"];
+    for (const shell of shells) {
+      const output = vi.fn();
+      handleCompletions(shell, { output });
+      const script = output.mock.calls[0][0] as string;
+      for (const cmd of newer) {
+        expect(script, `${shell} completions should mention "${cmd}"`).toContain(cmd);
+      }
+    }
+  });
+
+  it("completes guard and secrets subcommands", () => {
+    const shells: ShellType[] = ["bash", "zsh", "fish"];
+    for (const shell of shells) {
+      const output = vi.fn();
+      handleCompletions(shell, { output });
+      const script = output.mock.calls[0][0] as string;
+      // a representative subcommand from each group
+      expect(script).toContain("list-signatures");
+      expect(script).toContain("migrate");
+    }
+  });
+
   it("includes client IDs in completions", () => {
     const shells: ShellType[] = ["bash", "zsh", "fish"];
     for (const shell of shells) {
