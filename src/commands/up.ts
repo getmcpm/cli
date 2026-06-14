@@ -29,6 +29,7 @@ import type {
   LockFile,
   LockedServer,
   Policy,
+  NpmIntegritySnapshot,
 } from "../stack/schema.js";
 import {
   parseStackFile,
@@ -44,6 +45,7 @@ import { assessReleaseAge, DEFAULT_MIN_RELEASE_AGE_HOURS } from "../scanner/cool
 import { extractRegistryMeta } from "../utils/format-trust.js";
 import { applyKeychainSecrets, type SecretsMode, setSecrets as _setSecrets } from "../store/keychain.js";
 import { isNewUnguarded } from "../guard/unguarded.js";
+import { compareIntegrity } from "../registry/npm-integrity.js";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -135,6 +137,15 @@ export interface UpDeps {
    * per-server loop with the newly-consented set (additions only).
    */
   recordUnguardedConsent?: (names: readonly string[]) => Promise<void>;
+  /**
+   * H11 slice 1: fetch npm's published dist.integrity for an exact package
+   * coordinate. FAIL-OPEN: returns undefined on any error; the integrity pass
+   * is read-only and never alters install results.
+   */
+  fetchNpmIntegrity: (
+    identifier: string,
+    npmVersion: string
+  ) => Promise<NpmIntegritySnapshot | undefined>;
 }
 
 /** Terminal per-server status reported via UpDeps.recordResult. */
@@ -317,6 +328,11 @@ export async function handleUp(
       );
     }
   }
+
+  // Step 9b: H11 slice 1 — npm integrity drift pass (WARN-only, read-only).
+  // Runs regardless of dry-run (read-only network check; `up` already does
+  // network). Does NOT alter install results or summary counts.
+  await runIntegrityPass(lockFile, deps);
 
   // Step 10: Summary
   const installed = results.filter((r) => r.status === "installed").length;
@@ -544,6 +560,121 @@ async function processServer(input: ProcessInput): Promise<ServerResult> {
     message: `v${locked.version} (trust: ${trustScore.score}/${trustScore.maxPossible})${partialNote}`,
     storedSecrets: storedCount,
   };
+}
+
+// ---------------------------------------------------------------------------
+// H11 slice 1 — npm integrity drift pass
+// ---------------------------------------------------------------------------
+
+/**
+ * Read-only post-loop integrity pass. Fetches fresh npm dist.integrity in
+ * parallel for all locked npm servers that have a baseline snapshot, compares
+ * against the locked value, and emits batch WARN output. Never throws; never
+ * alters install results or summary counts.
+ *
+ * HONESTY BOUNDARY: all output must say "npm's published record … changed" and
+ * include the clause "mcpm checks the registry's published record, not the code
+ * your agent runs." NEVER write "serving different bytes" or claim protection.
+ */
+async function runIntegrityPass(
+  lockFile: LockFile,
+  deps: Pick<UpDeps, "fetchNpmIntegrity" | "output">
+): Promise<void> {
+  // Collect all locked registry servers.
+  const allEntries = Object.entries(lockFile.servers).filter(
+    ([, locked]) => isLockedRegistryServer(locked) && locked.registryType === "npm"
+  ) as [string, { version: string; registryType: string; identifier: string; trust: unknown; npmIntegrity?: { npmVersion: string; integrity: string } }][];
+
+  // Split into checkable (has baseline) and absent-baseline.
+  const checkable = allEntries.filter(([, locked]) => locked.npmIntegrity !== undefined);
+  const absentBaseline = allEntries.filter(([, locked]) => locked.npmIntegrity === undefined);
+
+  // Prefetch all fresh integrity values in parallel (single Promise.all, NOT serial).
+  const freshResults = await Promise.all(
+    checkable.map(([, locked]) =>
+      deps.fetchNpmIntegrity(locked.identifier, locked.npmIntegrity!.npmVersion)
+    )
+  );
+
+  // Classify results.
+  const offlineSkip: string[] = [];
+  const driftServers: { name: string; identifier: string; npmVersion: string; oldIntegrity: string; newIntegrity: string }[] = [];
+  const formatOnlyServers: { name: string; identifier: string; npmVersion: string }[] = [];
+
+  for (let i = 0; i < checkable.length; i++) {
+    const [name, locked] = checkable[i];
+    const fresh = freshResults[i];
+    const baseline = locked.npmIntegrity!;
+
+    if (fresh === undefined) {
+      offlineSkip.push(name);
+      continue;
+    }
+
+    const cmp = compareIntegrity(baseline.integrity, fresh.integrity);
+    if (cmp === "equal") {
+      // No output — integrity matches.
+    } else if (cmp === "differ") {
+      driftServers.push({
+        name,
+        identifier: locked.identifier,
+        npmVersion: baseline.npmVersion,
+        oldIntegrity: baseline.integrity,
+        newIntegrity: fresh.integrity,
+      });
+    } else {
+      // "format-only"
+      formatOnlyServers.push({
+        name,
+        identifier: locked.identifier,
+        npmVersion: baseline.npmVersion,
+      });
+    }
+  }
+
+  // Emit drift advisories (one per server).
+  for (const d of driftServers) {
+    const oldShort = d.oldIntegrity.slice(0, 16);
+    const newShort = d.newIntegrity.slice(0, 16);
+    deps.output(
+      `\n⚠ INTEGRITY DRIFT: npm's published record for ${d.identifier}@${d.npmVersion} changed` +
+        ` since you locked it (dist.integrity ${oldShort}… → ${newShort}…).` +
+        ` A published version's integrity is meant to be immutable, so this can mean a` +
+        ` supply-chain republish — but it can also be a legitimate republish or a different` +
+        ` registry. mcpm checks the registry's published record, not the code your agent runs.` +
+        ` This is a warning only — it does not block \`mcpm up\`; npx/uvx fetch and run the actual` +
+        ` package independently when the server starts (possibly from a different mirror).` +
+        ` Re-run \`mcpm lock\` if this change is expected.`
+    );
+  }
+
+  // Emit format-only advisories (one per server).
+  for (const f of formatOnlyServers) {
+    deps.output(
+      `\n⚠ ${f.name}: npm changed the integrity format for ${f.identifier}@${f.npmVersion}, so` +
+        ` mcpm cannot compare its published record against your locked baseline (mcpm checks the` +
+        ` registry's published record, not the code your agent runs).` +
+        ` Re-run \`mcpm lock\` to refresh the baseline.`
+    );
+  }
+
+  // Emit batch could-not-verify line (one total, not one per server). Covers
+  // both a genuine outage AND a 200 manifest lacking a comparable dist.integrity
+  // — so it must NOT assert "unreachable" (a cause it cannot prove).
+  if (offlineSkip.length > 0) {
+    deps.output(
+      `\ncould not verify npm integrity for ${offlineSkip.length} server(s) this run` +
+        ` (no drift result is not proof of integrity).`
+    );
+  }
+
+  // Emit batch absent-baseline line (one total, not one per server).
+  if (absentBaseline.length > 0) {
+    deps.output(
+      `\nintegrity baseline missing for ${absentBaseline.length} npm server(s)` +
+        ` — re-run \`mcpm lock\` with network access to enable drift detection.`
+    );
+  }
 }
 
 async function processUrlServer(
@@ -778,6 +909,7 @@ import { computeTrustScore as _computeTrustScore } from "../scanner/trust-score.
 import { handleLock } from "./lock.js";
 import { createConfirm } from "../utils/confirm.js";
 import { stdoutOutput } from "../utils/output.js";
+import { fetchNpmIntegrity as _fetchNpmIntegrity } from "../registry/npm-integrity.js";
 
 export function registerUpCommand(program: Command): void {
   program
@@ -843,6 +975,7 @@ export function registerUpCommand(program: Command): void {
                     now: () => Date.now(),
                     writeLockFile: (path, content) =>
                       writeFile(path, content, { encoding: "utf-8", mode: 0o600 }),
+                    fetchNpmIntegrity: _fetchNpmIntegrity,
                     output: stdoutOutput,
                   }
                 );
@@ -856,6 +989,7 @@ export function registerUpCommand(program: Command): void {
               },
               output: stdoutOutput,
               setSecrets: _setSecrets,
+              fetchNpmIntegrity: _fetchNpmIntegrity,
               readUnguardedConsent,
               recordUnguardedConsent: async (names) => {
                 const previous = await readUnguardedConsent();
