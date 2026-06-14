@@ -131,21 +131,23 @@ servers:
       GITHUB_TOKEN: { required: true, secret: true }
 ```
 
-### Starter packs
+### Scaffold a stack file
 
-Get a working MCP setup in one command.
+Start a new project's MCP setup in one command. `mcpm init` writes a starter `mcpm.yaml` you fill in with servers from `mcpm search`.
 
 ```
-$ mcpm init developer
+$ mcpm init
 
-  Installing 'developer' pack: Essential developer tools
-    Installing servers-filesystem... done
-    Installing servers-git... done
-    Installing servers-github... done
-  Installed 3/3 servers.
+  Created mcpm.yaml.
+
+  Next steps:
+    mcpm search <query>   find MCP servers in the registry
+    edit mcpm.yaml        add them under `servers:`
+    mcpm lock             resolve and lock versions
+    mcpm up               install from the stack file
 ```
 
-Available packs: `developer` (filesystem, git, GitHub), `data` (PostgreSQL, SQLite), `web` (HTTP fetch, Puppeteer).
+It refuses to clobber an existing `mcpm.yaml` (pass `--force` to overwrite). mcpm deliberately doesn't ship curated packs — blessing specific community servers is a trust decision a security tool shouldn't bake in.
 
 ## Trust score
 
@@ -181,7 +183,7 @@ Without an external scanner installed, the maximum possible score is 80/100. The
 | `mcpm publish check` | Dry-run: show trust score and what would be submitted |
 | `mcpm publish` | Submit to the official MCP registry (requires GITHUB_TOKEN) |
 | `mcpm doctor` | Check MCP setup health and report issues |
-| `mcpm init <pack>` | Install a curated starter pack of MCP servers |
+| `mcpm init` | Scaffold a starter `mcpm.yaml` stack file in the current directory |
 | `mcpm disable <name>` | Disable an MCP server without removing it from config |
 | `mcpm enable <name>` | Re-enable a previously disabled MCP server |
 | `mcpm import` | Import existing MCP servers from client config files |
@@ -212,6 +214,16 @@ Run `mcpm <command> --help` for options and flags.
 Install-time trust scoring catches most poisoned servers before they ship. But what about **rug-pulls** — a server that changes its tool definitions after you've already approved them? Or **prompt-injection in tool responses** — adversarial text embedded in a Slack message, web page, or calendar invite that the agent reads through your trusted MCP server?
 
 `mcpm guard` adds a runtime inspection layer. It wraps every installed MCP server with a stdio relay, scans tool descriptions / responses / arguments for OWASP MCP Top 10 attack patterns, pins each tool's schema at install time, and blocks calls when the live response drifts from the pin (rug-pull defense).
+
+### What happens on every tool call
+
+The guard sits inline on the stdio channel between your AI client and each MCP server, so it sees **both halves of every tool call** and inspects them as they pass:
+
+- **The request your agent sends** — the tool name and arguments, checked for sensitive-path exfil and injection smuggled into call parameters.
+- **The response the server returns** — checked for instruction injection hidden in the tool's output (the Slack message, web page, or calendar invite your agent is about to read).
+- **The tool's own definition** — `tools/list` descriptions, schemas, and annotations, checked against the schema pinned at approval time, so a server can't quietly rewrite a tool you already trusted.
+
+When a frame trips a signature, drift check, or policy rule, the guard **drops it and hands your agent a JSON-RPC error in its place** — carrying the signature id and a `remediation` string — so the poisoned content never reaches your model. Clean calls pass straight through (p99 ~0.065 ms on small frames). Server-initiated `sampling` / `elicitation` requests are inspected the same way, with the error routed back to the server rather than to your agent.
 
 ### Quick start
 
