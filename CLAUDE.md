@@ -1,7 +1,7 @@
 # MCP Registry — Project Context
 
 > This file is automatically read by Claude Code on every session.
-> Keep it updated as decisions are made. Last updated: 2026-06-03.
+> Keep it updated as decisions are made. Last updated: 2026-06-15.
 
 ---
 
@@ -12,7 +12,7 @@ An open-source, CLI-first MCP package manager — **"npm for MCP servers"**.
 A registry where developers can search, install, audit, publish, and update MCP servers
 across all major clients (Claude Desktop, Cursor, VS Code, Windsurf) from a single tool.
 
-**npm package**: `@getmcpm/cli` (v0.8.1) | **bin command**: `mcpm` | **repo**: github.com/getmcpm/cli | **web UI**: deferred to V1+
+**npm package**: `@getmcpm/cli` (v0.10.1) | **bin command**: `mcpm` | **repo**: github.com/getmcpm/cli | **web UI**: deferred to V1+
 
 ---
 
@@ -241,21 +241,13 @@ When community quality signals require a backend (user reviews, aggregated telem
 - [x] Prototype poisoning protection in .env parser
 - [x] Shared isEnoent() utility extracted to src/utils/fs.ts
 
-### V1.5 (community trust)
-
-- [ ] `mcpm publish` — submit to official registry with mandatory security scan gate
-- [ ] User ratings and reviews (requires backend)
-- [ ] Verified publisher badge
-- [ ] Usage stats (installs, active users)
-- [ ] Optional anonymous telemetry
-
 ### V0.5 (runtime defense — SHIPPED v0.5.0)
 
 - [x] `mcpm guard enable / disable / status` — auto-wraps detected client configs (Claude Desktop / Cursor / VS Code / Windsurf) with the inspection relay; per-server scope via `--server`
 - [x] `mcpm guard run --inner` — production stdio MITM using SDK framing helpers (OQ1 closed: p99 0.065ms small / 3.1ms large, 78×/8× under budget)
 - [x] `mcpm guard demo` — synthetic prompt-injection scenario for the launch screenshot
-- [x] Pattern engine (`src/guard/patterns.ts`) — NFKC + zero-width-strip + JSON leaf walk; 4 target types (tool_response / tool_call_args / tool_description / tool_annotations)
-- [x] 3 vendored OWASP MCP Top 10 v0.1 signatures (mcp-1 description injection, mcp-2 response injection, mcp-7 path exfil)
+- [x] Pattern engine (`src/guard/patterns.ts`) — NFKC + zero-width-strip + JSON leaf walk; 4 target types (tool_response / tool_call_args / tool_description / tool_annotations) *(v0.5.0 baseline; expanded to 8 inspected targets in v0.10.0 — see the V0.10 block below)*
+- [x] 3 vendored OWASP MCP Top 10 v0.1 signatures (mcp-1 description injection, mcp-2 response injection, mcp-7 path exfil) *(v0.5.0 baseline; 6 signatures as of v0.10.0)*
 - [x] Schema pinning + drift detection (rug-pull defense) — install-time + first-session-pin fallback + per-session same-session hash cache, SHA-256 integrity sidecar
 - [x] `mcpm guard accept-drift --new-hash` — re-pin after legitimate upgrade (requires explicit hash to close unbounded-window vulnerability)
 - [x] `mcpm guard mute / unmute / pause` — policy file editing CLI with auto-expiry, Zod-validated, integrity-sidecar-protected, lockfile-serialized
@@ -267,6 +259,23 @@ When community quality signals require a backend (user reviews, aggregated telem
 - [x] FP-rate corpus measurement (5-session seed, 0/24 FP; full 20-server capture in TODOS #29)
 - [x] 6 rounds of independent security review during development; all CRITICAL + HIGH fixed before commit
 - [x] Docs: README "Runtime defense" section + docs/GUARD.md + docs/SIGNATURES.md + docs/POLICY.md
+
+### V0.9 (supply-chain + trust hygiene — SHIPPED v0.9.0)
+
+- [x] F4 — release-age cooldown + install-script-shape awareness (PR #70); fixes the live trust-score inversion bug (a fresh poisoned republish used to score identically to a 29-day-old version)
+- [x] Registry-parse fix — accept the real MCP registry Argument shape; `mcpm search` previously rejected named/positional args (#71)
+
+### V0.10 (guard hardening + supply-chain tripwire — SHIPPED v0.10.0 / v0.10.1)
+
+Executed the `docs/SECURITY-HARDENING.md` first-slice plan (see its **Delivery status** table):
+- [x] H1 — inspect the unguarded JSON-RPC surface (resources / prompts / `initialize.instructions` / `structuredContent`) + H2 hidden-character presence detector (PR #74)
+- [x] H9 — fail-closed deny-by-default for un-guardable (HTTP/SSE) transport + guard-child spawn failure (#76)
+- [x] H4 — field-level schema-drift tiering (description-only = warn, schema/annotation = block) + `tools/list_changed` re-validation (#77)
+- [x] H7 slice-A — relay block-to-origin seam + sampling/elicitation prompt-injection content-scan; new `sampling_prompt` target (#78)
+- [x] H5 — initialize-handshake capability/identity drift, warn-once (#79)
+- [x] H11 slice-1 — npm same-version `dist.integrity` drift tripwire (WARN-only) (#81)
+- [x] Guard now ships **6 signatures over 8 inspected targets** (was 3/4 at v0.5.0); v0.10.1 = docs-accuracy patch (#85/#86)
+- [ ] Deferred with documented reasons: H3 (approval-time pin), H6 (dataflow correlator), H8 (keyed-MAC integrity), H10 (tamper-evident log), H12 (trust-tier + FP budget)
 
 ### V1.5 (community trust)
 
@@ -284,7 +293,7 @@ When community quality signals require a backend (user reviews, aggregated telem
 - [ ] `mcpm guard serve` — expose guard itself as an MCP server (agents can introspect their own security perimeter)
 - [ ] LLM-as-judge detection tier (opt-in) — close the verbatim-attack-phrase documentation gap
 - [ ] Separate signatures repo + signing (Sigstore / PGP) — when update cadence requires faster releases than @getmcpm/cli's normal cycle
-- [ ] HTTP transport guard — currently stdio-only
+- [ ] HTTP transport guard — currently stdio-only (v0.10.0 H9 #76 made un-guardable HTTP/SSE transports **fail-closed deny-by-default** rather than silently bypassed; a streamable-HTTP MITM relay remains the full fix)
 - [ ] Private registry for orgs (SSO, audit logs, policy enforcement)
 - [ ] Dependency graph (which servers compose well together)
 - [ ] AI-generated docs (Claude reads source → writes human-friendly tool docs)
@@ -455,6 +464,7 @@ the same entry shape).
 | 2026-06-01 | Secret store keyed by machine id (hostname + username), not a real secret | Zero-native-deps constraint (no keytar). AES-GCM with a machine-derived key protects against casual local inspection, NOT same-account file exfiltration — a copied `secrets.enc.json` decrypts on the same OS account. Runtime notices + docs reworded to drop any exfil-resistance claim. True at-rest resistance (OS keychain / user passphrase) deferred (security issue #15). |
 | 2026-06-03 | MCP tool input schemas hardened: bounded `name` (1–256), `client` as `z.enum(CLIENT_IDS)`, `strictObject` | Security issue #31. The bounded fields + client enum live on the per-field schemas, so they propagate to the live MCP boundary through the SDK's `.shape` consumption; the object-level `strict` setting does NOT survive `.shape` (SDK rebuilds a plain `z.object`), so the runtime `validateMcpServerName` / `CLIENT_IDS.includes` guards in `handlers.ts` remain the enforced backstop. `strict` hardens direct `.parse()` of the exported schemas. Dependabot half of #31 (github-actions + npm) already shipped in `.github/dependabot.yml`. |
 | 2026-06-03 | Secret store gains real exfiltration resistance via an OS-keychain master key — SUPERSEDES 2026-06-01 deferral | Security issue #15. A random 32-byte master key is held in the OS credential store via **zero-native-dep shell-outs** (macOS `security`, Linux `secret-tool`/libsecret, Windows DPAPI-blob via PowerShell — no keytar, constraint preserved); per-value AES-GCM keys are derived from it with HKDF. Because the master key never lands in `~/.mcpm`, a copied `secrets.enc.json` cannot be decrypted off-machine/-account. New entries are tagged `k1:`; legacy machine-scheme entries stay decryptable and `mcpm secrets migrate` upgrades them. Where no OS keychain exists (headless/CI, or `MCPM_DISABLE_OS_KEYCHAIN=1`) it falls back to the honestly-labelled machine key. `secrets set` now reports which backend actually protected the value. Tests force the fallback via `MCPM_DISABLE_OS_KEYCHAIN=1` (vitest.setup.ts) so the suite never touches a real keychain; `os-keychain.ts` dispatch is unit-tested with mocked `spawn`. CI is ubuntu-only, so the macOS/Windows shell-outs are not exercised in CI — verified locally on darwin. Known tradeoff (security review, MEDIUM): macOS passes the master key in `security` argv (the binary has no reliable non-interactive stdin path), briefly visible to a same-user `ps` during the write; bounded (write-only window; a same-user attacker can already read process memory; read path uses stdout). Linux passes via stdin, Windows via env var. Documented in `os-keychain.ts`. |
+| 2026-06-15 | Guard hardening program H1–H12 first slices SHIPPED in v0.10.0; docs reconciled to shipped state | The `docs/SECURITY-HARDENING.md` plan (drafted 2026-06-12 as "proposed") was executed: H1/H2 (#74), H9 (#76), H4 (#77), H7-A (#78), H5 (#79) + H11 supply-chain integrity tripwire slice-1 (#81), all released in **v0.10.0**; v0.10.1 docs patch (#85/#86). H3/H6/H8/H10/H12 deferred with documented reasons. The **Delivery status** table in SECURITY-HARDENING.md is now the per-control source of truth; per-PR design decisions live in commit history. This doc/ROADMAP/README reconcile pass corrected the prior `proposed / v0.8.1 / "nothing built yet"` drift. |
 
 ---
 

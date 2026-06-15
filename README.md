@@ -99,7 +99,7 @@ $ mcpm doctor
 
   Checking MCP setup...
   [pass] Claude Desktop config found
-  [pass] Node.js >= 20.0.0
+  [pass] npx runtime available
   [warn] Cursor config not found
   [pass] 3 servers installed, 0 with errors
 ```
@@ -195,7 +195,7 @@ Without an external scanner installed, the maximum possible score is 80/100. The
 | `mcpm completions <shell>` | Generate shell completion scripts (bash, zsh, fish) |
 | `mcpm why <name>` | Explain a server's trust score (breakdown of all components) |
 | `mcpm serve` | Start mcpm as an MCP server (stdio transport) |
-| `mcpm guard enable` | Wrap detected client configs with the inspection relay (v0.5.0) |
+| `mcpm guard enable` | Wrap detected client configs with the inspection relay |
 | `mcpm guard disable` | Restore original client configs |
 | `mcpm guard status` | Show what's wrapped and the per-server pin state |
 | `mcpm guard demo` | Run the synthetic prompt-injection scenario (visible block) |
@@ -209,7 +209,7 @@ Without an external scanner installed, the maximum possible score is 80/100. The
 
 Run `mcpm <command> --help` for options and flags.
 
-## Runtime defense (mcpm-guard, v0.5.0)
+## Runtime defense (mcpm-guard)
 
 Install-time trust scoring catches most poisoned servers before they ship. But what about **rug-pulls** — a server that changes its tool definitions after you've already approved them? Or **prompt-injection in tool responses** — adversarial text embedded in a Slack message, web page, or calendar invite that the agent reads through your trusted MCP server?
 
@@ -243,11 +243,16 @@ The `demo` command boots an in-process synthetic malicious server that returns a
 | Category | Attack class | Action |
 |---|---|---|
 | OWASP-MCP-1 | Tool-description injection (poisoning) | block |
-| OWASP-MCP-1 | Schema drift since install (rug-pull) | block |
+| OWASP-MCP-1 | Schema / annotation drift since install (rug-pull) | block |
+| OWASP-MCP-1 | Description-only drift (cosmetic tier) | warn |
+| OWASP-MCP-1 | Injection in `initialize` instructions | block |
 | OWASP-MCP-2 | Instruction injection in tool responses | block |
+| OWASP-MCP-2 | Instruction injection in resource / prompt content | warn (forward) |
 | OWASP-MCP-7 | Sensitive-path exfil in tool arguments | warn (promote to block via policy) |
+| Hidden chars | Zero-width / bidi / non-printable in tool metadata | high (warn) |
+| Sampling | Injection in a server-initiated `sampling` prompt | block (to the server) |
 
-Detection is regex + structural; NFKC + zero-width-char stripping defeats the common Unicode evasions. See `mcpm guard list-signatures` for the current shipped set.
+Detection is regex + structural; NFKC + zero-width-char stripping defeats the common Unicode evasions, and a separate hidden-character *presence* check flags evasion carriers before they're normalized away. See `mcpm guard list-signatures` for the current shipped set.
 
 ### Day-1 commands
 
@@ -369,7 +374,7 @@ subgraph config["Config Management<br/>(src/config/adapters/)"]
     ATOMIC["Atomic writes<br/>0o600 + symlink-safe<br/>.tmp/.bak"]
 end
 
-subgraph guard_runtime["Guard Runtime v0.5.0<br/>(src/guard/)"]
+subgraph guard_runtime["Guard Runtime<br/>(src/guard/)"]
     WRAP["Config entry wrap<br/>via run --inner"]
     RELAY["Stdio MITM Relay<br/>per-server"]
     PATTERNS["Pattern Engine<br/>OWASP MCP Top 10"]

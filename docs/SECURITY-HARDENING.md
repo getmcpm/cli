@@ -1,6 +1,6 @@
 # mcpm Security Hardening Plan — Supply Chain + Agent Tool-Call Defense
 
-> Status: **proposed** · Baseline: **v0.9.0** · Drafted: 2026-06-12
+> Status: **in delivery** (see *Delivery status* below) · Baseline: **v0.10.1** · Drafted: 2026-06-12 · Reconciled to shipped state: 2026-06-15
 >
 > **How this was produced:** a grounded multi-agent pass — (1) a file-and-function map of
 > mcpm's *current* protections and extension seams (`guard/`, `scanner/`, `stack/`,
@@ -12,7 +12,35 @@
 > supply-chain research lane was filtered by automated policy mid-run, so §6 (install-time)
 > is drafted from first principles; all controls here are **defensive**.
 >
-> **Nothing here is built yet.** This is a design-of-record to argue with before any PR.
+> **This began as a design-of-record; the first slices have since shipped** (see *Delivery
+> status* below). The §5 control bodies preserve the original design narrative — consult the
+> status table for what is live versus still proposed.
+
+---
+
+## Delivery status (reconciled to v0.10.1, 2026-06-15)
+
+The recommended first slices (§7) shipped in **v0.10.0**. Status per control — the §5 bodies below
+retain the original design narrative, so cross-reference this table for what is actually built:
+
+| Control | Status | Shipped | PR |
+|---|---|---|---|
+| H1 · inspect the unguarded JSON-RPC surface | ✅ shipped | v0.10.0 | #74 |
+| H2 · hidden-character presence detector | ✅ shipped | v0.10.0 | #74 |
+| H4 · field-level drift tiering + `list_changed` re-validation | ✅ shipped | v0.10.0 | #77 |
+| H5 · initialize-handshake capability/grant drift | ✅ shipped | v0.10.0 | #79 |
+| H7 · sampling/elicitation prompt-injection scan (slice A) | ◑ slice shipped | v0.10.0 | #78 |
+| H9 · fail-closed deny-by-default for un-guardable transport | ✅ shipped | v0.10.0 | #76 |
+| H11 · supply-chain integrity tripwire (npm same-version, slice 1) | ◑ slice shipped | v0.10.0 | #81 |
+| H3 · approval-time pinning | ○ deferred (value-thin vs first-session pin) | — | — |
+| H6 · cross-origin dataflow correlator | ○ deferred (observability-first once FP measured) | — | — |
+| H8 · keyed-MAC integrity for pins/policy | ○ deferred | — | — |
+| H10 · tamper-evident MAC-chained event log | ○ deferred | — | — |
+| H12 · per-server trust tier + FP budget | ○ deferred (build when consent-fatigue appears) | — | — |
+
+H7's remaining scope (quota / consent-gating / hard credential-field block) and H11's remaining scope
+(multi-registry, digest **BLOCK** / `--frozen`, Sigstore provenance) stay deferred — see §6 and
+ROADMAP F3/F8.
 
 ---
 
@@ -154,6 +182,10 @@ Most of this plan is *extension of existing seams*, not new architecture.
 ---
 
 ## 5. Hardening roadmap (critique-corrected)
+
+> **Status note:** H1/H2/H4/H5/H7-A/H9/H11 below are **SHIPPED in v0.10.0** — see the *Delivery
+> status* table at the top. The control bodies here are the original design narrative; they are not
+> updated per-PR, so treat the table as the source of truth for what is live.
 
 Impact ratings are **post-critique**: several draft "block" controls are demoted to
 warn/observability until their FP rate is measured. Ordered by impact-to-effort.
