@@ -1,13 +1,19 @@
 # mcpm Roadmap — Security & Developer Experience
 
-> Status: in delivery · Baseline: **v0.8.1** · Drafted: 2026-06-09
+> Status: in delivery · Baseline: **v0.10.1** · Drafted: 2026-06-09 · Reconciled: 2026-06-15
 >
 > **Delivery log:**
 > - ✅ **F4 — Release-age cooldown + install-script-shape awareness** — shipped (PR #70,
 >   2026-06-10). Fixes the live trust-score inversion bug below. Dogfooding it surfaced a
 >   pre-existing registry-parse bug (`mcpm search` rejected the real MCP registry Argument
->   shape), fixed in a follow-up PR. Next up: **F2** (name-collision slice) + **F3** (digest
->   lockfile) to complete the v0.9 trio.
+>   shape), fixed in a follow-up PR.
+> - ◑ **F3 Phase 1 (digest pin)** — shipped in REDUCED form as **H11 slice 1** (PR #81, v0.10.0):
+>   npm `dist.integrity` capture-on-`lock` + WARN-on-drift at `up`. Multi-registry (pypi/oci), the
+>   fail-closed `--frozen` **BLOCK** tier, and registry-claim re-proof remain pending (see F3 below).
+> - ✅ **Guard hardening (H1/H2/H4/H5/H7-A/H9)** — shipped v0.10.0 (PRs #74/#76/#77/#78/#79); details
+>   in `docs/SECURITY-HARDENING.md` *Delivery status*.
+> - **Next up:** F2 (cross-server name-collision slice) · F6 (elicitation/sampling wedge — cheaper
+>   now that #78 built the reverse block-to-origin routing) · the F3 `--frozen` BLOCK tier.
 >
 > This roadmap was produced by a grounded research-and-planning pass: six parallel
 > web-research lenses (threat landscape, competitors, MCP protocol evolution, DevX,
@@ -46,7 +52,7 @@ Scoring: `composite = impact + differentiation + alignment + 0.5·effort_cheapne
 |---|---|---|---|---|---|
 | 1 | `guard --confine` — OS-native sandbox (standard tier) | sec | L | **16.5** | v1.0 major |
 | 2 | Cross-server tool-shadowing detection (name-collision v1) | sec | S→M | **16.0** | v0.9 minor |
-| 3 | Content-pinned lockfile (digest tier) + `up --frozen` | both | M | **15.5** | v0.9 minor |
+| 3 | Content-pinned lockfile (digest tier) + `up --frozen` | both | M | **15.5** | ◑ phase-1 shipped (H11 #81); `--frozen` BLOCK pending |
 | 4 | Release-age cooldown + install-script-shape awareness ✅ **shipped (PR #70)** | sec | S→M | **15.5** | v0.9 minor |
 | 5 | Reject exfil-named schema params (DENY-tier, list-time) | sec | M | **15.5** | v0.9 minor |
 | 6 | Guard inspection of server-initiated channels (elicitation wedge) | sec | M | **15.0** | v1.0 major |
