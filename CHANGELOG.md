@@ -4,6 +4,10 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+
+- **Guard blocks credential-phishing elicitation/sampling prompts (F6)** — two new signatures (`MCP-CREDENTIAL-PHISHING`) catch a server that prompts the user to enter a crypto-wallet seed/recovery phrase, mnemonic, or wallet private key (wallet-drainer), or a card CVV/CVC, SSN, or card/bank PIN (financial phishing). They ride the H7 (#78) server-initiated scan path, so a tripped `elicitation/create` or `sampling/createMessage` is blocked with the JSON-RPC error routed back to the server. Each pattern is **solicitation-anchored** (an imperative ask, not a passing mention) so benign conversation history and field-name prose don't false-positive, and the relay's broad H7 injection scan is left fully intact (no role-filtering). Generic api-key/password/token elicitation is deliberately **not** blocked — a server collecting its own config secret during setup is the common, legitimate case. The guard now ships **8 signatures over 8 inspected targets** (was 6).
+
 ## [0.10.1] - 2026-06-14
 
 A documentation-accuracy patch (republished so the npm package page reflects it).

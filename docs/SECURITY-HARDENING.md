@@ -30,6 +30,7 @@ retain the original design narrative, so cross-reference this table for what is 
 | H4 · field-level drift tiering + `list_changed` re-validation | ✅ shipped | v0.10.0 | #77 |
 | H5 · initialize-handshake capability/grant drift | ✅ shipped | v0.10.0 | #79 |
 | H7 · sampling/elicitation prompt-injection scan (slice A) | ◑ slice shipped | v0.10.0 | #78 |
+| H7 · credential-phishing elicitation/sampling wedge (ROADMAP F6) | ✅ shipped | unreleased | — |
 | H9 · fail-closed deny-by-default for un-guardable transport | ✅ shipped | v0.10.0 | #76 |
 | H11 · supply-chain integrity tripwire (npm same-version, slice 1) | ◑ slice shipped | v0.10.0 | #81 |
 | H3 · approval-time pinning | ○ deferred (value-thin vs first-session pin) | — | — |
@@ -38,9 +39,10 @@ retain the original design narrative, so cross-reference this table for what is 
 | H10 · tamper-evident MAC-chained event log | ○ deferred | — | — |
 | H12 · per-server trust tier + FP budget | ○ deferred (build when consent-fatigue appears) | — | — |
 
-H7's remaining scope (quota / consent-gating / hard credential-field block) and H11's remaining scope
-(multi-registry, digest **BLOCK** / `--frozen`, Sigstore provenance) stay deferred — see §6 and
-ROADMAP F3/F8.
+H7 now also blocks **credential-phishing** elicitation/sampling prompts (ROADMAP F6 — two
+`MCP-CREDENTIAL-PHISHING` signatures on the same server-initiated scan path). H7's remaining scope
+(quota / consent-gating / hard credential-field block) and H11's remaining scope (multi-registry,
+digest **BLOCK** / `--frozen`, Sigstore provenance) stay deferred — see §6 and ROADMAP F3/F8.
 
 ---
 

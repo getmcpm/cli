@@ -274,7 +274,7 @@ Executed the `docs/SECURITY-HARDENING.md` first-slice plan (see its **Delivery s
 - [x] H7 slice-A — relay block-to-origin seam + sampling/elicitation prompt-injection content-scan; new `sampling_prompt` target (#78)
 - [x] H5 — initialize-handshake capability/identity drift, warn-once (#79)
 - [x] H11 slice-1 — npm same-version `dist.integrity` drift tripwire (WARN-only) (#81)
-- [x] Guard now ships **6 signatures over 8 inspected targets** (was 3/4 at v0.5.0); v0.10.1 = docs-accuracy patch (#85/#86)
+- [x] Guard now ships **8 signatures over 8 inspected targets** (was 3/4 at v0.5.0): the v0.10.0 six + two `MCP-CREDENTIAL-PHISHING` signatures (ROADMAP F6 credential-phishing elicitation/sampling wedge, unreleased); v0.10.1 = docs-accuracy patch (#85/#86)
 - [ ] Deferred with documented reasons: H3 (approval-time pin), H6 (dataflow correlator), H8 (keyed-MAC integrity), H10 (tamper-evident log), H12 (trust-tier + FP budget)
 
 ### V1.5 (community trust)
