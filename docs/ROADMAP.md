@@ -12,8 +12,10 @@
 >   fail-closed `--frozen` **BLOCK** tier, and registry-claim re-proof remain pending (see F3 below).
 > - ✅ **Guard hardening (H1/H2/H4/H5/H7-A/H9)** — shipped v0.10.0 (PRs #74/#76/#77/#78/#79); details
 >   in `docs/SECURITY-HARDENING.md` *Delivery status*.
-> - **Next up:** F2 (cross-server name-collision slice) · F6 (elicitation/sampling wedge — cheaper
->   now that #78 built the reverse block-to-origin routing) · the F3 `--frozen` BLOCK tier.
+> - ✅ **F6 — credential-phishing elicitation/sampling wedge** — shipped (two `MCP-CREDENTIAL-PHISHING`
+>   signatures riding the #78 server-initiated scan path; solicitation-anchored, zero new deps). The
+>   deferred url-origin / sampling-tool-loop / reverse-rate-limiter / per-server-CLI slices remain out.
+> - **Next up:** F2 (cross-server name-collision slice) · the F3 `--frozen` BLOCK tier.
 >
 > This roadmap was produced by a grounded research-and-planning pass: six parallel
 > web-research lenses (threat landscape, competitors, MCP protocol evolution, DevX,
@@ -200,8 +202,18 @@ Sequenced to keep momentum and the Dependabot surface clean (the v0.9 set adds *
 
 ---
 
-## F6 · Guard inspection of server-initiated channels (credential-phishing elicitation wedge)
+## F6 · Guard inspection of server-initiated channels (credential-phishing elicitation wedge) ✅ **shipped**
 **Category:** security · **Effort:** M (wedge) · **Score 15.0**
+
+> **Shipped** as two `MCP-CREDENTIAL-PHISHING` signatures (wallet-secret + financial-secret) on the
+> existing H7 (#78) server-initiated scan path — no new target/subtree/relay code, since #78 already
+> wraps `elicitation/create` + `sampling/createMessage` content into the synthetic frame and re-tags
+> findings to the block-capable `sampling_prompt` carrier. Patterns are **solicitation-anchored** (an
+> imperative ask, not a passing mention) so benign conversation history / field-name prose don't
+> false-positive; `[\s-]*` separators are zero-width-evasion safe. Generic api-key/password
+> elicitation stays out of scope (a server collecting its own secret is the common legit case);
+> OTP/verification-code, url-origin checks, sampling-tool-loop containment, the reverse rate-limiter,
+> and a per-server credential CLI remain **deferred**.
 
 **Problem.** The 2025-11 spec made the server an actor that initiates requests back at the client: `elicitation/create` (prompt the user, incl. URL-mode redirect) and `sampling/createMessage` (run a client inference, optionally with a `tools` array). Both are server→client traffic and the relay is **method-blind in the reverse direction** — verified: `SignatureTarget` is exactly the four forward-direction tool surfaces. Four surfaces unguarded; the highest-value is an **elicitation that phishes for credentials/seed-phrases/tokens** (the spec says servers must-not, but nothing enforces it).
 

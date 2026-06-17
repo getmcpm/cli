@@ -42,6 +42,14 @@ function toolsListResponse(descs: string[]): JSONRPCMessage {
   } as JSONRPCMessage;
 }
 
+function promptGet(text: string): JSONRPCMessage {
+  return {
+    jsonrpc: "2.0",
+    id: 4,
+    result: { messages: [{ role: "user", content: { type: "text", text } }] },
+  } as JSONRPCMessage;
+}
+
 describe("patterns: detection-bypass coverage (security #16)", () => {
   test("blocks instruction injection hidden in result.structuredContent", () => {
     const msg = {
@@ -395,4 +403,56 @@ describe("patterns: bounded match input / giant leaf (security #27)", () => {
     const r = inspectMessage(toolResponse(leaf), OWASP_MCP_TOP_10);
     expect(r.action).toBe("block");
   });
+});
+
+describe("patterns: F6 credential-phishing signatures (prompt_content carrier)", () => {
+  // On a real prompts/get response, prompt_content is a RETRIEVED-DATA carrier, so
+  // a match is warn-clamped here. The BLOCK behavior applies only to the
+  // server-INITIATED re-tag (run-inner.ts inspectServerInitiated), tested there.
+  // These tests assert the signature FIRES and the regexes hold the FP line.
+  const fires = (text: string): boolean =>
+    inspectMessage(promptGet(text), OWASP_MCP_TOP_10).findings.some(
+      (f) => f.category === "MCP-CREDENTIAL-PHISHING",
+    );
+
+  // ── positives (block tier): an imperative solicitation + the credential noun ──
+  test("matches a seed-phrase solicitation", () => expect(fires("enter your seed phrase")).toBe(true));
+  test("matches a recovery-phrase solicitation", () => expect(fires("paste your recovery phrase")).toBe(true));
+  test("matches a crypto-context mnemonic solicitation", () =>
+    expect(fires("type your wallet mnemonic")).toBe(true));
+  test("matches a BIP-39 solicitation", () => expect(fires("enter your BIP-39 phrase")).toBe(true));
+  test("matches a wallet private key (crypto co-occurrence)", () =>
+    expect(fires("paste your wallet private key")).toBe(true));
+  test("matches a CVV solicitation", () => expect(fires("enter the CVV on your card")).toBe(true));
+  test("matches an SSN solicitation (acronym, but solicited)", () =>
+    expect(fires("enter your SSN to verify identity")).toBe(true));
+  test("matches a full-SSN solicitation", () => expect(fires("enter your full social security number")).toBe(true));
+  test("matches a card/bank PIN solicitation", () => expect(fires("enter your ATM PIN")).toBe(true));
+
+  // ── invisible-separator evasion: PATTERN_BREAKERS strips the ZWSP, [\s-]* still matches ──
+  test("matches a zero-width-split seed phrase (review CRITICAL: invisible-sep bypass)", () =>
+    expect(fires("enter your seed​phrase now")).toBe(true));
+
+  // ── retrieved-data carrier clamps to warn (asymmetry vs server-initiated block) ──
+  test("a seed-phrase ask in a passive prompts/get template warns, not blocks (retrieved data)", () => {
+    expect(inspectMessage(promptGet("enter your seed phrase"), OWASP_MCP_TOP_10).action).toBe("warn");
+  });
+
+  // ── negatives: the FP gates (mention-not-ask + the excluded credential types) ──
+  test("does NOT match a benign MENTION without a solicitation (review: sampling-history DoS)", () =>
+    expect(fires("a seed phrase is also called a recovery phrase")).toBe(false));
+  test("does NOT match a non-crypto 'mnemonic' even when solicited (assembly/pedagogy)", () =>
+    expect(fires("enter the assembly mnemonic for this opcode")).toBe(false));
+  test("does NOT match SSN as a field name / column reference (review HIGH)", () =>
+    expect(fires("map the ssn field to the database column")).toBe(false));
+  test("does NOT match a bare 'private key' (SSH/cert/GPG import is legit)", () =>
+    expect(fires("paste your SSH private key to register the deploy key")).toBe(false));
+  test("does NOT match a generic api key (a server's own config secret is the common case)", () =>
+    expect(fires("enter your API key to connect")).toBe(false));
+  test("does NOT match a generic password", () => expect(fires("enter your password")).toBe(false));
+  test("does NOT match 'pin this' (no financial qualifier)", () =>
+    expect(fires("pin this server in your config")).toBe(false));
+  test("does NOT match an OTP / verification code (legit self-pairing)", () =>
+    expect(fires("enter the verification code we sent you")).toBe(false));
+  test("does NOT match 'bip' outside a BIP-39 context", () => expect(fires("zip the bipartite graph")).toBe(false));
 });

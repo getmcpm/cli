@@ -2,13 +2,22 @@
 
 The shipped signature catalog + how to add one. See `docs/GUARD.md` for the runtime model.
 
-## Currently shipped (3 signatures)
+## Currently shipped (8 signatures)
 
 | id | category | severity | target | description |
 |---|---|---|---|---|
 | `owasp-mcp-2-instruction-injection-in-response` | OWASP-MCP-2 | critical | tool_response | Imperative instructions in tool response content (Ignore previous / Disregard prior / Forget all / You are now in developer mode / `<\|system\|>`) |
 | `owasp-mcp-7-path-exfil-in-args` | OWASP-MCP-7 | high | tool_call_args | Sensitive file paths in tool arguments (.ssh / .aws/credentials / .env / id_rsa / .gnupg / .kube/config) |
 | `owasp-mcp-1-tool-description-injection` | OWASP-MCP-1 | critical | tool_description | Instruction-shaped text in tool descriptions (poisoning / rug-pull patterns) |
+| `owasp-mcp-2-instruction-injection-in-resource` | OWASP-MCP-2 | critical | resource_content | Imperative instructions in retrieved `resources/read` content (warn-and-forward — retrieved data) |
+| `owasp-mcp-2-instruction-injection-in-prompt` | OWASP-MCP-2 | critical | prompt_content | Imperative instructions in a server-provided `prompts/get` template (warn-and-forward — retrieved data) |
+| `owasp-mcp-1-initialize-instruction-injection` | OWASP-MCP-1 | critical | initialize_instructions | Instruction-shaped text in `initialize` instructions / serverInfo (line-jumping, block-capable pre-invocation context) |
+| `credential-phishing-wallet-solicitation` | MCP-CREDENTIAL-PHISHING | critical | prompt_content | Server-initiated prompt soliciting a crypto-wallet seed/recovery phrase, mnemonic, or wallet private key (drainer phishing) |
+| `credential-phishing-financial-solicitation` | MCP-CREDENTIAL-PHISHING | critical | prompt_content | Server-initiated prompt soliciting a card CVV/CVC, SSN, or card/bank PIN (financial phishing) |
+
+Plus the `hidden-chars-in-metadata` presence detector (category OWASP-MCP-1, target tool_description / tool_annotations / initialize_instructions), emitted by the H2 pass rather than a regex signature.
+
+> **Note on the two `MCP-CREDENTIAL-PHISHING` signatures.** They target `prompt_content` but their real value is on the **server-initiated** path: `inspectServerInitiated` (run-inner.ts) wraps a `sampling/createMessage` or `elicitation/create` request into a synthetic `prompts/get` frame, scans it, and **re-tags** any finding to the block-capable `sampling_prompt` carrier — so a credential-phishing *prompt* is blocked (error routed back to the server), while the same string in a passive retrieved `prompts/get` template stays warn-only. Both patterns are **solicitation-anchored** (an imperative verb + the credential noun) so a benign mention in replayed conversation history or field-name prose does not fire, and `[\s-]*` separators keep a zero-width-split evasion (`seed​phrase`) matching after `PATTERN_BREAKERS` strips the separator. Generic api-key/password/token solicitation is intentionally out of scope (a server collecting its own config secret is the common legitimate case); OTP/verification-code is deferred (self-pairing is indistinguishable from relay-phishing without provenance).
 
 Plus the runtime drift detectors (`schema-drift`, `schema-drift-cosmetic`, `schema-drift-in-session`) — emitted by the relay, not by the signature engine. Drift is classified per changed field (H4): a **description-only** change is `schema-drift-cosmetic` (severity high → warn, forwarded — the parallel `tool_description` pattern scan still blocks any regex-detectable injection on the same frame, since the relay takes the MAX action); a **schema or annotations** change — or any pre-H4 pin with no stored field hashes — is `schema-drift` (critical → block). A server→client `notifications/tools/list_changed` arms a single-shot re-validation so an *announced* upgrade is classified against the pin rather than tripping the same-session guard. Cosmetic warn is bounded by the pattern-engine regex floor (a paraphrased poison the regexes miss degrades to a forwarded warn — the opt-in LLM-judge tier is the V2 answer, not the drift tier).
 
@@ -42,8 +51,10 @@ interface Signature {
   readonly category: string;              // "OWASP-MCP-N"
   readonly severity: "critical" | "high" | "medium" | "low";
   readonly description: string;           // human-readable
-  readonly target: "tool_response" | "tool_call_args" | "tool_description" | "tool_annotations";
-  readonly patterns: readonly RegExp[];   // NFKC-tolerant regexes; whitespace via [\s]+
+  readonly target:                        // see src/guard/types.ts SignatureTarget
+    | "tool_response" | "tool_call_args" | "tool_description" | "tool_annotations"
+    | "resource_content" | "prompt_content" | "initialize_instructions" | "sampling_prompt";
+  readonly patterns: readonly RegExp[];   // NFKC-tolerant regexes; whitespace via [\s-]* (zero-width-evasion safe)
   readonly remediation: string;           // actionable string; shown to user on block
 }
 ```
@@ -63,9 +74,9 @@ When you write a new regex, validate it against these evasion shapes:
 ```markdown
 ## Signature: <id>
 
-**Category:** OWASP-MCP-N
+**Category:** OWASP-MCP-N (or a descriptive class, e.g. MCP-CREDENTIAL-PHISHING, when the OWASP v0.1 numbering doesn't cleanly map)
 **Severity:** critical | high | medium | low
-**Target:** tool_response | tool_call_args | tool_description | tool_annotations
+**Target:** tool_response | tool_call_args | tool_description | tool_annotations | resource_content | prompt_content | initialize_instructions | sampling_prompt
 
 **Attack vector:** <one paragraph; cite public disclosure URL if applicable>
 
