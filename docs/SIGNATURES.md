@@ -2,7 +2,7 @@
 
 The shipped signature catalog + how to add one. See `docs/GUARD.md` for the runtime model.
 
-## Currently shipped (8 signatures)
+## Currently shipped (9 catalog entries)
 
 | id | category | severity | target | description |
 |---|---|---|---|---|
@@ -14,8 +14,11 @@ The shipped signature catalog + how to add one. See `docs/GUARD.md` for the runt
 | `owasp-mcp-1-initialize-instruction-injection` | OWASP-MCP-1 | critical | initialize_instructions | Instruction-shaped text in `initialize` instructions / serverInfo (line-jumping, block-capable pre-invocation context) |
 | `credential-phishing-wallet-solicitation` | MCP-CREDENTIAL-PHISHING | critical | prompt_content | Server-initiated prompt soliciting a crypto-wallet seed/recovery phrase, mnemonic, or wallet private key (drainer phishing) |
 | `credential-phishing-financial-solicitation` | MCP-CREDENTIAL-PHISHING | critical | prompt_content | Server-initiated prompt soliciting a card CVV/CVC, SSN, or card/bank PIN (financial phishing) |
+| `exfil-param-in-schema` | OWASP-MCP-1 | critical | tool_description | **Structural** (no regex): a `tools/list` tool declares an input-schema parameter named with the context-exfil sigil convention (`_system_prompt_`, `_conversation_history_`, `_chain_of_thought_`, `_reasoning_trace_`, `_context_window_`, `_exfil*`) — the model auto-fills it, leaking context. Blocks the server's tool list at advertisement time. Emitted by `detectExfilParams` (a property-KEY walker), not the regex engine — the catalog entry carries empty `patterns` so the id is muteable/listable. |
 
 Plus the `hidden-chars-in-metadata` presence detector (category OWASP-MCP-1, target tool_description / tool_annotations / initialize_instructions), emitted by the H2 pass rather than a regex signature.
+
+> **Note on `exfil-param-in-schema` (F5).** Deny-tier and **zero-FP by design**: only the underscore-*wrapped* sigil form is matched (`_system_prompt_`), because a block on a `tools/list` frame disables the server's **entire** tool surface — so a false positive would brick a legit server. Bare names a real tool may use (`system_prompt`, `messages`, `reasoning`) and agent-framework runtime slots (`_context_`, `_memory_`, `_thinking_`) are **excluded**. It is a tripwire for the documented HiddenLayer/CyberArk convention — a **renamed** parameter (`systemPrompt`, `sys_prompt`, `context_dump`) evades it; the broader description-cross-check and bare-name SUSPECT tier are deferred (FP-laden). Keys are normalized (NFKC + confusable-fold + separator/camelCase canonicalization) before matching, so homoglyph/zero-width/`_systemPrompt_` variants still match.
 
 > **Note on the two `MCP-CREDENTIAL-PHISHING` signatures.** They target `prompt_content` but their real value is on the **server-initiated** path: `inspectServerInitiated` (run-inner.ts) wraps a `sampling/createMessage` or `elicitation/create` request into a synthetic `prompts/get` frame, scans it, and **re-tags** any finding to the block-capable `sampling_prompt` carrier — so a credential-phishing *prompt* is blocked (error routed back to the server), while the same string in a passive retrieved `prompts/get` template stays warn-only. Both patterns are **solicitation-anchored** (an imperative verb + the credential noun) so a benign mention in replayed conversation history or field-name prose does not fire, and `[\s-]*` separators keep a zero-width-split evasion (`seed​phrase`) matching after `PATTERN_BREAKERS` strips the separator. Generic api-key/password/token solicitation is intentionally out of scope (a server collecting its own config secret is the common legitimate case); OTP/verification-code is deferred (self-pairing is indistinguishable from relay-phishing without provenance).
 
