@@ -73,6 +73,12 @@ const PolicySchema = z.object({
   // are advisory (informational) on an interactive run; under `--ci` a collision
   // exits non-zero. Bare .optional(): consumers check `=== true`.
   checkShadowing: z.boolean().optional(),
+  // F3 (fail-closed): arm the `up --frozen` integrity freeze from the stack file —
+  // `up` verifies every locked npm server's published dist.integrity BEFORE
+  // installing and BLOCKS the whole run (installs nothing, exits nonzero) on drift /
+  // unverifiable / a suspicious missing baseline. Bare .optional(): consumers check
+  // `=== true`. Honest scope: npm-only; non-npm (pypi/oci) get a coverage notice.
+  frozen: z.boolean().optional(),
 });
 
 /** Top-level mcpm.yaml schema. */

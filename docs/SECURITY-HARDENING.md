@@ -33,6 +33,7 @@ retain the original design narrative, so cross-reference this table for what is 
 | H7 · credential-phishing elicitation/sampling wedge (ROADMAP F6) | ✅ shipped | unreleased | — |
 | H9 · fail-closed deny-by-default for un-guardable transport | ✅ shipped | v0.10.0 | #76 |
 | H11 · supply-chain integrity tripwire (npm same-version, slice 1) | ◑ slice shipped | v0.10.0 | #81 |
+| H11 · `up --frozen` fail-closed integrity BLOCK tier (ROADMAP F3) | ✅ shipped | unreleased | — |
 | H3 · approval-time pinning | ○ deferred (value-thin vs first-session pin) | — | — |
 | H6 · cross-origin dataflow correlator | ○ deferred (observability-first once FP measured) | — | — |
 | H8 · keyed-MAC integrity for pins/policy | ○ deferred | — | — |
