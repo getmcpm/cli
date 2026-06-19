@@ -65,6 +65,14 @@ const PolicySchema = z.object({
   // an untrusted caller can never opt in. Bare .optional(): consumers check
   // `=== true`.
   allowUrlServers: z.boolean().optional(),
+  // F2 (warn-tier, opt-in): cross-server tool-name-collision check at `mcpm up`.
+  // When true, `up` compares the guarded tool inventories (read from pins) across
+  // the resolved server set and reports any tool name exposed by >= 2 servers — a
+  // shadowing signal. Best-effort over ALREADY-GUARDED servers only (a server with
+  // no pin baseline contributes no names); not a fresh-install control. Findings
+  // are advisory (informational) on an interactive run; under `--ci` a collision
+  // exits non-zero. Bare .optional(): consumers check `=== true`.
+  checkShadowing: z.boolean().optional(),
 });
 
 /** Top-level mcpm.yaml schema. */
