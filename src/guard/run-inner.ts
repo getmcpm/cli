@@ -12,6 +12,7 @@
 
 import type { JSONRPCMessage } from "@modelcontextprotocol/sdk/types.js";
 import { inspectMessage, defaultActionForFinding, ACTION_RANK } from "./patterns.js";
+import { detectExfilParams } from "./exfil-params.js";
 import { OWASP_MCP_TOP_10 } from "./signatures.js";
 import { startRelay, buildSafeEnv, type GuardEvent } from "./relay.js";
 import { inspectForDrift, inspectHandshakeForDrift, classifyDrift, buildDriftFinding } from "./drift.js";
@@ -331,8 +332,12 @@ export async function runInner(parsed: RunInnerArgs): Promise<number> {
 
     const patternResult = inspectMessage(msg, OWASP_MCP_TOP_10);
     let driftResult: InspectResult = { action: "pass", findings: [] };
+    // F5: structural exfil-param key-name block on tools/list (the content-regex
+    // pipeline can't see a property KEY). Pass on every non-tools/list frame.
+    let exfilResult: InspectResult = { action: "pass", findings: [] };
 
     if (hasToolsList(msg)) {
+      exfilResult = detectExfilParams(msg);
       driftResult = inspectForDriftSync(msg, parsed.serverName, baselineForDrift, sessionState);
 
       // Off-thread: refresh snapshot + apply first-session pin capture.
@@ -361,7 +366,7 @@ export async function runInner(parsed: RunInnerArgs): Promise<number> {
       })();
     }
 
-    return applyPolicy(mergeInspect(patternResult, driftResult), policy);
+    return applyPolicy(mergeInspect(mergeInspect(patternResult, driftResult), exfilResult), policy);
   };
 
   const inspectParent = (msg: JSONRPCMessage): InspectResult => {

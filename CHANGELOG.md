@@ -4,6 +4,10 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+
+- **Guard blocks exfil-named tool-schema parameters at `tools/list` (F5)** — a new structural detector walks each tool's `inputSchema.properties` **keys** and blocks the server's tool list when a parameter is named with the documented context-exfiltration sigil convention (`_system_prompt_`, `_conversation_history_`, `_chain_of_thought_`, `_reasoning_trace_`, `_context_window_`, `_exfil*`) — names the model would silently auto-fill from the conversation/system prompt, leaking it with zero user interaction. This closes a structural gap: the content-regex pipeline only walks string *values*, never property *keys*. It blocks at advertisement time, before the model ever sees the tool. **Zero-FP by design:** only the underscore-*wrapped* sigil form is denied (the attacker tell); bare names a legit tool uses (`system_prompt`, `messages`, `reasoning`) and framework runtime slots (`_context_`, `_memory_`, `_thinking_`) are deliberately excluded. **Honest scope:** a tripwire for the documented convention — a renamed parameter evades it. Muteable via `mcpm guard mute exfil-param-in-schema`. The guard now ships **9 catalog entries**.
+
 ## [0.13.0] - 2026-06-20
 
 A supply-chain release: `mcpm up --frozen` turns the integrity tripwire into a fail-closed CI gate.

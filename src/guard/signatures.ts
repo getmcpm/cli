@@ -247,4 +247,27 @@ export const OWASP_MCP_TOP_10: readonly Signature[] = [
       "exception that may legitimately elicit an SSN; if you trust such a server, mute " +
       "via `mcpm guard mute credential-phishing-financial-solicitation`.",
   },
+  {
+    // F5 — STRUCTURAL exfil-param detector. The finding is emitted by
+    // detectExfilParams (a property-KEY walker over tools/list inputSchemas, NOT a
+    // content regex), so this catalog entry carries NO patterns. It exists only so
+    // the id is recognized by `guard mute exfil-param-in-schema`, `guard
+    // list-signatures`, and policy signature_overrides — all of which enumerate
+    // OWASP_MCP_TOP_10 ids. `inspectAgainstSignatures` safely no-ops on an empty
+    // patterns array (its inner pattern loop never runs). (Mirrors how
+    // hidden-chars-in-metadata SHOULD be cataloged — that one is a pre-existing gap.)
+    id: "exfil-param-in-schema",
+    category: "OWASP-MCP-1",
+    severity: "critical",
+    description:
+      "Tool input schema declares a context-exfiltration sigil parameter (e.g. _system_prompt_) the model auto-fills",
+    target: "tool_description",
+    patterns: [],
+    remediation:
+      "A tool's input schema declares a parameter named like a context-exfiltration sigil " +
+      "(e.g. `_system_prompt_`) that the model would silently auto-fill — a zero-interaction " +
+      "prompt leak. No legitimate tool names a parameter this way. The server's whole tools/list " +
+      "was blocked. Tripwire for the documented underscore-sigil convention; a renamed param " +
+      "evades it. If trusted, mute via `mcpm guard mute exfil-param-in-schema`.",
+  },
 ];

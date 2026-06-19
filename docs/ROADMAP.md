@@ -29,7 +29,11 @@
 >   `dist.integrity`; blocks on drift / could-not-verify / format-mismatch / suspicious-missing-baseline;
 >   benign refuse-to-run for a pre-baseline lock; pypi/oci coverage notice). Multi-registry baselines +
 >   registry-claim re-proof remain deferred.
-> - **Next up:** F5 (exfil-named schema params) · F7 (`sync --check`) · F10 (response DLP).
+> - ✅ **F5 — reject exfil-named tool-schema params (DENY-tier, list-time)** — shipped (`exfil-param-in-schema`:
+>   a structural property-KEY walker blocks a `tools/list` when a tool declares an underscore-wrapped
+>   context-exfil sigil param like `_system_prompt_`; zero-FP deny tier, honest "tripwire not defense"
+>   scope). The bare-name SUSPECT tier + description-cross-check remain deferred.
+> - **Next up:** F7 (`sync --check`) · F10 (response DLP) · F8/F9/F1 (v1.0 bets).
 >
 > This roadmap was produced by a grounded research-and-planning pass: six parallel
 > web-research lenses (threat landscape, competitors, MCP protocol evolution, DevX,
@@ -70,7 +74,7 @@ Scoring: `composite = impact + differentiation + alignment + 0.5·effort_cheapne
 | 2 | Cross-server tool-shadowing detection (name-collision v1) | sec | S→M | **16.0** | v0.9 minor |
 | 3 | Content-pinned lockfile (digest tier) + `up --frozen` | both | M | **15.5** | ◑ digest WARN (H11 #81) + `--frozen` BLOCK shipped; multi-registry + registry-claim re-proof deferred |
 | 4 | Release-age cooldown + install-script-shape awareness ✅ **shipped (PR #70)** | sec | S→M | **15.5** | v0.9 minor |
-| 5 | Reject exfil-named schema params (DENY-tier, list-time) | sec | M | **15.5** | v0.9 minor |
+| 5 | Reject exfil-named schema params (DENY-tier, list-time) | sec | M | **15.5** | ✅ shipped (deny tier; SUSPECT tier deferred) |
 | 6 | Guard inspection of server-initiated channels (elicitation wedge) | sec | M | **15.0** | v1.0 major |
 | 7 | `mcpm sync --check` — cross-client drift dashboard | devx | M | **14.5** | v0.9 minor |
 | 8 | `mcpm verify` — npm Sigstore provenance + identity-drift | sec | L | **14.0** | v1.0 major |
