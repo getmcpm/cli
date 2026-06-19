@@ -1,7 +1,7 @@
 # MCP Registry — Project Context
 
 > This file is automatically read by Claude Code on every session.
-> Keep it updated as decisions are made. Last updated: 2026-06-15.
+> Keep it updated as decisions are made. Last updated: 2026-06-20.
 
 ---
 
@@ -12,7 +12,7 @@ An open-source, CLI-first MCP package manager — **"npm for MCP servers"**.
 A registry where developers can search, install, audit, publish, and update MCP servers
 across all major clients (Claude Desktop, Cursor, VS Code, Windsurf) from a single tool.
 
-**npm package**: `@getmcpm/cli` (v0.10.1) | **bin command**: `mcpm` | **repo**: github.com/getmcpm/cli | **web UI**: deferred to V1+
+**npm package**: `@getmcpm/cli` (v0.14.0) | **bin command**: `mcpm` | **repo**: github.com/getmcpm/cli | **web UI**: deferred to V1+
 
 ---
 
@@ -235,7 +235,7 @@ When community quality signals require a backend (user reviews, aggregated telem
 - [x] Single .bak snapshot before batch writes
 - [x] Per-server error isolation (failures collected, others continue)
 - [x] URL server support (Cursor-only, warn for other clients)
-- [x] --dry-run, --ci, --profile, --strict, --yes flags on `mcpm up`
+- [x] --dry-run, --ci, --profile, --strict, --yes flags on `mcpm up` (later: `--check-shadowing` [F2], `--frozen` [F3])
 - [x] --strict --ci requires --yes for unattended server removal
 - [x] Path traversal protection on mcpm_up MCP tool input
 - [x] Prototype poisoning protection in .env parser
@@ -276,6 +276,16 @@ Executed the `docs/SECURITY-HARDENING.md` first-slice plan (see its **Delivery s
 - [x] H11 slice-1 — npm same-version `dist.integrity` drift tripwire (WARN-only) (#81)
 - [x] Guard now ships **9 catalog entries over 8 inspected targets** (was 3/4 at v0.5.0): the v0.10.0 six + two `MCP-CREDENTIAL-PHISHING` signatures (F6, v0.11) + the structural `exfil-param-in-schema` detector (F5 — a tools/list property-KEY denylist, empty `patterns`); v0.10.1 = docs-accuracy patch (#85/#86)
 - [ ] Deferred with documented reasons: H3 (approval-time pin), H6 (dataflow correlator), H8 (keyed-MAC integrity), H10 (tamper-evident log), H12 (trust-tier + FP budget)
+
+### V0.11–V0.14 (roadmap detector arc — SHIPPED)
+
+Five `docs/ROADMAP.md` features (see its delivery log) + a full dogfood and CI guards, each built ground→critique→TDD→review→dogfood:
+- [x] **F6 — credential-phishing elicitation/sampling wedge (v0.11.0)** — two `MCP-CREDENTIAL-PHISHING` signatures on the H7 (#78) server-initiated path; solicitation-anchored, blocks a server that prompts the user (via `elicitation/create` / `sampling/createMessage`) for a wallet seed phrase / private key or card CVV/SSN/PIN. Error routed back to the server. (#88)
+- [x] **F2 — cross-server tool-shadowing, name-collision slice (v0.12.0)** — `mcpm up --check-shadowing` / `policy.checkShadowing`; reads pins, flags any tool name owned by ≥2 servers. WARN-tier (override of the ROADMAP's "HIGH-block"), `--ci` blocks; best-effort over already-guarded servers (stack-hygiene aid, not a fresh-install control — loud coverage line). (#90)
+- [x] **Dogfood + prevention guards (v0.12.1)** — a 6-cluster full-surface dogfood (102 cmds, 0 crashes) fixed 4 false-success-overclaim / mislabel bugs (`guard reset-integrity`/`accept-drift`, `secrets rm`, `search` "Trust Score"→"Status", stale `init`-pack completions). Then two CI guards so those classes can't recur: a completions↔Commander-program invariant test + a built-binary output-contract smoke matrix. (#92, #94)
+- [x] **F3 — `up --frozen` fail-closed integrity BLOCK tier (v0.13.0)** — promotes the H11 WARN tripwire to an enforcing CI gate: pre-install verify of every locked npm server's `dist.integrity`, BLOCK (install nothing, exit nonzero — `npm ci` semantics) on drift / could-not-verify / format-mismatch / suspicious-missing-baseline; benign refuse-to-run for a pre-baseline lock; pypi/oci/url coverage notice. `--frozen` / `policy.frozen`. (#95)
+- [x] **F5 — reject exfil-named tool-schema params, DENY-tier list-time (v0.14.0)** — structural `exfil-param-in-schema` detector walks `tools/list` inputSchema property KEYS and blocks a tool declaring an underscore-wrapped context-exfil sigil (`_system_prompt_`, …) before the model sees it; zero-FP deny tier (wrapped form only; `_context_`/`_memory_` framework slots excluded), honest "tripwire not defense" scope, muteable. (#97)
+- [ ] **Next up (docs/ROADMAP.md):** F7 (`mcpm sync --check` cross-client drift) · F10 (response-side credential DLP) · the v1.0 bets — F1 `guard --confine` OS-sandbox, F8 `mcpm verify` Sigstore provenance, F9 doctor secret-scan/PATH. Known pre-existing nit: `hidden-chars-in-metadata` is un-muteable (not in the catalog) — the F5 empty-`patterns` fix would clear it.
 
 ### V1.5 (community trust)
 
