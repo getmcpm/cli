@@ -7,9 +7,11 @@
 >   2026-06-10). Fixes the live trust-score inversion bug below. Dogfooding it surfaced a
 >   pre-existing registry-parse bug (`mcpm search` rejected the real MCP registry Argument
 >   shape), fixed in a follow-up PR.
-> - ◑ **F3 Phase 1 (digest pin)** — shipped in REDUCED form as **H11 slice 1** (PR #81, v0.10.0):
->   npm `dist.integrity` capture-on-`lock` + WARN-on-drift at `up`. Multi-registry (pypi/oci), the
->   fail-closed `--frozen` **BLOCK** tier, and registry-claim re-proof remain pending (see F3 below).
+> - ◑ **F3 Phase 1 (digest pin)** — npm `dist.integrity` capture-on-`lock` + WARN-on-drift at `up`
+>   shipped as **H11 slice 1** (PR #81, v0.10.0); the fail-closed **`up --frozen` BLOCK tier** shipped
+>   next (`--frozen` / `policy.frozen` — pre-install verify, block on drift / unverifiable / format /
+>   suspicious-missing-baseline, `npm ci` semantics). Still pending: **multi-registry (pypi/oci) baselines**
+>   and **registry-claim re-proof** (both need lock-schema work — see F3 below + Feature 8).
 > - ✅ **Guard hardening (H1/H2/H4/H5/H7-A/H9)** — shipped v0.10.0 (PRs #74/#76/#77/#78/#79); details
 >   in `docs/SECURITY-HARDENING.md` *Delivery status*.
 > - ✅ **F6 — credential-phishing elicitation/sampling wedge** — shipped (two `MCP-CREDENTIAL-PHISHING`
@@ -23,7 +25,11 @@
 >   stack-hygiene / re-audit aid, **not** a fresh-install control, and exact-name only. The
 >   `origin-index.json` persistence (closes the non-guarded gap), the text-reference heuristic, and the
 >   relay-time integration remain the deferred fast-follow.
-> - **Next up:** the F3 `--frozen` BLOCK tier · F5 (exfil-named schema params).
+> - ✅ **F3 — `up --frozen` fail-closed integrity BLOCK tier** — shipped (pre-install verify of locked npm
+>   `dist.integrity`; blocks on drift / could-not-verify / format-mismatch / suspicious-missing-baseline;
+>   benign refuse-to-run for a pre-baseline lock; pypi/oci coverage notice). Multi-registry baselines +
+>   registry-claim re-proof remain deferred.
+> - **Next up:** F5 (exfil-named schema params) · F7 (`sync --check`) · F10 (response DLP).
 >
 > This roadmap was produced by a grounded research-and-planning pass: six parallel
 > web-research lenses (threat landscape, competitors, MCP protocol evolution, DevX,
@@ -62,7 +68,7 @@ Scoring: `composite = impact + differentiation + alignment + 0.5·effort_cheapne
 |---|---|---|---|---|---|
 | 1 | `guard --confine` — OS-native sandbox (standard tier) | sec | L | **16.5** | v1.0 major |
 | 2 | Cross-server tool-shadowing detection (name-collision v1) | sec | S→M | **16.0** | v0.9 minor |
-| 3 | Content-pinned lockfile (digest tier) + `up --frozen` | both | M | **15.5** | ◑ phase-1 shipped (H11 #81); `--frozen` BLOCK pending |
+| 3 | Content-pinned lockfile (digest tier) + `up --frozen` | both | M | **15.5** | ◑ digest WARN (H11 #81) + `--frozen` BLOCK shipped; multi-registry + registry-claim re-proof deferred |
 | 4 | Release-age cooldown + install-script-shape awareness ✅ **shipped (PR #70)** | sec | S→M | **15.5** | v0.9 minor |
 | 5 | Reject exfil-named schema params (DENY-tier, list-time) | sec | M | **15.5** | v0.9 minor |
 | 6 | Guard inspection of server-initiated channels (elicitation wedge) | sec | M | **15.0** | v1.0 major |
@@ -121,8 +127,21 @@ Sequenced to keep momentum and the Dependabot surface clean (the v0.9 set adds *
 
 ---
 
-## F3 · Content-pinned lockfile (digest tier) + `up --frozen`
+## F3 · Content-pinned lockfile (digest tier) + `up --frozen` ◑ **digest WARN + `--frozen` BLOCK shipped**
 **Category:** both · **Effort:** M (Phase 1) · **Score 15.5**
+
+> **Shipped:** H11 (#81) captures npm `dist.integrity` at `lock` and WARNs on drift at `up`; `up --frozen`
+> / `policy.frozen` (this slice) promotes it to a fail-closed CI gate — a **pre-install** verify that
+> BLOCKS the whole run (installs nothing, exits non-zero, `npm ci` semantics) on **integrity drift**, an
+> **unverifiable** record (offline/yanked/no-comparable-hash, fail-closed with a distinct transient
+> message), a **format mismatch**, or a **mixed-lock missing baseline**. Two corrections from the
+> adversarial critique: a **uniformly-baseline-less lock** (pre-v0.10 / offline) gets a benign
+> *refuse-to-run* ("run `mcpm lock` online once"), NOT a per-server poison verdict — otherwise the gate
+> hard-fails day-one against every existing lock; and **pypi/oci** get a coverage notice, not a block (no
+> baseline mechanism exists). Honest copy throughout: a block = the registry's *published record* diverged
+> from your lock, NOT proof mcpm stopped the bytes `npx`/`uvx` fetch at launch. **Still deferred:**
+> multi-registry (pypi/oci) baselines + the **registry-claim re-proof** (both need the optional lock
+> `integrity` block + a `lockfileVersion` bump), and the Sigstore provenance tier (= Feature 8).
 
 **Problem.** `mcpm-lock.yaml` pins a `version` string + trust snapshot, but **not the bytes**. `LockedRegistryServerSchema` (`src/stack/schema.ts`) stores only `{version, registryType, identifier, trust}`. A `version: "1.0.16"` entry happily installs a poisoned build (postmark). `up` never re-proves at install time that the registry coordinate still matches what was locked, nor recomputes trust for the resolved version.
 
