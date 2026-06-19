@@ -46,6 +46,13 @@ import { extractRegistryMeta } from "../utils/format-trust.js";
 import { applyKeychainSecrets, type SecretsMode, setSecrets as _setSecrets } from "../store/keychain.js";
 import { isNewUnguarded } from "../guard/unguarded.js";
 import { compareIntegrity } from "../registry/npm-integrity.js";
+import type { PinsFile } from "../guard/pins.js";
+import { readPins as _readPins } from "../guard/pins.js";
+import {
+  detectNameCollisions,
+  buildInventoryFromPins,
+  serversWithoutBaseline,
+} from "../guard/shadow.js";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -97,6 +104,13 @@ export interface UpOptions {
    * wins — an untrusted caller can never set `allowUnguarded`.
    */
   allowUnguarded?: boolean;
+  /**
+   * F2 (opt-in): run the cross-server tool-name-collision (shadow) check after
+   * install. Also armable via `policy.checkShadowing` in the stack file. WARN-tier
+   * — findings are advisory on an interactive run; under `--ci` any collision
+   * exits non-zero. Best-effort over already-guarded servers (see `runShadowPass`).
+   */
+  checkShadowing?: boolean;
 }
 
 export interface UpDeps {
@@ -146,6 +160,13 @@ export interface UpDeps {
     identifier: string,
     npmVersion: string
   ) => Promise<NpmIntegritySnapshot | undefined>;
+  /**
+   * F2: read ~/.mcpm/pins.json for the cross-server shadow check. Injectable for
+   * tests; defaults to the real store at the CLI boundary. When omitted, the
+   * shadow check is skipped (fail-soft) even if armed. The check is read-only and
+   * never alters install results.
+   */
+  readPins?: () => Promise<PinsFile>;
 }
 
 /** Terminal per-server status reported via UpDeps.recordResult. */
@@ -334,6 +355,17 @@ export async function handleUp(
   // network). Does NOT alter install results or summary counts.
   await runIntegrityPass(lockFile, deps);
 
+  // Step 9c: F2 — cross-server tool-name-collision (shadow) check. Opt-in,
+  // warn-tier, read-only. Best-effort over already-guarded servers. Under `--ci`
+  // a collision exits non-zero (see the throw below); interactively it is advisory.
+  let shadowCollisions = 0;
+  if (options.checkShadowing === true || stackFile.policy?.checkShadowing === true) {
+    shadowCollisions = await runShadowPass(
+      serverEntries.map(([name]) => name),
+      deps
+    );
+  }
+
   // Step 10: Summary
   const installed = results.filter((r) => r.status === "installed").length;
   const blocked = results.filter((r) => r.status === "blocked").length;
@@ -365,6 +397,15 @@ export async function handleUp(
   if (blocked > 0 || failed > 0) {
     // Signal failure via thrown error (caught by Commander registration)
     throw new Error(`${blocked + failed} server(s) could not be installed.`);
+  }
+
+  // F2: under --ci, a tool-name collision is a hard failure (the CI gate the
+  // opt-in check exists to provide). Interactive runs only warn (advisory).
+  if (shadowCollisions > 0 && options.ci) {
+    throw new Error(
+      `${shadowCollisions} cross-server tool-name collision(s) detected (--ci). ` +
+        "Resolve the shadowing (rename/remove a duplicate tool) or drop --check-shadowing."
+    );
   }
 }
 
@@ -677,6 +718,68 @@ async function runIntegrityPass(
   }
 }
 
+/**
+ * F2 — cross-server tool-name-collision (shadow) pass. Reads pins once, compares
+ * the guarded tool inventories across the resolved server set, and reports any
+ * tool name exposed by >= 2 servers. Read-only and FAIL-SOFT: a missing reader or
+ * unreadable/integrity-failed pins NEVER crashes `up` (the check is an advisory
+ * overlay, run after all install gates have already passed). Returns the number
+ * of collisions so the caller can apply the `--ci` exit gate.
+ *
+ * Honesty is load-bearing: pins only cover servers that have run under guard, so
+ * the coverage line names exactly how many servers had no baseline — a clean
+ * result over an un-pinned stack is NOT proof of no shadowing.
+ */
+async function runShadowPass(
+  serverNames: readonly string[],
+  deps: Pick<UpDeps, "readPins" | "output">
+): Promise<number> {
+  if (deps.readPins === undefined) {
+    // Armed but no pins reader wired — surface it (don't silently no-op) so an
+    // un-wired caller never mistakes "nothing printed" for "no shadowing".
+    deps.output("\n⚠ shadow check skipped: no pins reader available in this context.");
+    return 0;
+  }
+
+  let pins: PinsFile;
+  try {
+    pins = await deps.readPins();
+  } catch {
+    deps.output(
+      "\n⚠ shadow check skipped: ~/.mcpm/pins.json is unreadable (integrity check or corruption)."
+    );
+    return 0;
+  }
+
+  const findings = detectNameCollisions(buildInventoryFromPins(pins, serverNames));
+  const noBaseline = serversWithoutBaseline(pins, serverNames);
+  const checked = serverNames.length - noBaseline.length;
+
+  // Coverage honesty FIRST — never let a clean result read as "safe".
+  deps.output(
+    `\nShadow check: compared guarded tool inventories for ${checked} of ${serverNames.length} server(s).`
+  );
+  if (noBaseline.length > 0) {
+    deps.output(
+      `  ${noBaseline.length} server(s) have NO guard baseline yet (${noBaseline.join(", ")}) — ` +
+        "this check cannot see their tools, so a clean result does NOT mean no shadowing. " +
+        "Run them under `mcpm guard` (then re-run `mcpm up`) to include them."
+    );
+  }
+
+  for (const f of findings) {
+    deps.output(
+      `\n⚠ SHADOW: tool "${f.toolName}" is exposed by ${f.servers.length} servers (${f.servers.join(", ")}). ` +
+        "A lower-trust server can shadow a tool meant for another, so agent calls to " +
+        `"${f.toolName}" are ambiguous. This can also be benign (two servers of the same kind ` +
+        "legitimately export the same tool). Review which server should own it. (Exact-name match " +
+        "only — a homoglyph/case variant evades this check.)"
+    );
+  }
+
+  return findings.length;
+}
+
 async function processUrlServer(
   name: string,
   url: string,
@@ -923,6 +1026,7 @@ export function registerUpCommand(program: Command): void {
     .option("-y, --yes", "skip confirmation prompts (required with --strict --ci)")
     .option("--secrets <mode>", "where to store secret env vars: 'keychain' (encrypted in ~/.mcpm, resolved by mcpm guard at launch) or 'plaintext' (default); 'keychain' is rejected with --ci", parseSecretsMode)
     .option("--allow-unguarded", "permit URL/HTTP-transport servers to run WITHOUT runtime guard inspection (no relay wraps a non-stdio transport); records consent so future runs stay quiet")
+    .option("--check-shadowing", "report tool-name collisions across guarded servers (a shadowing signal); advisory interactively, exits nonzero under --ci")
     .action(
       async (opts: {
         file?: string;
@@ -933,6 +1037,7 @@ export function registerUpCommand(program: Command): void {
         yes?: boolean;
         secrets?: SecretsMode;
         allowUnguarded?: boolean;
+        checkShadowing?: boolean;
       }) => {
         const client = new RegistryClient();
         const { readUnguardedConsent, writeUnguardedConsent, mergeUnguarded } = await import(
@@ -950,6 +1055,7 @@ export function registerUpCommand(program: Command): void {
               yes: opts.yes,
               secrets: opts.secrets,
               allowUnguarded: opts.allowUnguarded,
+              checkShadowing: opts.checkShadowing,
             },
             {
               detectClients: detectInstalledClients,
@@ -990,6 +1096,7 @@ export function registerUpCommand(program: Command): void {
               output: stdoutOutput,
               setSecrets: _setSecrets,
               fetchNpmIntegrity: _fetchNpmIntegrity,
+              readPins: _readPins,
               readUnguardedConsent,
               recordUnguardedConsent: async (names) => {
                 const previous = await readUnguardedConsent();

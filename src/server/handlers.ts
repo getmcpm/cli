@@ -18,6 +18,7 @@ import { extractRegistryMeta } from "../utils/format-trust.js";
 import { formatMcpEntryCommand } from "../utils/format-entry.js";
 import { resolveInstallEntry } from "../commands/install.js";
 import { fetchNpmIntegrity as _fetchNpmIntegrity } from "../registry/npm-integrity.js";
+import { readPins as _readPins } from "../guard/pins.js";
 
 // ---------------------------------------------------------------------------
 // Input validation for MCP server tool arguments
@@ -561,6 +562,7 @@ export async function handleMcpUp(
         promptEnvVar: async () => "",
         output: (text) => outputLines.push(text),
         fetchNpmIntegrity: _fetchNpmIntegrity,
+        readPins: _readPins,
         recordResult: (r) => records.push(r),
       }
     );

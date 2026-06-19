@@ -4,6 +4,10 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+
+- **`mcpm up --check-shadowing` — cross-server tool-name-collision detection (F2, v1 slice)** — opt-in via the flag or `policy.checkShadowing`, `up` reads the guarded tool inventories (from pins) across the resolved server set and reports any tool name exposed by two or more servers — a *shadowing* signal, where a lower-trust server can intercept calls meant for a trusted one. **WARN-tier:** advisory on an interactive run; under `--ci` a collision exits non-zero. **Honest scope (stated in the output):** best-effort over **already-guarded** servers only (pins are populated when a server first runs under guard, so a never-guarded server contributes no names), and exact-name match — it is a stack-hygiene / re-audit aid, not a fresh-install control. Pure detector, zero new deps; the broader `origin-index` persistence and cross-origin text heuristic are a documented fast-follow.
+
 ## [0.11.0] - 2026-06-18
 
 A runtime-defense feature release: the guard relay now blocks credential-phishing prompts a server tries to push at the user.
