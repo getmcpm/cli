@@ -28,15 +28,18 @@ export interface CompletionsDeps {
 // Shell scripts
 // ---------------------------------------------------------------------------
 
-const SUBCOMMANDS = [
+// Exported for the completions↔program invariant test (completions.test.ts),
+// which asserts these stay in sync with the real Commander command surface so a
+// command/subcommand added or removed can't silently leave the completions stale.
+export const SUBCOMMANDS = [
   "search", "install", "info", "list", "remove", "audit", "update", "outdated",
   "doctor", "init", "import", "serve", "disable", "enable", "alias", "export",
   "lock", "up", "diff", "publish", "guard", "secrets", "why", "completions",
 ];
 
-const GUARD_SUBCOMMANDS =
+export const GUARD_SUBCOMMANDS =
   "enable disable status demo accept-drift mute unmute pause cleanup list-signatures reset-integrity run";
-const SECRETS_SUBCOMMANDS = "set get list rm migrate";
+export const SECRETS_SUBCOMMANDS = "set get list rm migrate";
 
 const CLIENT_IDS = ["claude-desktop", "cursor", "vscode", "windsurf"];
 
