@@ -299,14 +299,18 @@ export async function getSecret(server: string, key: string): Promise<string | n
   return decryptFromSnapshot(await readStore(), sk);
 }
 
-export async function deleteSecret(server: string, key: string): Promise<void> {
+/** Returns true if a secret was removed, false if no such secret existed. */
+export async function deleteSecret(server: string, key: string): Promise<boolean> {
   const sk = validatedStoreKey(server, key);
+  let removed = false;
   await withStoreLock(async () => {
     const store = await readStore();
     if (!(sk in store)) return;
     const { [sk]: _removed, ...rest } = store;
     await writeJson(STORE_FILE, rest);
+    removed = true;
   });
+  return removed;
 }
 
 // Intentionally UNLOCKED: read-only key enumeration, eventual consistency.

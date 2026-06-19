@@ -114,7 +114,10 @@ export async function handleSearch(
       chalk.cyan("Description"),
       chalk.cyan("Version"),
       chalk.cyan("Transport"),
-      chalk.cyan("Trust Score"),
+      // Registry lifecycle status, NOT a trust score — search is a fast discovery
+      // list and does not run the scanner per result. Computed trust lives in
+      // `mcpm why` / `info` / `install` / `audit`. (header was mislabeled "Trust Score")
+      chalk.cyan("Status"),
     ],
     style: { head: [], border: [] },
     wordWrap: true,
@@ -125,7 +128,7 @@ export async function handleSearch(
     const { server, _meta } = entry;
     const official = _meta?.[OFFICIAL_META_KEY] ?? {};
     const transport = resolveTransport(entry);
-    const trustScore = official?.status === "active" ? chalk.green("active") : (official?.status ?? "-");
+    const status = official?.status === "active" ? chalk.green("active") : (official?.status ?? "-");
     const description = server.description ?? "";
 
     table.push([
@@ -133,7 +136,7 @@ export async function handleSearch(
       description,
       server.version,
       transport,
-      trustScore,
+      status,
     ]);
   }
 

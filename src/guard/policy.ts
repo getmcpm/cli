@@ -182,7 +182,8 @@ export async function writePolicy(policy: GuardPolicyFile): Promise<void> {
   }
 }
 
-export async function resetPolicyIntegrity(): Promise<void> {
+/** Returns true if a sidecar was (re)written, false if there was no policy file. */
+export async function resetPolicyIntegrity(): Promise<boolean> {
   const p = await policyPath();
   const sidecarP = await integrityPath();
   let raw: string;
@@ -191,7 +192,7 @@ export async function resetPolicyIntegrity(): Promise<void> {
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code === "ENOENT") {
       await unlink(sidecarP).catch(() => undefined);
-      return;
+      return false;
     }
     throw err;
   }
@@ -201,6 +202,7 @@ export async function resetPolicyIntegrity(): Promise<void> {
   // the sidecar (or its .tmp), redirecting the write onto an attacker-chosen
   // path — the exact gap the PR closed for the main pins/policy writes.
   await writeFileAtomic(sidecarP, fileSha(raw));
+  return true;
 }
 
 export async function deletePolicy(): Promise<void> {

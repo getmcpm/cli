@@ -59,10 +59,6 @@ _mcpm_completions() {
       COMPREPLY=( $(compgen -W "${CLIENT_IDS.join(" ")}" -- "\${cur}") )
       return 0
       ;;
-    init)
-      COMPREPLY=( $(compgen -W "developer data web" -- "\${cur}") )
-      return 0
-      ;;
     completions)
       COMPREPLY=( $(compgen -W "bash zsh fish" -- "\${cur}") )
       return 0
@@ -127,9 +123,6 @@ _mcpm() {
       ;;
     args)
       case "\${words[1]}" in
-        init)
-          _values 'pack' developer data web
-          ;;
         completions)
           _values 'shell' bash zsh fish
           ;;
@@ -177,7 +170,6 @@ complete -c mcpm -n '__fish_use_subcommand' -a guard -d 'Runtime inspection rela
 complete -c mcpm -n '__fish_use_subcommand' -a secrets -d 'Manage encrypted secrets'
 complete -c mcpm -n '__fish_use_subcommand' -a why -d 'Show the trust breakdown'
 complete -c mcpm -n '__fish_use_subcommand' -a completions -d 'Generate completions'
-complete -c mcpm -n '__fish_seen_subcommand_from init' -a 'developer data web'
 complete -c mcpm -n '__fish_seen_subcommand_from completions' -a 'bash zsh fish'
 complete -c mcpm -n '__fish_seen_subcommand_from guard' -a '${GUARD_SUBCOMMANDS}'
 complete -c mcpm -n '__fish_seen_subcommand_from secrets' -a '${SECRETS_SUBCOMMANDS}'
