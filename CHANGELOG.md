@@ -4,6 +4,17 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [0.12.1] - 2026-06-19
+
+A correctness patch from a full-surface dogfood (102 commands, no crashes/hangs/security issues found — these are honesty fixes to command output).
+
+### Fixed
+
+- **`guard reset-integrity` / `guard accept-drift` no longer claim success on a no-op** — `reset-integrity` with no `pins.json` (and `accept-drift` for a server with no existing pin) printed "refreshed" / "re-pinned" / "removed" as if work happened. They now report "no pins.json found — nothing to refresh" / "no existing pin … nothing to re-pin/remove".
+- **`secrets rm` of a never-stored secret now errors instead of falsely reporting removal** — it printed "Removed secret '…'" for a secret that didn't exist; it now errors ("No secret stored for '…'", exit 1), mirroring `secrets get`.
+- **`search` column relabeled "Status"** — the column was headed "Trust Score" but rendered the registry lifecycle status ("active"). Search is a fast discovery list and doesn't run the scanner per result; the computed trust score lives in `mcpm why` / `info` / `install` / `audit`.
+- **Shell completions dropped the removed `init developer/data/web` packs** — bash/zsh/fish completions still suggested the curated starter packs removed in v0.x.
+
 ## [0.12.0] - 2026-06-19
 
 A supply-chain hygiene release: `mcpm up` can now flag cross-server tool-name collisions (a shadowing signal).
