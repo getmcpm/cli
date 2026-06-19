@@ -4,6 +4,10 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [0.13.0] - 2026-06-20
+
+A supply-chain release: `mcpm up --frozen` turns the integrity tripwire into a fail-closed CI gate.
+
 ### Added
 
 - **`mcpm up --frozen` — fail-closed supply-chain integrity gate (F3)** — opt-in via the flag or `policy.frozen`. Before installing anything, `up` verifies every locked npm server's published `dist.integrity` against the lock; on **integrity drift**, an **unverifiable** record (offline / yanked / no comparable hash), a **format mismatch**, or a **suspicious missing baseline**, it **blocks the entire run** (installs nothing, exits non-zero) — `npm ci` semantics. This promotes the v0.10 WARN-only integrity tripwire (H11) to a real CI gate. **Honest by design:** a lock with no baselines yet (pre-v0.10 or offline-locked) gets a benign "run `mcpm lock` online once" refusal, *not* a poison verdict; non-npm (pypi/oci) servers get a coverage notice (no baseline mechanism exists — deferred); and a block means *npm's published record diverged from your lock*, **not** that mcpm caught the bytes `npx`/`uvx` fetch at launch.
