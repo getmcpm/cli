@@ -423,7 +423,8 @@ export async function writePins(pins: PinsFile): Promise<void> {
  * contains. Used by `mcpm guard reset-integrity` after the user has reviewed
  * the file and acknowledged the tamper warning.
  */
-export async function resetIntegrity(): Promise<void> {
+/** Returns true if a sidecar was (re)written, false if there was no pins.json. */
+export async function resetIntegrity(): Promise<boolean> {
   const filePath = await pinsPath();
   const sidecarPath = await integrityPath();
   let content: string;
@@ -433,7 +434,7 @@ export async function resetIntegrity(): Promise<void> {
     if ((err as NodeJS.ErrnoException).code === "ENOENT") {
       // Nothing to reset; remove any stale sidecar.
       await unlink(sidecarPath).catch(() => undefined);
-      return;
+      return false;
     }
     throw err;
   }
@@ -443,6 +444,7 @@ export async function resetIntegrity(): Promise<void> {
   // at the sidecar (or its .tmp), redirecting the write onto an attacker-chosen
   // path — the exact gap the PR closed for the main pins/policy writes.
   await writeFileAtomic(sidecarPath, fileSha(content));
+  return true;
 }
 
 // ---------------------------------------------------------------------------

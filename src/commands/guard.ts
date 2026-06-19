@@ -106,8 +106,9 @@ export function registerGuardCommand(program: Command): void {
         process.exit(1);
       }
       const { acceptDriftCommand } = await import("../guard/drift.js");
+      let changed: boolean;
       try {
-        await acceptDriftCommand(server, {
+        changed = await acceptDriftCommand(server, {
           toolName: opts.tool,
           remove: opts.remove === true,
           newHash: opts.newHash,
@@ -116,9 +117,16 @@ export function registerGuardCommand(program: Command): void {
         process.stderr.write(`${err instanceof Error ? err.message : String(err)}\n`);
         process.exit(1);
       }
-      const action = opts.remove === true ? "removed" : `re-pinned to ${opts.newHash}`;
       const scope = opts.tool !== undefined ? ` tool "${opts.tool}"` : " (all tools)";
-      process.stdout.write(`mcpm guard accept-drift: ${server}${scope} ${action}.\n`);
+      if (!changed) {
+        process.stdout.write(
+          `mcpm guard accept-drift: no existing pin for ${server}${scope}; ` +
+            `nothing to ${opts.remove === true ? "remove" : "re-pin"}.\n`,
+        );
+      } else {
+        const action = opts.remove === true ? "removed" : `re-pinned to ${opts.newHash}`;
+        process.stdout.write(`mcpm guard accept-drift: ${server}${scope} ${action}.\n`);
+      }
     });
 
   guard
@@ -240,12 +248,20 @@ export function registerGuardCommand(program: Command): void {
       }
       if (opts.policy === true) {
         const { resetPolicyIntegrity } = await import("../guard/policy.js");
-        await resetPolicyIntegrity();
-        process.stdout.write("mcpm guard reset-integrity: guard-policy.yaml.integrity refreshed.\n");
+        const did = await resetPolicyIntegrity();
+        process.stdout.write(
+          did
+            ? "mcpm guard reset-integrity: guard-policy.yaml.integrity refreshed.\n"
+            : "mcpm guard reset-integrity: no guard-policy.yaml found — nothing to refresh.\n",
+        );
       } else {
         const { resetIntegrity } = await import("../guard/pins.js");
-        await resetIntegrity();
-        process.stdout.write("mcpm guard reset-integrity: pins.json.integrity refreshed.\n");
+        const did = await resetIntegrity();
+        process.stdout.write(
+          did
+            ? "mcpm guard reset-integrity: pins.json.integrity refreshed.\n"
+            : "mcpm guard reset-integrity: no pins.json found — nothing to refresh.\n",
+        );
       }
     });
 

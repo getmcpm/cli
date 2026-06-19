@@ -613,11 +613,15 @@ export function applyAcceptDrift(
   return next;
 }
 
+/** Returns true if the pin set changed (a pin was re-pinned/removed), false if
+ *  there was no matching existing pin so nothing was written. */
 export async function acceptDriftCommand(
   serverName: string,
   options: { toolName?: string; remove?: boolean; newHash?: string } = {},
-): Promise<void> {
+): Promise<boolean> {
   const pins = await readPins();
   const next = applyAcceptDrift(pins, serverName, options);
-  if (next !== pins) await writePins(next);
+  const changed = next !== pins;
+  if (changed) await writePins(next);
+  return changed;
 }

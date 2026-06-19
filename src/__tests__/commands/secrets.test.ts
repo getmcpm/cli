@@ -31,7 +31,10 @@ function makeDeps(overrides: Partial<SecretsDeps> = {}): {
     }),
     getSecret: vi.fn(async (s: string, k: string) => store[`${s}/${k}`] ?? null),
     deleteSecret: vi.fn(async (s: string, k: string) => {
-      delete store[`${s}/${k}`];
+      const composite = `${s}/${k}`;
+      const existed = composite in store;
+      delete store[composite];
+      return existed;
     }),
     listAll: vi.fn(async () => {
       const grouped: Record<string, string[]> = {};
@@ -147,6 +150,15 @@ describe("mcpm secrets — rm", () => {
     await deps.setSecret("gh", "TOKEN", "x");
     await handleSecretsRemove("gh", "TOKEN", { yes: false }, deps);
     expect(store["gh/TOKEN"]).toBe("x");
+  });
+
+  it("errors instead of falsely claiming removal when the secret does not exist", async () => {
+    const { deps, out } = makeDeps();
+    await expect(
+      handleSecretsRemove("gh", "MISSING", { yes: true }, deps)
+    ).rejects.toThrow(/no secret stored/i);
+    // The throw precedes the success line, so "Removed secret" is never printed.
+    expect(out.join("\n")).not.toMatch(/removed secret/i);
   });
 });
 

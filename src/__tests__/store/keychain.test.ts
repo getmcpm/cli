@@ -36,16 +36,16 @@ describe("keychain store", () => {
     expect(await getSecret("my-server", "API_KEY")).toBe("new-value");
   });
 
-  it("deletes a secret and returns null afterwards", async () => {
+  it("deletes a secret, returns true, and reads null afterwards", async () => {
     const { setSecret, getSecret, deleteSecret } = await import("../../store/keychain.js");
     await setSecret("my-server", "API_KEY", "to-be-deleted");
-    await deleteSecret("my-server", "API_KEY");
+    expect(await deleteSecret("my-server", "API_KEY")).toBe(true);
     expect(await getSecret("my-server", "API_KEY")).toBeNull();
   });
 
-  it("deleteSecret is a no-op for nonexistent keys (does not throw)", async () => {
+  it("deleteSecret is a no-op for nonexistent keys (returns false, does not throw)", async () => {
     const { deleteSecret } = await import("../../store/keychain.js");
-    await expect(deleteSecret("my-server", "GHOST_KEY")).resolves.not.toThrow();
+    await expect(deleteSecret("my-server", "GHOST_KEY")).resolves.toBe(false);
   });
 
   it("lists secret keys without revealing values", async () => {

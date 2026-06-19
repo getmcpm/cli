@@ -31,7 +31,7 @@ import { stdoutOutput } from "../utils/output.js";
 export interface SecretsDeps {
   setSecret: (server: string, key: string, value: string) => Promise<void>;
   getSecret: (server: string, key: string) => Promise<string | null>;
-  deleteSecret: (server: string, key: string) => Promise<void>;
+  deleteSecret: (server: string, key: string) => Promise<boolean>;
   listAll: () => Promise<Record<string, string[]>>;
   promptValue: (label: string) => Promise<string>;
   confirmRemove: (label: string) => Promise<boolean>;
@@ -167,7 +167,12 @@ export async function handleSecretsRemove(
       return;
     }
   }
-  await deps.deleteSecret(server, key);
+  const removed = await deps.deleteSecret(server, key);
+  if (!removed) {
+    // Don't claim a removal that didn't happen — mirror handleSecretsGet's
+    // absent-secret error so the operator isn't misled about a credential action.
+    throw new Error(`No secret stored for '${server}/${key}'.`);
+  }
   deps.output(`Removed secret '${server}/${key}'.`);
 }
 

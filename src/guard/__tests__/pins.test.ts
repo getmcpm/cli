@@ -373,6 +373,17 @@ describe("readPins / writePins", () => {
     expect(readFileSync(sidecar, "utf-8")).toMatch(/^sha256:[0-9a-f]{64}$/);
   });
 
+  test("resetIntegrity returns false when there is no pins.json (nothing to refresh)", async () => {
+    expect(await resetIntegrity()).toBe(false);
+  });
+
+  test("resetIntegrity returns true and rewrites the sidecar when pins.json exists", async () => {
+    await writePins(emptyPinsFile());
+    expect(await resetIntegrity()).toBe(true);
+    const sidecar = path.join(tmpHome, ".mcpm", "pins.json.integrity");
+    expect(readFileSync(sidecar, "utf-8")).toMatch(/^sha256:[0-9a-f]{64}$/);
+  });
+
   test("readPins throws PinsIntegrityError when pins.json is tampered with", async () => {
     await writePins(emptyPinsFile());
     // Modify pins.json behind the sidecar's back.
