@@ -254,8 +254,8 @@ export const OWASP_MCP_TOP_10: readonly Signature[] = [
     // the id is recognized by `guard mute exfil-param-in-schema`, `guard
     // list-signatures`, and policy signature_overrides — all of which enumerate
     // OWASP_MCP_TOP_10 ids. `inspectAgainstSignatures` safely no-ops on an empty
-    // patterns array (its inner pattern loop never runs). (Mirrors how
-    // hidden-chars-in-metadata SHOULD be cataloged — that one is a pre-existing gap.)
+    // patterns array (its inner pattern loop never runs). (The
+    // hidden-chars-in-metadata entry below uses this same empty-patterns pattern.)
     id: "exfil-param-in-schema",
     category: "OWASP-MCP-1",
     severity: "critical",
@@ -269,5 +269,27 @@ export const OWASP_MCP_TOP_10: readonly Signature[] = [
       "prompt leak. No legitimate tool names a parameter this way. The server's whole tools/list " +
       "was blocked. Tripwire for the documented underscore-sigil convention; a renamed param " +
       "evades it. If trusted, mute via `mcpm guard mute exfil-param-in-schema`.",
+  },
+  {
+    // hidden-chars-in-metadata — the H2 PRESENCE detector (detectHiddenChars in
+    // patterns.ts) emits this finding INLINE from a codepoint scan of raw metadata
+    // leaves, NOT a content regex, so like exfil-param-in-schema above it carries NO
+    // patterns. The entry exists only so the id is recognized by `guard mute
+    // hidden-chars-in-metadata` (the block message instructs exactly that),
+    // `guard list-signatures`, and policy signature_overrides — all of which
+    // enumerate OWASP_MCP_TOP_10 ids. `inspectAgainstSignatures` no-ops on the empty
+    // patterns array. Keep `patterns: []`: a regex here would double-fire alongside
+    // the detectHiddenChars emission.
+    id: "hidden-chars-in-metadata",
+    category: "OWASP-MCP-1",
+    severity: "high",
+    description:
+      "Invisible/control characters in tool metadata (description, title, inputSchema text, annotations) that hide content from human review",
+    target: "tool_description",
+    patterns: [],
+    remediation:
+      "Tool metadata contains invisible/control characters that hide content from " +
+      "human review (tool-poisoning indicator). Inspect the server's source; if " +
+      "legitimate (rare), mute via `mcpm guard mute hidden-chars-in-metadata`.",
   },
 ];

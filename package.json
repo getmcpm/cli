@@ -47,12 +47,13 @@
   },
   "pnpm": {
     "overrides": {
-      "vite": "7.3.2",
-      "hono": "^4.12.21",
+      "vite": "7.3.5",
+      "hono": "^4.12.25",
       "@hono/node-server": "1.19.14",
       "fast-uri": "^3.1.2",
       "postcss": "^8.5.10",
-      "ip-address": "^10.1.1"
+      "ip-address": "^10.1.1",
+      "esbuild": "^0.28.1"
     }
   },
   "dependencies": {

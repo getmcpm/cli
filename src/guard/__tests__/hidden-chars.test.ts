@@ -250,6 +250,26 @@ describe("H2: MUST NOT fire on benign metadata", () => {
   });
 });
 
+// ─────────────────────── catalog wiring (mute / list-signatures) ───────────────────────
+
+describe("hidden-chars-in-metadata is cataloged so `guard mute` / list-signatures recognize it", () => {
+  // The finding is emitted inline by detectHiddenChars (patterns.ts), not by a
+  // content regex, so without a catalog entry `mcpm guard mute
+  // hidden-chars-in-metadata` exited 1 — even though the block message tells the
+  // user to run exactly that. mute/list-signatures/overrides all enumerate
+  // OWASP_MCP_TOP_10 ids, so the id must appear there (mirrors the F5
+  // exfil-param-in-schema empty-patterns entry).
+  test("the emitted signature_id is a recognized catalog entry with empty patterns", () => {
+    const entry = OWASP_MCP_TOP_10.find((s) => s.id === HIDDEN_FINDING_ID);
+    expect(entry).toBeDefined();
+    expect(entry?.category).toBe("OWASP-MCP-1");
+    expect(entry?.severity).toBe("high");
+    // MUST stay empty: the finding is structural/inline; a regex here would
+    // double-fire alongside the detectHiddenChars emission.
+    expect(entry?.patterns).toHaveLength(0);
+  });
+});
+
 // ─────────────────────── SCOPE: NOT on retrieved data ───────────────────────
 
 describe("H2: scoped to metadata — does NOT fire on retrieved data", () => {
