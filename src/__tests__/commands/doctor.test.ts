@@ -357,3 +357,68 @@ describe("doctorHandler — return value (exit code signal)", () => {
     expect(code).toBe(0);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Cross-client (advisory) section
+// ---------------------------------------------------------------------------
+
+function captureOutput() {
+  const lines: string[] = [];
+  return { fn: (t: string) => lines.push(t), text: () => lines.join("\n") };
+}
+
+describe("doctorHandler — cross-client (advisory)", () => {
+  // Only claude-desktop + cursor have configs in these cases.
+  const twoClients = (id: ClientId) => id === "claude-desktop" || id === "cursor";
+
+  it("reports consistency when both clients share the same servers (exit unchanged)", async () => {
+    const cap = captureOutput();
+    const deps = makeHealthyDeps({
+      checkConfigExists: vi.fn((id: ClientId) => Promise.resolve(twoClients(id))),
+      output: cap.fn,
+    });
+    const code = await doctorHandler(deps);
+    expect(cap.text()).toContain("Cross-client (advisory):");
+    expect(cap.text()).toMatch(/consistent across 2 clients/);
+    expect(code).toBe(0);
+  });
+
+  it("flags a server present in one client but missing in another, WITHOUT failing doctor", async () => {
+    const cap = captureOutput();
+    const deps = makeHealthyDeps({
+      checkConfigExists: vi.fn((id: ClientId) => Promise.resolve(twoClients(id))),
+      getAdapter: vi.fn((id: ClientId) =>
+        makeAdapter(id, id === "claude-desktop" ? { fs: { command: "npx", args: ["fs"] } } : {}),
+      ),
+      output: cap.fn,
+    });
+    const code = await doctorHandler(deps);
+    expect(cap.text()).toMatch(/⚠ fs .*missing in cursor/);
+    expect(cap.text()).toContain("mcpm sync --check");
+    expect(code).toBe(0); // drift is advisory — must NOT flip the exit code
+  });
+
+  it("flags a shape conflict (same server, different command) without failing doctor", async () => {
+    const cap = captureOutput();
+    const deps = makeHealthyDeps({
+      checkConfigExists: vi.fn((id: ClientId) => Promise.resolve(twoClients(id))),
+      getAdapter: vi.fn((id: ClientId) =>
+        makeAdapter(id, { gh: { command: id === "cursor" ? "uvx" : "npx", env: { TOKEN: "x" } } }),
+      ),
+      output: cap.fn,
+    });
+    const code = await doctorHandler(deps);
+    expect(cap.text()).toMatch(/⚠ gh .*config differs \(command\)/);
+    expect(code).toBe(0);
+  });
+
+  it("omits the cross-client section when fewer than 2 clients have a config", async () => {
+    const cap = captureOutput();
+    const deps = makeHealthyDeps({
+      checkConfigExists: vi.fn((id: ClientId) => Promise.resolve(id === "claude-desktop")),
+      output: cap.fn,
+    });
+    await doctorHandler(deps);
+    expect(cap.text()).not.toContain("Cross-client");
+  });
+});

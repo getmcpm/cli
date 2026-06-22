@@ -15,6 +15,7 @@ import type { ClientId } from "../config/paths.js";
 import type { ConfigAdapter, McpServerEntry } from "../config/adapters/index.js";
 import type { detectInstalledClients } from "../config/detector.js";
 import type { getConfigPath } from "../config/paths.js";
+import { buildDriftModel, type ClientState } from "../config/drift.js";
 
 // ---------------------------------------------------------------------------
 // Deps interface
@@ -169,6 +170,43 @@ export async function doctorHandler(deps: DoctorDeps): Promise<number> {
           `Server '${serverName}' in ${CLIENT_LABELS[clientId]} uses '${cmd}' but ${cmd} is not installed.`
         );
       }
+    }
+  }
+
+  // -------------------------------------------------------------------------
+  // 3b. Cross-client consistency (advisory).
+  //
+  // Compares only clients with a readable config. This is informational and
+  // NEVER fails doctor — a server merely absent from one client is a heads-up,
+  // not a broken setup. `mcpm sync --check` is the dedicated exit-2 CI gate, so
+  // these lines stay OUT of `issues` (which drives the exit code).
+  // -------------------------------------------------------------------------
+
+  const driftStates: ClientState[] = CLIENT_IDS.flatMap((clientId) => {
+    const result = clientResults[clientId];
+    return result?.exists && !result.malformed && result.servers
+      ? [{ clientId, servers: result.servers }]
+      : [];
+  });
+
+  if (driftStates.length >= 2) {
+    const drift = buildDriftModel(driftStates);
+    output("");
+    output("Cross-client (advisory):");
+    if (drift.drifted === 0) {
+      const word = drift.servers.length === 1 ? "server" : "servers";
+      output(`  ✓ ${drift.servers.length} ${word} consistent across ${drift.clients.length} clients`);
+    } else {
+      for (const server of drift.servers) {
+        if (server.conflict) {
+          output(
+            `  ⚠ ${server.name} — config differs (${server.conflictFields!.join(", ")}) across ${server.present.join(", ")}`,
+          );
+        } else if (server.absent.length > 0) {
+          output(`  ⚠ ${server.name} — in ${server.present.join(", ")}; missing in ${server.absent.join(", ")}`);
+        }
+      }
+      output("  Run `mcpm sync --check` for the full matrix (advisory, not a failure).");
     }
   }
 

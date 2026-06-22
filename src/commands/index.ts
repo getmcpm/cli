@@ -25,6 +25,7 @@ import { registerExportCommand } from "./export.js";
 import { registerLockCommand } from "./lock.js";
 import { registerUpCommand } from "./up.js";
 import { registerDiffCommand } from "./diff.js";
+import { registerSyncCommand } from "./sync.js";
 import { registerPublishCommand } from "./publish/index.js";
 import { registerOutdatedCommand } from "./outdated.js";
 import { registerGuardCommand } from "./guard.js";
@@ -63,6 +64,8 @@ export { registerUpCommand, handleUp } from "./up.js";
 export type { UpDeps, UpOptions } from "./up.js";
 export { registerDiffCommand, handleDiff } from "./diff.js";
 export type { DiffDeps, DiffOptions } from "./diff.js";
+export { registerSyncCommand, handleSync } from "./sync.js";
+export type { SyncDeps, SyncOptions, SyncResult } from "./sync.js";
 export {
   registerSecretsCommand,
   handleSecretsSet,
@@ -94,6 +97,7 @@ export function registerCommands(program: Command): void {
   registerLockCommand(program);
   registerUpCommand(program);
   registerDiffCommand(program);
+  registerSyncCommand(program);
   registerOutdatedCommand(program);
   registerPublishCommand(program);
   registerGuardCommand(program);
