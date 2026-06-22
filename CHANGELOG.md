@@ -4,6 +4,22 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [0.15.0] - 2026-06-22
+
+A developer-experience release: `mcpm sync --check` surfaces cross-client config drift, plus a dependency-hygiene sweep.
+
+### Added
+
+- **`mcpm sync --check` — cross-client config-drift dashboard (F7)** — a read-only, symmetric view across every detected client (Claude Desktop, Cursor, VS Code, Windsurf): for each server it shows which clients have it, which are missing it, and whether the clients that *do* have it agree on the server's shape. It renders a matrix (`✓` present / `·` absent / `≠` shape conflict) with per-server detail; `--json` emits the drift model; `--check` exits non-zero (`2`) when drift is found, for CI. Shape comparison covers command, args, and env/header **key sets** — it **never compares env or header values**, so secrets never reach the output. `mcpm doctor` gains a matching advisory "Cross-client" section (informational — it never changes doctor's exit code). The write/convergence path (`--union` / `--from-client`) is deferred to a follow-up.
+
+### Fixed
+
+- **`mcpm guard mute hidden-chars-in-metadata` now works** — the hidden-character detector emits this signature id, but it wasn't in the catalog that `mute` / `list-signatures` enumerate, so the command exited `1` even though the block message instructs running it. It's now a catalog entry (no change to detection behavior).
+
+### Changed
+
+- **Dependency hygiene** — bumped `hono` (→ 4.12.25), `vite` (→ 7.3.5), and added an `esbuild` override (→ 0.28.1) to clear all open Dependabot alerts. The hono advisories are in HTTP-server / serve-static / Lambda code paths that mcpm's stdio-only guard never exercises, so they were never reachable — this restores a clean alert surface. `typescript` and `@types/node` major-version bumps are now pinned out (they break the `tsc` lint gate).
+
 ## [0.14.0] - 2026-06-20
 
 A runtime-defense release: the guard blocks tools that advertise an exfil-named schema parameter.
