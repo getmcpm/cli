@@ -17,6 +17,14 @@ updates:
       interval: "weekly"
     open-pull-requests-limit: 10
     labels: ["dependencies"]
+    ignore:
+      # TypeScript 6.x and @types/node 26 break `tsc --noEmit` (the lint/typecheck
+      # gate). @types/node is also pinned to the engines.node floor (>=22) on purpose.
+      # Re-evaluate on a deliberate TS6 migration. Parked PRs: #57, #103.
+      - dependency-name: "typescript"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "@types/node"
+        update-types: ["version-update:semver-major"]
     groups:
       # Batch low-risk dev tooling updates into one PR to cut noise.
       dev-dependencies:
