@@ -34,7 +34,7 @@ export interface CompletionsDeps {
 export const SUBCOMMANDS = [
   "search", "install", "info", "list", "remove", "audit", "update", "outdated",
   "doctor", "init", "import", "serve", "disable", "enable", "alias", "export",
-  "lock", "up", "diff", "publish", "guard", "secrets", "why", "completions",
+  "lock", "up", "diff", "sync", "publish", "guard", "secrets", "why", "completions",
 ];
 
 export const GUARD_SUBCOMMANDS =
@@ -109,6 +109,7 @@ _mcpm() {
     'lock:Resolve and lock a stack file (mcpm.yaml -> mcpm-lock.yaml)'
     'up:Install servers from a stack file with trust policy'
     'diff:Compare installed state vs declared stack'
+    'sync:Show cross-client config drift'
     'publish:Publish a server to the registry'
     'guard:Runtime inspection relay (enable/disable/status/...)'
     'secrets:Manage encrypted secrets for servers'
@@ -168,6 +169,7 @@ complete -c mcpm -n '__fish_use_subcommand' -a export -d 'Export to a stack file
 complete -c mcpm -n '__fish_use_subcommand' -a lock -d 'Lock a stack file'
 complete -c mcpm -n '__fish_use_subcommand' -a up -d 'Install from a stack file'
 complete -c mcpm -n '__fish_use_subcommand' -a diff -d 'Compare installed vs declared'
+complete -c mcpm -n '__fish_use_subcommand' -a sync -d 'Show cross-client config drift'
 complete -c mcpm -n '__fish_use_subcommand' -a publish -d 'Publish a server to the registry'
 complete -c mcpm -n '__fish_use_subcommand' -a guard -d 'Runtime inspection relay'
 complete -c mcpm -n '__fish_use_subcommand' -a secrets -d 'Manage encrypted secrets'
