@@ -19,6 +19,7 @@ import { inspectForDrift, inspectHandshakeForDrift, classifyDrift, buildDriftFin
 import { readPins, writePins } from "./pins.js";
 import { readPolicy, expireStale, PolicyIntegrityError, type GuardPolicyFile } from "./policy.js";
 import { appendEvent } from "./event-log.js";
+import { hashOriginalEntry } from "./wrap.js";
 import { sanitizeForTerminal } from "./sanitize.js";
 import { resolveEnvPlaceholders } from "../store/keychain.js";
 import type { InspectFinding, InspectResult } from "./types.js";
@@ -34,6 +35,13 @@ export interface RunInnerArgs {
    * shell secrets (OPENAI_API_KEY, AWS_*, GITHUB_TOKEN, …) are NOT forwarded.
    */
   readonly declaredEnvKeys: readonly string[];
+  /**
+   * Issue #29 — the `--orig-hash` carried in the wrap marker (a SHA-256 over the
+   * original command + args + declared-env KEY names, computed at `mcpm guard
+   * enable` time). Verified at spawn (warn-once on mismatch — see runInner). Absent
+   * for pre-#29 legacy wraps, in which case the check is skipped (not failed).
+   */
+  readonly origHash?: string;
 }
 
 const SIGNATURE_LIST_VERSION = "owasp-mcp-top-10@v0.5.0";
@@ -226,6 +234,52 @@ function serverInitiatedContent(msg: JSONRPCMessage): unknown[] {
 
 export async function runInner(parsed: RunInnerArgs): Promise<number> {
   const safeName = sanitizeForTerminal(parsed.serverName);
+
+  // Issue #29 — spawn-time wrap-marker integrity check. `--orig-hash` (a SHA-256
+  // over the original command + args + declared-env KEY names, set at `mcpm guard
+  // enable` time) was, until now, verified ONLY on the disable/unwrap path
+  // (wrap.ts `unwrapEntry`) — never at spawn, so a client-config edit that rewrote
+  // the wrapped argv launched unchecked. Recompute and compare here.
+  //
+  // Phase 1 (this release): WARN on mismatch but DO NOT fail closed — promotion to
+  // a hard refusal is gated on dogfood evidence of zero benign mismatches. An
+  // ABSENT hash is a pre-#29 legacy wrap: skip silently (failing closed there
+  // would brick servers wrapped by an older mcpm the moment the user upgrades).
+  if (typeof parsed.origHash === "string" && parsed.origHash.length > 0) {
+    const recomputed = hashOriginalEntry(parsed.command, parsed.args, parsed.declaredEnvKeys);
+    if (recomputed !== parsed.origHash) {
+      process.stderr.write(
+        `[mcpm-guard] ORIG-HASH-MISMATCH ${safeName}: the wrapped command/args/declared-env ` +
+          `no longer match the integrity hash embedded at \`mcpm guard enable\` time — the ` +
+          `client config entry may have been edited or tampered with. Starting anyway ` +
+          `(advisory); a future mcpm release will refuse to start on mismatch. Review ` +
+          `~/.mcpm/guard-events.jsonl, and if you changed the entry on purpose re-run ` +
+          `\`mcpm guard enable\` to re-pin it.\n`,
+      );
+      // Persist to the audit log so the mismatch is reviewable (mirrors the H9
+      // spawn-failure synthetic-finding precedent in relay.ts — RELAY category,
+      // valid InspectFinding shape, no GuardEvent type change).
+      void appendEvent(
+        {
+          ts: new Date().toISOString(),
+          direction: "parent->child",
+          action: "warn",
+          findings: [
+            {
+              signature_id: "orig-hash-mismatch",
+              category: "RELAY",
+              severity: "high",
+              target: "tool_response",
+              matched_text_excerpt: "wrap-marker integrity: recomputed hash != embedded --orig-hash",
+              remediation:
+                "Re-run `mcpm guard enable` to re-pin, or restore the original wrapped entry in the client config.",
+            },
+          ],
+        },
+        parsed.serverName,
+      );
+    }
+  }
 
   const logEvent = (event: GuardEvent): void => {
     if (event.action === "block" || event.action === "warn") {

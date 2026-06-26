@@ -310,6 +310,9 @@ export function registerGuardCommand(program: Command): void {
           command,
           args,
           declaredEnvKeys,
+          // Issue #29: forward the marker's --orig-hash so run-inner can verify
+          // wrap-marker integrity at spawn (previously parsed here but dropped).
+          origHash: opts.origHash,
         });
         process.exit(code);
       },
