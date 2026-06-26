@@ -90,6 +90,9 @@ describe("mcpm guard run --inner argv parsing through Commander", () => {
       command: "npx",
       args: ["-y", "server"],
       declaredEnvKeys: ["FOO", "BAR"],
+      // Issue #29: --orig-hash is now threaded through to run-inner for
+      // spawn-time wrap-marker integrity verification (previously dropped).
+      origHash: "deadbeef",
     });
   });
 

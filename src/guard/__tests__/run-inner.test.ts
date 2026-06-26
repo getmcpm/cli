@@ -341,6 +341,103 @@ describe("runInner fail-safe loading", () => {
   });
 });
 
+// ─────────── PR1: orig-hash spawn-verify (warn-once, Phase 1) ───────────
+
+describe("runInner orig-hash spawn-verify (warn-once, Phase 1)", () => {
+  let exitSpy: ReturnType<typeof vi.spyOn>;
+  let stderrSpy: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    // resetModules BEFORE doMock so the mocks apply to the dynamically-imported
+    // run-inner graph (matches the fail-safe tests above); otherwise the REAL
+    // startRelay spawns `node server.js` and the exit code leaks into the assert.
+    vi.resetModules();
+    exitSpy = vi.spyOn(process, "exit").mockImplementation(((_code?: number) => {
+      throw new Error("__EXIT__");
+    }) as never);
+    stderrSpy = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+    // pins + policy read clean so runInner proceeds to the relay; stub the relay
+    // so no real subprocess is spawned.
+    vi.doMock("../pins.js", async () => {
+      const actual = await vi.importActual<typeof import("../pins.js")>("../pins.js");
+      return { ...actual, readPins: async (): Promise<PinsFile> => actual.emptyPinsFile() };
+    });
+    vi.doMock("../policy.js", async () => {
+      const actual = await vi.importActual<typeof import("../policy.js")>("../policy.js");
+      return { ...actual, readPolicy: async () => ({}) };
+    });
+    vi.doMock("../relay.js", async () => {
+      const actual = await vi.importActual<typeof import("../relay.js")>("../relay.js");
+      return { ...actual, startRelay: () => ({ child: {} as never, exit: Promise.resolve(0) }) };
+    });
+  });
+
+  afterEach(() => {
+    exitSpy.mockRestore();
+    stderrSpy.mockRestore();
+    vi.resetModules();
+    vi.doUnmock("../pins.js");
+    vi.doUnmock("../policy.js");
+    vi.doUnmock("../relay.js");
+  });
+
+  const base = {
+    serverName: "victim",
+    command: "node",
+    args: ["server.js", "--port", "3000"],
+    declaredEnvKeys: ["API_KEY"],
+  };
+
+  test("matching orig-hash → no warning, relay starts", async () => {
+    const { hashOriginalEntry } = await import("../wrap.js");
+    const origHash = hashOriginalEntry(base.command, base.args, base.declaredEnvKeys);
+    const { runInner } = await import("../run-inner.js");
+    const code = await runInner({ ...base, origHash });
+    expect(code).toBe(0);
+    const stderr = stderrSpy.mock.calls.flat().join("");
+    expect(stderr).not.toContain("ORIG-HASH-MISMATCH");
+    expect(exitSpy).not.toHaveBeenCalled();
+  });
+
+  test("mismatched orig-hash → warns but does NOT fail closed (Phase 1)", async () => {
+    const wrongHash = "a".repeat(64);
+    const { runInner } = await import("../run-inner.js");
+    const code = await runInner({ ...base, origHash: wrongHash });
+    expect(code).toBe(0); // warn-once Phase 1: still starts the relay
+    const stderr = stderrSpy.mock.calls.flat().join("");
+    expect(stderr).toContain("[mcpm-guard] ORIG-HASH-MISMATCH");
+    expect(stderr).toContain("victim");
+    expect(exitSpy).not.toHaveBeenCalled(); // NOT fail-closed in Phase 1
+  });
+
+  test("absent orig-hash (pre-#29 legacy wrap) → skipped silently, relay starts", async () => {
+    const { runInner } = await import("../run-inner.js");
+    const code = await runInner({ ...base }); // no origHash field at all
+    expect(code).toBe(0);
+    const stderr = stderrSpy.mock.calls.flat().join("");
+    expect(stderr).not.toContain("ORIG-HASH-MISMATCH");
+    expect(exitSpy).not.toHaveBeenCalled();
+  });
+
+  test("declared-env key order does not cause a benign mismatch", async () => {
+    // hashOriginalEntry sorts envKeys internally; a marker that listed keys in a
+    // different order must still verify (no false ORIG-HASH-MISMATCH).
+    const { hashOriginalEntry } = await import("../wrap.js");
+    const origHash = hashOriginalEntry("node", ["s.js"], ["B_KEY", "A_KEY"]);
+    const { runInner } = await import("../run-inner.js");
+    const code = await runInner({
+      serverName: "victim",
+      command: "node",
+      args: ["s.js"],
+      declaredEnvKeys: ["A_KEY", "B_KEY"], // reversed vs the hash input
+      origHash,
+    });
+    expect(code).toBe(0);
+    const stderr = stderrSpy.mock.calls.flat().join("");
+    expect(stderr).not.toContain("ORIG-HASH-MISMATCH");
+  });
+});
+
 // ─────────────── H4: list_changed arm predicate + spoof guard ───────────────
 
 describe("isToolsListChangedNotification (H4 list_changed arm predicate)", () => {
