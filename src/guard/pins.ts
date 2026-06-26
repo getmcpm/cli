@@ -11,8 +11,9 @@
  *   ~/.mcpm/pins.json            — pin data, JSON, format_version-tagged
  *   ~/.mcpm/pins.json.integrity  — SHA-256 of pins.json contents (sidecar)
  *
- * The integrity sidecar (security review F4.2) is an UNKEYED SHA-256 of
- * pins.json stored next to it with the same 0o600 perms. It provides
+ * The integrity sidecar (security review F4.2 / issue #19) is an UNKEYED SHA-256
+ * of pins.json stored next to it with the same 0o600 perms (the sidecar write
+ * itself now lives in the shared store-integrity.ts). It provides
  * INTEGRITY (tamper-EVIDENCE against accidental corruption / cross-machine
  * copies / a different OS-user account), NOT AUTHENTICITY against a
  * same-user/postinstall attacker: any process that can write pins.json can
@@ -30,7 +31,8 @@
  */
 
 import { createHash } from "node:crypto";
-import { readFile, writeFile, rename, unlink, lstat } from "node:fs/promises";
+import { readFile, writeFile, unlink } from "node:fs/promises";
+import { fileSha, writeFileAtomic } from "./store-integrity.js";
 import path from "node:path";
 import lockfile from "proper-lockfile";
 import { z } from "zod";
@@ -265,47 +267,6 @@ export class PinsIntegrityError extends Error {
   }
 }
 
-// Issue #19: UNKEYED SHA-256. This is an integrity checksum (tamper-evidence),
-// not a keyed MAC — it cannot authenticate the writer. A same-user/postinstall
-// process can recompute this to match a malicious edit. Do not document it as
-// anti-malware. A keyed scheme needs a secret the writable store lacks (#15).
-function fileSha(content: string): string {
-  return `sha256:${createHash("sha256").update(content, "utf8").digest("hex")}`;
-}
-
-// #26 (replicated from config/adapters/base.ts, which does not export it): throw
-// if `targetPath` is a symlink. lstat does not follow the final component, so
-// this detects a symlinked target before a write follows it onto an
-// attacker-chosen path. A missing path (ENOENT) is fine — nothing to traverse.
-async function assertNotSymlink(targetPath: string): Promise<void> {
-  let st: Awaited<ReturnType<typeof lstat>>;
-  try {
-    st = await lstat(targetPath);
-  } catch (err) {
-    if ((err as NodeJS.ErrnoException).code === "ENOENT") return;
-    throw err;
-  }
-  if (st.isSymbolicLink()) {
-    throw new Error(`Refusing to write pins through a symlink: ${targetPath}`);
-  }
-}
-
-// Write `data` atomically to `target`: refuse symlinks, clear any stale `.tmp`
-// (which may itself be a pre-placed symlink — unlinking removes only the link),
-// then create the `.tmp` EXCLUSIVELY (wx) so it is a fresh, unfollowed inode,
-// and rename into place. Mirrors base.ts/writeAtomic.
-async function writeFileAtomic(target: string, data: string): Promise<void> {
-  await assertNotSymlink(target);
-  const tmp = `${target}.tmp`;
-  try {
-    await unlink(tmp);
-  } catch (err) {
-    if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
-  }
-  await writeFile(tmp, data, { encoding: "utf-8", mode: 0o600, flag: "wx" });
-  await rename(tmp, target);
-}
-
 async function pinsPath(): Promise<string> {
   return path.join(await getStorePath(), PINS_FILENAME);
 }
@@ -411,8 +372,8 @@ export async function writePins(pins: PinsFile): Promise<void> {
     stale: 5_000,
   });
   try {
-    await writeFileAtomic(filePath, serialized);
-    await writeFileAtomic(sidecarPath, fileSha(serialized));
+    await writeFileAtomic(filePath, serialized, "pins");
+    await writeFileAtomic(sidecarPath, fileSha(serialized), "pins");
   } finally {
     await release();
   }
@@ -443,7 +404,7 @@ export async function resetIntegrity(): Promise<boolean> {
   // writeFile(`${sidecarPath}.tmp`) + rename would follow a pre-placed symlink
   // at the sidecar (or its .tmp), redirecting the write onto an attacker-chosen
   // path — the exact gap the PR closed for the main pins/policy writes.
-  await writeFileAtomic(sidecarPath, fileSha(content));
+  await writeFileAtomic(sidecarPath, fileSha(content), "pins");
   return true;
 }
 

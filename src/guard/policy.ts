@@ -18,8 +18,8 @@
  * Pure load/save here; subcommand handlers in cli.ts compose these helpers.
  */
 
-import { createHash } from "node:crypto";
-import { mkdir, readFile, writeFile, rename, unlink, lstat } from "node:fs/promises";
+import { mkdir, readFile, writeFile, unlink } from "node:fs/promises";
+import { fileSha, writeFileAtomic } from "./store-integrity.js";
 import path from "node:path";
 import lockfile from "proper-lockfile";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
@@ -44,52 +44,12 @@ export interface GuardPolicyFile {
   readonly paused_until?: string;
 }
 
-// #26 (replicated from config/adapters/base.ts, which does not export it): throw
-// if `targetPath` is a symlink. lstat does not follow the final component, so
-// this detects a symlinked target before a write follows it onto an
-// attacker-chosen path. A missing path (ENOENT) is fine — nothing to traverse.
-async function assertNotSymlink(targetPath: string): Promise<void> {
-  let st: Awaited<ReturnType<typeof lstat>>;
-  try {
-    st = await lstat(targetPath);
-  } catch (err) {
-    if ((err as NodeJS.ErrnoException).code === "ENOENT") return;
-    throw err;
-  }
-  if (st.isSymbolicLink()) {
-    throw new Error(`Refusing to write policy through a symlink: ${targetPath}`);
-  }
-}
-
-// Write `data` atomically to `target`: refuse symlinks, clear any stale `.tmp`
-// (which may itself be a pre-placed symlink — unlinking removes only the link),
-// then create the `.tmp` EXCLUSIVELY (wx) so it is a fresh, unfollowed inode,
-// and rename into place. Mirrors base.ts/writeAtomic.
-async function writeFileAtomic(target: string, data: string): Promise<void> {
-  await assertNotSymlink(target);
-  const tmp = `${target}.tmp`;
-  try {
-    await unlink(tmp);
-  } catch (err) {
-    if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
-  }
-  await writeFile(tmp, data, { encoding: "utf-8", mode: 0o600, flag: "wx" });
-  await rename(tmp, target);
-}
-
 async function policyPath(): Promise<string> {
   return path.join(await getStorePath(), POLICY_FILENAME);
 }
 
 async function integrityPath(): Promise<string> {
   return path.join(await getStorePath(), POLICY_INTEGRITY_FILENAME);
-}
-
-// Issue #19: UNKEYED SHA-256 — integrity (tamper-evidence), not authenticity.
-// A same-user/postinstall process can recompute this to match a malicious
-// edit, so it is not anti-malware. A keyed MAC needs a secret absent here (#15).
-function fileSha(content: string): string {
-  return `sha256:${createHash("sha256").update(content, "utf8").digest("hex")}`;
 }
 
 export class PolicyIntegrityError extends Error {
@@ -175,8 +135,8 @@ export async function writePolicy(policy: GuardPolicyFile): Promise<void> {
   });
   try {
     const serialized = stringifyYaml(policy);
-    await writeFileAtomic(p, serialized);
-    await writeFileAtomic(sidecarP, fileSha(serialized));
+    await writeFileAtomic(p, serialized, "policy");
+    await writeFileAtomic(sidecarP, fileSha(serialized), "policy");
   } finally {
     await release();
   }
@@ -201,7 +161,7 @@ export async function resetPolicyIntegrity(): Promise<boolean> {
   // writeFile(`${sidecarP}.tmp`) + rename would follow a pre-placed symlink at
   // the sidecar (or its .tmp), redirecting the write onto an attacker-chosen
   // path — the exact gap the PR closed for the main pins/policy writes.
-  await writeFileAtomic(sidecarP, fileSha(raw));
+  await writeFileAtomic(sidecarP, fileSha(raw), "policy");
   return true;
 }
 

@@ -612,4 +612,14 @@ describe("issue #19 — integrity sidecars relabeled integrity-not-authenticity"
     // guard signatures" with no caveat that it can also rewrite the sidecar.
     expect(src).not.toMatch(/script that mutates this file silently disables guard/);
   });
+
+  // PR2: the sidecar primitive (fileSha + the symlink-safe atomic writer) now
+  // lives in store-integrity.ts, so the honest-wording contract must hold there
+  // too — that is the single place a future overclaim could regress.
+  test("store-integrity.ts states integrity-not-authenticity and references issue #19", () => {
+    const src = readSrc("../store-integrity.ts");
+    expect(src).toMatch(/issue #19/i);
+    expect(src).toMatch(/UNKEYED/);
+    expect(src).toMatch(/not\s+anti-malware|NOT\s+authenticity/i);
+  });
 });
