@@ -272,11 +272,20 @@ export function registerGuardCommand(program: Command): void {
     .option("--server-name <name>", "server name (set by enable)")
     .option("--declared-env <csv>", "comma-separated declared env key names (set by enable)")
     .option("--orig-hash <hex>", "integrity hash of the original entry (set by enable)")
+    .option("--confine-profile-hash <hex>", "F1: content hash of the confine profile (set by enable)")
+    .option("--confine-required", "F1: fail closed if this server cannot be confined (set by enable)")
     .allowUnknownOption()
     .allowExcessArguments()
     .action(
       async (
-        opts: { inner?: boolean; serverName?: string; declaredEnv?: string; origHash?: string },
+        opts: {
+          inner?: boolean;
+          serverName?: string;
+          declaredEnv?: string;
+          origHash?: string;
+          confineProfileHash?: string;
+          confineRequired?: boolean;
+        },
         cmd: Command,
       ) => {
         // SECURITY F6: refuse direct user invocation without the --inner marker.
@@ -313,6 +322,10 @@ export function registerGuardCommand(program: Command): void {
           // Issue #29: forward the marker's --orig-hash so run-inner can verify
           // wrap-marker integrity at spawn (previously parsed here but dropped).
           origHash: opts.origHash,
+          // F1: forward the confine marker tokens so run-inner can run the spawn
+          // decision table (registered .option()s keep them OUT of cmd.args).
+          confineProfileHash: opts.confineProfileHash,
+          confineRequired: opts.confineRequired === true,
         });
         process.exit(code);
       },

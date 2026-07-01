@@ -19,6 +19,9 @@ let runInnerCalls: Array<{
   command: string;
   args: readonly string[];
   declaredEnvKeys: readonly string[];
+  origHash?: string;
+  confineProfileHash?: string;
+  confineRequired?: boolean;
 }>;
 
 beforeEach(() => {
@@ -33,6 +36,9 @@ beforeEach(() => {
       command: string;
       args: readonly string[];
       declaredEnvKeys: readonly string[];
+      origHash?: string;
+      confineProfileHash?: string;
+      confineRequired?: boolean;
     }) => {
       runInnerCalls.push(args);
       return 0;
@@ -72,6 +78,9 @@ describe("mcpm guard run --inner argv parsing through Commander", () => {
       command: "npx",
       args: ["-y", "@modelcontextprotocol/server-filesystem", "/data"],
       declaredEnvKeys: [],
+      // F1: guard.ts always threads confineRequired (=== true), so it is false
+      // (not undefined) when the marker carries no --confine-required flag.
+      confineRequired: false,
     });
   });
 
@@ -93,6 +102,7 @@ describe("mcpm guard run --inner argv parsing through Commander", () => {
       // Issue #29: --orig-hash is now threaded through to run-inner for
       // spawn-time wrap-marker integrity verification (previously dropped).
       origHash: "deadbeef",
+      confineRequired: false,
     });
   });
 

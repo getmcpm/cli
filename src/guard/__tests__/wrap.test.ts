@@ -13,6 +13,9 @@ import {
   defaultWrapContext,
   WRAP_ORIG_HASH_FLAG,
   WRAP_DECLARED_ENV_FLAG,
+  WRAP_CONFINE_HASH_FLAG,
+  WRAP_CONFINE_REQUIRED_FLAG,
+  WRAP_ARG_SEPARATOR,
   type WrapContext,
 } from "../wrap.js";
 
@@ -214,5 +217,82 @@ describe("resolveMcpmBinaryPath / defaultWrapContext", () => {
   test("falls back to bare 'mcpm' for non-dist scripts (shim)", () => {
     const path = resolveMcpmBinaryPath(["/usr/local/bin/node", "/some/shim", "guard"]);
     expect(path).toBe("mcpm");
+  });
+});
+
+// ─────────────── F1: confine marker tokens (produce / parse / neutrality) ───────────────
+
+const HEX64 = "a".repeat(64);
+
+describe("wrapEntry — confine marker tokens", () => {
+  test("emits --confine-profile-hash + --confine-required before `--`, after --orig-hash", () => {
+    const wrapped = wrapEntry(
+      "fs",
+      { command: "npx", args: ["-y", "srv"], env: { FOO: "1" } },
+      ctx,
+      { profileHash: HEX64, required: true },
+    );
+    const a = wrapped.args!;
+    const iHash = a.indexOf(WRAP_CONFINE_HASH_FLAG);
+    const iReq = a.indexOf(WRAP_CONFINE_REQUIRED_FLAG);
+    const iSep = a.indexOf(WRAP_ARG_SEPARATOR);
+    const iOrig = a.indexOf(WRAP_ORIG_HASH_FLAG);
+    expect(iHash).toBeGreaterThan(iOrig); // confine tokens follow --orig-hash
+    expect(a[iHash + 1]).toBe(HEX64);
+    expect(iReq).toBeGreaterThan(-1);
+    expect(iHash).toBeLessThan(iSep); // ...and both precede `--`
+    expect(iReq).toBeLessThan(iSep);
+  });
+
+  test("omits --confine-required when required=false", () => {
+    const wrapped = wrapEntry("fs", { command: "x" }, ctx, { profileHash: HEX64, required: false });
+    expect(wrapped.args).toContain(WRAP_CONFINE_HASH_FLAG);
+    expect(wrapped.args).not.toContain(WRAP_CONFINE_REQUIRED_FLAG);
+  });
+
+  test("no confine arg → no confine tokens (unchanged wraps)", () => {
+    const wrapped = wrapEntry("fs", { command: "x" }, ctx);
+    expect(wrapped.args).not.toContain(WRAP_CONFINE_HASH_FLAG);
+    expect(wrapped.args).not.toContain(WRAP_CONFINE_REQUIRED_FLAG);
+  });
+});
+
+describe("confine marker NEUTRALITY (orig-hash + unwrap unaffected)", () => {
+  const orig = { command: "npx", args: ["-y", "srv", "/data"], env: { API_KEY: "x", B: "y" } };
+
+  test("unwrapEntry still verifies orig-hash and reconstructs the original entry", () => {
+    const wrapped = wrapEntry("fs", orig, ctx, { profileHash: HEX64, required: true });
+    const back = unwrapEntry(wrapped);
+    expect(back).not.toBeNull();
+    expect(back!.command).toBe("npx");
+    expect(back!.args).toEqual(["-y", "srv", "/data"]);
+    expect(back!.env).toEqual({ API_KEY: "x", B: "y" });
+  });
+
+  test("isWrapped + getWrappedServerName work with confine tokens present", () => {
+    const wrapped = wrapEntry("fs", orig, ctx, { profileHash: HEX64, required: false });
+    expect(isWrapped(wrapped)).toBe(true);
+    expect(getWrappedServerName(wrapped)).toBe("fs");
+  });
+
+  test("a wrapped-with-confine entry's --orig-hash equals the confine-free hash (excluded from hash)", () => {
+    const withConfine = wrapEntry("fs", orig, ctx, { profileHash: HEX64, required: true });
+    const a = withConfine.args!;
+    expect(a[a.indexOf(WRAP_ORIG_HASH_FLAG) + 1]).toBe(
+      hashOriginalEntry("npx", ["-y", "srv", "/data"], ["API_KEY", "B"]),
+    );
+  });
+
+  test("wrapEntry refuses to embed a non-64-hex confine hash (write-side guard)", () => {
+    expect(() => wrapEntry("fs", orig, ctx, { profileHash: "not-hex", required: false })).toThrow(
+      /64/,
+    );
+  });
+
+  test("a hand-crafted marker with a bad confine hash → parseMarker rejects → unwrap refuses", () => {
+    // Simulate an attacker hand-editing the IDE config to a malformed hash.
+    const good = wrapEntry("fs", orig, ctx, { profileHash: HEX64, required: false });
+    const tampered = { ...good, args: good.args!.map((a) => (a === HEX64 ? "deadbeef" : a)) };
+    expect(unwrapEntry(tampered)).toBeNull();
   });
 });
