@@ -28,7 +28,7 @@ import {
   withProfile,
   confineSandboxRoot,
 } from "./confine/store.js";
-import { hashConfineProfile } from "./confine/profile.js";
+import { hashConfineProfile, type ConfineStore } from "./confine/profile.js";
 import { isConfineBackendAvailable } from "./confine/apply.js";
 import { SANDBOX_EXEC_PATH } from "./confine/backend-macos.js";
 import { placeholderEnvKeys } from "../store/keychain.js";
@@ -185,6 +185,10 @@ async function collectConfineTargets(opts: ConfineComputeOpts): Promise<Map<stri
     for (const [name, entry] of Object.entries(entries)) {
       if (opts.server !== undefined && name !== opts.server) continue;
       if (!entry.command || isWrapped(entry)) continue;
+      // Tie-breaker: first client wins. If the same server NAME runs a different
+      // command across clients (e.g. `npx` in one, `node` in another), the net
+      // classification is taken from the first-seen command. Pass `--client` to
+      // enroll per-client and avoid the ambiguity.
       if (!targets.has(name)) targets.set(name, { command: entry.command, args: entry.args });
     }
   }
@@ -210,11 +214,10 @@ async function collectConfineTargets(opts: ConfineComputeOpts): Promise<Map<stri
 export async function computeConfineMarkers(
   opts: ConfineComputeOpts,
 ): Promise<ReadonlyMap<string, ConfineMarker>> {
-  const markers = new Map<string, ConfineMarker>();
   const targets = await collectConfineTargets(opts);
-  if (targets.size === 0) return markers;
+  if (targets.size === 0) return new Map();
 
-  let store;
+  let store: ConfineStore;
   try {
     store = await readConfineStore();
   } catch (err) {
@@ -225,6 +228,22 @@ export async function computeConfineMarkers(
     );
   }
 
+  const { markers, storeToWrite } = await resolveConfineMarkers(targets, store, opts);
+  if (storeToWrite !== null) await writeConfineStore(storeToWrite);
+  return markers;
+}
+
+/**
+ * Build the markers for `targets`: reuse an already-stored profile (stable hash,
+ * no store churn) or derive+stage a new one. Returns the markers and the store to
+ * persist (null when nothing new was added, so the caller skips the write).
+ */
+async function resolveConfineMarkers(
+  targets: Map<string, ConfineTarget>,
+  store: ConfineStore,
+  opts: ConfineComputeOpts,
+): Promise<{ markers: Map<string, ConfineMarker>; storeToWrite: ConfineStore | null }> {
+  const markers = new Map<string, ConfineMarker>();
   const home = os.homedir();
   const sandboxRoot = await confineSandboxRoot();
   const tmpDir = os.tmpdir();
@@ -232,8 +251,8 @@ export async function computeConfineMarkers(
   let next = store;
   let added = 0;
   for (const [name, target] of targets) {
-    if (Object.hasOwn(store.servers, name)) {
-      const existing = store.servers[name];
+    const existing = Object.hasOwn(store.servers, name) ? store.servers[name] : undefined;
+    if (existing !== undefined) {
       markers.set(name, {
         profileHash: hashConfineProfile(existing),
         required: existing.require_confine,
@@ -258,8 +277,7 @@ export async function computeConfineMarkers(
       required: profile.require_confine,
     });
   }
-  if (added > 0) await writeConfineStore(next);
-  return markers;
+  return { markers, storeToWrite: added > 0 ? next : null };
 }
 
 function printConfineNotice(
