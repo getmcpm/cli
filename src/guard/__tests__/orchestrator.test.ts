@@ -209,9 +209,10 @@ describe("enableGuardAcrossClients — F1 confine markers", () => {
 
     await enableGuardAcrossClients(deps);
 
-    expect(state["fs-mcp"]?.args).toContain("--confine-profile-hash");
-    expect(state["fs-mcp"]?.args).toContain(hash);
-    expect(state["fs-mcp"]?.args).toContain("--confine-required");
+    // The hash VALUE must immediately follow the flag (not merely appear somewhere).
+    const fsArgs = state["fs-mcp"]?.args ?? [];
+    expect(fsArgs[fsArgs.indexOf("--confine-profile-hash") + 1]).toBe(hash);
+    expect(fsArgs).toContain("--confine-required");
     // Unmapped server is wrapped WITHOUT confine tokens.
     expect(state["git-mcp"]?.args?.[0]).toBe("guard");
     expect(state["git-mcp"]?.args).not.toContain("--confine-profile-hash");

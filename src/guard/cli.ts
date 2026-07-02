@@ -28,7 +28,7 @@ import {
   withProfile,
   confineSandboxRoot,
 } from "./confine/store.js";
-import { hashConfineProfile, emptyConfineStore } from "./confine/profile.js";
+import { hashConfineProfile } from "./confine/profile.js";
 import { isConfineBackendAvailable } from "./confine/apply.js";
 import { SANDBOX_EXEC_PATH } from "./confine/backend-macos.js";
 import { placeholderEnvKeys } from "../store/keychain.js";
@@ -91,29 +91,34 @@ export async function runEnableCommand(opts: EnableOpts): Promise<void> {
   const previousConsented = await readUnguardedConsent();
 
   if (opts.dryRun === true) {
-    const deps = buildDeps({ allowUnguarded: opts.allowUnguarded });
-    const status = await statusAcrossClients(deps);
-    const confineNote = opts.confine === "standard" ? " (with OS confinement)" : "";
-    opts.write(`Dry-run: planned wraps${confineNote}\n`);
-    for (const c of status.clients) {
-      if (opts.client !== undefined && c.clientId !== opts.client) continue;
-      const candidates = c.servers.filter((s) => {
-        if (opts.server !== undefined && s.name !== opts.server) return false;
-        return !s.wrapped;
-      });
-      opts.write(`  ${CLIENT_LABELS[c.clientId]}: would wrap ${candidates.length} server(s)\n`);
-      for (const s of candidates) opts.write(`    + ${s.name}\n`);
-    }
+    await printEnableDryRun(opts);
     return;
   }
 
-  // F1: when confining, derive+store each target server's profile ONCE and build
-  // the name→marker map BEFORE the orchestrator runs, so the same content hash is
-  // embedded across every client that wraps that server.
-  const confineMarkers =
-    opts.confine === "standard"
-      ? await computeConfineMarkers({ server: opts.server, write: opts.write })
-      : undefined;
+  if (opts.confine === "off") {
+    // Acknowledge the flag so `--confine off` isn't a silent no-op.
+    opts.write("OS confinement: skipped (--confine off).\n");
+  }
+
+  // F1: build the name→marker map BEFORE the orchestrator runs, so the same
+  // content hash is embedded across every client that wraps a given server. A
+  // corrupt/tampered confine store ABORTS the enable (store left untouched)
+  // rather than silently clobbering previously-enrolled servers or masking tamper.
+  let confineMarkers: ReadonlyMap<string, ConfineMarker> | undefined;
+  if (opts.confine === "standard") {
+    try {
+      confineMarkers = await computeConfineMarkers({
+        client: opts.client,
+        server: opts.server,
+        write: opts.write,
+      });
+    } catch (err) {
+      opts.write(
+        chalk.yellow(`\n⚠ OS confinement aborted: ${sanitize((err as Error).message)}`) + "\n",
+      );
+      return;
+    }
+  }
 
   const deps = buildDeps({ allowUnguarded: opts.allowUnguarded, confineMarkers });
   const summary = await enableGuardAcrossClients(deps, opts);
@@ -123,40 +128,53 @@ export async function runEnableCommand(opts: EnableOpts): Promise<void> {
   printRestartReminder(opts);
 }
 
+async function printEnableDryRun(opts: EnableOpts): Promise<void> {
+  const deps = buildDeps({ allowUnguarded: opts.allowUnguarded });
+  const status = await statusAcrossClients(deps);
+  const confineNote = opts.confine === "standard" ? " (with OS confinement)" : "";
+  opts.write(`Dry-run: planned wraps${confineNote}\n`);
+  for (const c of status.clients) {
+    if (opts.client !== undefined && c.clientId !== opts.client) continue;
+    const candidates = c.servers.filter((s) => {
+      if (opts.server !== undefined && s.name !== opts.server) return false;
+      return !s.wrapped;
+    });
+    opts.write(`  ${CLIENT_LABELS[c.clientId]}: would wrap ${candidates.length} server(s)\n`);
+    for (const s of candidates) opts.write(`    + ${s.name}\n`);
+  }
+}
+
 // ---------------------------------------------------------------------------
 // F1 confine: marker computation + doctor
 // ---------------------------------------------------------------------------
 
 export interface ConfineComputeOpts {
+  readonly client?: ClientId;
   readonly server?: string;
   readonly net?: "all" | "none";
   readonly requireConfine?: boolean;
   readonly write: (s: string) => void;
 }
 
-/**
- * Derive + persist a ConfineProfile for every unwrapped STDIO server that
- * `enable` will wrap (respecting `--server`), returning a name→marker map for the
- * orchestrator to embed. Each server is derived ONCE (a single `capturedAt`) so
- * its content hash is identical across every client that wraps it — otherwise the
- * spawn-time verify (decide.ts row 3) would mismatch and fail closed. Merges into
- * the existing store so other enrolled servers are preserved.
- */
-export async function computeConfineMarkers(
-  opts: ConfineComputeOpts,
-): Promise<ReadonlyMap<string, ConfineMarker>> {
-  const markers = new Map<string, ConfineMarker>();
+interface ConfineTarget {
+  readonly command: string;
+  readonly args?: readonly string[];
+}
 
+/**
+ * De-duped (by name) set of servers `enable` will wrap and therefore need a
+ * confine profile: unwrapped STDIO servers only (url/HTTP have no command;
+ * already-wrapped servers aren't re-wrapped), respecting `--client`/`--server`.
+ */
+async function collectConfineTargets(opts: ConfineComputeOpts): Promise<Map<string, ConfineTarget>> {
+  const targets = new Map<string, ConfineTarget>();
   let clients: ClientId[];
   try {
     clients = await detectInstalledClients();
   } catch {
-    return markers;
+    return targets;
   }
-
-  // De-dupe by name across clients; url/HTTP (no command) and already-wrapped
-  // servers are not wrapped by `enable`, so they need no confine profile.
-  const targets = new Map<string, { command: string; args?: readonly string[] }>();
+  if (opts.client !== undefined) clients = clients.filter((c) => c === opts.client);
   for (const clientId of clients) {
     let entries;
     try {
@@ -170,24 +188,58 @@ export async function computeConfineMarkers(
       if (!targets.has(name)) targets.set(name, { command: entry.command, args: entry.args });
     }
   }
+  return targets;
+}
+
+/**
+ * Build the name→marker map for the servers `enable` will wrap, persisting a
+ * ConfineProfile for genuinely-new servers. Returns markers for the orchestrator
+ * to embed. Two load-bearing properties:
+ *
+ *   1. FAIL CLOSED on a corrupt/tampered store — `readConfineStore` throws only on
+ *      a genuine integrity/shape/version error (ENOENT returns an empty store), so
+ *      we let it PROPAGATE (the caller aborts the enable). We must never fall back
+ *      to an empty store + overwrite: that would erase previously-enrolled servers
+ *      and mask the tamper signal.
+ *   2. REUSE an already-stored profile rather than re-deriving it. A re-derive would
+ *      mint a fresh `capturedAt`; even though captured_at is excluded from the hash,
+ *      reusing avoids churning the store on a retry and keeps the binding stable.
+ *      (v1 does not re-enroll a server whose command changed — that's the deferred
+ *      per-server `guard confine` command; the existing profile is the safe choice.)
+ */
+export async function computeConfineMarkers(
+  opts: ConfineComputeOpts,
+): Promise<ReadonlyMap<string, ConfineMarker>> {
+  const markers = new Map<string, ConfineMarker>();
+  const targets = await collectConfineTargets(opts);
   if (targets.size === 0) return markers;
 
   let store;
   try {
     store = await readConfineStore();
   } catch (err) {
-    opts.write(
-      `⚠ could not read ~/.mcpm/guard-confine.yaml (${sanitize((err as Error).message)}); ` +
-        `starting a fresh confine store for this enable.\n`,
+    throw new Error(
+      `cannot read the confine store (~/.mcpm/guard-confine.yaml): ${(err as Error).message} ` +
+        `Review it for unauthorized changes; if you edited it intentionally, restore or remove it. ` +
+        `Refusing to enroll — the store was left untouched.`,
     );
-    store = emptyConfineStore();
   }
 
   const home = os.homedir();
   const sandboxRoot = await confineSandboxRoot();
   const tmpDir = os.tmpdir();
   const capturedAt = new Date().toISOString();
+  let next = store;
+  let added = 0;
   for (const [name, target] of targets) {
+    if (Object.hasOwn(store.servers, name)) {
+      const existing = store.servers[name];
+      markers.set(name, {
+        profileHash: hashConfineProfile(existing),
+        required: existing.require_confine,
+      });
+      continue;
+    }
     const profile = deriveDefaultProfile({
       serverName: name,
       command: target.command,
@@ -199,13 +251,14 @@ export async function computeConfineMarkers(
       requireConfine: opts.requireConfine,
       net: opts.net,
     });
-    store = withProfile(store, name, profile);
+    next = withProfile(next, name, profile);
+    added += 1;
     markers.set(name, {
       profileHash: hashConfineProfile(profile),
       required: profile.require_confine,
     });
   }
-  await writeConfineStore(store);
+  if (added > 0) await writeConfineStore(next);
   return markers;
 }
 
@@ -235,15 +288,16 @@ export interface DoctorConfineOpts extends CommandIO {
   readonly json?: boolean;
 }
 
+interface DoctorConfineServer {
+  readonly name: string;
+  readonly tier: string;
+  readonly net: string;
+  readonly requireConfine: boolean;
+}
+
 export async function runDoctorConfineCommand(opts: DoctorConfineOpts): Promise<void> {
   const backendAvailable = isConfineBackendAvailable();
-  let servers: Array<{
-    name: string;
-    tier: string;
-    net: string;
-    requireConfine: boolean;
-    scratchDir: string;
-  }> = [];
+  let servers: DoctorConfineServer[] = [];
   let storeError: string | undefined;
   try {
     const store = await readConfineStore();
@@ -252,62 +306,69 @@ export async function runDoctorConfineCommand(opts: DoctorConfineOpts): Promise<
       tier: p.tier,
       net: p.net,
       requireConfine: p.require_confine,
-      scratchDir: p.scratch_dir,
     }));
   } catch (err) {
     storeError = (err as Error).message;
   }
+  opts.write(
+    opts.json === true
+      ? renderDoctorConfineJson(backendAvailable, servers, storeError)
+      : renderDoctorConfineText(backendAvailable, servers, storeError),
+  );
+}
 
-  if (opts.json === true) {
-    opts.write(
-      JSON.stringify(
-        {
-          platform: process.platform,
-          backendAvailable,
-          sandboxExecPath: process.platform === "darwin" ? SANDBOX_EXEC_PATH : null,
-          storeError: storeError ?? null,
-          servers: servers.map((s) => ({
-            name: s.name,
-            tier: s.tier,
-            net: s.net,
-            requireConfine: s.requireConfine,
-          })),
-        },
-        null,
-        2,
-      ) + "\n",
-    );
-    return;
-  }
+function renderDoctorConfineJson(
+  backendAvailable: boolean,
+  servers: readonly DoctorConfineServer[],
+  storeError: string | undefined,
+): string {
+  return (
+    JSON.stringify(
+      {
+        platform: process.platform,
+        backendAvailable,
+        sandboxExecPath: process.platform === "darwin" ? SANDBOX_EXEC_PATH : null,
+        // sanitize: an OS error message can carry control chars / ANSI (parity
+        // with the text branch, which already sanitizes).
+        storeError: storeError !== undefined ? sanitize(storeError) : null,
+        servers,
+      },
+      null,
+      2,
+    ) + "\n"
+  );
+}
 
-  opts.write("mcpm guard doctor-confine\n\n");
-  opts.write(`  platform        : ${process.platform}\n`);
-  opts.write(`  sandbox backend : ${backendAvailable ? "available" : "UNAVAILABLE"}`);
-  if (process.platform === "darwin") opts.write(` (${SANDBOX_EXEC_PATH})`);
-  opts.write("\n");
+function renderDoctorConfineText(
+  backendAvailable: boolean,
+  servers: readonly DoctorConfineServer[],
+  storeError: string | undefined,
+): string {
+  const out: string[] = ["mcpm guard doctor-confine", ""];
+  out.push(`  platform        : ${process.platform}`);
+  let backendLine = `  sandbox backend : ${backendAvailable ? "available" : "UNAVAILABLE"}`;
+  if (process.platform === "darwin") backendLine += ` (${SANDBOX_EXEC_PATH})`;
+  out.push(backendLine);
   if (!backendAvailable) {
-    opts.write(
-      "  → enrolled servers run UNCONFINED here (hybrid posture); a require_confine server fails closed.\n",
+    out.push(
+      "  → enrolled servers run UNCONFINED here (hybrid posture); a require_confine server fails closed.",
     );
   }
-  opts.write("\n");
+  out.push("");
   if (storeError !== undefined) {
-    opts.write(`  ⚠ could not read the confine store: ${sanitize(storeError)}\n`);
-    return;
+    out.push(`  ⚠ could not read the confine store: ${sanitize(storeError)}`, "");
+    return out.join("\n");
   }
   if (servers.length === 0) {
-    opts.write(
-      "  No servers enrolled in confinement. Enroll with `mcpm guard enable --confine`.\n",
-    );
-    return;
+    out.push("  No servers enrolled in confinement. Enroll with `mcpm guard enable --confine`.", "");
+    return out.join("\n");
   }
-  opts.write(`  Enrolled servers (${servers.length}):\n`);
+  out.push(`  Enrolled servers (${servers.length}):`);
   for (const s of servers) {
-    opts.write(
-      `    ${sanitize(s.name)} — tier=${s.tier} net=${s.net} require_confine=${s.requireConfine}\n`,
-    );
+    out.push(`    ${sanitize(s.name)} — tier=${s.tier} net=${s.net} require_confine=${s.requireConfine}`);
   }
-  opts.write("\n  Run `mcpm guard status` for per-client wrap state.\n");
+  out.push("", "  Run `mcpm guard status` for per-client wrap state.", "");
+  return out.join("\n");
 }
 
 /**

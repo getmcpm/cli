@@ -58,15 +58,22 @@ export function registerGuardCommand(program: Command): void {
       }) => {
         const { runEnableCommand } = await import("../guard/cli.js");
         const opts = parseClientServer(rawOpts);
-        // `--confine` (bare) → standard; `--confine off` → off; anything else invalid.
+        // `--confine` (bare) / `standard` / `true` / `1` → standard; `off` → off;
+        // anything else is rejected.
         let confine: "standard" | "off" | undefined;
-        if (rawOpts.confine === true || rawOpts.confine === "standard") {
+        if (
+          rawOpts.confine === true ||
+          rawOpts.confine === "standard" ||
+          rawOpts.confine === "true" ||
+          rawOpts.confine === "1"
+        ) {
           confine = "standard";
         } else if (rawOpts.confine === "off") {
           confine = "off";
         } else if (rawOpts.confine !== undefined) {
           process.stderr.write(
-            `mcpm guard enable: invalid --confine value "${String(rawOpts.confine)}" (use standard|off).\n`,
+            `mcpm guard enable: invalid --confine value "${String(rawOpts.confine)}" ` +
+              `(use \`--confine\`, \`--confine standard\`, or \`--confine off\`).\n`,
           );
           process.exit(1);
         }

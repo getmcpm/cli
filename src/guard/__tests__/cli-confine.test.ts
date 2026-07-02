@@ -17,6 +17,7 @@ import {
   runDoctorConfineCommand,
 } from "../cli.js";
 import { readConfineStore } from "../confine/store.js";
+import { hashConfineProfile } from "../confine/profile.js";
 
 let tmpHome: string;
 let originalHome: string | undefined;
@@ -93,6 +94,27 @@ describe("computeConfineMarkers", () => {
     const markers = await computeConfineMarkers({ write: collect().write });
     expect(markers.size).toBe(0);
   });
+
+  test("re-run REUSES an already-stored profile (no re-derive, no store churn) — multi-client retry", async () => {
+    writeCursor({ probe: { command: "node", args: ["x.js"] } });
+    const first = await computeConfineMarkers({ write: collect().write });
+    const stored = (await readConfineStore()).servers.probe!;
+    // Second run for the same server: must reuse the stored profile's hash and
+    // NOT overwrite the entry (a re-derive would mint a new captured_at → churn).
+    const second = await computeConfineMarkers({ write: collect().write });
+    expect(second.get("probe")!.profileHash).toBe(first.get("probe")!.profileHash);
+    expect(second.get("probe")!.profileHash).toBe(hashConfineProfile(stored));
+    expect((await readConfineStore()).servers.probe!.captured_at).toBe(stored.captured_at);
+  });
+
+  test("--client narrows enrollment to that client only", async () => {
+    // A server present in the (default cursor) config; a --client vscode run must
+    // enroll nothing from cursor (and cursor's server stays out of the store).
+    writeCursor({ probe: { command: "node", args: ["x.js"] } });
+    const markers = await computeConfineMarkers({ client: "vscode", write: collect().write });
+    expect(markers.size).toBe(0);
+    expect(Object.keys((await readConfineStore()).servers)).toEqual([]);
+  });
 });
 
 describe("runEnableCommand --confine (end-to-end)", () => {
@@ -108,6 +130,12 @@ describe("runEnableCommand --confine (end-to-end)", () => {
     expect(entry.args?.slice(-2)).toEqual(["node", "x.js"]);
     const store = await readConfineStore();
     expect(store.servers.probe?.tier).toBe("standard");
+    // LOAD-BEARING: the embedded hash VALUE must equal the stored profile's hash
+    // (that binding is what lets spawn-time verify detect a tampered store). A
+    // wrong/stale hash would pass the flag-present check but break enforcement.
+    const args = entry.args ?? [];
+    const embedded = args[args.indexOf("--confine-profile-hash") + 1];
+    expect(embedded).toBe(hashConfineProfile(store.servers.probe!));
     // Backend forced unavailable → the enroll notice warns it runs unconfined.
     expect(io.text()).toContain("enrolled in OS confinement");
     expect(io.text()).toContain("UNCONFINED");
@@ -120,6 +148,26 @@ describe("runEnableCommand --confine (end-to-end)", () => {
     // No confine store created.
     const store = await readConfineStore();
     expect(Object.keys(store.servers)).toEqual([]);
+  });
+
+  test("aborts (no wrap, store left untouched) when the confine store is corrupt/tampered", async () => {
+    writeCursor({ probe: { command: "node", args: ["x.js"] } });
+    // Structurally-invalid store, no sidecar → integrity skipped → Zod shape error
+    // (which readConfineStore throws). It must be aborted-on, never clobbered.
+    const mcpmDir = path.join(tmpHome, ".mcpm");
+    mkdirSync(mcpmDir, { recursive: true });
+    const storePath = path.join(mcpmDir, "guard-confine.yaml");
+    const corrupt = 'format_version: 1\nservers: "not-an-object"\n';
+    writeFileSync(storePath, corrupt, { mode: 0o600 });
+    const io = collect();
+
+    await runEnableCommand({ confine: "standard", write: io.write });
+
+    expect(io.text()).toContain("OS confinement aborted");
+    // Not wrapped (aborted before the orchestrator ran)…
+    expect(readCursor().probe.args ?? []).not.toContain("--confine-profile-hash");
+    // …and the corrupt store was left byte-for-byte intact (not clobbered).
+    expect(readFileSync(storePath, "utf-8")).toBe(corrupt);
   });
 });
 
