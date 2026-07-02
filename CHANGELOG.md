@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## [Unreleased]
+## [0.16.0] - 2026-07-02
 
 An enforcement release: `mcpm guard --confine` wraps a relayed stdio server in an OS sandbox — the guard's first *containment* primitive, complementing every prior *detection* feature.
 
@@ -15,9 +15,14 @@ An enforcement release: `mcpm guard --confine` wraps a relayed stdio server in a
 
 - **`--orig-hash` is now verified at spawn time, not only on disable/unwrap (#108)** — the wrap marker's `--orig-hash` (the original server command binding) is checked when the relay spawns the child. **Phase 1 = WARN-once on mismatch** — it does *not* fail closed yet (a future release promotes it after zero-mismatch dogfood evidence); an *absent* hash (legacy pre-#29 wrap) is skipped, not failed. Emits an `orig-hash-mismatch` event (category `RELAY`). (#108)
 
+### Fixed
+
+- **`writePins` no longer leaves a 0-byte `pins.json` on an interrupted write** — the drift-store writer touched `pins.json` empty (`flag: wx`) *before* locking and writing content; a crash/kill — or a concurrent, unlocked `readPins` — in that window left an empty file, so the next launch parsed `""` → `PINS-READ-ERROR` and failed the guard **closed** (bricked until the file was manually removed). It now touches with valid serialized content, so an interrupted write stays readable (an absent sidecar is the first-run path). Pre-existing; surfaced by the new confine dogfood, with a regression test that reproduces the crash window.
+
 ### Internal
 
 - **`store-integrity.ts` extraction (refactor, #109)** — `fileSha` / `assertNotSymlink` / `writeFileAtomic` were extracted from `pins.ts` and `policy.ts` into one shared `src/guard/store-integrity.ts` (the confine store reuses it). Behavior is identical; the symlink-refusal message now names the store (`pins` / `policy` / `confine`). (#109)
+- **Hermetic macOS confine dogfood (`pnpm dogfood:confine`)** — an end-to-end pre-release gate that drives the real `enable → guard run → sandbox-exec → relay` chain in a throwaway `$HOME` (canonicalized so Seatbelt `subpath` rules match), with a **positive control**: a secret that reads fine unconfined must be denied (`EPERM`, not `ENOENT`) inside the sandbox. It also asserts stdio integrity through the relay, tamper-fails-closed via the CONFINE gate, and a `CONFINE` event is logged. macOS-only (SKIPs elsewhere); covers the enforcement path the ubuntu-only CI can't exercise. Added to the launch checklist.
 
 ## [0.15.0] - 2026-06-22
 
