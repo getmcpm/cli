@@ -123,8 +123,16 @@ The wrap transformation in JSON:
 
 A pre-batch `.bak` snapshot is written per touched client (`<config>.guard-enable.bak`) so the whole operation is recoverable even if a single per-server write fails mid-batch.
 
+The `--orig-hash` token is now verified at spawn time too (previously it was checked only on `disable`/unwrap). This is **Phase 1: warn-once** on mismatch — it does *not* fail closed yet (a future release promotes it after zero-mismatch dogfood evidence); an absent hash (a legacy pre-`--orig-hash` wrap) is skipped, not failed.
+
 ### `mcpm guard disable [--client <id>] [--server <name>]`
 Reverses the wrap by parsing the wrap marker out of the args and reconstructing the original entry. Falls back to the `.bak` if the wrap pattern is malformed (e.g. user hand-edited the config since enable).
+
+### `mcpm guard enable [...] --confine [off]`
+Opt-in OS sandbox for the servers being wrapped (macOS only, unreleased — next minor). See **OS confinement (`--confine`)** below. The bare flag enrolls every unwrapped stdio server it wraps at the "standard" tier; `--confine off` is the same as omitting the flag (no enrollment). Respects `--client` / `--server`.
+
+### `mcpm guard doctor-confine [--json]`
+Read-only. Reports OS-backend availability (platform + presence of `/usr/bin/sandbox-exec`) and the enrolled servers (tier / net / require_confine). Points to `mcpm guard status` for per-client wrap state. See **OS confinement (`--confine`)** below.
 
 ### `mcpm guard status`
 Prints what's wrapped and the pin state per server (unprotected / first-session-pin pending / fully protected).
@@ -174,6 +182,60 @@ The relay refuses to use either file if its sidecar doesn't match — this is th
 
 ---
 
+## OS confinement (`--confine`)
+
+> Status: shipped to `main` across PRs #108–#111, **unreleased (next minor)**. **macOS only in v1.** Opt-in — without `--confine`, `enable`/`disable` behave exactly as before.
+
+Every guard feature above is **detection**: the relay reasons about the JSON-RPC bytes flowing through it and warns or blocks. But the relay is a stdio MITM — it can inspect every frame yet cannot *contain* the child MCP server it spawns. A server that simply *decides* to read `~/.ssh` or write `~/Library/LaunchAgents` never expresses that intent through inspectable traffic. `--confine` is the first **enforcement** primitive: it wraps the relayed child in an OS sandbox so it physically cannot read secret files or persist, regardless of the JSON-RPC it emits. Detection and confinement are complementary — watch vs contain.
+
+### The standard tier
+
+On macOS, confinement is applied via Seatbelt (`sandbox-exec`). The one shipped tier is "standard":
+
+- **READ — allow-all except a secret-dir denylist.** Reads are permitted everywhere *except* a curated set of credential/config locations: SSH / AWS / gcloud / gh / GnuPG keys, `~/.npmrc` / `~/.docker` / `~/.kube` / `~/.netrc` / `~/.git-credentials` and similar credential files, macOS Keychains, browser cookie stores, the MCP client config dirs, and mcpm's own `~/.mcpm` store.
+- **WRITE — deny-all-of-`$HOME` except caches + scratch.** A single rule blocks the whole persistence class (`~/.zshrc`, `~/Library/LaunchAgents`, PATH-shadowing `~/bin`, git hooks). Writes are allowed only to caches (`~/.npm`, `~/.cache`, `~/Library/Caches`), the per-server scratch dir, system temp (`/tmp`, `/private/tmp`, `/var/folders`, `/var/tmp`), and `/dev`.
+- **NET — launcher-classified.** Launchers that fetch at startup (npx / uvx / pip / pipx / docker / npm / pnpm / yarn / bun) get network "all"; everything else gets egress-deny "none".
+- The server's own scratch dir (`~/.mcpm/sandbox/<server>`) is both readable and writable.
+
+### Enabling and disabling
+
+```
+mcpm guard enable --confine                 # enroll every wrapped stdio server, standard tier
+mcpm guard enable --confine --server foo    # scope to one server
+mcpm guard enable --confine off             # same as omitting: no enrollment
+```
+
+`--confine` enrolls only **unwrapped stdio** servers it wraps — url/HTTP servers and already-wrapped servers are skipped. To **unconfine**, run the existing `mcpm guard disable` (optionally `--server <name>`): it removes the wrap marker, which removes confinement. A leftover profile left behind in the store is harmless.
+
+### Inspecting
+
+`mcpm guard doctor-confine [--json]` is read-only: it reports OS-backend availability (platform + `/usr/bin/sandbox-exec` presence) and the enrolled servers with their tier / net / require_confine flags. For per-client wrap state, use `mcpm guard status`.
+
+### Hybrid posture (what happens without a backend)
+
+Confinement never fails silently. The store (`~/.mcpm/guard-confine.yaml`) is the source of truth for "is server X enrolled".
+
+- **Confine** when the server is enrolled + the profile hash matches + an OS backend is available.
+- **Run unconfined with a loud notice** when there is no OS backend (Linux / CI / Windows) or the marker/profile is missing on a **non-required** server. Never silent — backend availability is pre-checked, never inferred from a spawn error.
+- **Fail closed (refuse to start, exit 1)** at spawn time on: a profile-hash mismatch (tamper), a malformed hash, a stripped marker on a `require_confine` server, or a wiped store on a `require_confine` server.
+
+### Marker tokens
+
+The wrapped config entry carries two new tokens **before** the `--` separator: `--confine-profile-hash <sha256>` (a content hash of the rendered profile, binding the marker to the stored profile) and `--confine-required` (a bare flag, present iff the server is `require_confine`, replicated into the IDE config so it survives a wiped store). Both are **neutral** to `--orig-hash` — excluded from its hash input, and the `--` position is unchanged — so unwrap/disable still work.
+
+### Store
+
+`~/.mcpm/guard-confine.yaml` (+ an unkeyed `.integrity` sidecar) is the enrollment source of truth. Like `pins.json`, it **fails closed** on integrity / shape / format-version mismatch. The sidecar is tamper-*evidence*, not authenticity (issue #19) — the same honest labeling as the pins and policy sidecars.
+
+### Caveats
+
+- **macOS only.** Linux `bwrap` support and a STRICT tier (read-allowlist / scratch-only-write / host-granular net) are deferred.
+- The macOS `sandbox-exec` path is **not exercised in CI** (ubuntu-only); it is covered by mocked arg-vector unit tests plus local darwin verification — the same gap the os-keychain darwin shell-outs already carry.
+- Net is launcher-permissive, so confinement does **not** stop network exfil in general, and it does **not** defend against a same-user attacker who can rewrite both the IDE config *and* `~/.mcpm`.
+- **Deferred fast-follow:** the per-server `mcpm guard confine <server>` command (`--off` / `--show` / `--require` / `--allow-read/-write/-net`) is not shipped. Per-server confine is achievable today via `enable --confine --server X` + `disable --server X`.
+
+---
+
 ## Files mcpm-guard touches
 
 | Path | Purpose | Format |
@@ -182,10 +244,14 @@ The relay refuses to use either file if its sidecar doesn't match — this is th
 | `~/.mcpm/pins.json.integrity` | SHA-256 of `pins.json` content | One-line sha256 sidecar |
 | `~/.mcpm/guard-policy.yaml` | User overrides + pause state | YAML, see `docs/POLICY.md` |
 | `~/.mcpm/guard-policy.yaml.integrity` | SHA-256 of `guard-policy.yaml` | One-line sha256 sidecar |
+| `~/.mcpm/guard-confine.yaml` | OS-confinement enrollment (tier / net / require_confine per server) | YAML, fails closed like pins.json |
+| `~/.mcpm/guard-confine.yaml.integrity` | SHA-256 of `guard-confine.yaml` | One-line sha256 sidecar |
 | `~/.mcpm/guard-events.jsonl` | Append-only event log | JSON-Lines |
 | `<client config>.guard-{enable,disable}.bak` | Pre-batch backup per touched client | Original JSON content |
 
 All files are written `0o600`; the parent dir is `0o700`.
+
+Confinement adds events (not signatures — the catalog count is unchanged) to `guard-events.jsonl` under category `CONFINE`: `confine-applied`, `confine-hash-mismatch`, `confine-marker-stripped`, `confine-profile-missing`, `confine-backend-missing`, `confine-marker-malformed`; plus `orig-hash-mismatch` (category `RELAY`, from the spawn-time `--orig-hash` verify).
 
 ---
 

@@ -254,6 +254,10 @@ The `demo` command boots an in-process synthetic malicious server that returns a
 
 Detection is regex + structural; NFKC + zero-width-char stripping defeats the common Unicode evasions, and a separate hidden-character *presence* check flags evasion carriers before they're normalized away. See `mcpm guard list-signatures` for the current shipped set.
 
+### Confinement (opt-in enforcement)
+
+Everything above is *detection* — the relay reasons about the JSON-RPC bytes and warns or blocks. But a server that decides to read `~/.ssh` or write a `~/Library/LaunchAgents` persistence hook never expresses that through inspectable traffic. `mcpm guard enable --confine` complements detection with *enforcement*: it wraps each relayed stdio server in an OS sandbox that physically denies reads of a secret-file denylist and writes outside caches/scratch, so the server can't exfil credentials or persist regardless of the JSON-RPC it emits. `mcpm guard doctor-confine` reports backend availability and which servers are enrolled. **macOS only** for now (Seatbelt/`sandbox-exec`); on other platforms it warns and runs unconfined rather than giving a false sense of protection. See `docs/GUARD.md` for the tier details and caveats.
+
 ### Day-1 commands
 
 ```bash
@@ -262,6 +266,8 @@ mcpm guard disable [--client <name>] [--server <name>]               # unwrap
 mcpm guard status                                                    # what's wrapped + pin state
 mcpm guard demo                                                      # synthetic attack-block demo
 mcpm guard list-signatures [--json]                                  # show shipped signatures
+mcpm guard enable --confine                                          # also OS-sandbox wrapped stdio servers (macOS)
+mcpm guard doctor-confine [--json]                                   # confine backend availability + enrolled servers
 ```
 
 ### When a block fires

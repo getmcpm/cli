@@ -77,7 +77,15 @@ mcpm/
 │   │   ├── run-inner.ts            — `mcpm guard run --inner` entry, wires the relay
 │   │   ├── event-log.ts            — append-only JSONL writer for guard-events.jsonl
 │   │   ├── sanitize.ts             — shared ANSI/control-char terminal sanitizer
+│   │   ├── store-integrity.ts      — shared fileSha / assertNotSymlink / writeFileAtomic (pins + policy + confine)
 │   │   ├── cli.ts                  — Commander glue for enable/disable/status/cleanup
+│   │   ├── confine/                 — OS confinement (F1, macOS-only, opt-in via --confine)
+│   │   │   ├── profile.ts          — standard-tier read/write/net rule set
+│   │   │   ├── derive.ts           — render a Seatbelt profile for a server (+ content hash)
+│   │   │   ├── backend-macos.ts    — sandbox-exec backend + availability pre-check
+│   │   │   ├── apply.ts            — wrap the child spawn argv with the backend
+│   │   │   ├── store.ts            — ~/.mcpm/guard-confine.yaml enrollment store (+ integrity)
+│   │   │   └── decide.ts           — spawn-time confine/fail-closed/hybrid-warn decision
 │   │   └── demo/                   — synthetic echo-bot + runner for `mcpm guard demo`
 │   └── utils/
 │       ├── output.ts               — leveled output helpers
@@ -104,10 +112,10 @@ mcpm/
 
 | Module | Purpose |
 |---|---|
-| `commands/` | 24 CLI commands (incl. `guard` subcommand group with 12 subcommands and `publish` with 3 subcommands), each a self-contained Commander action |
+| `commands/` | 24 CLI commands (incl. `guard` subcommand group with 13 subcommands and `publish` with 3 subcommands), each a self-contained Commander action |
 | `server/` | MCP server (stdio): 9 tools wrapping CLI logic via injectable handlers |
 | `stack/` | Stack file schemas (mcpm.yaml/mcpm-lock.yaml), semver resolution, trust policy, .env parsing |
-| `guard/` | **v0.5.0 runtime defense.** Stdio MITM relay, OWASP MCP Top 10 pattern engine, schema pinning + drift detection, policy file editor, integrity sidecars, event log. See `docs/GUARD.md`. |
+| `guard/` | **v0.5.0 runtime defense.** Stdio MITM relay, OWASP MCP Top 10 pattern engine, schema pinning + drift detection, policy file editor, integrity sidecars, event log. Plus `guard/confine/` (F1, unreleased/next minor): the first **enforcement** primitive — the relay optionally wraps the child spawn in an OS sandbox (macOS `sandbox-exec`) so a server physically can't read secret files or persist, complementing byte-level detection. See `docs/GUARD.md`. |
 | `registry/` | Typed HTTP client for the official MCP Registry API (v0.1 at registry.modelcontextprotocol.io) |
 | `config/` | OS-aware config paths, client detection, and per-client config adapters with atomic writes |
 | `scanner/` | Trust scoring engine: tier 1 (metadata), tier 2 (static pattern analysis), composite score |
@@ -142,6 +150,8 @@ mcpm/
 | `mcpm secrets` | Manage encrypted credentials for MCP servers |
 | `mcpm publish` | Publish an MCP server to the official registry |
 | `mcpm guard enable / disable / status` | Wrap detected client configs with the inspection relay; restore; report state |
+| `mcpm guard enable --confine` | Opt-in: also enroll unwrapped stdio servers into an OS sandbox (macOS-only; `--confine off` disables) |
+| `mcpm guard doctor-confine` | Read-only: report OS-backend availability + enrolled servers (tier / net / require_confine) |
 | `mcpm guard demo` | Synthetic prompt-injection scenario (visible block in terminal) |
 | `mcpm guard accept-drift / mute / unmute / pause / cleanup` | Runtime tuning + escape hatches |
 | `mcpm guard list-signatures / reset-integrity` | Catalog inspection + integrity sidecar regeneration |
@@ -280,6 +290,60 @@ end
 Note over IDE,EventLog: Event log entry (if findings):<br/>{ts, server_name, direction,<br/>action, findings:[{signature_id,<br/>category, severity, target,<br/>matched_text_excerpt, remediation}]}
 ```
 
+### OS confinement (F1 — unreleased / next minor)
+
+Everything above is **detection**: the relay reasons about JSON-RPC bytes and warns
+or blocks. It cannot *contain* the child it spawns — a server that decides to read
+`~/.ssh` or write `~/Library/LaunchAgents` never expresses that intent through
+inspectable traffic. `--confine` is the first **enforcement** primitive: it wraps the
+relayed child in an OS sandbox so it physically cannot read secret files or persist,
+regardless of the JSON-RPC it emits. Detection (watch) and confinement (contain) are
+complementary. **macOS-only in v1** (Linux `bwrap` deferred); **opt-in** — without
+`--confine`, enable/disable behavior is unchanged.
+
+```
+  mcpm guard enable --confine
+       │  enrolls each UNWRAPPED stdio server it wraps
+       ▼
+  ~/.mcpm/guard-confine.yaml (+ .integrity)   ← source of truth for "server X is confined"
+       │
+       │  wrap marker gains two neutral tokens before `--`:
+       │  --confine-profile-hash <sha256>  (binds marker ↔ stored profile)
+       │  --confine-required               (bare flag, replicated into IDE config)
+       ▼
+  mcpm guard run --inner  (spawn-time decision, src/guard/confine/decide.ts)
+       │
+       ├── CONFINE  — enrolled + hash matches + backend available
+       │     └─ apply.ts wraps the child argv with backend-macos.ts (sandbox-exec)
+       │        using the derived Seatbelt profile (derive.ts + profile.ts)
+       │
+       ├── FAIL CLOSED (refuse to start, exit 1) — hash mismatch / malformed hash /
+       │     stripped marker or wiped store on a require_confine server
+       │
+       └── HYBRID (WARN loudly + run UNCONFINED, never silent) — no OS backend
+             (Linux/CI/Windows) or missing marker/profile on a NON-required server
+```
+
+Standard tier (macOS Seatbelt): **read** allow-all *except* a secret-dir denylist
+(`~/.ssh`, `~/.aws`, `~/.gnupg`, cloud/gh/npm/docker/kube creds, keychains, browser
+cookie stores, MCP client config dirs, and mcpm's own `~/.mcpm`); **write** deny all of
+`$HOME` *except* caches, the per-server scratch dir, and system temp/`/dev` — one rule
+that blocks the whole persistence class (`~/.zshrc`, LaunchAgents, PATH-shadowing
+`~/bin`, git hooks); **net** launcher-classified (npx/uvx/pip/docker/… ⇒ network "all",
+everything else ⇒ egress-deny). The confine store reuses the shared
+`store-integrity.ts` extracted from `pins.ts` + `policy.ts` and fails closed on
+integrity/shape/format-version mismatch. CONFINE events (`confine-applied`,
+`confine-hash-mismatch`, `confine-marker-stripped`, …) append to
+`guard-events.jsonl`; the OWASP signature catalog count is unchanged.
+
+Honest caveats: the sandbox-exec path is not exercised in ubuntu-only CI (mocked
+arg-vector unit tests + local darwin verification, same gap the os-keychain shell-outs
+carry); net is launcher-permissive (do not read this as general exfil prevention); it
+does not defend against a same-user attacker who can rewrite **both** the IDE config
+and `~/.mcpm`. A strict tier (read-allowlist / scratch-only-write / host-granular net),
+Linux `bwrap`, and the per-server `guard confine <server>` command are deferred (per-server
+confine is achievable today via `enable --confine --server X` + `disable --server X`).
+
 ## Configuration
 
 ### Local state directory
@@ -293,6 +357,9 @@ Note over IDE,EventLog: Event log entry (if findings):<br/>{ts, server_name, dir
 ├── pins.json.integrity           — sha256 sidecar over pins.json
 ├── guard-policy.yaml             — user overrides (mute/pause)
 ├── guard-policy.yaml.integrity   — sha256 sidecar over guard-policy.yaml
+├── guard-confine.yaml            — confine enrollment store (F1; source of truth for "server X is confined")
+├── guard-confine.yaml.integrity  — sha256 sidecar over guard-confine.yaml (fails closed on mismatch)
+├── sandbox/<server>/             — per-server confine scratch dir (read+write inside the sandbox)
 └── guard-events.jsonl            — append-only event log (parse with jq)
 ```
 
