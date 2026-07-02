@@ -114,6 +114,39 @@ describe("CLI smoke — no-op paths must not claim false success", () => {
   });
 });
 
+describe("CLI smoke — CI-gate exit codes (docs/CONTRACTS.md)", () => {
+  it("sync --check exits 2 when clients disagree (the drift signal CI consumes)", () => {
+    withHome((home) => {
+      mkdirSync(path.join(home, ".cursor"), { recursive: true });
+      mkdirSync(path.join(home, ".codeium", "windsurf"), { recursive: true });
+      // cursor has `foo`; windsurf does not -> drift.
+      writeFileSync(
+        path.join(home, ".cursor", "mcp.json"),
+        '{"mcpServers":{"foo":{"command":"echo","args":["a"]}}}',
+      );
+      writeFileSync(path.join(home, ".codeium", "windsurf", "mcp_config.json"), '{"mcpServers":{}}');
+      const r = run(["sync", "--check"], home);
+      expect(r.code).toBe(2);
+      expect(r.out).toMatch(/foo/);
+    });
+  });
+
+  it("sync --check exits 0 with no client configs (no false drift)", () => {
+    withHome((home) => {
+      const r = run(["sync", "--check"], home);
+      expect(r.code).toBe(0);
+    });
+  });
+
+  it("up --frozen exits 1 when the stack file is missing (fail-closed, not a false pass)", () => {
+    withHome((home) => {
+      const r = run(["up", "--frozen"], home);
+      expect(r.code).toBe(1);
+      expect(r.out).toMatch(/stack file not found/i);
+    });
+  });
+});
+
 describe("CLI smoke — generated completions are valid shell", () => {
   it("the bash completion script passes `bash -n` (syntax check)", () => {
     withHome((home) => {

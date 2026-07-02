@@ -2,6 +2,26 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased]
+
+### Added
+
+- **`docs/CONTRACTS.md` — stability contracts** — documents the exit codes CI can
+  depend on (notably `sync --check` → `2` on drift, `up --frozen` fail-closed → `1`),
+  the versioned `mcpm.yaml` / `mcpm-lock.yaml` formats, which `--json` shapes are
+  stable, and the semver-exempt `~/.mcpm` internals. No behaviour change — it names
+  guarantees that already hold.
+
+### Internal
+
+- **macOS CI leg for `--confine`** — CI now runs the hermetic `pnpm dogfood:confine`
+  on a `macos-latest` runner, so the flagship OS-sandbox enforcement path is
+  CI-verified rather than only verified locally (the ubuntu matrix can't exercise
+  Seatbelt / `sandbox-exec`).
+- **CI-gate exit-code smoke tests** — added end-to-end assertions for the contract
+  above (`sync --check` drift = `2` with a positive no-drift control; `up --frozen`
+  missing-stack = `1`).
+
 ## [0.16.0] - 2026-07-02
 
 An enforcement release: `mcpm guard --confine` wraps a relayed stdio server in an OS sandbox — the guard's first *containment* primitive, complementing every prior *detection* feature.
