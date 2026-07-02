@@ -401,6 +401,40 @@ describe("readPins / writePins", () => {
     expect(pins.servers).toEqual({});
   });
 
+  // Regression (dogfood 2026-07-02): writePins used to touch pins.json to 0
+  // bytes before locking. A crash/kill — or a concurrent, unlocked readPins —
+  // in the window between that touch and the atomic finalize write left an
+  // empty file, so the next launch did JSON.parse("") → PINS-READ-ERROR and
+  // failed the guard closed (bricked until the user manually rm'd pins.json).
+  // The pre-touch must write VALID content so an interrupted write is readable.
+  test("interrupted writePins leaves a VALID pins.json, not a 0-byte brick", async () => {
+    const dir = path.join(tmpHome, ".mcpm");
+    mkdirSync(dir, { recursive: true, mode: 0o700 });
+    const filePath = path.join(dir, "pins.json");
+    // Hold proper-lockfile's lock dir (`${file}.lock`) so writePins throws at
+    // lockfile.lock() — i.e. AFTER the initial touch, BEFORE the finalize write.
+    mkdirSync(`${filePath}.lock`);
+
+    let pins = emptyPinsFile();
+    pins = upsertToolPin(pins, "fs", "read", {
+      current_hash: "sha256:abc",
+      previous_hashes: [],
+      captured_at: "2026-07-02T00:00:00Z",
+      captured_via: "install",
+      signature_list_version: "v0.5.0",
+    });
+    await expect(writePins(pins)).rejects.toThrow();
+
+    // The file left by the pre-touch must be valid JSON, never 0 bytes.
+    const bytes = readFileSync(filePath, "utf-8");
+    expect(bytes.length).toBeGreaterThan(0);
+    expect(() => JSON.parse(bytes)).not.toThrow();
+
+    // The next launch must NOT fail closed — no sidecar yet ⇒ first-run path.
+    rmSync(`${filePath}.lock`, { recursive: true, force: true });
+    await expect(readPins()).resolves.toBeDefined();
+  });
+
   test("resetIntegrity refreshes the sidecar after manual edit", async () => {
     await writePins(emptyPinsFile());
     const filePath = path.join(tmpHome, ".mcpm", "pins.json");

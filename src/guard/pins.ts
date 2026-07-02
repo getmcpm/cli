@@ -359,10 +359,15 @@ export async function writePins(pins: PinsFile): Promise<void> {
   const sidecarPath = await integrityPath();
   const serialized = `${JSON.stringify(pins, null, 2)}\n`;
 
-  // Touch the file first if it doesn't exist — proper-lockfile requires
-  // the target to exist before locking.
+  // Touch the file first if it doesn't exist — proper-lockfile requires the
+  // target to exist before locking. Write VALID pins content, NOT "": a crash
+  // (or a concurrent, unlocked readPins) between this touch and the atomic
+  // write below must never observe a 0-byte pins.json — that throws
+  // PINS-READ-ERROR and fails the guard closed / bricks the next launch.
+  // readPins treats an absent sidecar as first-run, so this sidecar-less
+  // intermediate parses cleanly; the lock+atomic writes below finalize it.
   try {
-    await writeFile(filePath, "", { flag: "wx", mode: 0o600 });
+    await writeFile(filePath, serialized, { flag: "wx", mode: 0o600 });
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code !== "EEXIST") throw err;
   }
