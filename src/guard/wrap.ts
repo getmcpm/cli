@@ -46,6 +46,13 @@ export const WRAP_ARG_SEPARATOR = "--";
 export const WRAP_SERVER_NAME_FLAG = "--server-name";
 export const WRAP_DECLARED_ENV_FLAG = "--declared-env";
 export const WRAP_ORIG_HASH_FLAG = "--orig-hash";
+// F1 confine marker tokens. `--confine-profile-hash <hex>` binds the entry to a
+// stored ConfineProfile (spawn-time content-hash verify). `--confine-required` is
+// a BARE flag replicating require_confine into the IDE config so a required server
+// still fails closed even if ~/.mcpm/guard-confine.yaml is wiped. Both sit BEFORE
+// `--` and are excluded from hashOriginalEntry, so `--orig-hash` is unaffected.
+export const WRAP_CONFINE_HASH_FLAG = "--confine-profile-hash";
+export const WRAP_CONFINE_REQUIRED_FLAG = "--confine-required";
 
 /**
  * Resolve the mcpm binary path used at wrap time. Falls back to "mcpm"
@@ -111,7 +118,7 @@ function buildWrappedArgs(
   origCommand: string,
   origArgs: readonly string[],
   envKeys: readonly string[],
-  options: { scriptPath?: string } = {},
+  options: { scriptPath?: string; confine?: ConfineMarker } = {},
 ): string[] {
   const out: string[] = [];
   if (options.scriptPath) out.push(options.scriptPath);
@@ -119,19 +126,41 @@ function buildWrappedArgs(
   if (envKeys.length > 0) {
     out.push(WRAP_DECLARED_ENV_FLAG, envKeys.join(","));
   }
-  out.push(
-    WRAP_ORIG_HASH_FLAG,
-    hashOriginalEntry(origCommand, origArgs, envKeys),
-    WRAP_ARG_SEPARATOR,
-    origCommand,
-    ...origArgs,
-  );
+  out.push(WRAP_ORIG_HASH_FLAG, hashOriginalEntry(origCommand, origArgs, envKeys));
+  // F1: confine tokens go AFTER --orig-hash and BEFORE `--`. They are NOT part of
+  // hashOriginalEntry's inputs, and origStartIdx still points past `--`, so the
+  // orig-hash check + unwrap reconstruction are unaffected.
+  if (options.confine) {
+    // Refuse to embed a malformed hash: parseMarker rejects a non-64-hex value at
+    // read time (→ malformed marker), so writing one would silently degrade the
+    // server on the next spawn. Fail loudly at enable time instead.
+    if (!/^[0-9a-f]{64}$/.test(options.confine.profileHash)) {
+      throw new Error(
+        `wrapEntry: confine profileHash must be 64 lowercase hex chars, got ` +
+          `${JSON.stringify(options.confine.profileHash)}`,
+      );
+    }
+    out.push(WRAP_CONFINE_HASH_FLAG, options.confine.profileHash);
+    if (options.confine.required) out.push(WRAP_CONFINE_REQUIRED_FLAG);
+  }
+  out.push(WRAP_ARG_SEPARATOR, origCommand, ...origArgs);
   return out;
 }
 
 export interface WrapContext {
   readonly mcpmBinary: string;
   readonly scriptPath?: string;
+}
+
+/**
+ * F1: per-server confine info embedded into the wrap marker. Passed to wrapEntry
+ * (not folded into the shared WrapContext, which carries no per-server data).
+ */
+export interface ConfineMarker {
+  /** SHA-256 content hash of the stored ConfineProfile (hashConfineProfile). */
+  readonly profileHash: string;
+  /** Whether to emit the bare --confine-required flag (require_confine). */
+  readonly required: boolean;
 }
 
 export function defaultWrapContext(argv: readonly string[] = process.argv): WrapContext {
@@ -152,6 +181,7 @@ export function wrapEntry(
   serverName: string,
   entry: McpServerEntry,
   ctx: WrapContext,
+  confine?: ConfineMarker,
 ): McpServerEntry {
   if (!entry.command) {
     throw new Error(
@@ -163,7 +193,7 @@ export function wrapEntry(
     entry.command,
     entry.args ?? [],
     declaredEnvKeys(entry.env),
-    { scriptPath: ctx.scriptPath },
+    { scriptPath: ctx.scriptPath, confine },
   );
   return {
     command: ctx.mcpmBinary,
@@ -206,6 +236,10 @@ interface ParsedMarker {
   readonly serverName: string;
   readonly declaredEnvKeys: string[];
   readonly origHash: string | null;
+  /** F1: the --confine-profile-hash value (validated 64-hex), or null. */
+  readonly confineProfileHash: string | null;
+  /** F1: whether the bare --confine-required flag was present. */
+  readonly confineRequired: boolean;
   /** Index (into entry.args) of the element immediately after `--`. */
   readonly origStartIdx: number;
 }
@@ -223,6 +257,8 @@ function parseMarker(args: readonly string[]): ParsedMarker | null {
 
   let declaredEnvKeys: string[] = [];
   let origHash: string | null = null;
+  let confineProfileHash: string | null = null;
+  let confineRequired = false;
 
   // Optional named flags, in any order, until the `--` separator.
   while (i < args.length && args[i] !== WRAP_ARG_SEPARATOR) {
@@ -234,6 +270,17 @@ function parseMarker(args: readonly string[]): ParsedMarker | null {
     } else if (flag === WRAP_ORIG_HASH_FLAG && value !== undefined) {
       origHash = value;
       i += 2;
+    } else if (flag === WRAP_CONFINE_HASH_FLAG && value !== undefined) {
+      // Validate the shape here so a crafted `--confine-profile-hash --` can't
+      // pass `--` as the value and shift the real separator (a marker that would
+      // corrupt origStartIdx is treated as malformed).
+      if (!/^[0-9a-f]{64}$/.test(value)) return null;
+      confineProfileHash = value;
+      i += 2;
+    } else if (flag === WRAP_CONFINE_REQUIRED_FLAG) {
+      // Bare boolean flag — NO value; advance by ONE (not two).
+      confineRequired = true;
+      i += 1;
     } else {
       // Unknown token before the separator — marker is malformed.
       return null;
@@ -241,7 +288,14 @@ function parseMarker(args: readonly string[]): ParsedMarker | null {
   }
 
   if (args[i] !== WRAP_ARG_SEPARATOR) return null; // no separator found
-  return { serverName, declaredEnvKeys, origHash, origStartIdx: i + 1 };
+  return {
+    serverName,
+    declaredEnvKeys,
+    origHash,
+    confineProfileHash,
+    confineRequired,
+    origStartIdx: i + 1,
+  };
 }
 
 /**

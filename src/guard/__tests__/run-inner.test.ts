@@ -977,3 +977,196 @@ describe("inspectHandshakeDriftSync (H5)", () => {
     expect(muted.findings.map((f) => f.signature_id)).not.toContain("handshake-drift-capability");
   });
 });
+
+// ─────────────── F1: confine spawn decision integration ───────────────
+
+import { hashConfineProfile, type ConfineProfile } from "../confine/profile.js";
+
+describe("runInner — F1 confine spawn integration", () => {
+  let exitSpy: ReturnType<typeof vi.spyOn>;
+  let stderrSpy: ReturnType<typeof vi.spyOn>;
+  let startRelayCalls: Array<{ command: string; args: readonly string[] }>;
+  let mockProfile: ConfineProfile | null;
+  let mockBackendAvailable: boolean;
+  let mockLoadThrows: Error | null;
+  let mockWrapNull: boolean;
+
+  const P: ConfineProfile = {
+    tier: "standard",
+    require_confine: false,
+    read_deny: ["/home/u/.ssh"],
+    write_allow: ["/tmp"],
+    net: "none",
+    scratch_dir: "/home/u/.mcpm/sandbox/srv",
+    captured_at: "2026-01-01T00:00:00Z",
+  };
+
+  beforeEach(() => {
+    vi.resetModules();
+    startRelayCalls = [];
+    mockProfile = null;
+    mockBackendAvailable = true;
+    mockLoadThrows = null;
+    mockWrapNull = false;
+    exitSpy = vi.spyOn(process, "exit").mockImplementation(((_c?: number) => {
+      throw new Error("__EXIT__");
+    }) as never);
+    stderrSpy = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+    vi.doMock("../pins.js", async () => {
+      const actual = await vi.importActual<typeof import("../pins.js")>("../pins.js");
+      return { ...actual, readPins: async (): Promise<PinsFile> => actual.emptyPinsFile() };
+    });
+    vi.doMock("../policy.js", async () => {
+      const actual = await vi.importActual<typeof import("../policy.js")>("../policy.js");
+      return { ...actual, readPolicy: async () => ({}) };
+    });
+    vi.doMock("../relay.js", async () => {
+      const actual = await vi.importActual<typeof import("../relay.js")>("../relay.js");
+      return {
+        ...actual,
+        startRelay: (opts: { command: string; args: readonly string[] }) => {
+          startRelayCalls.push({ command: opts.command, args: opts.args });
+          return { child: {} as never, exit: Promise.resolve(0) };
+        },
+      };
+    });
+    vi.doMock("../confine/store.js", async () => {
+      const actual = await vi.importActual<typeof import("../confine/store.js")>("../confine/store.js");
+      return {
+        ...actual,
+        loadProfile: async () => {
+          if (mockLoadThrows) throw mockLoadThrows;
+          return mockProfile;
+        },
+      };
+    });
+    vi.doMock("../confine/apply.js", async () => {
+      const actual = await vi.importActual<typeof import("../confine/apply.js")>("../confine/apply.js");
+      return {
+        ...actual,
+        isConfineBackendAvailable: () => mockBackendAvailable,
+        wrapForConfinement: (_p: ConfineProfile, command: string, args: readonly string[]) =>
+          mockWrapNull || !mockBackendAvailable
+            ? null
+            : { command: "/usr/bin/sandbox-exec", args: ["-p", "<sbpl>", command, ...args] },
+      };
+    });
+  });
+
+  afterEach(() => {
+    exitSpy.mockRestore();
+    stderrSpy.mockRestore();
+    vi.resetModules();
+    vi.doUnmock("../pins.js");
+    vi.doUnmock("../policy.js");
+    vi.doUnmock("../relay.js");
+    vi.doUnmock("../confine/store.js");
+    vi.doUnmock("../confine/apply.js");
+  });
+
+  const argsFor = (over: Record<string, unknown> = {}) => ({
+    serverName: "srv",
+    command: "node",
+    args: ["server.js"],
+    declaredEnvKeys: [] as string[],
+    ...over,
+  });
+
+  test("enrolled + matching hash + backend up → child spawned under sandbox-exec", async () => {
+    mockProfile = P;
+    mockBackendAvailable = true;
+    const { runInner } = await import("../run-inner.js");
+    const code = await runInner(argsFor({ confineProfileHash: hashConfineProfile(P) }));
+    expect(code).toBe(0);
+    expect(startRelayCalls).toHaveLength(1);
+    expect(startRelayCalls[0]!.command).toBe("/usr/bin/sandbox-exec");
+    expect(startRelayCalls[0]!.args).toEqual(["-p", "<sbpl>", "node", "server.js"]);
+  });
+
+  test("required + backend DOWN → fail closed (exit 1, CONFINE-BLOCK), no relay", async () => {
+    mockProfile = { ...P, require_confine: true };
+    mockBackendAvailable = false;
+    const { runInner } = await import("../run-inner.js");
+    await expect(
+      runInner(argsFor({ confineProfileHash: hashConfineProfile({ ...P, require_confine: true }), confineRequired: true })),
+    ).rejects.toThrow("__EXIT__");
+    expect(exitSpy).toHaveBeenCalledWith(1);
+    expect(stderrSpy.mock.calls.flat().join("")).toContain("[mcpm-guard] CONFINE-BLOCK");
+    expect(startRelayCalls).toHaveLength(0);
+  });
+
+  test("not-required + backend DOWN → warn + run UNCONFINED (original command)", async () => {
+    mockProfile = P;
+    mockBackendAvailable = false;
+    const { runInner } = await import("../run-inner.js");
+    const code = await runInner(argsFor({ confineProfileHash: hashConfineProfile(P) }));
+    expect(code).toBe(0);
+    expect(startRelayCalls[0]!.command).toBe("node"); // NOT wrapped
+    expect(stderrSpy.mock.calls.flat().join("")).toContain("[mcpm-guard] CONFINE-UNCONFINED");
+  });
+
+  test("hash MISMATCH → fail closed regardless of backend", async () => {
+    mockProfile = P;
+    mockBackendAvailable = true;
+    const { runInner } = await import("../run-inner.js");
+    await expect(
+      runInner(argsFor({ confineProfileHash: "b".repeat(64) })),
+    ).rejects.toThrow("__EXIT__");
+    expect(exitSpy).toHaveBeenCalledWith(1);
+    expect(stderrSpy.mock.calls.flat().join("")).toContain("CONFINE-BLOCK");
+  });
+
+  test("not enrolled + no marker tokens → normal unconfined spawn, no CONFINE noise", async () => {
+    mockProfile = null;
+    const { runInner } = await import("../run-inner.js");
+    const code = await runInner(argsFor());
+    expect(code).toBe(0);
+    expect(startRelayCalls[0]!.command).toBe("node");
+    expect(stderrSpy.mock.calls.flat().join("")).not.toContain("CONFINE-");
+  });
+
+  test("store read error + required marker → fail closed (store wiped/tampered)", async () => {
+    mockLoadThrows = new Error("guard-confine.yaml integrity check failed");
+    const { runInner } = await import("../run-inner.js");
+    await expect(
+      runInner(argsFor({ confineRequired: true })),
+    ).rejects.toThrow("__EXIT__");
+    expect(exitSpy).toHaveBeenCalledWith(1);
+    const stderr = stderrSpy.mock.calls.flat().join("");
+    expect(stderr).toContain("CONFINE-STORE-ERROR");
+    expect(stderr).toContain("CONFINE-BLOCK");
+  });
+
+  test("malformed --confine-profile-hash in marker → fail closed (tamper), no relay", async () => {
+    mockProfile = P;
+    const { runInner } = await import("../run-inner.js");
+    await expect(runInner(argsFor({ confineProfileHash: "NOT-64-HEX" }))).rejects.toThrow("__EXIT__");
+    expect(exitSpy).toHaveBeenCalledWith(1);
+    expect(stderrSpy.mock.calls.flat().join("")).toContain("malformed --confine-profile-hash");
+    expect(startRelayCalls).toHaveLength(0);
+  });
+
+  test("backend vanishes at wrap (wrapForConfinement→null) + required → fail closed", async () => {
+    const req = { ...P, require_confine: true };
+    mockProfile = req;
+    mockBackendAvailable = true; // decision says confine...
+    mockWrapNull = true; // ...but the wrap returns null (backend flipped between checks)
+    const { runInner } = await import("../run-inner.js");
+    await expect(
+      runInner(argsFor({ confineProfileHash: hashConfineProfile(req), confineRequired: true })),
+    ).rejects.toThrow("__EXIT__");
+    expect(exitSpy).toHaveBeenCalledWith(1);
+    expect(startRelayCalls).toHaveLength(0);
+  });
+
+  test("backend vanishes at wrap + NOT required → warn + run unconfined (never silent)", async () => {
+    mockProfile = P;
+    mockBackendAvailable = true;
+    mockWrapNull = true;
+    const { runInner } = await import("../run-inner.js");
+    const code = await runInner(argsFor({ confineProfileHash: hashConfineProfile(P) }));
+    expect(code).toBe(0);
+    expect(startRelayCalls[0]!.command).toBe("node"); // unconfined, not sandbox-exec
+    expect(stderrSpy.mock.calls.flat().join("")).toContain("CONFINE-UNCONFINED");
+  });
+});

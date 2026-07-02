@@ -20,9 +20,13 @@ import { readPins, writePins } from "./pins.js";
 import { readPolicy, expireStale, PolicyIntegrityError, type GuardPolicyFile } from "./policy.js";
 import { appendEvent } from "./event-log.js";
 import { hashOriginalEntry } from "./wrap.js";
+import { loadProfile } from "./confine/store.js";
+import { isConfineBackendAvailable, wrapForConfinement } from "./confine/apply.js";
+import { decideConfine } from "./confine/decide.js";
+import type { ConfineProfile } from "./confine/profile.js";
 import { sanitizeForTerminal } from "./sanitize.js";
 import { resolveEnvPlaceholders } from "../store/keychain.js";
-import type { InspectFinding, InspectResult } from "./types.js";
+import type { InspectFinding, InspectResult, Severity } from "./types.js";
 
 export interface RunInnerArgs {
   readonly serverName: string;
@@ -42,6 +46,14 @@ export interface RunInnerArgs {
    * for pre-#29 legacy wraps, in which case the check is skipped (not failed).
    */
   readonly origHash?: string;
+  /**
+   * F1: the wrap marker's confine tokens. `confineProfileHash` is the content
+   * hash of the enrolled ConfineProfile (`--confine-profile-hash`);
+   * `confineRequired` mirrors `--confine-required`. Both drive the spawn confine
+   * decision table (see runInner). Absent for non-confined servers.
+   */
+  readonly confineProfileHash?: string;
+  readonly confineRequired?: boolean;
 }
 
 const SIGNATURE_LIST_VERSION = "owasp-mcp-top-10@v0.5.0";
@@ -230,6 +242,33 @@ function serverInitiatedContent(msg: JSONRPCMessage): unknown[] {
   if (typeof p.message === "string") out.push(p.message);
   if (p.requestedSchema !== null && typeof p.requestedSchema === "object") out.push(p.requestedSchema);
   return out;
+}
+
+/**
+ * Build a synthetic CONFINE-category GuardEvent for guard-events.jsonl (mirrors
+ * the H9 spawn-failure precedent: a valid InspectFinding shape, no type change).
+ */
+function confineGuardEvent(
+  event: string,
+  reason: string,
+  action: InspectResult["action"],
+  severity: Severity,
+): GuardEvent {
+  return {
+    ts: new Date().toISOString(),
+    direction: "parent->child",
+    action,
+    findings: [
+      {
+        signature_id: event,
+        category: "CONFINE",
+        severity,
+        target: "tool_response",
+        matched_text_excerpt: reason,
+        remediation: "See docs/GUARD.md — `mcpm guard confine`.",
+      },
+    ],
+  };
 }
 
 export async function runInner(parsed: RunInnerArgs): Promise<number> {
@@ -455,9 +494,127 @@ export async function runInner(parsed: RunInnerArgs): Promise<number> {
     return 1;
   }
 
+  // F1 — spawn-time confinement decision. The confine store is the source of
+  // truth for "is this server enrolled" (so a stripped marker on an enrolled
+  // server is still caught); the marker's --confine-profile-hash +
+  // --confine-required bind it. backendAvailable is PRE-CHECKED here (never via
+  // the child's 'error' event) so a missing sandbox binary can't misattribute
+  // H9's spawn-failure forensics to the wrapper instead of the real server.
+  //
+  // A confine hash flag that is present but NOT 64-hex is a tampered/corrupt
+  // marker (parseMarker rejects the same shape for unwrap). Treat it as tamper and
+  // fail closed with a dedicated event — do not let it fall through to a
+  // misleading "hash mismatch" verdict.
+  if (
+    parsed.confineProfileHash !== undefined &&
+    !/^[0-9a-f]{64}$/.test(parsed.confineProfileHash)
+  ) {
+    process.stderr.write(
+      `[mcpm-guard] CONFINE-BLOCK ${safeName}: malformed --confine-profile-hash in the wrap ` +
+        `marker (the client config entry may be tampered or corrupt). Refusing to start.\n`,
+    );
+    void appendEvent(
+      confineGuardEvent(
+        "confine-marker-malformed",
+        "malformed confine profile hash",
+        "block",
+        "critical",
+      ),
+      parsed.serverName,
+    );
+    process.exit(1);
+  }
+  let spawnCommand = parsed.command;
+  let spawnArgs: readonly string[] = parsed.args;
+  let confineProfile: ConfineProfile | null = null;
+  try {
+    confineProfile = await loadProfile(parsed.serverName);
+  } catch (err) {
+    // A corrupt/tampered store fails closed at the read. Surface it and treat the
+    // profile as absent, so the decision keys fail-closed on --confine-required.
+    process.stderr.write(
+      `[mcpm-guard] CONFINE-STORE-ERROR ${safeName}: ${(err as Error).message}\n`,
+    );
+  }
+  const confineDecision = decideConfine({
+    profile: confineProfile,
+    markerHash: parsed.confineProfileHash ?? null,
+    markerRequired: parsed.confineRequired === true,
+    backendAvailable: isConfineBackendAvailable(),
+  });
+  if (confineDecision.action === "fail-closed") {
+    process.stderr.write(
+      `[mcpm-guard] CONFINE-BLOCK ${safeName}: ${confineDecision.reason}. Refusing to start ` +
+        `(this server is marked require-confine). Run \`mcpm guard doctor-confine\` to check the ` +
+        `backend, and review ~/.mcpm/guard-events.jsonl.\n`,
+    );
+    if (confineDecision.event !== undefined) {
+      void appendEvent(
+        confineGuardEvent(confineDecision.event, confineDecision.reason, "block", "critical"),
+        parsed.serverName,
+      );
+    }
+    process.exit(1);
+  }
+  if (confineDecision.action === "confine" && confineProfile !== null) {
+    const wrapped = wrapForConfinement(confineProfile, parsed.command, parsed.args);
+    if (wrapped !== null) {
+      spawnCommand = wrapped.command;
+      spawnArgs = wrapped.args;
+      void appendEvent(
+        confineGuardEvent(
+          confineDecision.event ?? "confine-applied",
+          confineDecision.reason,
+          "pass",
+          "low",
+        ),
+        parsed.serverName,
+      );
+    } else {
+      // The backend was available when decideConfine ran but wrapForConfinement
+      // returned null (e.g. MCPM_DISABLE_CONFINE flipped, or the binary vanished,
+      // between the pre-check and here). NEVER silently run a to-be-confined server
+      // unconfined: fail closed if required, else warn loudly + log.
+      const required = parsed.confineRequired === true || confineProfile.require_confine;
+      if (required) {
+        process.stderr.write(
+          `[mcpm-guard] CONFINE-BLOCK ${safeName}: sandbox backend became unavailable at spawn ` +
+            `(require-confine). Refusing to start.\n`,
+        );
+        void appendEvent(
+          confineGuardEvent(
+            "confine-backend-missing",
+            "backend unavailable at wrap",
+            "block",
+            "critical",
+          ),
+          parsed.serverName,
+        );
+        process.exit(1);
+      }
+      process.stderr.write(
+        `[mcpm-guard] CONFINE-UNCONFINED ${safeName}: sandbox backend unavailable at wrap — ` +
+          `running unconfined.\n`,
+      );
+      void appendEvent(
+        confineGuardEvent("confine-backend-missing", "backend unavailable at wrap", "warn", "high"),
+        parsed.serverName,
+      );
+    }
+  } else if (confineDecision.event !== undefined) {
+    // Unconfined but noteworthy (stripped marker / missing profile / no backend).
+    process.stderr.write(
+      `[mcpm-guard] CONFINE-UNCONFINED ${safeName}: ${confineDecision.reason} — running unconfined.\n`,
+    );
+    void appendEvent(
+      confineGuardEvent(confineDecision.event, confineDecision.reason, "warn", "high"),
+      parsed.serverName,
+    );
+  }
+
   const handle = startRelay({
-    command: parsed.command,
-    args: parsed.args,
+    command: spawnCommand,
+    args: spawnArgs,
     env: childEnv,
     parentIn: process.stdin,
     parentOut: process.stdout,
