@@ -2,6 +2,23 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased]
+
+### Added
+
+- **CycloneDX SBOM attached to each release** — every GitHub release now carries a
+  machine-readable `mcpm.cdx.json` (CycloneDX) SBOM of mcpm's own dependency tree,
+  generated from the committed `pnpm-lock.yaml`. A concrete procurement/compliance
+  artifact for downstreams (EU CRA, SOC 2 evidence).
+
+### Internal
+
+- **Supply-chain evidence pack** — added `SECURITY.md` (vulnerability-disclosure
+  policy, scope, supported-versions, and the already-shipped npm provenance story),
+  `CONTRIBUTING.md`, and an [OpenSSF Scorecard](.github/workflows/scorecard.yml)
+  workflow that publishes a project-health/supply-chain posture score. No behaviour
+  change; these make mcpm's own security posture reviewable without asking.
+
 ## [0.16.0] - 2026-07-02
 
 An enforcement release: `mcpm guard --confine` wraps a relayed stdio server in an OS sandbox — the guard's first *containment* primitive, complementing every prior *detection* feature.
