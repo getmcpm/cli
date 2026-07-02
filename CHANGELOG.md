@@ -6,6 +6,10 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- **CycloneDX SBOM attached to each release** — every GitHub release now carries a
+  machine-readable `mcpm.cdx.json` (CycloneDX) SBOM of mcpm's own dependency tree,
+  generated from the committed `pnpm-lock.yaml`. A concrete procurement/compliance
+  artifact for downstreams (EU CRA, SOC 2 evidence).
 - **`docs/CONTRACTS.md` — stability contracts** — documents the exit codes CI can
   depend on (notably `sync --check` → `2` on drift, `up --frozen` fail-closed → `1`),
   the versioned `mcpm.yaml` / `mcpm-lock.yaml` formats, which `--json` shapes are
@@ -14,6 +18,11 @@ All notable changes to this project will be documented in this file.
 
 ### Internal
 
+- **Supply-chain evidence pack** — added `SECURITY.md` (vulnerability-disclosure
+  policy, scope, supported-versions, and the already-shipped npm provenance story),
+  `CONTRIBUTING.md`, and an [OpenSSF Scorecard](.github/workflows/scorecard.yml)
+  workflow that publishes a project-health/supply-chain posture score. No behaviour
+  change; these make mcpm's own security posture reviewable without asking.
 - **macOS CI leg for `--confine`** — CI now runs the hermetic `pnpm dogfood:confine`
   on a `macos-latest` runner, so the flagship OS-sandbox enforcement path is
   CI-verified rather than only verified locally (the ubuntu matrix can't exercise
