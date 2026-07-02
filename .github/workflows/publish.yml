@@ -38,7 +38,19 @@ jobs:
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
-      - name: Create GitHub Release
+      # SBOM generation runs AFTER publish and is best-effort, so a SBOM-tool
+      # hiccup can never block the npm release. If it fails, the release is still
+      # created below (just without the asset) and the workflow stays green.
+      - name: Generate CycloneDX SBOM
+        continue-on-error: true
+        uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0.24.0
+        with:
+          format: cyclonedx-json
+          output-file: mcpm.cdx.json
+          upload-artifact: false
+          upload-release-assets: false
+
+      - name: Create GitHub Release + attach SBOM
         env:
           GH_TOKEN: ${{ github.token }}
         # Idempotent: a release may already exist (e.g. created manually right
@@ -48,4 +60,10 @@ jobs:
             echo "Release $GITHUB_REF_NAME already exists — skipping creation."
           else
             gh release create "$GITHUB_REF_NAME" --generate-notes --title "$GITHUB_REF_NAME"
+          fi
+          # Best-effort: only attach the SBOM if generation above succeeded.
+          if [ -f mcpm.cdx.json ]; then
+            gh release upload "$GITHUB_REF_NAME" mcpm.cdx.json --clobber
+          else
+            echo "No SBOM produced — skipping asset upload."
           fi
