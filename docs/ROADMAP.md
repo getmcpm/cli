@@ -33,7 +33,17 @@
 >   a structural property-KEY walker blocks a `tools/list` when a tool declares an underscore-wrapped
 >   context-exfil sigil param like `_system_prompt_`; zero-FP deny tier, honest "tripwire not defense"
 >   scope). The bare-name SUSPECT tier + description-cross-check remain deferred.
-> - **Next up:** F7 (`sync --check`) · F10 (response DLP) · F8/F9/F1 (v1.0 bets).
+> - ✅ **F1 — `guard --confine` OS-native sandbox (standard tier)** — engine + enable-path shipped
+>   across PRs #108/#109/#110 (merged) + #111 (user-facing commands); **unreleased (next minor)**.
+>   macOS Seatbelt standard tier, wrap-marker tokens (`--confine-profile-hash` / `--confine-required`),
+>   a 9-row spawn-decision table, the `~/.mcpm/guard-confine.yaml` store, and `guard enable --confine`
+>   + `guard doctor-confine`. **Load-bearing correction:** the plan below assumed confine could "ride the
+>   existing `--orig-hash` spawn-verify" as one call-site change — that spawn-verify **did not exist**
+>   (`--orig-hash` was verified only on disable/unwrap), so orig-hash spawn-verify (WARN-once, Phase 1)
+>   was built from scratch (#108) and effort was **XL, not L**. Deferred: Linux bwrap, the strict tier,
+>   orig-hash Phase-2 fail-closed, and the per-server `guard confine <server>` command (achievable today
+>   via `enable --confine --server X` + `disable --server X`).
+> - **Next up:** F10 (response DLP) · F8/F9 (v1.0 bets).
 >
 > This roadmap was produced by a grounded research-and-planning pass: six parallel
 > web-research lenses (threat landscape, competitors, MCP protocol evolution, DevX,
@@ -70,7 +80,7 @@ Scoring: `composite = impact + differentiation + alignment + 0.5·effort_cheapne
 
 | # | Feature | Cat | Effort | Score | Bucket |
 |---|---|---|---|---|---|
-| 1 | `guard --confine` — OS-native sandbox (standard tier) | sec | L | **16.5** | v1.0 major |
+| 1 | `guard --confine` — OS-native sandbox (standard tier) | sec | ~~L~~ **XL** | **16.5** | ✅ shipped (engine + enable-path; unreleased, next minor); Linux/strict/per-server-CLI deferred |
 | 2 | Cross-server tool-shadowing detection (name-collision v1) | sec | S→M | **16.0** | v0.9 minor |
 | 3 | Content-pinned lockfile (digest tier) + `up --frozen` | both | M | **15.5** | ◑ digest WARN (H11 #81) + `--frozen` BLOCK shipped; multi-registry + registry-claim re-proof deferred |
 | 4 | Release-age cooldown + install-script-shape awareness ✅ **shipped (PR #70)** | sec | S→M | **15.5** | v0.9 minor |
@@ -233,8 +243,43 @@ Sequenced to keep momentum and the Dependabot surface clean (the v0.9 set adds *
 
 # v1.0 — next major (the flagship + harder bets)
 
-## F1 · `guard --confine` — OS-native sandbox (standard tier) — **THE STRATEGIC BET**
-**Category:** security · **Effort:** L (standard) · **Score 16.5** (highest)
+## F1 · `guard --confine` — OS-native sandbox (standard tier) — **THE STRATEGIC BET** ✅ **shipped (engine + enable-path)**
+**Category:** security · **Effort:** ~~L (standard)~~ **XL** · **Score 16.5** (highest)
+
+> **Shipped (engine + enable-path)** across PRs #108/#109/#110 (merged) + #111 (user-facing commands);
+> **unreleased (next minor)**. mcpm-guard's **first enforcement primitive** — every prior guard feature
+> is *detection* (reasons about JSON-RPC bytes, warns/blocks); a stdio MITM cannot *contain* a child that
+> *decides* to read `~/.ssh` or persist a LaunchAgent. `--confine` wraps the relayed child in an OS
+> sandbox so it physically cannot, regardless of the JSON-RPC it emits. **macOS only in v1.**
+> - **Load-bearing correction to the plan below:** the "single load-bearing insertion" premise —
+>   that confine rides the existing `--orig-hash` spawn-verify as *one call-site change* — was **FALSE**.
+>   No spawn-time verify existed: `--orig-hash` was verified only on disable/unwrap. So orig-hash
+>   spawn-verify was **built from scratch** (#108, WARN-once Phase 1 — does not yet fail closed; an absent
+>   legacy hash is skipped, not failed), and the real effort was **XL, not L**.
+> - **What shipped:** macOS Seatbelt/`sandbox-exec` **standard tier** (read allow-all EXCEPT a secret-dir
+>   denylist — `~/.ssh`/`~/.aws`/`~/.gnupg`/`~/.config/gh`/keychains/browser-cookie stores/MCP-client
+>   config dirs/mcpm's own store; write-deny all of `$HOME` except caches + the per-server scratch dir +
+>   system temp + `/dev`; net launcher-classified — `npx`/`uvx`/`pip`/`docker`/… ⇒ network, everything
+>   else ⇒ egress-deny); two new **wrap-marker tokens** (`--confine-profile-hash <sha256>` binding
+>   marker↔stored-profile, and a bare `--confine-required`, both `--orig-hash`-neutral); a **9-row
+>   spawn-decision table** in `run-inner` (confine when enrolled + hash matches + backend available;
+>   FAIL CLOSED on hash-mismatch / malformed-hash / stripped-marker-on-required / wiped-store-on-required;
+>   HYBRID WARN-loud-and-run-unconfined when no backend or a missing marker on a non-required server —
+>   never silent); the `~/.mcpm/guard-confine.yaml` store (+ `.integrity` sidecar; fails closed on
+>   integrity/shape/format-version mismatch like `pins.json`; unkeyed sidecar = tamper-evidence NOT
+>   authenticity, issue #19); shared `src/guard/store-integrity.ts` extracted from `pins.ts`/`policy.ts`
+>   (#109); and the user-facing `guard enable --confine` (bare flag ⇒ standard tier; `--confine off` ⇒
+>   disabled; enrolls unwrapped stdio servers it wraps) + read-only `guard doctor-confine [--json]`.
+>   New `guard-events.jsonl` events under category `CONFINE` (plus `orig-hash-mismatch` under RELAY) —
+>   these are events, not signatures, so the catalog count is unchanged.
+> - **Deferred:** Linux `bwrap`, the **strict tier** (below), orig-hash **Phase-2 fail-closed**, and the
+>   per-server `guard confine <server>` / `--off` / `--show` / `--require` / `--allow-read/-write/-net`
+>   command (per-server confine is achievable today via `enable --confine --server X` + `disable
+>   --server X`). **Honest caveats:** the macOS `sandbox-exec` path is not exercised in ubuntu-only CI
+>   (mocked arg-vector unit tests + local darwin verification — same gap as the os-keychain shell-outs);
+>   confine is opt-in (without it enable/disable is unchanged); net is launcher-permissive so this does
+>   NOT stop network exfil in general; and it does NOT defend a same-user attacker who can rewrite BOTH
+>   the IDE config AND `~/.mcpm`.
 
 **Problem.** The relay is a stdio MITM: it inspects every JSON-RPC frame but does **not contain** the child spawned at `relay.ts:130` — it inherits the IDE's full privileges and can `open("~/.ssh/id_ed25519")`, `connect()` anywhere, or fork a curl-exfil, and the relay sees only the JSON-RPC it chooses to send. This is the structural half a byte-inspecting relay **categorically cannot reach**.
 

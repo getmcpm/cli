@@ -96,7 +96,16 @@ function canonicalize(value: unknown): unknown {
  * the marker↔store binding load-bearing: a same-user attacker who rewrites the
  * stored profile body (issue #19 — the sidecar is unkeyed) changes this hash, so
  * the spawn-time recompute no longer matches the marker and the run fails closed.
+ *
+ * Hashes ONLY the enforcement-policy fields — `captured_at` is provenance
+ * metadata, not policy, and is DELIBERATELY excluded. If it were hashed, two
+ * derivations of the same policy at different times would hash differently, so a
+ * multi-client partial-enable + retry (which re-derives an already-enrolled
+ * server with a fresh timestamp) would mint a new hash that no longer matches the
+ * already-wrapped clients' markers → spawn decision-table row 3 (fail-closed
+ * ALWAYS) would brick a working server with a bogus tamper alarm.
  */
 export function hashConfineProfile(profile: ConfineProfile): string {
-  return createHash("sha256").update(JSON.stringify(canonicalize(profile))).digest("hex");
+  const { captured_at: _capturedAt, ...policy } = profile;
+  return createHash("sha256").update(JSON.stringify(canonicalize(policy))).digest("hex");
 }

@@ -45,6 +45,16 @@ describe("hashConfineProfile", () => {
     expect(hashConfineProfile({ ...base, read_deny: [] })).not.toBe(h);
     expect(hashConfineProfile({ ...base, require_confine: true })).not.toBe(h);
     expect(hashConfineProfile({ ...base, write_allow: ["/tmp", "/etc"] })).not.toBe(h);
+    expect(hashConfineProfile({ ...base, tier: "standard", scratch_dir: "/other" })).not.toBe(h);
+  });
+
+  test("EXCLUDES captured_at (provenance, not policy) — else a re-derive at a new time would false-tamper", () => {
+    // Two derivations of the same policy at different times MUST hash equal, or a
+    // multi-client partial-enable + retry (fresh timestamp) would mint a hash that
+    // mismatches already-wrapped markers → spawn row 3 fail-closed on a good server.
+    expect(hashConfineProfile({ ...base, captured_at: "2099-12-31T23:59:59Z" })).toBe(
+      hashConfineProfile(base),
+    );
   });
 });
 

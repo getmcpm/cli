@@ -45,6 +45,13 @@ H7 now also blocks **credential-phishing** elicitation/sampling prompts (ROADMAP
 (quota / consent-gating / hard credential-field block) and H11's remaining scope (multi-registry,
 digest **BLOCK** / `--frozen`, Sigstore provenance) stay deferred — see §6 and ROADMAP F3/F8.
 
+**Runtime containment now has an implementation.** Every H1–H12 control here is *detection*
+(reasoning about JSON-RPC bytes); ROADMAP **F1 `guard --confine`** (a separate track — see
+`docs/ROADMAP.md`) adds the first *enforcement* primitive by wrapping the relayed stdio child in an
+OS sandbox (macOS Seatbelt/`sandbox-exec` in v1) so it physically cannot read secret files or
+persist, regardless of the traffic it emits — complementary to frame detection (contain vs watch).
+Shipped across #108/#109/#110/#111, macOS-only, opt-in, **unreleased (next minor)**.
+
 ---
 
 ## 0. The six principles (these govern every control below)

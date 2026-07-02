@@ -44,19 +44,44 @@ export function registerGuardCommand(program: Command): void {
       "permit URL/HTTP-transport servers to run WITHOUT runtime guard inspection " +
         "(no MITM relay exists for non-stdio transports); records consent so future runs stay quiet",
     )
+    .option(
+      "--confine [mode]",
+      "enroll wrapped stdio servers in an OS sandbox (macOS Seatbelt): standard | off (default when flag present: standard)",
+    )
     .action(
       async (rawOpts: {
         client?: string;
         server?: string;
         dryRun?: boolean;
         allowUnguarded?: boolean;
+        confine?: boolean | string;
       }) => {
         const { runEnableCommand } = await import("../guard/cli.js");
         const opts = parseClientServer(rawOpts);
+        // `--confine` (bare) / `standard` / `true` / `1` → standard; `off` → off;
+        // anything else is rejected.
+        let confine: "standard" | "off" | undefined;
+        if (
+          rawOpts.confine === true ||
+          rawOpts.confine === "standard" ||
+          rawOpts.confine === "true" ||
+          rawOpts.confine === "1"
+        ) {
+          confine = "standard";
+        } else if (rawOpts.confine === "off") {
+          confine = "off";
+        } else if (rawOpts.confine !== undefined) {
+          process.stderr.write(
+            `mcpm guard enable: invalid --confine value "${String(rawOpts.confine)}" ` +
+              `(use \`--confine\`, \`--confine standard\`, or \`--confine off\`).\n`,
+          );
+          process.exit(1);
+        }
         await runEnableCommand({
           ...opts,
           dryRun: rawOpts.dryRun === true,
           allowUnguarded: rawOpts.allowUnguarded === true,
+          confine,
           write: (s) => process.stdout.write(s),
         });
       },
@@ -227,6 +252,18 @@ export function registerGuardCommand(program: Command): void {
         process.stdout.write(`    target   : ${s.target}\n`);
         process.stdout.write(`    details  : ${s.description}\n\n`);
       }
+    });
+
+  guard
+    .command("doctor-confine")
+    .description("Report OS confinement backend availability + enrolled servers")
+    .option("--json", "emit machine-readable JSON")
+    .action(async (opts: { json?: boolean }) => {
+      const { runDoctorConfineCommand } = await import("../guard/cli.js");
+      await runDoctorConfineCommand({
+        json: opts.json === true,
+        write: (s) => process.stdout.write(s),
+      });
     });
 
   guard
