@@ -39,6 +39,32 @@ function makeServerEntry(overrides: Partial<ServerEntry["server"]> = {}): Server
 }
 
 // ---------------------------------------------------------------------------
+// Registry lifecycle status (E9a) — the audit WARN surface
+// ---------------------------------------------------------------------------
+
+describe("scanTier1 — registry lifecycle status (E9a)", () => {
+  function withStatus(status: string): ServerEntry {
+    const e = makeServerEntry();
+    (
+      e._meta!["io.modelcontextprotocol.registry/official"] as Record<string, unknown>
+    ).status = status;
+    return e;
+  }
+
+  it("emits a registry-status finding when the server is DELETED", () => {
+    expect(scanTier1(withStatus("deleted")).map((f) => f.type)).toContain("registry-status");
+  });
+
+  it("emits a registry-status finding when the server is DEPRECATED", () => {
+    expect(scanTier1(withStatus("deprecated")).map((f) => f.type)).toContain("registry-status");
+  });
+
+  it("emits NO registry-status finding when the server is active (inert)", () => {
+    expect(scanTier1(withStatus("active")).map((f) => f.type)).not.toContain("registry-status");
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Clean server — no findings
 // ---------------------------------------------------------------------------
 

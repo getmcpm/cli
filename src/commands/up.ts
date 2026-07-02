@@ -43,6 +43,7 @@ import { parseEnvFile } from "../stack/env.js";
 import { resolveInstallEntry, parseSecretsMode, validateRemoteUrl } from "./install.js";
 import { assessReleaseAge, DEFAULT_MIN_RELEASE_AGE_HOURS } from "../scanner/cooldown.js";
 import { extractRegistryMeta } from "../utils/format-trust.js";
+import { assessServerStatus } from "../scanner/registry-status.js";
 import { applyKeychainSecrets, type SecretsMode, setSecrets as _setSecrets } from "../store/keychain.js";
 import { isNewUnguarded } from "../guard/unguarded.js";
 import { compareIntegrity } from "../registry/npm-integrity.js";
@@ -504,6 +505,19 @@ async function processServer(input: ProcessInput): Promise<ServerResult> {
 
   // Trust re-assessment
   const serverEntry = await deps.getServer(name, locked.version);
+
+  // Registry-delisting gate — fail closed if the registry marks this server
+  // "deleted" (removed/withdrawn). Fail-SAFE: only an explicit "deleted"
+  // blocks; "deprecated"/absent/unknown do not (surfaced as a finding below).
+  const statusGate = assessServerStatus(serverEntry);
+  if (statusGate.blocks) {
+    return {
+      name,
+      status: "blocked",
+      message: `deleted from the MCP registry${statusGate.statusMessage ? ` (${statusGate.statusMessage})` : ""}`,
+    };
+  }
+
   const tier1 = deps.scanTier1(serverEntry);
   let findings: Finding[] = [...tier1];
   if (scannerAvailable) {

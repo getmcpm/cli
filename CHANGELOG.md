@@ -2,6 +2,20 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased]
+
+### Added
+
+- **Registry-delisting gate** — `mcpm install` and `mcpm up` now **fail closed** when
+  the official MCP registry marks a server `deleted` (removed/withdrawn), and
+  `mcpm audit` surfaces a `deleted` **or** `deprecated` listing as an advisory
+  finding. This consumes the registry's own lifecycle `status` — a free community
+  revocation signal mcpm already fetched on every run but ignored. **Fail-SAFE by
+  design:** only an explicit `deleted` blocks; a `deprecated` or absent/unknown
+  status never blocks (registry status is an availability signal, not an integrity
+  one — a new benign status the registry adds later must not brick installs). The
+  registry's optional `statusMessage` is surfaced in the reason. Zero new deps.
+
 ## [0.16.0] - 2026-07-02
 
 An enforcement release: `mcpm guard --confine` wraps a relayed stdio server in an OS sandbox — the guard's first *containment* primitive, complementing every prior *detection* feature.

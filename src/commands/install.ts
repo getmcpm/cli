@@ -23,6 +23,7 @@ import type { TrustScore, TrustScoreInput } from "../scanner/trust-score.js";
 import type { InstalledServer } from "../store/servers.js";
 import { scoreBar, levelColor, extractRegistryMeta } from "../utils/format-trust.js";
 import { assessReleaseAge, DEFAULT_MIN_RELEASE_AGE_HOURS } from "../scanner/cooldown.js";
+import { assessServerStatus } from "../scanner/registry-status.js";
 import { DANGEROUS_FLAG_PREFIXES } from "../scanner/patterns.js";
 import { applyKeychainSecrets, type SecretsMode, setSecrets as _setSecrets } from "../store/keychain.js";
 
@@ -380,6 +381,34 @@ export async function handleInstall(
   // Step 1: Fetch server metadata
   // -------------------------------------------------------------------------
   const serverEntry = await registryClient.getServer(name);
+
+  // -------------------------------------------------------------------------
+  // Step 1b: registry-delisting gate (fail closed, before any scan/output)
+  // -------------------------------------------------------------------------
+  // If the registry itself marks this server "deleted" (removed/withdrawn),
+  // refuse to install. Fail-SAFE: ONLY an explicit "deleted" blocks; a
+  // "deprecated" or absent/unknown status does not (surfaced as an advisory
+  // finding by scanTier1 instead). See scanner/registry-status.ts.
+  const statusGate = assessServerStatus(serverEntry);
+  if (statusGate.blocks) {
+    if (options.json === true) {
+      output(
+        JSON.stringify(
+          {
+            name,
+            error: "server_delisted",
+            status: statusGate.status,
+            message: statusGate.statusMessage ?? null,
+          },
+          null,
+          2
+        )
+      );
+    }
+    throw new Error(
+      `"${name}" has been deleted from the MCP registry${statusGate.statusMessage ? ` (${statusGate.statusMessage})` : ""}. Installation aborted.`
+    );
+  }
 
   // -------------------------------------------------------------------------
   // Step 2: Trust assessment

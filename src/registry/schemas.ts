@@ -84,7 +84,11 @@ export const RemoteSchema = z.object({
 });
 
 export const OfficialMetaSchema = z.object({
+  // Server lifecycle status — the registry enum is "active" | "deprecated" |
+  // "deleted" (kept as z.string() for forward-compat). statusMessage carries the
+  // registry's optional human explanation (e.g. deprecation/removal reason).
   status: z.string().optional(),
+  statusMessage: z.string().optional(),
   publishedAt: z.string().optional(),
   updatedAt: z.string().optional(),
   isLatest: z.boolean().optional(),
