@@ -1,5 +1,9 @@
 # mcpm Roadmap — Security & Developer Experience
 
+> **Companion:** [`ROADMAP-ADOPTION.md`](./ROADMAP-ADOPTION.md) covers the developer- and
+> enterprise-**adoption** track (distribution, org policy, SIEM/SBOM evidence, client
+> reach). This file is the security/DevX **feature** track.
+>
 > Status: in delivery · Baseline: **v0.10.1** · Drafted: 2026-06-09 · Reconciled: 2026-06-15
 >
 > **Delivery log:**

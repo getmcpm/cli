@@ -177,11 +177,19 @@ function runToExit(args) {
   }
 
   // 2. tamper — corrupt the embedded profile hash → must fail closed via the
-  // CONFINE gate (decide table row 3). Remove pins.json first: a prior confined
-  // run can leave a 0-byte pins.json (writePins touch-empty window), and a
-  // PINS-READ-ERROR would fail-closed for an UNRELATED reason — masking the gate
-  // under test. Asserting on the CONFINE-BLOCK message proves the right gate fired.
-  fs.rmSync(path.join(process.env.HOME, ".mcpm", "pins.json"), { force: true });
+  // CONFINE gate (decide table row 3). Clear the WHOLE pins sidecar set first:
+  // the happy-path step above ran a real tools/list that TOFU-writes BOTH
+  // pins.json AND its pins.json.integrity sidecar (off-thread). Deleting only
+  // pins.json leaves the sidecar, so readPins sees a sidecar with no matching
+  // file -> PINS-READ-ERROR, which fails closed for an UNRELATED reason and masks
+  // the CONFINE gate under test. (Timing-dependent: locally the sidecar write may
+  // not have landed yet; on a slower CI runner it has — which is how the macOS CI
+  // leg first caught this.) Remove pins.json, its .integrity sidecar, and any
+  // stale .lock so readPins sees a clean first-run state.
+  const mcpmDir = path.join(process.env.HOME, ".mcpm");
+  fs.rmSync(path.join(mcpmDir, "pins.json"), { force: true });
+  fs.rmSync(path.join(mcpmDir, "pins.json.integrity"), { force: true });
+  fs.rmSync(path.join(mcpmDir, "pins.json.lock"), { recursive: true, force: true });
   const hi = entry.args.indexOf("--confine-profile-hash");
   const tampered = entry.args.slice();
   tampered[hi + 1] = "0".repeat(64);

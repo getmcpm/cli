@@ -1,0 +1,40 @@
+name: Scorecard
+
+# OpenSSF Scorecard — publishes a project-health/supply-chain posture score that
+# enterprise reviewers can consult without asking. Read-only analysis of this repo.
+on:
+  branch_protection_rule:
+  schedule:
+    - cron: "37 5 * * 1" # weekly, Monday 05:37 UTC
+  push:
+    branches: [main]
+
+permissions: read-all
+
+jobs:
+  analysis:
+    name: Scorecard analysis
+    runs-on: ubuntu-latest
+    permissions:
+      security-events: write # upload the SARIF result to the Security tab
+      id-token: write # publish results to the public Scorecard API
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - uses: ossf/scorecard-action@99c09fe975337306107572b4fdf4db224cf8e2f2 # v2.4.3
+        with:
+          results_file: results.sarif
+          results_format: sarif
+          publish_results: true
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: scorecard-results
+          path: results.sarif
+          retention-days: 5
+
+      - uses: github/codeql-action/upload-sarif@c35d1b164463ee62a100735382aaaa525c5d3496 # v3
+        with:
+          sarif_file: results.sarif
