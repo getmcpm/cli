@@ -137,6 +137,42 @@ function makeDeps(overrides: Partial<InstallDeps> = {}): InstallDeps {
 }
 
 // ---------------------------------------------------------------------------
+// Registry-delisting gate (E9a)
+// ---------------------------------------------------------------------------
+
+describe("handleInstall — registry-delisting gate (E9a)", () => {
+  beforeEach(() => {
+    vi.resetAllMocks();
+  });
+
+  function entryWithStatus(status: string): ServerEntry {
+    const e = makeServerEntry();
+    (
+      e._meta!["io.modelcontextprotocol.registry/official"] as Record<string, unknown>
+    ).status = status;
+    return e;
+  }
+
+  it("blocks (throws, installs nothing) when the registry marks the server DELETED", async () => {
+    const deps = makeDeps({
+      registryClient: { getServer: vi.fn().mockResolvedValue(entryWithStatus("deleted")) },
+    });
+    await expect(handleInstall("io.github.test/my-server", {}, deps)).rejects.toThrow(
+      /deleted from the MCP registry/i
+    );
+    expect(deps.addToStore).not.toHaveBeenCalled();
+  });
+
+  it("does NOT block a DEPRECATED server (advisory only — install proceeds)", async () => {
+    const deps = makeDeps({
+      registryClient: { getServer: vi.fn().mockResolvedValue(entryWithStatus("deprecated")) },
+    });
+    await expect(handleInstall("io.github.test/my-server", {}, deps)).resolves.not.toThrow();
+    expect(deps.addToStore).toHaveBeenCalled();
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Happy path — GREEN trust score
 // ---------------------------------------------------------------------------
 

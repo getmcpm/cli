@@ -6,6 +6,15 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- **Registry-delisting gate** — `mcpm install` and `mcpm up` now **fail closed** when
+  the official MCP registry marks a server `deleted` (removed/withdrawn), and
+  `mcpm audit` surfaces a `deleted` **or** `deprecated` listing as an advisory
+  finding. This consumes the registry's own lifecycle `status` — a free community
+  revocation signal mcpm already fetched on every run but ignored. **Fail-SAFE by
+  design:** only an explicit `deleted` blocks; a `deprecated` or absent/unknown
+  status never blocks (registry status is an availability signal, not an integrity
+  one — a new benign status the registry adds later must not brick installs). The
+  registry's optional `statusMessage` is surfaced in the reason. Zero new deps.
 - **CycloneDX SBOM attached to each release** — every GitHub release now carries a
   machine-readable `mcpm.cdx.json` (CycloneDX) SBOM of mcpm's own dependency tree,
   generated from the committed `pnpm-lock.yaml`. A concrete procurement/compliance

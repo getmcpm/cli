@@ -15,6 +15,7 @@ import {
   detectInstallScriptShape,
   type ArgSchema,
 } from "./patterns.js";
+import { assessServerStatus } from "./registry-status.js";
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -29,7 +30,8 @@ export interface Finding {
     | "exfil-args"
     | "scanner-error"
     | "release-cooldown" // NEW — emitted only by assessReleaseAge (needs a clock; never by scanTier1)
-    | "install-script"; // NEW — emitted by scanTier1 via detectInstallScriptShape (deterministic)
+    | "install-script" // NEW — emitted by scanTier1 via detectInstallScriptShape (deterministic)
+    | "registry-status"; // NEW — emitted by scanTier1 when the registry marks the server deprecated/deleted
   message: string;
   location: string;
   /**
@@ -130,6 +132,14 @@ export function scanTier1(entry: ServerEntry): Finding[] {
 
   // --- 3. Typosquatting check on package name ---
   allFindings.push(...detectTyposquatting(server.name, KNOWN_POPULAR_SERVERS));
+
+  // --- 4. Registry lifecycle status (E9a): surface a deprecated/deleted
+  // listing as an advisory finding. install/up additionally fail closed on
+  // "deleted" via their own gates; audit relies on this finding to WARN. ---
+  const statusFinding = assessServerStatus(entry).finding;
+  if (statusFinding) {
+    allFindings.push(statusFinding);
+  }
 
   return allFindings;
 }

@@ -147,6 +147,35 @@ describe("handleUp", () => {
     expect(adapter.addServer).not.toHaveBeenCalled();
   });
 
+  // E9a: the registry itself pulled this listing → fail closed, install nothing.
+  it("blocks a server the registry marks DELETED (E9a)", async () => {
+    const stackPath = await writeStackAndLock(basicStack, basicLock);
+    const deleted = {
+      ...makeServerEntry("io.github.test/server-a", "1.2.0"),
+      _meta: { "io.modelcontextprotocol.registry/official": { status: "deleted" } },
+    } as ServerEntry;
+    const deps = makeDeps({ getServer: vi.fn().mockResolvedValue(deleted) });
+
+    await expect(handleUp({ stackFile: stackPath }, deps)).rejects.toThrow(/could not be installed/);
+
+    const adapter = (deps.getAdapter as ReturnType<typeof vi.fn>).mock.results[0].value;
+    expect(adapter.addServer).not.toHaveBeenCalled();
+  });
+
+  it("does NOT block a DEPRECATED server (advisory only — installs) (E9a)", async () => {
+    const stackPath = await writeStackAndLock(basicStack, basicLock);
+    const deprecated = {
+      ...makeServerEntry("io.github.test/server-a", "1.2.0"),
+      _meta: { "io.modelcontextprotocol.registry/official": { status: "deprecated" } },
+    } as ServerEntry;
+    const deps = makeDeps({ getServer: vi.fn().mockResolvedValue(deprecated) });
+
+    await handleUp({ stackFile: stackPath }, deps);
+
+    const adapter = (deps.getAdapter as ReturnType<typeof vi.fn>).mock.results[0].value;
+    expect(adapter.addServer).toHaveBeenCalled();
+  });
+
   it("auto-runs lock when no lock file exists", async () => {
     const dir = await mkdtemp(path.join(os.tmpdir(), "mcpm-up-nolock-"));
     const stackPath = path.join(dir, "mcpm.yaml");
