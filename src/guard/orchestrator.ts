@@ -17,7 +17,7 @@
 import { copyFile } from "node:fs/promises";
 import type { ClientId } from "../config/paths.js";
 import type { ConfigAdapter, McpServerEntry } from "../config/adapters/index.js";
-import { wrapEntry, unwrapEntry, isWrapped, type WrapContext } from "./wrap.js";
+import { wrapEntry, unwrapEntry, isWrapped, type WrapContext, type ConfineMarker } from "./wrap.js";
 
 export interface ClientReport {
   readonly clientId: ClientId;
@@ -52,6 +52,13 @@ export interface OrchestratorDeps {
   readonly getAdapter: (clientId: ClientId) => ConfigAdapter;
   readonly getConfigPath: (clientId: ClientId) => string;
   readonly wrapContext: WrapContext;
+  /**
+   * F1: per-server confine info to embed into the wrap marker at enable time,
+   * keyed by server name. Built by the cli layer (derive + store the profile,
+   * then map name → {profileHash, required}). A name absent from the map is
+   * wrapped without confinement (today's behavior). Only consulted on `enable`.
+   */
+  readonly confineMarkers?: ReadonlyMap<string, ConfineMarker>;
   /**
    * H9: per-invocation consent to run URL/HTTP-transport (unwrappable) servers
    * UNGUARDED. Set from the `--allow-unguarded` flag. When absent/false, a url
@@ -311,7 +318,10 @@ async function planForClient(
         }
         continue;
       }
-      transforms.push({ name, nextEntry: wrapEntry(name, entry, deps.wrapContext) });
+      transforms.push({
+        name,
+        nextEntry: wrapEntry(name, entry, deps.wrapContext, deps.confineMarkers?.get(name)),
+      });
     } else {
       if (!isWrapped(entry)) {
         skipped.push({ name, reason: "not wrapped" });

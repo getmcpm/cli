@@ -192,3 +192,35 @@ describe("statusAcrossClients", () => {
     expect(status.clients[0]?.servers).toContainEqual({ name: "git-mcp", wrapped: false, unguarded: false });
   });
 });
+
+// ─────────────── F1: confineMarkers embedding ───────────────
+
+describe("enableGuardAcrossClients — F1 confine markers", () => {
+  test("embeds --confine-profile-hash for a mapped server; none for an unmapped one", async () => {
+    const state: Record<string, McpServerEntry> = {
+      "fs-mcp": { command: "npx", args: ["-y", "fs"] },
+      "git-mcp": { command: "npx", args: ["-y", "git"] },
+    };
+    const hash = "a".repeat(64);
+    const deps: OrchestratorDeps = {
+      ...makeDeps({ cursor: makeAdapter("cursor", state) }),
+      confineMarkers: new Map([["fs-mcp", { profileHash: hash, required: true }]]),
+    };
+
+    await enableGuardAcrossClients(deps);
+
+    expect(state["fs-mcp"]?.args).toContain("--confine-profile-hash");
+    expect(state["fs-mcp"]?.args).toContain(hash);
+    expect(state["fs-mcp"]?.args).toContain("--confine-required");
+    // Unmapped server is wrapped WITHOUT confine tokens.
+    expect(state["git-mcp"]?.args?.[0]).toBe("guard");
+    expect(state["git-mcp"]?.args).not.toContain("--confine-profile-hash");
+  });
+
+  test("no confineMarkers → no confine tokens (unchanged wraps)", async () => {
+    const state: Record<string, McpServerEntry> = { "fs-mcp": { command: "npx", args: ["fs"] } };
+    const deps = makeDeps({ cursor: makeAdapter("cursor", state) });
+    await enableGuardAcrossClients(deps);
+    expect(state["fs-mcp"]?.args).not.toContain("--confine-profile-hash");
+  });
+});
