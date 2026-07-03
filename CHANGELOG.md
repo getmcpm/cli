@@ -2,7 +2,9 @@
 
 All notable changes to this project will be documented in this file.
 
-## [Unreleased]
+## [0.19.0] - 2026-07-03
+
+The rest of Wave 1 in one release — developer reach and CI citizenship: mcpm now manages **Gemini CLI**, `mcpm verify` and `mcpm audit --sarif` make it a first-class CI gate (client-free integrity + SARIF code-scanning), `mcpm doctor` gains a structured `--json` and a redacted `--report`, and the README documents every collision-free install channel (npm/npx/pnpm/mise).
 
 ### Documentation
 
