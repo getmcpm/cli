@@ -102,8 +102,9 @@ names the **critique-corrected first slice**.
 ## Wave 0 — credibility floor (✅ SHIPPED in v0.17.0)
 
 > **Status (2026-07-03):** all four Wave-0 items (E3, B1a, E11, E9a) shipped in
-> **v0.17.0**. Wave-1 **D1** (Claude Code adapter) is merged to `main` and ships on
-> the next tag. Descriptions below are kept as the original plan of record.
+> **v0.17.0**. **Wave 1 is complete:** D1 shipped in **v0.18.0**; D4a + D7 + D2 + D3 +
+> D6 shipped together in **v0.19.0**. Descriptions below are kept as the original
+> plan of record.
 
 
 Cheap, and every enterprise conversation dies without them.
@@ -140,8 +141,8 @@ Cheap, and every enterprise conversation dies without them.
 The completeness critic's verdict: the candidate set over-indexed enterprise for a
 2-star product; **D1 is the single highest-leverage item in the entire set.**
 
-- **D1 · Claude Code adapter — user-global slice only. ✅ SHIPPED** (merged to `main`,
-  ships next tag; see CHANGELOG `[Unreleased]`). Added `claude-code` as a plain
+- **D1 · Claude Code adapter — user-global slice only. ✅ SHIPPED in v0.18.0.**
+  Added `claude-code` as a plain
   5th `CLIENT_ID` targeting `~/.claude.json` (rootKey `mcpServers`). It fits the
   existing one-path-per-client contract, so detector, `sync --check`, `guard enable`,
   `list`, `install`, `import` all work day one. Include the TODOS #23 Zod-validation
@@ -151,14 +152,14 @@ The completeness critic's verdict: the candidate set over-indexed enterprise for
   contract across six consumers, and guard wrapping would commit machine-specific
   markers into a shared git file. Project scope needs its own design (see D6b/E10b).
   Claude Code is the fastest-growing dev product ever; mcp-scan already covers it.
-- **D4a · Gemini CLI adapter. ✅ SHIPPED** (on `main`, ships next tag; see CHANGELOG
+- **D4a · Gemini CLI adapter. ✅ SHIPPED in v0.19.0** (see CHANGELOG
   `[Unreleased]`). Standalone S as predicted: `~/.gemini/settings.json`, same
   `mcpServers` rootKey, a rootKey-only `BaseAdapter` subclass (6th first-class
   client). User-global scope only; per-project `.gemini/settings.json` out of scope.
   URL caveat: Gemini reads `url`=SSE / `httpUrl`=HTTP, mcpm writes `url`. (Codex =
   D4b, real M — TOML needs BaseAdapter read/write format hooks + a `smol-toml`-class
   dep decision; don't blend the estimates.)
-- **D7 · doctor --json / --report. ✅ SHIPPED** (on `main`, ships next tag; see
+- **D7 · doctor --json / --report. ✅ SHIPPED in v0.19.0** (see
   CHANGELOG `[Unreleased]`). `doctorHandler` now builds a structured `DoctorModel`
   (the first of the four structured-output mappers to land — carries `schemaVersion`
   as the shared convention) then renders; `--json` emits it; `handleDoctor` reuses the
@@ -176,7 +177,7 @@ The completeness critic's verdict: the candidate set over-indexed enterprise for
   backend — no server names/args). `.github/ISSUE_TEMPLATE/bug.yml` requires a pasted
   report — the telemetry-free friction channel (flutter/brew/gh norm). **Cut:**
   PATH-origin classification (that's F9-PR2; don't smuggle it in).
-- **D2 · `mcpm verify` + GitHub Action. ✅ SHIPPED** (on `main`, ships next tag; see
+- **D2 · `mcpm verify` + GitHub Action. ✅ SHIPPED in v0.19.0** (see
   CHANGELOG `[Unreleased]`). Confirmed the critique: `classifyIntegrity` + a new pure
   `frozenVerdict` were extracted from `up.ts` into `src/stack/frozen-verify.ts`, and
   `mcpm verify [--json]` runs that pass **client-free** (no client detection, no
@@ -195,15 +196,15 @@ The completeness critic's verdict: the candidate set over-indexed enterprise for
   `mcpm verify` (SHA-pinned, step summary from `--json`, static badge). Pre-commit
   rides the same verb. **Naming is deliberate:** B3 later *extends* `mcpm verify`
   with provenance — one verb, integrity now, provenance later.
-- **D3 · `mcpm audit --sarif`. ✅ SHIPPED** (on `main`, ships next tag; see CHANGELOG
+- **D3 · `mcpm audit --sarif`. ✅ SHIPPED in v0.19.0** (see CHANGELOG
   `[Unreleased]`). Pure `src/output/sarif.ts` mapper beside the `--json` branch;
   rules from the real `Finding.type`s (**8**, not 7 — the union grew; the rule catalog
   is a TS-exhaustive `Record` so a new type forces an update); artifactLocation =
   `mcpm.yaml` (file-level, no fake line numbers) + a `logicalLocation` for the server
   name + a stable `partialFingerprints`. Report-only, exit matches `audit` (risky→1).
   GitHub code-scanning upload documented in the README. **Cut:** guard-events SARIF.
-- **D6 · Distribution (trimmed). ✅ SHIPPED** (the in-repo slice; on `main`, ships next
-  tag). **Name-collision blocker RESOLVED with data**: `mcpm` is already the
+- **D6 · Distribution (trimmed). ✅ SHIPPED in v0.19.0** (the in-repo slice).
+  **Name-collision blocker RESOLVED with data**: `mcpm` is already the
   homebrew-core formula for the unrelated [mcpm.sh](https://mcpm.sh) (v2.15.0) and it
   squats PyPI — its bin is also `mcpm`. **Decision:** do NOT fight for `brew install
   mcpm` / the `mcpm` mise short-name; distribute through the collision-free scoped
@@ -353,11 +354,16 @@ decision, not a drift).
 
 ## Suggested release mapping
 
-- **v0.16** — F1 `guard --confine` (shipped; predates this roadmap).
+> Updated to what actually shipped: the Claude Code headline landed alone in v0.18,
+> and the rest of Wave 1 shipped together in v0.19 (so the enterprise kit shifts a
+> minor later).
+
+- **v0.16** — ✅ F1 `guard --confine` (shipped; predates this roadmap).
 - **v0.17** — ✅ Wave 0 (E3 + B1a + E11 + E9a) — the credibility floor.
-- **v0.18** — D1 (Claude Code adapter, already merged) + D4a + D7 + the CI story
-  (D2 verify/Action, D3 SARIF) + D6 — the Claude Code headline + developer reach.
-- **v0.19** — E5 + E2 + E4 + E6 + E10a (the enterprise self-serve evidence kit).
+- **v0.18** — ✅ D1 (Claude Code adapter) + the SBOM-under-immutable-releases fix.
+- **v0.19** — ✅ the rest of Wave 1 together: D4a (Gemini CLI) + D7 (`doctor --json`/
+  `--report`) + D2 (`mcpm verify` + Action) + D3 (`audit --sarif`) + D6 (distribution).
+- **v0.20** — E5 + E2 + E4 + E6 + E10a (the enterprise self-serve evidence kit).
 - **v1.0** — E1 + B2 + B3 (managed policy, Linux confine, provenance — the
   "enterprise-ready" claim becomes true, and 1.0 signals the semver discipline
   enterprises ask for) + D5 as the launch content.

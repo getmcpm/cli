@@ -12,7 +12,7 @@ An open-source, CLI-first MCP package manager — **"npm for MCP servers"**.
 A registry where developers can search, install, audit, publish, and update MCP servers
 across all major clients (Claude Desktop, Claude Code, Cursor, VS Code, Windsurf, Gemini CLI) from a single tool.
 
-**npm package**: `@getmcpm/cli` (v0.18.0 released — added the Claude Code client adapter [D1]; `guard --confine` shipped in v0.16.0; the Gemini CLI client adapter [D4a] is on `main`, ships next minor) | **bin command**: `mcpm` | **repo**: github.com/getmcpm/cli | **web UI**: deferred to V1+
+**npm package**: `@getmcpm/cli` (v0.19.0 released — the Wave-1 developer-reach batch: Gemini CLI adapter [D4a], `doctor --json`/`--report` [D7], `mcpm verify` + GitHub Action [D2], `audit --sarif` [D3], distribution/install matrix [D6]; Claude Code adapter [D1] shipped in v0.18.0; `guard --confine` in v0.16.0) | **bin command**: `mcpm` | **repo**: github.com/getmcpm/cli | **web UI**: deferred to V1+
 
 ---
 
@@ -286,7 +286,7 @@ Five `docs/ROADMAP.md` features (see its delivery log) + a full dogfood and CI g
 - [x] **Dogfood + prevention guards (v0.12.1)** — a 6-cluster full-surface dogfood (102 cmds, 0 crashes) fixed 4 false-success-overclaim / mislabel bugs (`guard reset-integrity`/`accept-drift`, `secrets rm`, `search` "Trust Score"→"Status", stale `init`-pack completions). Then two CI guards so those classes can't recur: a completions↔Commander-program invariant test + a built-binary output-contract smoke matrix. (#92, #94)
 - [x] **F3 — `up --frozen` fail-closed integrity BLOCK tier (v0.13.0)** — promotes the H11 WARN tripwire to an enforcing CI gate: pre-install verify of every locked npm server's `dist.integrity`, BLOCK (install nothing, exit nonzero — `npm ci` semantics) on drift / could-not-verify / format-mismatch / suspicious-missing-baseline; benign refuse-to-run for a pre-baseline lock; pypi/oci/url coverage notice. `--frozen` / `policy.frozen`. (#95)
 - [x] **F5 — reject exfil-named tool-schema params, DENY-tier list-time (v0.14.0)** — structural `exfil-param-in-schema` detector walks `tools/list` inputSchema property KEYS and blocks a tool declaring an underscore-wrapped context-exfil sigil (`_system_prompt_`, …) before the model sees it; zero-FP deny tier (wrapped form only; `_context_`/`_memory_` framework slots excluded), honest "tripwire not defense" scope, muteable. (#97)
-- [ ] **Next up (docs/ROADMAP.md):** F10 (response-side credential DLP) · the v1.0 bets — F8 `mcpm verify` Sigstore provenance, F9 doctor secret-scan/PATH. (F7 `mcpm sync --check` shipped in v0.15.0; F1 `guard --confine` released in v0.16.0 — see the block below. See also **docs/ROADMAP-ADOPTION.md**: Wave 0 shipped in v0.17.0, Claude Code adapter [D1] on `main`.)
+- [ ] **Next up (docs/ROADMAP.md):** F10 (response-side credential DLP) · the v1.0 bets — F8 `mcpm verify` Sigstore provenance, F9 doctor secret-scan/PATH. (F7 `mcpm sync --check` shipped in v0.15.0; F1 `guard --confine` released in v0.16.0 — see the block below. See also **docs/ROADMAP-ADOPTION.md**: Wave 0 shipped in v0.17.0, and Wave 1 is complete — D1 in v0.18.0, then D4a+D7+D2+D3+D6 in v0.19.0.)
 
 ### F1 `guard --confine` — first enforcement primitive (RELEASED in v0.16.0)
 
