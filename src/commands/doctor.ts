@@ -480,8 +480,8 @@ export function registerDoctorCommand(program: Command): void {
   program
     .command("doctor")
     .description("Check MCP setup health and report issues")
-    .option("--json", "emit the structured DoctorModel as JSON (shape UNSTABLE)")
-    .option("--report", "emit a redacted, pasteable env snapshot for bug reports")
+    .option("--json", "emit the structured DoctorModel as JSON (shape UNSTABLE; NOT redacted — includes server names, use --report to share publicly)")
+    .option("--report", "emit a redacted, pasteable env snapshot for bug reports (no server names/args)")
     .action(async (options: { json?: boolean; report?: boolean }) => {
       // --json / --report are machine/paste output — never colorize.
       const plain = options.json || options.report;
