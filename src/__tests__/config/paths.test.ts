@@ -124,6 +124,33 @@ describe("getConfigPath", () => {
   });
 
   // -------------------------------------------------------------------------
+  // Gemini CLI
+  // -------------------------------------------------------------------------
+
+  describe("gemini-cli", () => {
+    it("returns ~/.gemini/settings.json on darwin", () => {
+      setPlatform("darwin");
+      mockHomedir.mockReturnValue("/Users/alice");
+      expect(getConfigPath("gemini-cli")).toBe("/Users/alice/.gemini/settings.json");
+    });
+
+    it("returns ~/.gemini/settings.json on linux", () => {
+      setPlatform("linux");
+      mockHomedir.mockReturnValue("/home/alice");
+      expect(getConfigPath("gemini-cli")).toBe("/home/alice/.gemini/settings.json");
+    });
+
+    it("is home-relative on win32 — NOT under APPDATA", () => {
+      setPlatform("win32");
+      mockHomedir.mockReturnValue("C:\\Users\\alice");
+      process.env["APPDATA"] = "C:\\Users\\alice\\AppData\\Roaming";
+      const result = getConfigPath("gemini-cli");
+      expect(result).toContain("settings.json");
+      expect(result).not.toContain("AppData");
+    });
+  });
+
+  // -------------------------------------------------------------------------
   // Cursor
   // -------------------------------------------------------------------------
 

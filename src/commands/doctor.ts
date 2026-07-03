@@ -47,6 +47,7 @@ const CLIENT_LABELS: Record<ClientId, string> = {
   cursor: "Cursor",
   vscode: "VS Code",
   windsurf: "Windsurf",
+  "gemini-cli": "Gemini CLI",
 };
 
 const RUNTIME_INSTALL_HINTS: Record<Runtime, string> = {
