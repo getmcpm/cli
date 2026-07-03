@@ -134,7 +134,19 @@ function driveHappy(args) {
     function advance() {
       if (step === 1 && seen[1]) { step = 2; send({ jsonrpc: "2.0", method: "notifications/initialized" }); send({ jsonrpc: "2.0", id: 2, method: "tools/list" }); }
       else if (step === 2 && seen[2]) { step = 3; send({ jsonrpc: "2.0", id: 3, method: "tools/call", params: { name: "probe", arguments: {} } }); }
-      else if (step === 3 && seen[3]) { done = true; clearTimeout(to); child.kill(); resolve(seen); }
+      else if (step === 3 && seen[3]) {
+        // Resolve only once the child has FULLY EXITED — not the instant the 3rd
+        // response lands. The relay child does an off-thread TOFU pin write
+        // (pins.json + .integrity) triggered by the tools/list above; resolving
+        // before exit lets that write land AFTER the tamper step's rmSync,
+        // recreating a partial pins state → a spurious PINS-READ-ERROR that masks
+        // the CONFINE gate under test (the flake #114 chased and only narrowed).
+        // Once the process is gone, no further writes from it are possible.
+        done = true; clearTimeout(to);
+        const kto = setTimeout(() => child.kill("SIGKILL"), 2000); // escalate if SIGTERM stalls
+        child.once("exit", () => { clearTimeout(kto); resolve(seen); });
+        child.kill();
+      }
     }
     child.stdout.on("data", (d) => {
       buf += d.toString("utf8");
@@ -177,15 +189,15 @@ function runToExit(args) {
   }
 
   // 2. tamper — corrupt the embedded profile hash → must fail closed via the
-  // CONFINE gate (decide table row 3). Clear the WHOLE pins sidecar set first:
-  // the happy-path step above ran a real tools/list that TOFU-writes BOTH
-  // pins.json AND its pins.json.integrity sidecar (off-thread). Deleting only
-  // pins.json leaves the sidecar, so readPins sees a sidecar with no matching
-  // file -> PINS-READ-ERROR, which fails closed for an UNRELATED reason and masks
-  // the CONFINE gate under test. (Timing-dependent: locally the sidecar write may
-  // not have landed yet; on a slower CI runner it has — which is how the macOS CI
-  // leg first caught this.) Remove pins.json, its .integrity sidecar, and any
-  // stale .lock so readPins sees a clean first-run state.
+  // CONFINE gate (decide table row 3). driveHappy() above now waits for its child
+  // to fully EXIT, so the relay's off-thread pins TOFU write (pins.json +
+  // .integrity) has finished before we get here — no write can land after the
+  // rmSync below. Still clear the WHOLE pins sidecar set (file + .integrity +
+  // .lock) so readPins sees a clean first-run state: an orphaned sidecar (file
+  // gone, sidecar left) would raise PINS-READ-ERROR and fail closed for an
+  // UNRELATED reason, masking the CONFINE gate under test. (This is the flake the
+  // macOS CI leg first caught, then re-caught when only the file was removed and
+  // the async writer still raced — closed for good by the exit-wait.)
   const mcpmDir = path.join(process.env.HOME, ".mcpm");
   fs.rmSync(path.join(mcpmDir, "pins.json"), { force: true });
   fs.rmSync(path.join(mcpmDir, "pins.json.integrity"), { force: true });
