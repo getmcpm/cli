@@ -24,7 +24,7 @@ A wrapped MCP server's stdio looks like this:
    the real MCP server (e.g. servers-filesystem)
 ```
 
-`mcpm guard enable` rewrites your detected client configs (Claude Desktop / Cursor / VS Code / Windsurf) so each server's `command` becomes the relay, with the original command/args sandwiched after a `--` separator. `mcpm guard disable` restores the original entries.
+`mcpm guard enable` rewrites your detected client configs (Claude Desktop / Claude Code / Cursor / VS Code / Windsurf) so each server's `command` becomes the relay, with the original command/args sandwiched after a `--` separator. `mcpm guard disable` restores the original entries.
 
 Detection is layered:
 

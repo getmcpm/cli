@@ -99,7 +99,12 @@ names the **critique-corrected first slice**.
 
 ---
 
-## Wave 0 — credibility floor (days, ship immediately)
+## Wave 0 — credibility floor (✅ SHIPPED in v0.17.0)
+
+> **Status (2026-07-03):** all four Wave-0 items (E3, B1a, E11, E9a) shipped in
+> **v0.17.0**. Wave-1 **D1** (Claude Code adapter) is merged to `main` and ships on
+> the next tag. Descriptions below are kept as the original plan of record.
+
 
 Cheap, and every enterprise conversation dies without them.
 
@@ -135,7 +140,8 @@ Cheap, and every enterprise conversation dies without them.
 The completeness critic's verdict: the candidate set over-indexed enterprise for a
 2-star product; **D1 is the single highest-leverage item in the entire set.**
 
-- **D1 · Claude Code adapter — user-global slice only.** Add `claude-code` as a plain
+- **D1 · Claude Code adapter — user-global slice only. ✅ SHIPPED** (merged to `main`,
+  ships next tag; see CHANGELOG `[Unreleased]`). Added `claude-code` as a plain
   5th `CLIENT_ID` targeting `~/.claude.json` (rootKey `mcpServers`). It fits the
   existing one-path-per-client contract, so detector, `sync --check`, `guard enable`,
   `list`, `install`, `import` all work day one. Include the TODOS #23 Zod-validation
@@ -313,9 +319,11 @@ decision, not a drift).
 
 ## Suggested release mapping
 
-- **v0.17** — Wave 0 + D1 + D4a + D7 (credibility floor + Claude Code headline).
-- **v0.18** — D2 + D3 + D6 (CI story: verify/Action/SARIF) + E5.
-- **v0.19** — E2 + E4 + E6 + E10a (the enterprise self-serve evidence kit).
+- **v0.16** — F1 `guard --confine` (shipped; predates this roadmap).
+- **v0.17** — ✅ Wave 0 (E3 + B1a + E11 + E9a) — the credibility floor.
+- **v0.18** — D1 (Claude Code adapter, already merged) + D4a + D7 + the CI story
+  (D2 verify/Action, D3 SARIF) + D6 — the Claude Code headline + developer reach.
+- **v0.19** — E5 + E2 + E4 + E6 + E10a (the enterprise self-serve evidence kit).
 - **v1.0** — E1 + B2 + B3 (managed policy, Linux confine, provenance — the
   "enterprise-ready" claim becomes true, and 1.0 signals the semver discipline
   enterprises ask for) + D5 as the launch content.

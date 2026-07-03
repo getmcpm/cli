@@ -38,7 +38,7 @@
 >   context-exfil sigil param like `_system_prompt_`; zero-FP deny tier, honest "tripwire not defense"
 >   scope). The bare-name SUSPECT tier + description-cross-check remain deferred.
 > - ✅ **F1 — `guard --confine` OS-native sandbox (standard tier)** — engine + enable-path shipped
->   across PRs #108/#109/#110 (merged) + #111 (user-facing commands); **unreleased (next minor)**.
+>   across PRs #108/#109/#110 (merged) + #111 (user-facing commands); **released in v0.16.0**.
 >   macOS Seatbelt standard tier, wrap-marker tokens (`--confine-profile-hash` / `--confine-required`),
 >   a 9-row spawn-decision table, the `~/.mcpm/guard-confine.yaml` store, and `guard enable --confine`
 >   + `guard doctor-confine`. **Load-bearing correction:** the plan below assumed confine could "ride the
@@ -84,7 +84,7 @@ Scoring: `composite = impact + differentiation + alignment + 0.5·effort_cheapne
 
 | # | Feature | Cat | Effort | Score | Bucket |
 |---|---|---|---|---|---|
-| 1 | `guard --confine` — OS-native sandbox (standard tier) | sec | ~~L~~ **XL** | **16.5** | ✅ shipped (engine + enable-path; unreleased, next minor); Linux/strict/per-server-CLI deferred |
+| 1 | `guard --confine` — OS-native sandbox (standard tier) | sec | ~~L~~ **XL** | **16.5** | ✅ shipped (engine + enable-path; released v0.16.0); Linux/strict/per-server-CLI deferred |
 | 2 | Cross-server tool-shadowing detection (name-collision v1) | sec | S→M | **16.0** | v0.9 minor |
 | 3 | Content-pinned lockfile (digest tier) + `up --frozen` | both | M | **15.5** | ◑ digest WARN (H11 #81) + `--frozen` BLOCK shipped; multi-registry + registry-claim re-proof deferred |
 | 4 | Release-age cooldown + install-script-shape awareness ✅ **shipped (PR #70)** | sec | S→M | **15.5** | v0.9 minor |
@@ -251,7 +251,7 @@ Sequenced to keep momentum and the Dependabot surface clean (the v0.9 set adds *
 **Category:** security · **Effort:** ~~L (standard)~~ **XL** · **Score 16.5** (highest)
 
 > **Shipped (engine + enable-path)** across PRs #108/#109/#110 (merged) + #111 (user-facing commands);
-> **unreleased (next minor)**. mcpm-guard's **first enforcement primitive** — every prior guard feature
+> **released in v0.16.0**. mcpm-guard's **first enforcement primitive** — every prior guard feature
 > is *detection* (reasons about JSON-RPC bytes, warns/blocks); a stdio MITM cannot *contain* a child that
 > *decides* to read `~/.ssh` or persist a LaunchAgent. `--confine` wraps the relayed child in an OS
 > sandbox so it physically cannot, regardless of the JSON-RPC it emits. **macOS only in v1.**
