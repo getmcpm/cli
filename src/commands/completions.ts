@@ -34,7 +34,7 @@ export interface CompletionsDeps {
 export const SUBCOMMANDS = [
   "search", "install", "info", "list", "remove", "audit", "update", "outdated",
   "doctor", "init", "import", "serve", "disable", "enable", "alias", "export",
-  "lock", "up", "diff", "sync", "publish", "guard", "secrets", "why", "completions",
+  "lock", "up", "verify", "diff", "sync", "publish", "guard", "secrets", "why", "completions",
 ];
 
 export const GUARD_SUBCOMMANDS =
@@ -108,6 +108,7 @@ _mcpm() {
     'export:Export installed servers to a stack file'
     'lock:Resolve and lock a stack file (mcpm.yaml -> mcpm-lock.yaml)'
     'up:Install servers from a stack file with trust policy'
+    'verify:Verify lockfile integrity against npm (CI gate)'
     'diff:Compare installed state vs declared stack'
     'sync:Show cross-client config drift'
     'publish:Publish a server to the registry'
@@ -168,6 +169,7 @@ complete -c mcpm -n '__fish_use_subcommand' -a alias -d 'Manage server aliases'
 complete -c mcpm -n '__fish_use_subcommand' -a export -d 'Export to a stack file'
 complete -c mcpm -n '__fish_use_subcommand' -a lock -d 'Lock a stack file'
 complete -c mcpm -n '__fish_use_subcommand' -a up -d 'Install from a stack file'
+complete -c mcpm -n '__fish_use_subcommand' -a verify -d 'Verify lockfile integrity (CI gate)'
 complete -c mcpm -n '__fish_use_subcommand' -a diff -d 'Compare installed vs declared'
 complete -c mcpm -n '__fish_use_subcommand' -a sync -d 'Show cross-client config drift'
 complete -c mcpm -n '__fish_use_subcommand' -a publish -d 'Publish a server to the registry'

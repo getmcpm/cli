@@ -1,0 +1,53 @@
+name: 'mcpm verify'
+description: "Fail-closed lockfile integrity gate — verify mcpm-lock.yaml against npm's published record."
+branding:
+  icon: 'shield'
+  color: 'green'
+
+inputs:
+  version:
+    description: 'Version or dist-tag of @getmcpm/cli to run.'
+    required: false
+    default: 'latest'
+  working-directory:
+    description: 'Directory containing mcpm.yaml / mcpm-lock.yaml.'
+    required: false
+    default: '.'
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Run mcpm verify
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      env:
+        MCPM_CLI_VERSION: ${{ inputs.version }}
+      run: |
+        # Capture the JSON model AND the exit code. `verify` exits non-zero on an
+        # integrity block, and that becomes this step's (and the job's) exit code.
+        set +e
+        out="$(npx --yes "@getmcpm/cli@${MCPM_CLI_VERSION}" verify --json)"
+        code=$?
+        set -e
+        echo "$out"
+
+        # Render a job step summary from --json (node is preinstalled on GH runners).
+        printf '%s' "$out" | node -e '
+          let d; try { d = JSON.parse(require("fs").readFileSync(0, "utf8")); } catch { process.exit(0); }
+          const fs = require("fs"); const sum = process.env.GITHUB_STEP_SUMMARY;
+          if (!sum) process.exit(0);
+          const L = ["### mcpm verify"];
+          if (d.error) L.push("", "✗ " + d.error);
+          else if (d.noBaselines) L.push("", "✗ lock has no integrity baselines — run `mcpm lock` online once.");
+          else if (d.ok) L.push("", "✓ " + d.verified + " npm server(s) verified against npm’s published record.");
+          else {
+            L.push("", "✗ verification failed — " + (d.blocked || []).length + " server(s):", "");
+            for (const b of d.blocked || []) L.push("- `" + (b.identifier || b.name) + "` — " + b.reason);
+          }
+          if ((d.unenforceable || []).length)
+            L.push("", "_" + d.unenforceable.length + " server(s) (pypi/oci/url) have no baseline mechanism — not enforced._");
+          L.push("", "_mcpm checks the registry’s published record, not the code your agent runs._");
+          fs.appendFileSync(sum, L.join("\n") + "\n");
+        ' || true
+
+        exit $code

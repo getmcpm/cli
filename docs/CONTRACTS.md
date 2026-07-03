@@ -14,6 +14,7 @@ do-not-proceed.
 | `mcpm --version` | always | — | prints `X.Y.Z` |
 | `mcpm up` | applied cleanly | `1` | blocks the run when any server is **blocked** (trust floor, integrity, policy) or **failed**, regardless of `--ci` |
 | `mcpm up --frozen` | lockfile verified, applied | `1` | fail-closed pre-install verify: blocks on integrity drift, an unverifiable record, a format mismatch, or a missing stack/lock |
+| `mcpm verify` | lockfile integrity verified | `1` | repo-only, **client-free** CI gate: the same fail-closed integrity pass as `up --frozen` (drift / unverifiable / format mismatch / suspicious missing baseline), plus `1` when no lock file is found. `--json` emits the verify model |
 | `mcpm up --ci` | applied, no prompts | `1` | non-interactive; also non-zero on shadow collisions when combined with `--check-shadowing` |
 | `mcpm sync --check` | all clients in sync | **`2`** on drift/conflict; `1` on error | **`2` is the drift signal** — the value CI consumes. `--json` emits the drift model |
 | `mcpm audit` | scan complete | `1` when overall trust level is **risky** | advisory findings (e.g. a delisted/deprecated server) lower the score but do not by themselves flip the exit |
@@ -34,7 +35,7 @@ new failure modes, but the meanings above will not be repurposed within `0.x`.
 ## `--json` output (mostly UNSTABLE for now)
 
 `--json` is available on `search`, `install`, `list`, `info`, `audit`, `update`,
-`outdated`, `diff`, `sync`, `why`, `doctor`, `guard list-signatures`, and
+`outdated`, `diff`, `sync`, `why`, `doctor`, `verify`, `guard list-signatures`, and
 `guard doctor-confine`. **Treat these shapes as unstable in `0.x`** — fields may be
 added or renamed — with one exception:
 
