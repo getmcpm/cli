@@ -230,7 +230,7 @@ When a frame trips a signature, drift check, or policy rule, the guard **drops i
 ```bash
 npm install -g @getmcpm/cli@latest
 
-mcpm guard enable           # wrap detected client configs (Claude Desktop / Cursor / VS Code / Windsurf)
+mcpm guard enable           # wrap detected client configs (Claude Desktop / Claude Code / Cursor / VS Code / Windsurf)
 # → restart your IDE so it re-spawns the wrapped server processes
 mcpm guard demo             # synthetic prompt-injection scenario — see a live block in your terminal
 mcpm guard status           # what's protected, what's still in first-session-pin mode

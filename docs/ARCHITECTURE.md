@@ -376,7 +376,7 @@ Plus, when `mcpm guard enable` runs, each touched client config gets a
 | VS Code | `~/Library/Application Support/Code/User/mcp.json` |
 | Windsurf | `~/.codeium/windsurf/mcp_config.json` |
 
-Linux and Windows paths are also supported. Config key: `mcpServers` (Claude Desktop, Cursor) or `servers` (VS Code).
+Linux and Windows paths are also supported. Config key: `mcpServers` (Claude Desktop, Claude Code, Cursor, Windsurf) or `servers` (VS Code).
 
 All config writes use atomic file operations (write to `.tmp`, then `fs.rename`). Files are written with `mode: 0o600` and directories with `mode: 0o700` to restrict access.
 
