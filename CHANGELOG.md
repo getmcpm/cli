@@ -2,7 +2,9 @@
 
 All notable changes to this project will be documented in this file.
 
-## [Unreleased]
+## [0.18.0] - 2026-07-03
+
+A developer-reach release: mcpm becomes usable with **Claude Code**, the most widely-used MCP host. Also the first release to actually ship the CycloneDX SBOM as a release asset (the v0.17.0 attach step tripped over GitHub immutable releases; now fixed).
 
 ### Added
 
@@ -16,6 +18,20 @@ All notable changes to this project will be documented in this file.
   `oauthAccount`, `numStartups`, …) via the existing atomic read-modify-write +
   `.bak` backup. Distinct from the existing `claude-desktop` client (a different
   app and file). Zero new deps.
+
+### Internal
+
+- **Release SBOM now attaches under immutable releases** — the publish workflow
+  attached the CycloneDX SBOM via a follow-up `gh release upload`, which GitHub
+  rejects (HTTP 422) on repos with immutable releases enabled; v0.17.0 published
+  to npm but its release ended up asset-less. The SBOM is now passed to
+  `gh release create` as a positional asset, so it's sealed with the release
+  atomically. This release is the first to carry it correctly.
+- **Confine macOS dogfood flake closed at root** — the `--confine` tamper check
+  intermittently failed closed on the pins store instead of the confine gate
+  because the happy-path driver killed the relay child without awaiting exit, so
+  its off-thread pins write raced the tamper step. The driver now waits for the
+  child to fully exit before tampering.
 
 ## [0.17.0] - 2026-07-03
 
