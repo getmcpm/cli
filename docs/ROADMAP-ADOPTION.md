@@ -202,11 +202,19 @@ The completeness critic's verdict: the candidate set over-indexed enterprise for
   `mcpm.yaml` (file-level, no fake line numbers) + a `logicalLocation` for the server
   name + a stable `partialFingerprints`. Report-only, exit matches `audit` (risky→1).
   GitHub code-scanning upload documented in the README. **Cut:** guard-events SARIF.
-- **D6 · Distribution (trimmed).** mise registry PR (near-zero — npm backend alias) +
-  `getmcpm/homebrew-mcpm` tap + README install matrix. Framed honestly as
-  convenience, not enterprise unblock. **Cut:** devcontainer feature until a
+- **D6 · Distribution (trimmed). ✅ SHIPPED** (the in-repo slice; on `main`, ships next
+  tag). **Name-collision blocker RESOLVED with data**: `mcpm` is already the
+  homebrew-core formula for the unrelated [mcpm.sh](https://mcpm.sh) (v2.15.0) and it
+  squats PyPI — its bin is also `mcpm`. **Decision:** do NOT fight for `brew install
+  mcpm` / the `mcpm` mise short-name; distribute through the collision-free scoped
+  channels. Shipped: README install matrix (npm / npx / pnpm / **mise** via the
+  built-in `npm:@getmcpm/cli` backend — verified against mise docs, **no registry PR
+  needed**) + `docs/DISTRIBUTION.md` documenting the decision. **Deferred (external
+  repos / outward-facing, need owner action):** the `getmcpm/homebrew-mcpm` tap (a
+  non-colliding formula name + bin decision) and a mise registry short-name PR — both
+  documented as deferred, not blocking. **Cut:** devcontainer feature until a
   project-scope adapter exists (inside a container there are no host GUI configs to
-  manage). **Blocker:** resolve the mcpm.sh name collision first.
+  manage).
 
 **Awareness (non-code, runs alongside Wave 1):** submit to the MCP-security
 roundups/awesome-lists that currently omit mcpm; a comparison page (mcpm vs

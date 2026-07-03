@@ -25,9 +25,22 @@ The risky part of an MCP server doesn't show up at install -- it shows up while 
 
 ## Quick start
 
-```bash
-npm install -g @getmcpm/cli
+Install with the package manager you already use:
 
+| Method | Command |
+|---|---|
+| **npm** (global) | `npm install -g @getmcpm/cli` |
+| **npx** (no install) | `npx @getmcpm/cli <command>` |
+| **pnpm** | `pnpm add -g @getmcpm/cli` |
+| **mise** | `mise use -g npm:@getmcpm/cli` |
+
+The binary is `mcpm`. **Heads up:** the `mcpm` Homebrew formula is a *different,
+unrelated* project ([mcpm.sh](https://mcpm.sh)) — install this mcpm via
+npm/npx/pnpm/mise above (all resolve the scoped `@getmcpm/cli` package, so there's
+no name collision). A dedicated Homebrew tap is deferred; see
+[`docs/DISTRIBUTION.md`](docs/DISTRIBUTION.md).
+
+```bash
 mcpm search filesystem
 mcpm info io.github.domdomegg/filesystem-mcp
 mcpm install io.github.domdomegg/filesystem-mcp
