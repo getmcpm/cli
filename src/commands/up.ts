@@ -46,7 +46,7 @@ import { extractRegistryMeta } from "../utils/format-trust.js";
 import { assessServerStatus } from "../scanner/registry-status.js";
 import { applyKeychainSecrets, type SecretsMode, setSecrets as _setSecrets } from "../store/keychain.js";
 import { isNewUnguarded } from "../guard/unguarded.js";
-import { compareIntegrity } from "../registry/npm-integrity.js";
+import { classifyIntegrity, frozenVerdict } from "../stack/frozen-verify.js";
 import type { PinsFile } from "../guard/pins.js";
 import { readPins as _readPins } from "../guard/pins.js";
 import {
@@ -651,95 +651,13 @@ async function processServer(input: ProcessInput): Promise<ServerResult> {
  * include the clause "mcpm checks the registry's published record, not the code
  * your agent runs." NEVER write "serving different bytes" or claim protection.
  */
-/** A locked registry server entry (npm or other), as stored in mcpm-lock.yaml. */
-type LockedRegistryEntry = {
-  version: string;
-  registryType: string;
-  identifier: string;
-  trust: unknown;
-  npmIntegrity?: { npmVersion: string; integrity: string };
-};
-
-/** Server coordinate carried through integrity classification. */
-type IntegrityCoord = { name: string; identifier: string; npmVersion: string };
-
-interface IntegrityClassification {
-  /** locked dist.integrity differs from npm's current published record. */
-  readonly drift: (IntegrityCoord & { oldIntegrity: string; newIntegrity: string })[];
-  /** npm's record uses no algorithm in common with the lock — cannot compare. */
-  readonly formatOnly: IntegrityCoord[];
-  /** fetch returned nothing (offline / 404 / no comparable dist.integrity). */
-  readonly couldNotVerify: IntegrityCoord[];
-  /** npm servers whose lock entry has no npmIntegrity baseline at all. */
-  readonly absentBaseline: string[];
-  /** servers --frozen cannot integrity-check at all: non-npm registry servers
-   *  (pypi/oci — no baseline mechanism yet) plus url servers (no package coordinate). */
-  readonly unenforceable: string[];
-  /** count of npm servers that DID have a baseline (to tell lock-wide vs mixed gaps). */
-  readonly checkedNpmCount: number;
-}
-
-/**
- * Shared integrity classifier (H11). Fetches npm's current published dist.integrity
- * for every locked npm server with a baseline (one batched Promise.all) and sorts
- * every locked registry server into buckets. Pure of output — both the WARN pass
- * (runIntegrityPass) and the fail-closed BLOCK pass (runFrozenPass) consume it, so
- * the fetch/compare logic lives in exactly one place.
- */
-async function classifyIntegrity(
-  lockFile: LockFile,
-  deps: Pick<UpDeps, "fetchNpmIntegrity">
-): Promise<IntegrityClassification> {
-  const registryEntries = Object.entries(lockFile.servers).filter(([, locked]) =>
-    isLockedRegistryServer(locked)
-  ) as [string, LockedRegistryEntry][];
-
-  const npmEntries = registryEntries.filter(([, l]) => l.registryType === "npm");
-  // Everything that is NOT an npm registry server can't be integrity-checked:
-  // pypi/oci (no baseline mechanism yet) and url servers (no package coordinate).
-  const npmNames = new Set(npmEntries.map(([name]) => name));
-  const unenforceable = Object.keys(lockFile.servers).filter((name) => !npmNames.has(name));
-
-  const checkable = npmEntries.filter(([, l]) => l.npmIntegrity !== undefined);
-  const absentBaseline = npmEntries
-    .filter(([, l]) => l.npmIntegrity === undefined)
-    .map(([name]) => name);
-
-  const fresh = await Promise.all(
-    checkable.map(([, l]) => deps.fetchNpmIntegrity(l.identifier, l.npmIntegrity!.npmVersion))
-  );
-
-  const drift: IntegrityClassification["drift"] = [];
-  const formatOnly: IntegrityCoord[] = [];
-  const couldNotVerify: IntegrityCoord[] = [];
-
-  for (let i = 0; i < checkable.length; i++) {
-    const [name, locked] = checkable[i]!;
-    const baseline = locked.npmIntegrity!;
-    const snap = fresh[i];
-    const coord: IntegrityCoord = { name, identifier: locked.identifier, npmVersion: baseline.npmVersion };
-
-    if (snap === undefined) {
-      couldNotVerify.push(coord);
-      continue;
-    }
-    const cmp = compareIntegrity(baseline.integrity, snap.integrity);
-    if (cmp === "equal") continue;
-    if (cmp === "differ") {
-      drift.push({ ...coord, oldIntegrity: baseline.integrity, newIntegrity: snap.integrity });
-    } else {
-      formatOnly.push(coord);
-    }
-  }
-
-  return { drift, formatOnly, couldNotVerify, absentBaseline, unenforceable, checkedNpmCount: checkable.length };
-}
+// classifyIntegrity + its types moved to ../stack/frozen-verify.ts (shared with `mcpm verify`).
 
 async function runIntegrityPass(
   lockFile: LockFile,
   deps: Pick<UpDeps, "fetchNpmIntegrity" | "output">
 ): Promise<void> {
-  const c = await classifyIntegrity(lockFile, deps);
+  const c = await classifyIntegrity(lockFile, deps.fetchNpmIntegrity);
 
   // Emit drift advisories (one per server).
   for (const d of c.drift) {
@@ -808,69 +726,71 @@ async function runFrozenPass(
   lockFile: LockFile,
   deps: Pick<UpDeps, "fetchNpmIntegrity" | "output">
 ): Promise<void> {
-  const c = await classifyIntegrity(lockFile, deps);
+  const v = frozenVerdict(await classifyIntegrity(lockFile, deps.fetchNpmIntegrity));
 
   // Servers --frozen can't integrity-check (pypi/oci have no baseline mechanism;
   // url servers have no package coordinate) — name them loudly rather than let a
   // clean result read as a full freeze (multi-registry pinning is deferred).
-  if (c.unenforceable.length > 0) {
+  if (v.unenforceable.length > 0) {
     deps.output(
-      `\n${c.unenforceable.length} server(s) (pypi/oci/url) have no integrity baseline mechanism` +
+      `\n${v.unenforceable.length} server(s) (pypi/oci/url) have no integrity baseline mechanism` +
         ` — \`--frozen\` cannot enforce them (multi-registry pinning is deferred).`
     );
   }
 
   // A lock where NO npm server has a baseline is benign (pre-baseline or offline
   // lock), not an attack — refuse with instructions instead of a per-server verdict.
-  if (c.absentBaseline.length > 0 && c.checkedNpmCount === 0) {
+  if (v.noBaselines) {
     throw new Error(
       "--frozen: this lock has no integrity baselines (it predates them, or was last locked" +
         " offline). Run `mcpm lock` online once to record them, then `mcpm up --frozen`."
     );
   }
 
-  const blocks: string[] = [];
-  for (const d of c.drift) {
-    const oldShort = d.oldIntegrity.slice(0, 16);
-    const newShort = d.newIntegrity.slice(0, 16);
-    blocks.push(
-      `✗ FROZEN: npm's published record for ${d.identifier}@${d.npmVersion} changed since you` +
-        ` locked it (dist.integrity ${oldShort}… → ${newShort}…). --frozen refuses to install on` +
-        ` integrity drift. Re-pin with \`mcpm lock\` only if this change is expected.`
-    );
-  }
-  for (const f of c.formatOnly) {
-    blocks.push(
-      `✗ FROZEN: cannot compare npm's published record for ${f.identifier}@${f.npmVersion} against` +
-        ` your locked baseline (integrity format changed). Re-run \`mcpm lock\` to refresh it.`
-    );
-  }
-  // could-not-verify is NON-deterministic (a transient registry blip looks the same
-  // as a yanked version) — give it a distinct "re-run" message, separate from the
-  // deterministic drift block.
-  for (const v of c.couldNotVerify) {
-    blocks.push(
-      `✗ FROZEN: could not verify npm's published record for ${v.identifier}@${v.npmVersion} this` +
-        ` run (offline, a yanked version, or no comparable dist.integrity). --frozen requires proof` +
-        ` the record matches your lock — this may be a transient registry error, so re-run; if it` +
-        ` persists, drop --frozen.`
-    );
-  }
-  // mixed-lock gap (handled above only when checkedNpmCount === 0).
-  for (const name of c.absentBaseline) {
-    blocks.push(
-      `✗ FROZEN: no integrity baseline recorded for ${name}, though other servers in this lock` +
-        ` have one. Re-run \`mcpm lock\` online to record it, then \`mcpm up --frozen\`.`
-    );
-  }
+  if (v.ok) return;
 
-  if (blocks.length > 0) {
-    deps.output(`\n${blocks.join("\n")}`);
-    deps.output("\nmcpm verifies the registry's published record, not the code your agent runs at launch.");
-    throw new Error(
-      `frozen: ${blocks.length} server(s) failed integrity verification; nothing was installed.`
-    );
-  }
+  const blocks = v.blocks.map((b) => {
+    switch (b.reason) {
+      case "drift":
+        return (
+          `✗ FROZEN: npm's published record for ${b.identifier}@${b.npmVersion} changed since you` +
+          ` locked it (dist.integrity ${b.oldIntegrity.slice(0, 16)}… → ${b.newIntegrity.slice(0, 16)}…). --frozen refuses to install on` +
+          ` integrity drift. Re-pin with \`mcpm lock\` only if this change is expected.`
+        );
+      case "format":
+        return (
+          `✗ FROZEN: cannot compare npm's published record for ${b.identifier}@${b.npmVersion} against` +
+          ` your locked baseline (integrity format changed). Re-run \`mcpm lock\` to refresh it.`
+        );
+      case "could-not-verify":
+        // NON-deterministic (a transient registry blip looks the same as a yanked
+        // version) — distinct "re-run" message, separate from deterministic drift.
+        return (
+          `✗ FROZEN: could not verify npm's published record for ${b.identifier}@${b.npmVersion} this` +
+          ` run (offline, a yanked version, or no comparable dist.integrity). --frozen requires proof` +
+          ` the record matches your lock — this may be a transient registry error, so re-run; if it` +
+          ` persists, drop --frozen.`
+        );
+      case "missing-baseline":
+        // Mixed-lock gap (the lock-wide case is the benign refuse-to-run above).
+        return (
+          `✗ FROZEN: no integrity baseline recorded for ${b.name}, though other servers in this lock` +
+          ` have one. Re-run \`mcpm lock\` online to record it, then \`mcpm up --frozen\`.`
+        );
+      default: {
+        // Compile-time exhaustiveness: a new FrozenBlock reason must add a case here,
+        // or this fails to build — never silently emit `undefined` in a block message.
+        const _never: never = b;
+        throw new Error(`unhandled frozen block reason: ${JSON.stringify(_never)}`);
+      }
+    }
+  });
+
+  deps.output(`\n${blocks.join("\n")}`);
+  deps.output("\nmcpm verifies the registry's published record, not the code your agent runs at launch.");
+  throw new Error(
+    `frozen: ${blocks.length} server(s) failed integrity verification; nothing was installed.`
+  );
 }
 
 /**

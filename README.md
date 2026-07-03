@@ -191,6 +191,7 @@ Without an external scanner installed, the maximum possible score is 80/100. The
 | `mcpm export` | Export installed servers as an mcpm.yaml stack file |
 | `mcpm lock` | Resolve versions and create mcpm-lock.yaml with trust snapshots |
 | `mcpm up` | Install all servers from mcpm.yaml with trust verification |
+| `mcpm verify` | Repo-only CI gate: verify lockfile integrity vs npm's published record (`--json`) |
 | `mcpm diff` | Compare installed servers against mcpm.yaml and lock file |
 | `mcpm completions <shell>` | Generate shell completion scripts (bash, zsh, fish) |
 | `mcpm why <name>` | Explain a server's trust score (breakdown of all components) |
@@ -208,6 +209,31 @@ Without an external scanner installed, the maximum possible score is 80/100. The
 | `mcpm guard reset-integrity` | Regenerate the pins.json or guard-policy.yaml integrity sidecar |
 
 Run `mcpm <command> --help` for options and flags.
+
+## CI: verify your lockfile
+
+`mcpm verify` is a repo-only, **client-free** gate: it checks your committed
+`mcpm-lock.yaml` against npm's **published** `dist.integrity` record and exits
+non-zero on integrity drift, an unverifiable record, a format mismatch, or a
+suspicious missing baseline. Because it needs no AI clients installed, it runs on a
+hosted CI runner (where `mcpm up` cannot).
+
+```yaml
+# .github/workflows/mcpm.yml
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: getmcpm/cli/.github/actions/mcpm-verify@v0.19.0   # or: run: npx @getmcpm/cli verify
+```
+
+The Action writes a job step summary from `--json`; the same verb works as a
+pre-commit hook. See [`.github/actions/mcpm-verify`](.github/actions/mcpm-verify).
+
+> Honesty boundary: a failure means npm's *published record* diverged from your
+> lock — not that mcpm caught malicious bytes; npx/uvx fetch the artifact
+> independently at server launch.
 
 ## Runtime defense (mcpm-guard)
 

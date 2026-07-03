@@ -6,6 +6,17 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- **`mcpm verify` + an official GitHub Action (D2)** — a repo-only, **client-free**
+  integrity gate for CI. `mcpm verify` loads `mcpm-lock.yaml` and runs the same
+  fail-closed integrity pass as `mcpm up --frozen` — BLOCK (exit 1) on integrity
+  drift, an unverifiable record, a format mismatch, or a suspicious missing baseline
+  — but, unlike `up`, it needs **no AI clients installed**, so it runs on a hosted
+  runner (where `up` hard-fails on zero detected clients). `--json` emits a
+  structured model; a composite Action at `.github/actions/mcpm-verify` wraps it with
+  a job step summary. Pre-commit rides the same verb. Deliberately **one verb**:
+  provenance (Sigstore) will *extend* `mcpm verify` later, never fork it. v1 scope is
+  npm `dist.integrity`; pypi/oci/url are reported as unenforceable, and stack-vs-lock
+  staleness is a deferred follow-up.
 - **`mcpm doctor --json` and `--report`** — `doctor`'s checks are now built into a
   structured `DoctorModel` (clients with server + guarded counts, runtimes, advisory
   cross-client drift, typed issues, `ok`). `--json` emits that model (shape UNSTABLE);
@@ -26,6 +37,13 @@ All notable changes to this project will be documented in this file.
   Note: Gemini reads `url` as an SSE endpoint and `httpUrl` as HTTP — mcpm writes
   `url`, the same URL-transport caveat that already applies to non-Cursor clients.
   Zero new deps.
+
+### Internal
+
+- **Shared frozen-verify extraction** — `classifyIntegrity` + a new pure
+  `frozenVerdict` moved from `up.ts` into `src/stack/frozen-verify.ts`, consumed by
+  both `up --frozen` and the new `mcpm verify`. `up`'s output and block matrix are
+  byte-identical (its 13 frozen tests pass unchanged).
 
 ### Fixed
 

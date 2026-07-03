@@ -176,7 +176,17 @@ The completeness critic's verdict: the candidate set over-indexed enterprise for
   backend — no server names/args). `.github/ISSUE_TEMPLATE/bug.yml` requires a pasted
   report — the telemetry-free friction channel (flutter/brew/gh norm). **Cut:**
   PATH-origin classification (that's F9-PR2; don't smuggle it in).
-- **D2 · `mcpm verify` + GitHub Action.** The critique killed the "thin wrapper"
+- **D2 · `mcpm verify` + GitHub Action. ✅ SHIPPED** (on `main`, ships next tag; see
+  CHANGELOG `[Unreleased]`). Confirmed the critique: `classifyIntegrity` + a new pure
+  `frozenVerdict` were extracted from `up.ts` into `src/stack/frozen-verify.ts`, and
+  `mcpm verify [--json]` runs that pass **client-free** (no client detection, no
+  `~/.mcpm`, no writes) with the same BLOCK semantics + exit codes as `up --frozen`
+  (exit 1 on drift / unverifiable / format mismatch / mixed missing baseline; benign
+  refuse on a lock-wide no-baseline; pypi/oci/url reported as unenforceable). Composite
+  Action at `.github/actions/mcpm-verify` (step summary from `--json`, static badge,
+  pre-commit snippet). `up`'s block matrix is byte-identical (13 frozen tests
+  unchanged). **v1 scope = npm `dist.integrity`**; stack-vs-lock staleness deferred.
+  Original plan: The critique killed the "thin wrapper"
   framing: none of the existing commands run on a hosted runner (`up` hard-fails on
   zero detected clients; `sync --check`/`audit` are vacuously green there). First a
   CLI PR: **`mcpm verify [--json]`** — repo-only, client-free; loads
