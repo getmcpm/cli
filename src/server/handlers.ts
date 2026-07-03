@@ -5,8 +5,6 @@
  * All dependencies are injectable for testability.
  */
 
-import { execFile } from "node:child_process";
-import { promisify } from "node:util";
 import path from "node:path";
 import type { ClientId } from "../config/paths.js";
 import { CLIENT_IDS } from "../config/paths.js";
@@ -17,6 +15,7 @@ import type { TrustScore, TrustScoreInput } from "../scanner/trust-score.js";
 import { extractRegistryMeta } from "../utils/format-trust.js";
 import { formatMcpEntryCommand } from "../utils/format-entry.js";
 import { resolveInstallEntry } from "../commands/install.js";
+import { buildDoctorModel, makeCheckConfigExists, execCheckDefault } from "../commands/doctor.js";
 import { fetchNpmIntegrity as _fetchNpmIntegrity } from "../registry/npm-integrity.js";
 import { readPins as _readPins } from "../guard/pins.js";
 
@@ -49,8 +48,6 @@ function validateMcpServerName(name: string): void {
     );
   }
 }
-
-const execFileAsync = promisify(execFile);
 
 // ---------------------------------------------------------------------------
 // Dependency injection types
@@ -319,19 +316,14 @@ export async function handleAudit(deps: ServerDeps): Promise<object> {
 }
 
 export async function handleDoctor(deps: ServerDeps): Promise<object> {
-  const detected = await deps.detectClients();
-  const clients = detected.map((id) => ({ id, detected: true }));
-
-  const cmds = ["npx", "uvx", "docker"] as const;
-  const results = await Promise.allSettled(
-    cmds.map((cmd) => execFileAsync(cmd, ["--version"], { timeout: 5000 }))
-  );
-  const runtimes = cmds.map((name, i) => ({
-    name,
-    available: results[i].status === "fulfilled",
-  }));
-
-  return { clients, runtimes, issues: [] };
+  // Reuse the CLI's structured model so this tool reports real issues instead of
+  // the formerly-hardcoded `issues: []` (D7). Honors the injected getConfigPath.
+  return buildDoctorModel({
+    getAdapter: deps.getAdapter,
+    getConfigPath: deps.getConfigPath,
+    checkConfigExists: makeCheckConfigExists(deps.getConfigPath),
+    execCheck: execCheckDefault,
+  });
 }
 
 export async function handleSetup(

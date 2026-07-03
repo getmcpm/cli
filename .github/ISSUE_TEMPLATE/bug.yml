@@ -1,0 +1,57 @@
+name: Bug report
+description: Something in mcpm isn't working as expected.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting a bug. mcpm collects **no telemetry**, so the environment
+        report below is how we learn what setup hit the problem. It is **redacted** —
+        `--report` prints only counts, versions, and OS info, never your server names,
+        arguments, or secrets.
+
+  - type: textarea
+    id: report
+    attributes:
+      label: Environment report
+      description: "Run `mcpm doctor --report` and paste the output here (it is redacted — no server names/args)."
+      render: text
+      placeholder: |
+        mcpm doctor --report (redacted — no server names or args)
+        mcpm:            0.19.0
+        node:            v22.0.0
+        os:              darwin arm64 24.5.0
+        ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: What did you do, what did you expect, and what happened instead?
+      placeholder: |
+        1. Ran `mcpm ...`
+        2. Expected ...
+        3. Got ...
+    validations:
+      required: true
+
+  - type: input
+    id: command
+    attributes:
+      label: Command
+      description: The exact mcpm command you ran (redact any secrets/tokens).
+      placeholder: "mcpm up --frozen"
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before submitting
+      options:
+        - label: I searched existing issues and this isn't a duplicate.
+          required: true
+        - label: My pasted report does not contain any secrets or private server names I don't want public.
+          required: true
