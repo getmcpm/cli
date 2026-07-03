@@ -175,7 +175,7 @@ Without an external scanner installed, the maximum possible score is 80/100. The
 | `mcpm info <name>` | Show full details for an MCP server |
 | `mcpm list` | List all installed MCP servers across detected AI clients |
 | `mcpm remove <name>` | Remove an MCP server from client config(s) |
-| `mcpm audit` | Scan all installed servers and produce a trust report |
+| `mcpm audit` | Scan all installed servers and produce a trust report (`--json`, `--sarif` for GitHub code-scanning) |
 | `mcpm update` | Check for newer versions and update installed servers |
 | `mcpm outdated` | Show version drift and trust regression for installed servers |
 | `mcpm secrets` | Manage MCP server credentials (AES-GCM encrypted at rest; key held in the OS keychain — macOS Keychain / libsecret / Windows DPAPI — so a copied store can't be decrypted off-machine, with a machine-derived-key fallback where no keychain is available). `mcpm secrets migrate` upgrades older entries |
@@ -230,6 +230,19 @@ jobs:
 
 The Action writes a job step summary from `--json`; the same verb works as a
 pre-commit hook. See [`.github/actions/mcpm-verify`](.github/actions/mcpm-verify).
+
+**Code scanning:** `mcpm audit --sarif` emits a SARIF 2.1.0 report (one rule per
+finding type, findings anchored file-level to `mcpm.yaml`) that GitHub ingests as
+code-scanning alerts:
+
+```yaml
+      - run: npx @getmcpm/cli audit --sarif > mcpm.sarif
+        continue-on-error: true   # audit exits 1 when a server is risky
+      - uses: github/codeql-action/upload-sarif@v3
+        if: always()              # upload even if the audit flagged a risk
+        with:
+          sarif_file: mcpm.sarif
+```
 
 > Honesty boundary: a failure means npm's *published record* diverged from your
 > lock — not that mcpm caught malicious bytes; npx/uvx fetch the artifact

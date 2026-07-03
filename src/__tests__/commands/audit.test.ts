@@ -349,6 +349,46 @@ describe("handleAudit — safe/caution/risky mix", () => {
 });
 
 // ---------------------------------------------------------------------------
+// --sarif (D3)
+// ---------------------------------------------------------------------------
+
+describe("handleAudit — --sarif", () => {
+  it("emits a SARIF 2.1.0 log mapping findings, exit 1 when risky", async () => {
+    const lines: string[] = [];
+    const deps = {
+      ...makeDeps({
+        scanTier1: vi.fn().mockReturnValue([
+          { type: "secrets", severity: "critical", message: "leaked key", location: "srv" },
+        ] as Finding[]),
+        computeTrustScore: vi.fn().mockReturnValue(makeTrustScore("risky", 20)),
+      }),
+      output: (t: string) => lines.push(t),
+    };
+    const code = await handleAudit({ sarif: true }, deps);
+    expect(code).toBe(1); // risky → 1, same as --json contract
+
+    const sarif = JSON.parse(lines.join("\n"));
+    expect(sarif.version).toBe("2.1.0");
+    const result = sarif.runs[0].results[0];
+    expect(result.ruleId).toBe("mcpm/secrets");
+    expect(result.level).toBe("error");
+    expect(result.locations[0].physicalLocation.artifactLocation.uri).toBe("mcpm.yaml");
+    // The report-only branch never touches the store even if --fix is also passed.
+    expect(deps.removeFromStore).not.toHaveBeenCalled();
+  });
+
+  it("emits valid SARIF with no results + exit 0 when everything is clean", async () => {
+    const lines: string[] = [];
+    const deps = { ...makeDeps(), output: (t: string) => lines.push(t) }; // safe, no findings
+    const code = await handleAudit({ sarif: true }, deps);
+    expect(code).toBe(0);
+    const sarif = JSON.parse(lines.join("\n"));
+    expect(sarif.runs[0].results).toHaveLength(0);
+    expect(sarif.runs[0].tool.driver.rules.length).toBe(8); // rule catalog always present
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Summary line
 // ---------------------------------------------------------------------------
 

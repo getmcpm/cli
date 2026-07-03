@@ -195,11 +195,13 @@ The completeness critic's verdict: the candidate set over-indexed enterprise for
   `mcpm verify` (SHA-pinned, step summary from `--json`, static badge). Pre-commit
   rides the same verb. **Naming is deliberate:** B3 later *extends* `mcpm verify`
   with provenance — one verb, integrity now, provenance later.
-- **D3 · `mcpm audit --sarif`.** Pure `src/output/sarif.ts` mapper beside the existing
-  `--json` branch; rules from the 7 real `Finding.type`s; artifactLocation =
-  `mcpm.yaml` (file-level, no fake line numbers). GitHub code-scanning upload
-  documented. **Cut:** guard-events SARIF (no repo artifact to anchor; their export
-  story is E2).
+- **D3 · `mcpm audit --sarif`. ✅ SHIPPED** (on `main`, ships next tag; see CHANGELOG
+  `[Unreleased]`). Pure `src/output/sarif.ts` mapper beside the `--json` branch;
+  rules from the real `Finding.type`s (**8**, not 7 — the union grew; the rule catalog
+  is a TS-exhaustive `Record` so a new type forces an update); artifactLocation =
+  `mcpm.yaml` (file-level, no fake line numbers) + a `logicalLocation` for the server
+  name + a stable `partialFingerprints`. Report-only, exit matches `audit` (risky→1).
+  GitHub code-scanning upload documented in the README. **Cut:** guard-events SARIF.
 - **D6 · Distribution (trimmed).** mise registry PR (near-zero — npm backend alias) +
   `getmcpm/homebrew-mcpm` tap + README install matrix. Framed honestly as
   convenience, not enterprise unblock. **Cut:** devcontainer feature until a
