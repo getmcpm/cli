@@ -6,6 +6,13 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- **`mcpm audit --sarif` (D3)** — emit a SARIF 2.1.0 report for GitHub
+  code-scanning (`github/codeql-action/upload-sarif`). One rule per real
+  `Finding.type`; each finding becomes a result anchored **file-level** to
+  `mcpm.yaml` (audit scans installed servers, which have no source line — a
+  fabricated line number would be a lie), with severity mapped to SARIF
+  `error`/`warning`/`note` and a stable fingerprint so GitHub tracks the same alert
+  across runs. Report-only (never fixes); exit code matches `audit` (`1` when risky).
 - **`mcpm verify` + an official GitHub Action (D2)** — a repo-only, **client-free**
   integrity gate for CI. `mcpm verify` loads `mcpm-lock.yaml` and runs the same
   fail-closed integrity pass as `mcpm up --frozen` — BLOCK (exit 1) on integrity

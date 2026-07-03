@@ -20,6 +20,7 @@ import ora from "ora";
 import type { InstalledServer } from "../store/servers.js";
 import type { ServerEntry } from "../registry/types.js";
 import type { Finding } from "../scanner/tier1.js";
+import { buildSarif } from "../output/sarif.js";
 import type { TrustScore, TrustScoreInput } from "../scanner/trust-score.js";
 import { levelColor, scoreBar, extractRegistryMeta } from "../utils/format-trust.js";
 import { stdoutOutput } from "../utils/output.js";
@@ -39,6 +40,7 @@ const DEFAULT_FIX_THRESHOLD = 50;
 
 export interface AuditOptions {
   json?: boolean;
+  sarif?: boolean;
   fix?: boolean;
   minTrust?: number;
   yes?: boolean;
@@ -233,6 +235,25 @@ export async function handleAudit(
 
   spinner.stop();
 
+  // --sarif mode: a read-only SARIF 2.1.0 report for GitHub code-scanning. Report
+  // only — never fixes. Exit code matches audit's contract (risky → 1); upload with
+  // `if: always()` so the artifact survives a non-zero audit.
+  if (options.sarif === true) {
+    // __PKG_VERSION__ is a tsup build-time define; guard for non-bundled (test) runs.
+    const version = typeof __PKG_VERSION__ === "string" ? __PKG_VERSION__ : "0.0.0";
+    output(
+      JSON.stringify(
+        buildSarif(
+          results.map((r) => ({ name: r.name, findings: r.findings })),
+          version
+        ),
+        null,
+        2
+      )
+    );
+    return results.some((r) => r.score.level === "risky") ? 1 : 0;
+  }
+
   // --json mode (without --fix: bare array; with --fix: wrapped object)
   if (options.json === true) {
     const serversJson = results.map((r) => ({
@@ -339,10 +360,11 @@ export function registerAuditCommand(program: Command): void {
     .command("audit")
     .description("Scan all installed servers and produce a trust report")
     .option("--json", "Output raw JSON instead of a formatted table")
+    .option("--sarif", "Output a SARIF 2.1.0 report for GitHub code-scanning (report only)")
     .option("--fix", "remove servers whose trust score is below the threshold")
     .option("--min-trust <n>", "threshold used by --fix (default 50)", parseMinTrust)
     .option("-y, --yes", "skip confirmation prompts")
-    .action(async (opts: { json?: boolean; fix?: boolean; minTrust?: number; yes?: boolean }) => {
+    .action(async (opts: { json?: boolean; sarif?: boolean; fix?: boolean; minTrust?: number; yes?: boolean }) => {
       const { getInstalledServers } = await import("../store/servers.js");
       const { RegistryClient } = await import("../registry/client.js");
       const { scanTier1 } = await import("../scanner/tier1.js");
@@ -370,7 +392,7 @@ export function registerAuditCommand(program: Command): void {
       };
 
       const exitCode = await handleAudit(
-        { json: opts.json, fix: opts.fix, minTrust: opts.minTrust, yes: opts.yes },
+        { json: opts.json, sarif: opts.sarif, fix: opts.fix, minTrust: opts.minTrust, yes: opts.yes },
         deps
       ).catch((err: Error) => {
         console.error(chalk.red(err.message));
