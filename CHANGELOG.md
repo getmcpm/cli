@@ -2,7 +2,9 @@
 
 All notable changes to this project will be documented in this file.
 
-## [Unreleased]
+## [0.17.0] - 2026-07-03
+
+A credibility-floor release for developer/enterprise adoption: supply-chain evidence (`SECURITY.md`, a CycloneDX SBOM on every release, OpenSSF Scorecard), a macOS CI leg that verifies the `--confine` enforcement path end-to-end, published stability contracts (`docs/CONTRACTS.md`), and a fail-safe registry-delisting gate.
 
 ### Added
 
