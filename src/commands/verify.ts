@@ -66,52 +66,65 @@ export async function verifyHandler(deps: VerifyDeps, opts: VerifyOpts = {}): Pr
   const stackPath = opts.stackFile ?? "mcpm.yaml";
   const lockPath = stackPath.replace(/\.yaml$/, "-lock.yaml");
 
-  const lockFile = await deps.parseLock(lockPath);
-  if (lockFile === null) {
-    // Deterministic gate: verify NEVER auto-locks (that would defeat the point in CI).
-    const error = `no lock file found at ${lockPath} — run \`mcpm lock\` first.`;
+  // Fail-closed: this handler NEVER throws — any error (a missing lock, a malformed /
+  // Zod-invalid lock that makes parseLock throw, a fetch failure) resolves to exit 1
+  // with a structured error model. That keeps the CI gate closed even when the
+  // exported handler is reused programmatically (no ambient top-level catch).
+  try {
+    const lockFile = await deps.parseLock(lockPath);
+    if (lockFile === null) {
+      // Deterministic gate: verify NEVER auto-locks (that would defeat the point in CI).
+      return emitError(deps, opts, `no lock file found at ${lockPath} — run \`mcpm lock\` first.`);
+    }
+
+    const v = frozenVerdict(await classifyIntegrity(lockFile, deps.fetchNpmIntegrity));
+
+    const blocked: VerifyBlocked[] = v.blocks.map((b) =>
+      b.reason === "missing-baseline"
+        ? { name: b.name, reason: b.reason }
+        : { name: b.name, reason: b.reason, identifier: b.identifier, npmVersion: b.npmVersion }
+    );
+    // "checkable" npm servers minus those that failed a checkable reason. missing-baseline
+    // blocks are NOT in checkedNpmCount, so they don't subtract here.
+    const failedCheckable = v.blocks.filter((b) => b.reason !== "missing-baseline").length;
+
     const model: VerifyModel = {
       schemaVersion: 1,
-      ok: false,
-      verified: 0,
-      checkedNpmCount: 0,
-      noBaselines: false,
-      blocked: [],
-      unenforceable: [],
-      error,
+      ok: v.ok,
+      verified: v.checkedNpmCount - failedCheckable,
+      checkedNpmCount: v.checkedNpmCount,
+      noBaselines: v.noBaselines,
+      blocked,
+      unenforceable: v.unenforceable,
     };
-    if (opts.json) deps.output(JSON.stringify(model, null, 2));
-    else deps.output(`\n✗ ${error}`);
-    return 1;
+
+    if (opts.json) {
+      deps.output(JSON.stringify(model, null, 2));
+    } else {
+      renderVerifyText(model, deps.output);
+    }
+    return model.ok ? 0 : 1;
+  } catch (err) {
+    const detail = err instanceof Error ? err.message : String(err);
+    return emitError(deps, opts, `could not verify ${lockPath}: ${detail}`);
   }
+}
 
-  const v = frozenVerdict(await classifyIntegrity(lockFile, deps.fetchNpmIntegrity));
-
-  const blocked: VerifyBlocked[] = v.blocks.map((b) =>
-    b.reason === "missing-baseline"
-      ? { name: b.name, reason: b.reason }
-      : { name: b.name, reason: b.reason, identifier: b.identifier, npmVersion: b.npmVersion }
-  );
-  // "checkable" npm servers minus those that failed a checkable reason. missing-baseline
-  // blocks are NOT in checkedNpmCount, so they don't subtract here.
-  const failedCheckable = v.blocks.filter((b) => b.reason !== "missing-baseline").length;
-
+/** Emit a fail-closed error (structured under --json) and return exit code 1. */
+function emitError(deps: VerifyDeps, opts: VerifyOpts, error: string): number {
   const model: VerifyModel = {
     schemaVersion: 1,
-    ok: v.ok,
-    verified: v.checkedNpmCount - failedCheckable,
-    checkedNpmCount: v.checkedNpmCount,
-    noBaselines: v.noBaselines,
-    blocked,
-    unenforceable: v.unenforceable,
+    ok: false,
+    verified: 0,
+    checkedNpmCount: 0,
+    noBaselines: false,
+    blocked: [],
+    unenforceable: [],
+    error,
   };
-
-  if (opts.json) {
-    deps.output(JSON.stringify(model, null, 2));
-  } else {
-    renderVerifyText(model, deps.output);
-  }
-  return model.ok ? 0 : 1;
+  if (opts.json) deps.output(JSON.stringify(model, null, 2));
+  else deps.output(`\n✗ ${error}`);
+  return 1;
 }
 
 const REASON_PHRASE: Record<FrozenBlock["reason"], string> = {

@@ -121,6 +121,21 @@ describe("verifyHandler — block matrix", () => {
     expect(code).toBe(1);
     expect(d.out()).toMatch(/no lock file found.*mcpm lock/i);
   });
+
+  it("fail-closed: a malformed lock (parseLock throws) → exit 1, never throws", async () => {
+    const lines: string[] = [];
+    const badDeps: VerifyDeps = {
+      parseLock: vi.fn().mockRejectedValue(new Error("Invalid lock file (schema)")),
+      fetchNpmIntegrity: vi.fn(),
+      output: (t: string) => lines.push(t),
+    };
+    // Must resolve (not reject) to a non-zero code — the gate stays CLOSED on a bad lock.
+    const code = await verifyHandler(badDeps, { json: true });
+    expect(code).toBe(1);
+    const model = JSON.parse(lines.join("\n")) as VerifyModel;
+    expect(model.ok).toBe(false);
+    expect(model.error).toMatch(/could not verify.*Invalid lock file/i);
+  });
 });
 
 describe("verifyHandler — honesty + --json", () => {

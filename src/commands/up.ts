@@ -777,6 +777,12 @@ async function runFrozenPass(
           `✗ FROZEN: no integrity baseline recorded for ${b.name}, though other servers in this lock` +
           ` have one. Re-run \`mcpm lock\` online to record it, then \`mcpm up --frozen\`.`
         );
+      default: {
+        // Compile-time exhaustiveness: a new FrozenBlock reason must add a case here,
+        // or this fails to build — never silently emit `undefined` in a block message.
+        const _never: never = b;
+        throw new Error(`unhandled frozen block reason: ${JSON.stringify(_never)}`);
+      }
     }
   });
 
