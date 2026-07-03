@@ -182,7 +182,7 @@ Without an external scanner installed, the maximum possible score is 80/100. The
 | `mcpm publish scaffold` | Create a .mcpm-publish.yaml manifest interactively |
 | `mcpm publish check` | Dry-run: show trust score and what would be submitted |
 | `mcpm publish` | Submit to the official MCP registry (requires GITHUB_TOKEN) |
-| `mcpm doctor` | Check MCP setup health and report issues |
+| `mcpm doctor` | Check MCP setup health and report issues (`--json` structured model, `--report` redacted paste-for-bug-reports snapshot) |
 | `mcpm init` | Scaffold a starter `mcpm.yaml` stack file in the current directory |
 | `mcpm disable <name>` | Disable an MCP server without removing it from config |
 | `mcpm enable <name>` | Re-enable a previously disabled MCP server |

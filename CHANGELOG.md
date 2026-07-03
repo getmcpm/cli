@@ -6,6 +6,15 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- **`mcpm doctor --json` and `--report`** — `doctor`'s checks are now built into a
+  structured `DoctorModel` (clients with server + guarded counts, runtimes, advisory
+  cross-client drift, typed issues, `ok`). `--json` emits that model (shape UNSTABLE);
+  `--report` emits a **redacted, pasteable** environment snapshot for bug reports —
+  OS/arch, mcpm + node versions, per-client server counts, runtime availability,
+  confine-backend + secret-store backend, and issue **counts** only. It deliberately
+  carries **no server names or arguments** (issue messages that embed a server name
+  are reduced to counts). A new `.github/ISSUE_TEMPLATE/bug.yml` requires a pasted
+  report — the telemetry-free way to learn what setup hit a bug.
 - **Gemini CLI adapter (`~/.gemini/settings.json`)** — mcpm now reads and writes
   MCP servers for **Gemini CLI** (Google's terminal agent) as a first-class client
   (`--client gemini-cli`). Same top-level `mcpServers` map as Claude Code / Cursor,
@@ -17,6 +26,14 @@ All notable changes to this project will be documented in this file.
   Note: Gemini reads `url` as an SSE endpoint and `httpUrl` as HTTP — mcpm writes
   `url`, the same URL-transport caveat that already applies to non-Cursor clients.
   Zero new deps.
+
+### Fixed
+
+- **`mcpm_doctor` MCP tool now reports real issues** — it previously returned a
+  hardcoded `issues: []` and listed only *detected* clients. It now reuses the same
+  `DoctorModel` builder as the CLI, so an agent calling the tool sees malformed
+  configs and missing-runtime issues (and the full per-client health), not an empty
+  list.
 
 ## [0.18.0] - 2026-07-03
 

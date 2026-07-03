@@ -34,7 +34,7 @@ new failure modes, but the meanings above will not be repurposed within `0.x`.
 ## `--json` output (mostly UNSTABLE for now)
 
 `--json` is available on `search`, `install`, `list`, `info`, `audit`, `update`,
-`outdated`, `diff`, `sync`, `why`, `guard list-signatures`, and
+`outdated`, `diff`, `sync`, `why`, `doctor`, `guard list-signatures`, and
 `guard doctor-confine`. **Treat these shapes as unstable in `0.x`** — fields may be
 added or renamed — with one exception:
 
@@ -43,6 +43,11 @@ added or renamed — with one exception:
 
 The remaining `--json` shapes stabilize per-command as they are schema-typed and
 documented; until then, pin to the exit codes, not the field names.
+
+`mcpm doctor --report` is a **redacted, human-pasteable** text snapshot (not JSON):
+OS/arch, mcpm + node versions, per-client server counts, runtime availability,
+confine + secret-store backend, and issue *counts*. It carries **no server names or
+arguments** by design (for pasting into public bug reports). Format is UNSTABLE.
 
 ## Semver-exempt internals (may change any release)
 

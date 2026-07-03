@@ -158,7 +158,17 @@ The completeness critic's verdict: the candidate set over-indexed enterprise for
   URL caveat: Gemini reads `url`=SSE / `httpUrl`=HTTP, mcpm writes `url`. (Codex =
   D4b, real M — TOML needs BaseAdapter read/write format hooks + a `smol-toml`-class
   dep decision; don't blend the estimates.)
-- **D7 · doctor --json / --report.** Refactor `doctorHandler` to build a structured
+- **D7 · doctor --json / --report. ✅ SHIPPED** (on `main`, ships next tag; see
+  CHANGELOG `[Unreleased]`). `doctorHandler` now builds a structured `DoctorModel`
+  (the first of the four structured-output mappers to land — carries `schemaVersion`
+  as the shared convention) then renders; `--json` emits it; `handleDoctor` reuses the
+  model, fixing the hardcoded `issues: []`. `--report` = redacted snapshot (OS/arch,
+  mcpm+node versions, per-client server **counts**, runtime availability, confine +
+  secret-store backend, issue counts) — **no server names/args**. `bug.yml` requires
+  a pasted report. Note: doctor issues stayed a doctor-specific typed list (not forced
+  into the audit `Finding` shape — different domain); the shared "one model" is the
+  `schemaVersion` + JSON convention, not a monolithic type.  Original plan:
+  Refactor `doctorHandler` to build a structured
   `DoctorModel` then render; `--json` emits it — and reuse the model in
   `src/server/handlers.ts handleDoctor`, fixing the latent bug where the MCP-server
   doctor hardcodes `issues: []`. `--report` = redacted snapshot from shipped surfaces
