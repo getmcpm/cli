@@ -4,6 +4,17 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Documentation
+
+- **Install matrix + distribution doc (D6)** — the README now lists npm / npx / pnpm /
+  **mise** (`mise use -g npm:@getmcpm/cli`, via mise's built-in `npm:` backend — no
+  registry entry needed) as install channels, all resolving the scoped `@getmcpm/cli`
+  package. New `docs/DISTRIBUTION.md` documents the deliberate **name-collision
+  decision**: the `mcpm` Homebrew formula (and PyPI name) belong to the unrelated
+  [mcpm.sh](https://mcpm.sh) project, so mcpm ships through the collision-free scoped
+  channels rather than fighting for `brew install mcpm`. A Homebrew tap + mise
+  registry short-name are deferred (documented).
+
 ### Added
 
 - **`mcpm audit --sarif` (D3)** — emit a SARIF 2.1.0 report for GitHub
