@@ -10,6 +10,7 @@ import { ClaudeCodeAdapter } from "./claude-code.js";
 import { CursorAdapter } from "./cursor.js";
 import { VSCodeAdapter } from "./vscode.js";
 import { WindsurfAdapter } from "./windsurf.js";
+import { GeminiCliAdapter } from "./gemini-cli.js";
 
 export function getAdapter(clientId: ClientId): ConfigAdapter {
   switch (clientId) {
@@ -23,6 +24,8 @@ export function getAdapter(clientId: ClientId): ConfigAdapter {
       return new VSCodeAdapter();
     case "windsurf":
       return new WindsurfAdapter();
+    case "gemini-cli":
+      return new GeminiCliAdapter();
     default: {
       const _never: never = clientId;
       throw new Error(`Unknown clientId: ${String(_never)}`);

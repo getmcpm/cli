@@ -2,6 +2,22 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased]
+
+### Added
+
+- **Gemini CLI adapter (`~/.gemini/settings.json`)** — mcpm now reads and writes
+  MCP servers for **Gemini CLI** (Google's terminal agent) as a first-class client
+  (`--client gemini-cli`). Same top-level `mcpServers` map as Claude Code / Cursor,
+  so every command that enumerates clients — `install`, `remove`, `list`, `audit`,
+  `doctor`, `sync --check`, `up`, `guard`, … — picks it up automatically. Scope is
+  the **user-global** config; per-project `.gemini/settings.json` is intentionally
+  out of scope. Writes preserve every unrelated setting in the file (`theme`,
+  `selectedAuthType`, …) via the existing atomic read-modify-write + `.bak` backup.
+  Note: Gemini reads `url` as an SSE endpoint and `httpUrl` as HTTP — mcpm writes
+  `url`, the same URL-transport caveat that already applies to non-Cursor clients.
+  Zero new deps.
+
 ## [0.18.0] - 2026-07-03
 
 A developer-reach release: mcpm becomes usable with **Claude Code**, the most widely-used MCP host. Also the first release to actually ship the CycloneDX SBOM as a release asset (the v0.17.0 attach step tripped over GitHub immutable releases; now fixed).

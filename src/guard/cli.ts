@@ -45,6 +45,7 @@ const CLIENT_LABELS: Record<ClientId, string> = {
   cursor: "Cursor",
   vscode: "VS Code",
   windsurf: "Windsurf",
+  "gemini-cli": "Gemini CLI",
 };
 
 // Re-export the shared sanitizer under the local name (security review Step 7 F5:

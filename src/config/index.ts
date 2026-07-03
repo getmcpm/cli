@@ -11,4 +11,5 @@ export { ClaudeCodeAdapter } from "./adapters/claude-code.js";
 export { CursorAdapter } from "./adapters/cursor.js";
 export { VSCodeAdapter } from "./adapters/vscode.js";
 export { WindsurfAdapter } from "./adapters/windsurf.js";
+export { GeminiCliAdapter } from "./adapters/gemini-cli.js";
 export { getAdapter } from "./adapters/factory.js";

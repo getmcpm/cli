@@ -17,6 +17,7 @@ export const CLIENT_IDS = [
   "cursor",
   "vscode",
   "windsurf",
+  "gemini-cli",
 ] as const;
 
 export type ClientId = (typeof CLIENT_IDS)[number];
@@ -78,6 +79,12 @@ export function getConfigPath(
     case "windsurf":
       // ~/.codeium/windsurf/mcp_config.json on all platforms — home-relative, NOT under appData
       return path.join(home, ".codeium", "windsurf", "mcp_config.json");
+
+    case "gemini-cli":
+      // ~/.gemini/settings.json on all platforms — Gemini CLI's user-global config,
+      // home-relative (NOT under appData). Top-level `mcpServers` only; per-project
+      // .gemini/settings.json is intentionally out of scope (same as claude-code).
+      return path.join(home, ".gemini", "settings.json");
 
     default: {
       // TypeScript exhaustiveness — this branch is reached only with a bad cast.

@@ -230,7 +230,7 @@ When a frame trips a signature, drift check, or policy rule, the guard **drops i
 ```bash
 npm install -g @getmcpm/cli@latest
 
-mcpm guard enable           # wrap detected client configs (Claude Desktop / Claude Code / Cursor / VS Code / Windsurf)
+mcpm guard enable           # wrap detected client configs (Claude Desktop / Claude Code / Cursor / VS Code / Windsurf / Gemini CLI)
 # → restart your IDE so it re-spawns the wrapped server processes
 mcpm guard demo             # synthetic prompt-injection scenario — see a live block in your terminal
 mcpm guard status           # what's protected, what's still in first-session-pin mode
@@ -344,6 +344,7 @@ The `mcpm_setup` tool takes a natural language description like "filesystem and 
 | Cursor | `~/.cursor/mcp.json` |
 | VS Code | `~/Library/Application Support/Code/User/mcp.json` |
 | Windsurf | `~/.codeium/windsurf/mcp_config.json` |
+| Gemini CLI | `~/.gemini/settings.json` (user-global `mcpServers`) |
 
 Linux and Windows paths are also supported. See `mcpm doctor` to verify which clients are detected on your system.
 
@@ -377,7 +378,7 @@ subgraph scanning["Local Scanning & Trust<br/>(src/scanner/)"]
 end
 
 subgraph config["Config Management<br/>(src/config/adapters/)"]
-    DETECT["Detect AI clients<br/>Claude Desktop / Cursor<br/>VS Code / Windsurf"]
+    DETECT["Detect AI clients<br/>Claude Desktop / Claude Code / Cursor<br/>VS Code / Windsurf / Gemini CLI"]
     ATOMIC["Atomic writes<br/>0o600 + symlink-safe<br/>.tmp/.bak"]
 end
 
@@ -399,9 +400,11 @@ end
 
 subgraph clients["Native AI Clients"]
     CD["Claude Desktop"]
+    CC["Claude Code"]
     CURSOR["Cursor"]
     VSCODE["VS Code"]
     WINDSURF["Windsurf"]
+    GEMINI["Gemini CLI"]
 end
 
 CLI --> commands

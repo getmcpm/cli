@@ -151,9 +151,13 @@ The completeness critic's verdict: the candidate set over-indexed enterprise for
   contract across six consumers, and guard wrapping would commit machine-specific
   markers into a shared git file. Project scope needs its own design (see D6b/E10b).
   Claude Code is the fastest-growing dev product ever; mcp-scan already covers it.
-- **D4a · Gemini CLI adapter.** Standalone S: `~/.gemini/settings.json`, same rootKey,
-  7-line adapter. (Codex = D4b, real M — TOML needs BaseAdapter read/write format
-  hooks + a `smol-toml`-class dep decision; don't blend the estimates.)
+- **D4a · Gemini CLI adapter. ✅ SHIPPED** (on `main`, ships next tag; see CHANGELOG
+  `[Unreleased]`). Standalone S as predicted: `~/.gemini/settings.json`, same
+  `mcpServers` rootKey, a rootKey-only `BaseAdapter` subclass (6th first-class
+  client). User-global scope only; per-project `.gemini/settings.json` out of scope.
+  URL caveat: Gemini reads `url`=SSE / `httpUrl`=HTTP, mcpm writes `url`. (Codex =
+  D4b, real M — TOML needs BaseAdapter read/write format hooks + a `smol-toml`-class
+  dep decision; don't blend the estimates.)
 - **D7 · doctor --json / --report.** Refactor `doctorHandler` to build a structured
   `DoctorModel` then render; `--json` emits it — and reuse the model in
   `src/server/handlers.ts handleDoctor`, fixing the latent bug where the MCP-server

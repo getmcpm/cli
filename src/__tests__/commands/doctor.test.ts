@@ -26,7 +26,7 @@ export interface DoctorDeps {
 // Helpers
 // ---------------------------------------------------------------------------
 
-const ALL_CLIENTS: ClientId[] = ["claude-desktop", "claude-code", "cursor", "vscode", "windsurf"];
+const ALL_CLIENTS: ClientId[] = ["claude-desktop", "claude-code", "cursor", "vscode", "windsurf", "gemini-cli"];
 
 function makeAdapter(
   clientId: ClientId,
