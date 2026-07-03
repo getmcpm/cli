@@ -53,17 +53,18 @@ jobs:
       - name: Create GitHub Release + attach SBOM
         env:
           GH_TOKEN: ${{ github.token }}
-        # Idempotent: a release may already exist (e.g. created manually right
-        # after the tag push, or on a workflow re-run). Don't fail the publish.
+        # Attach the SBOM AT CREATION TIME. GitHub immutable releases seal a
+        # release's assets on creation and reject any later `gh release upload`
+        # with HTTP 422, so the SBOM must be passed to `gh release create` as a
+        # positional asset — not uploaded in a follow-up step. Idempotent: a
+        # release may already exist (manual create, or a re-run); we don't fail
+        # the publish, but we also can't amend an immutable one.
         run: |
           if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
-            echo "Release $GITHUB_REF_NAME already exists — skipping creation."
+            echo "Release $GITHUB_REF_NAME already exists — skipping (immutable releases can't be amended)."
+          elif [ -f mcpm.cdx.json ]; then
+            gh release create "$GITHUB_REF_NAME" mcpm.cdx.json --generate-notes --title "$GITHUB_REF_NAME"
           else
+            echo "No SBOM produced — creating release without asset."
             gh release create "$GITHUB_REF_NAME" --generate-notes --title "$GITHUB_REF_NAME"
-          fi
-          # Best-effort: only attach the SBOM if generation above succeeded.
-          if [ -f mcpm.cdx.json ]; then
-            gh release upload "$GITHUB_REF_NAME" mcpm.cdx.json --clobber
-          else
-            echo "No SBOM produced — skipping asset upload."
           fi
