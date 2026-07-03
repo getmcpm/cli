@@ -13,6 +13,7 @@ import path from "path";
 // server/tools.ts — no hand-maintained duplicate list, no unsafe tuple cast.
 export const CLIENT_IDS = [
   "claude-desktop",
+  "claude-code",
   "cursor",
   "vscode",
   "windsurf",
@@ -59,6 +60,13 @@ export function getConfigPath(
   switch (clientId) {
     case "claude-desktop":
       return path.join(appDataDir(platform, home), "Claude", "claude_desktop_config.json");
+
+    case "claude-code":
+      // ~/.claude.json on all platforms — Claude Code's user-global config,
+      // home-relative (NOT under appData). Distinct from claude-desktop above:
+      // different app, different file. User-global `mcpServers` only; per-project
+      // servers under `projects[<path>].mcpServers` are intentionally out of scope.
+      return path.join(home, ".claude.json");
 
     case "cursor":
       // ~/.cursor/mcp.json on all platforms — home-relative, NOT under appData
