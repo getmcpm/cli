@@ -43,6 +43,7 @@ type Runtime = (typeof RUNTIMES)[number];
 
 const CLIENT_LABELS: Record<ClientId, string> = {
   "claude-desktop": "Claude Desktop",
+  "claude-code": "Claude Code",
   cursor: "Cursor",
   vscode: "VS Code",
   windsurf: "Windsurf",

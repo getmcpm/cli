@@ -340,6 +340,7 @@ The `mcpm_setup` tool takes a natural language description like "filesystem and 
 | Client | Config path (macOS) |
 |---|---|
 | Claude Desktop | `~/Library/Application Support/Claude/claude_desktop_config.json` |
+| Claude Code | `~/.claude.json` (user-global `mcpServers`) |
 | Cursor | `~/.cursor/mcp.json` |
 | VS Code | `~/Library/Application Support/Code/User/mcp.json` |
 | Windsurf | `~/.codeium/windsurf/mcp_config.json` |

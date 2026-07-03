@@ -97,6 +97,33 @@ describe("getConfigPath", () => {
   });
 
   // -------------------------------------------------------------------------
+  // Claude Code — ~/.claude.json, home-relative on every platform
+  // -------------------------------------------------------------------------
+
+  describe("claude-code", () => {
+    it("returns ~/.claude.json on darwin", () => {
+      setPlatform("darwin");
+      mockHomedir.mockReturnValue("/Users/alice");
+      expect(getConfigPath("claude-code")).toBe("/Users/alice/.claude.json");
+    });
+
+    it("returns ~/.claude.json on linux", () => {
+      setPlatform("linux");
+      mockHomedir.mockReturnValue("/home/alice");
+      expect(getConfigPath("claude-code")).toBe("/home/alice/.claude.json");
+    });
+
+    it("is home-relative on win32 — NOT under APPDATA (unlike claude-desktop)", () => {
+      setPlatform("win32");
+      mockHomedir.mockReturnValue("C:\\Users\\alice");
+      process.env["APPDATA"] = "C:\\Users\\alice\\AppData\\Roaming";
+      const result = getConfigPath("claude-code");
+      expect(result).toContain(".claude.json");
+      expect(result).not.toContain("AppData");
+    });
+  });
+
+  // -------------------------------------------------------------------------
   // Cursor
   // -------------------------------------------------------------------------
 

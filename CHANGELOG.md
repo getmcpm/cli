@@ -2,6 +2,21 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased]
+
+### Added
+
+- **Claude Code adapter (`~/.claude.json`)** — mcpm now reads and writes MCP
+  servers for **Claude Code**, the most widely-used MCP host, as a first-class
+  client (`--client claude-code`). Every command that enumerates clients —
+  `install`, `remove`, `list`, `audit`, `doctor`, `sync --check`, `up`, `guard`,
+  … — picks it up automatically. Scope is the **user-global** `mcpServers` map;
+  per-project servers (`projects[<path>].mcpServers`) are intentionally out of
+  scope for now. Writes preserve every unrelated key in the file (`projects`,
+  `oauthAccount`, `numStartups`, …) via the existing atomic read-modify-write +
+  `.bak` backup. Distinct from the existing `claude-desktop` client (a different
+  app and file). Zero new deps.
+
 ## [0.17.0] - 2026-07-03
 
 A credibility-floor release for developer/enterprise adoption: supply-chain evidence (`SECURITY.md`, a CycloneDX SBOM on every release, OpenSSF Scorecard), a macOS CI leg that verifies the `--confine` enforcement path end-to-end, published stability contracts (`docs/CONTRACTS.md`), and a fail-safe registry-delisting gate.
