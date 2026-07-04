@@ -65,7 +65,7 @@ In practice: muting one signature can't silently disable detection on a co-occur
 
 ## Integrity sidecar
 
-`~/.mcpm/guard-policy.yaml.integrity` holds the SHA-256 of `guard-policy.yaml` content. Any mismatch on read raises `PolicyIntegrityError`; the relay returns a `pins-integrity-failure` block on the next inspected message until the user runs `mcpm guard reset-integrity --policy --yes` after manual review.
+`~/.mcpm/guard-policy.yaml.integrity` holds the SHA-256 of `guard-policy.yaml` content. Any mismatch on read raises `PolicyIntegrityError`; the relay emits a `POLICY-INTEGRITY-ERROR` warning on stderr and falls back to full enforcement for the rest of the session (fail-safe, not a per-message block); running `mcpm guard reset-integrity --policy --yes` after review re-trusts the file.
 
 This protects against a same-machine attacker (npm postinstall script, malware) writing to the policy file silently. It does NOT protect against a same-user attacker who can ALSO compute the new sidecar — see `docs/GUARD.md` threat model.
 

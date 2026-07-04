@@ -50,6 +50,11 @@ OS/arch, mcpm + node versions, per-client server counts, runtime availability,
 confine + secret-store backend, and issue *counts*. It carries **no server names or
 arguments** by design (for pasting into public bug reports). Format is UNSTABLE.
 
+`mcpm audit --sarif` emits **SARIF 2.1.0** — the most CI-automated structured output
+mcpm produces (uploaded to GitHub code-scanning). The outer shape is governed by the
+SARIF spec; there is one rule per `Finding` type. The rule catalog and severities may
+still change within `0.x`. Its exit code follows `audit` (risky → `1`).
+
 ## Semver-exempt internals (may change any release)
 
 These are implementation details, guarded by their own `format_version` fields and

@@ -24,7 +24,7 @@ A wrapped MCP server's stdio looks like this:
    the real MCP server (e.g. servers-filesystem)
 ```
 
-`mcpm guard enable` rewrites your detected client configs (Claude Desktop / Claude Code / Cursor / VS Code / Windsurf) so each server's `command` becomes the relay, with the original command/args sandwiched after a `--` separator. `mcpm guard disable` restores the original entries.
+`mcpm guard enable` rewrites your detected client configs (Claude Desktop / Claude Code / Cursor / VS Code / Windsurf / Gemini CLI) so each server's `command` becomes the relay, with the original command/args sandwiched after a `--` separator. `mcpm guard disable` restores the original entries.
 
 Detection is layered:
 
@@ -112,7 +112,7 @@ Note over IDE,EventLog: Event log entry (if findings):<br/>{ts, server_name, dir
 Bare invocation. Shows status if any servers are wrapped, otherwise prints help.
 
 ### `mcpm guard enable [--client <id>] [--server <name>] [--dry-run]`
-Wraps detected client configs. Use `--client` to scope to one (`claude-desktop` / `cursor` / `vscode` / `windsurf`); `--server` to scope to a single server name. `--dry-run` prints the planned changes without writing.
+Wraps detected client configs. Use `--client` to scope to one (`claude-desktop` / `claude-code` / `cursor` / `vscode` / `windsurf` / `gemini-cli`); `--server` to scope to a single server name. `--dry-run` prints the planned changes without writing.
 
 The wrap transformation in JSON:
 ```
@@ -129,7 +129,7 @@ The `--orig-hash` token is now verified at spawn time too (previously it was che
 Reverses the wrap by parsing the wrap marker out of the args and reconstructing the original entry. Falls back to the `.bak` if the wrap pattern is malformed (e.g. user hand-edited the config since enable).
 
 ### `mcpm guard enable [...] --confine [off]`
-Opt-in OS sandbox for the servers being wrapped (macOS only, unreleased — next minor). See **OS confinement (`--confine`)** below. The bare flag enrolls every unwrapped stdio server it wraps at the "standard" tier; `--confine off` is the same as omitting the flag (no enrollment). Respects `--client` / `--server`.
+Opt-in OS sandbox for the servers being wrapped (macOS only, shipped in v0.16.0). See **OS confinement (`--confine`)** below. The bare flag enrolls every unwrapped stdio server it wraps at the "standard" tier; `--confine off` is the same as omitting the flag (no enrollment). Respects `--client` / `--server`.
 
 ### `mcpm guard doctor-confine [--json]`
 Read-only. Reports OS-backend availability (platform + presence of `/usr/bin/sandbox-exec`) and the enrolled servers (tier / net / require_confine). Points to `mcpm guard status` for per-client wrap state. See **OS confinement (`--confine`)** below.
@@ -138,7 +138,7 @@ Read-only. Reports OS-backend availability (platform + presence of `/usr/bin/san
 Prints what's wrapped and the pin state per server (unprotected / first-session-pin pending / fully protected).
 
 ### `mcpm guard demo`
-Runs the in-process `prompt-injection` scenario. The output is byte-identical to what the production relay emits, so screenshotting the demo accurately represents what a real block looks like. Additional scenarios (`path-exfil`, `rug-pull`) ship in v0.5.0.1.
+Runs the in-process `prompt-injection` scenario. The output is byte-identical to what the production relay emits, so screenshotting the demo accurately represents what a real block looks like. Additional scenarios (path-exfil, rug-pull) are planned but not yet shipped.
 
 ### `mcpm guard accept-drift <server> [--tool <name>] [--new-hash <sha256:...>] [--remove] [--yes]`
 
@@ -184,7 +184,7 @@ The relay refuses to use either file if its sidecar doesn't match — this is th
 
 ## OS confinement (`--confine`)
 
-> Status: shipped to `main` across PRs #108–#111, **unreleased (next minor)**. **macOS only in v1.** Opt-in — without `--confine`, `enable`/`disable` behave exactly as before.
+> Status: shipped in v0.16.0 (PRs #108–#111). macOS only in v1. Opt-in — without `--confine`, `enable`/`disable` behave exactly as before.
 
 Every guard feature above is **detection**: the relay reasons about the JSON-RPC bytes flowing through it and warns or blocks. But the relay is a stdio MITM — it can inspect every frame yet cannot *contain* the child MCP server it spawns. A server that simply *decides* to read `~/.ssh` or write `~/Library/LaunchAgents` never expresses that intent through inspectable traffic. `--confine` is the first **enforcement** primitive: it wraps the relayed child in an OS sandbox so it physically cannot read secret files or persist, regardless of the JSON-RPC it emits. Detection and confinement are complementary — watch vs contain.
 
@@ -290,7 +290,7 @@ If guard itself crashes (e.g. on PATH disruption — the wrapped command points 
 **Does NOT protect against:**
 - Compromised install — the wrap is opt-in via `mcpm guard enable`; if your machine is already compromised, the attacker can disable guard
 - Same-user file tampering — `~/.mcpm/pins.json` and `~/.mcpm/guard-policy.yaml` have integrity sidecars, but a same-user attacker can compute new sidecars; the sidecars are an "accidental tamper / cross-user" defense, not anti-malware
-- Verbatim attack-phrase documentation — the regex engine cannot distinguish "ignore previous instructions" used as documentation from the same phrase used as an instruction. The LLM-as-judge tier in v0.5.1+ would close this gap
-- HTTP-transport servers — v0.5.0 wraps stdio only. HTTP guard is v0.5.1+
+- Verbatim attack-phrase documentation — the regex engine cannot distinguish "ignore previous instructions" used as documentation from the same phrase used as an instruction. A future opt-in LLM-as-judge tier would close this gap
+- HTTP-transport servers — v0.5.0 wraps stdio only. HTTP guard is deferred (v0.10.0 made HTTP/SSE fail-closed deny-by-default; a streamable-HTTP MITM relay is still the full fix)
 
 **Performance budget:** spike measured 0.065ms p99 small / 3.1ms p99 large message overhead through the SDK framing helpers (OQ1 closed). With NFKC + 15 regexes per leaf added on top, expected p99 is < 10ms for large messages.

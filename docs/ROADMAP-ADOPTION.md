@@ -1,6 +1,6 @@
 # mcpm Roadmap — Developer & Enterprise Adoption
 
-> Status: **DRAFT for review** · Baseline: **v0.16.0** · Drafted: 2026-07-03
+> Status: **Active plan of record** · Current: **v0.19.0** · Baseline drafted at v0.16.0 (2026-07-03)
 >
 > Companion to [`ROADMAP.md`](./ROADMAP.md) (the security/DevX feature roadmap, now ~80%
 > delivered). That roadmap answered *"what should mcpm detect and enforce?"* — this one
@@ -153,14 +153,14 @@ The completeness critic's verdict: the candidate set over-indexed enterprise for
   markers into a shared git file. Project scope needs its own design (see D6b/E10b).
   Claude Code is the fastest-growing dev product ever; mcp-scan already covers it.
 - **D4a · Gemini CLI adapter. ✅ SHIPPED in v0.19.0** (see CHANGELOG
-  `[Unreleased]`). Standalone S as predicted: `~/.gemini/settings.json`, same
+  `[0.19.0]`). Standalone S as predicted: `~/.gemini/settings.json`, same
   `mcpServers` rootKey, a rootKey-only `BaseAdapter` subclass (6th first-class
   client). User-global scope only; per-project `.gemini/settings.json` out of scope.
   URL caveat: Gemini reads `url`=SSE / `httpUrl`=HTTP, mcpm writes `url`. (Codex =
   D4b, real M — TOML needs BaseAdapter read/write format hooks + a `smol-toml`-class
   dep decision; don't blend the estimates.)
 - **D7 · doctor --json / --report. ✅ SHIPPED in v0.19.0** (see
-  CHANGELOG `[Unreleased]`). `doctorHandler` now builds a structured `DoctorModel`
+  CHANGELOG `[0.19.0]`). `doctorHandler` now builds a structured `DoctorModel`
   (the first of the four structured-output mappers to land — carries `schemaVersion`
   as the shared convention) then renders; `--json` emits it; `handleDoctor` reuses the
   model, fixing the hardcoded `issues: []`. `--report` = redacted snapshot (OS/arch,
@@ -178,7 +178,7 @@ The completeness critic's verdict: the candidate set over-indexed enterprise for
   report — the telemetry-free friction channel (flutter/brew/gh norm). **Cut:**
   PATH-origin classification (that's F9-PR2; don't smuggle it in).
 - **D2 · `mcpm verify` + GitHub Action. ✅ SHIPPED in v0.19.0** (see
-  CHANGELOG `[Unreleased]`). Confirmed the critique: `classifyIntegrity` + a new pure
+  CHANGELOG `[0.19.0]`). Confirmed the critique: `classifyIntegrity` + a new pure
   `frozenVerdict` were extracted from `up.ts` into `src/stack/frozen-verify.ts`, and
   `mcpm verify [--json]` runs that pass **client-free** (no client detection, no
   `~/.mcpm`, no writes) with the same BLOCK semantics + exit codes as `up --frozen`
@@ -197,7 +197,7 @@ The completeness critic's verdict: the candidate set over-indexed enterprise for
   rides the same verb. **Naming is deliberate:** B3 later *extends* `mcpm verify`
   with provenance — one verb, integrity now, provenance later.
 - **D3 · `mcpm audit --sarif`. ✅ SHIPPED in v0.19.0** (see CHANGELOG
-  `[Unreleased]`). Pure `src/output/sarif.ts` mapper beside the `--json` branch;
+  `[0.19.0]`). Pure `src/output/sarif.ts` mapper beside the `--json` branch;
   rules from the real `Finding.type`s (**8**, not 7 — the union grew; the rule catalog
   is a TS-exhaustive `Record` so a new type forces an update); artifactLocation =
   `mcpm.yaml` (file-level, no fake line numbers) + a `logicalLocation` for the server

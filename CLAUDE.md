@@ -133,7 +133,7 @@ Build the **open-source, community-owned npm+npm_audit** for MCP:
 - **Commands**: `mcpm search`, `mcpm install`, `mcpm list`, `mcpm remove`, `mcpm info`,
   `mcpm audit`, `mcpm update`, `mcpm outdated`, `mcpm doctor`, `mcpm init`, `mcpm import`, `mcpm serve`,
   `mcpm disable`, `mcpm enable`, `mcpm alias`, `mcpm completions`,
-  `mcpm export`, `mcpm lock`, `mcpm up`, `mcpm verify`, `mcpm diff`, `mcpm publish`, `mcpm guard`,
+  `mcpm export`, `mcpm lock`, `mcpm up`, `mcpm verify`, `mcpm diff`, `mcpm sync`, `mcpm publish`, `mcpm guard`,
   `mcpm guard doctor-confine`, `mcpm secrets`, `mcpm why`
   (`mcpm guard enable --confine` opt-in wraps unwrapped stdio servers in an OS sandbox — macOS-first)
 
@@ -403,7 +403,7 @@ the registry concept end-to-end before we launch publicly.
 ### mcpm-guard subsystem (v0.5.0)
 
 ```
-  IDE (Claude Desktop / Cursor / VS Code / Windsurf)
+  IDE (Claude Desktop / Cursor / VS Code / Windsurf / Claude Code / Gemini CLI)
        │
        │  JSON-RPC over stdio
        ▼
@@ -442,7 +442,7 @@ the registry concept end-to-end before we launch publicly.
 The orchestrator (`src/guard/orchestrator.ts`) implements two-phase commit
 across detected clients: Phase 1 reads all + computes plans, Phase 2 applies
 via `BaseAdapter.replaceServer`. Wrap transformation is centralized in
-`src/guard/wrap.ts` and verified-once on `BaseAdapter` (all 4 adapters share
+`src/guard/wrap.ts` and verified-once on `BaseAdapter` (all 6 adapters share
 the same entry shape).
 
 ---

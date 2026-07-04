@@ -43,8 +43,10 @@ mcpm/
 │   │   ├── detector.ts             — detect installed AI clients
 │   │   └── adapters/
 │   │       ├── base.ts             — shared adapter logic
+│   │       ├── claude-code.ts
 │   │       ├── claude-desktop.ts
 │   │       ├── cursor.ts
+│   │       ├── gemini-cli.ts
 │   │       ├── vscode.ts
 │   │       ├── windsurf.ts
 │   │       └── factory.ts          — adapter factory by client ID
@@ -94,13 +96,13 @@ mcpm/
 │       ├── format-trust.ts         — format trust score display
 │       └── fs.ts                   — shared filesystem helpers (isEnoent)
 ├── src/__tests__/
-│   ├── commands/                    — 16 command test files
+│   ├── commands/                    — 33 command test files
 │   ├── config/                      — adapter + detector + paths tests
 │   └── store/                       — cache + servers + store tests
 ├── scripts/
 │   └── demo.sh                     — asciinema demo recording script
 ├── .github/workflows/
-│   ├── ci.yml                      — build + test on push/PR (Node 20, 22, 24)
+│   ├── ci.yml                      — build + test on push/PR (Node 22, 24, 26)
 │   └── publish.yml                 — npm publish + GitHub Release on v* tags (Node 24)
 ├── package.json                    — @getmcpm/cli, bin: mcpm
 ├── tsconfig.json
@@ -112,10 +114,10 @@ mcpm/
 
 | Module | Purpose |
 |---|---|
-| `commands/` | 24 CLI commands (incl. `guard` subcommand group with 13 subcommands and `publish` with 3 subcommands), each a self-contained Commander action |
+| `commands/` | 26 CLI commands (incl. `guard` subcommand group with 13 subcommands and `publish` with 3 subcommands), each a self-contained Commander action |
 | `server/` | MCP server (stdio): 9 tools wrapping CLI logic via injectable handlers |
 | `stack/` | Stack file schemas (mcpm.yaml/mcpm-lock.yaml), semver resolution, trust policy, .env parsing |
-| `guard/` | **v0.5.0 runtime defense.** Stdio MITM relay, OWASP MCP Top 10 pattern engine, schema pinning + drift detection, policy file editor, integrity sidecars, event log. Plus `guard/confine/` (F1, unreleased/next minor): the first **enforcement** primitive — the relay optionally wraps the child spawn in an OS sandbox (macOS `sandbox-exec`) so a server physically can't read secret files or persist, complementing byte-level detection. See `docs/GUARD.md`. |
+| `guard/` | **v0.5.0 runtime defense.** Stdio MITM relay, OWASP MCP Top 10 pattern engine, schema pinning + drift detection, policy file editor, integrity sidecars, event log. Plus `guard/confine/` (F1, released v0.16.0, macOS-only, opt-in via --confine): the first **enforcement** primitive — the relay optionally wraps the child spawn in an OS sandbox (macOS `sandbox-exec`) so a server physically can't read secret files or persist, complementing byte-level detection. See `docs/GUARD.md`. |
 | `registry/` | Typed HTTP client for the official MCP Registry API (v0.1 at registry.modelcontextprotocol.io) |
 | `config/` | OS-aware config paths, client detection, and per-client config adapters with atomic writes |
 | `scanner/` | Trust scoring engine: tier 1 (metadata), tier 2 (static pattern analysis), composite score |
@@ -144,6 +146,8 @@ mcpm/
 | `mcpm lock` | Resolve versions and create mcpm-lock.yaml with trust snapshots |
 | `mcpm up` | Install all servers from mcpm.yaml with trust verification |
 | `mcpm diff` | Compare installed servers against mcpm.yaml and lock file |
+| `mcpm sync` | Cross-client config-drift dashboard (`--check` CI gate, exit 2) |
+| `mcpm verify` | Client-free lockfile integrity gate for CI (`--json`) |
 | `mcpm completions <shell>` | Generate shell completion scripts (bash, zsh, fish) |
 | `mcpm serve` | Start mcpm as an MCP server (stdio transport) |
 | `mcpm why <name>` | Explain a server's trust score (breakdown of all scoring components) |
@@ -174,7 +178,7 @@ Fail --> End1["Exit 1"]
 CheckMinTrust -->|Yes| Prompt["Display Trust<br/>Breakdown + Prompt<br/>User Confirm"]
 Prompt --> UserReject{"User<br/>accepts?"}
 UserReject -->|No| End2["Return<br/>(cancelled)"]
-UserReject -->|Yes| Detect["Detect Clients<br/>Claude Desktop,<br/>Cursor, VS Code,<br/>Windsurf"]
+UserReject -->|Yes| Detect["Detect Clients<br/>Claude Desktop,<br/>Claude Code,<br/>Cursor, VS Code,<br/>Windsurf, Gemini CLI"]
 Detect --> CheckExisting{"Server already<br/>installed<br/>(unless --force)?"}
 CheckExisting -->|Yes| FailExisting["Throw Error<br/>already installed"]
 FailExisting --> End3["Exit 1"]
@@ -290,7 +294,7 @@ end
 Note over IDE,EventLog: Event log entry (if findings):<br/>{ts, server_name, direction,<br/>action, findings:[{signature_id,<br/>category, severity, target,<br/>matched_text_excerpt, remediation}]}
 ```
 
-### OS confinement (F1 — unreleased / next minor)
+### OS confinement (F1 — released v0.16.0)
 
 Everything above is **detection**: the relay reasons about JSON-RPC bytes and warns
 or blocks. It cannot *contain* the child it spawns — a server that decides to read
@@ -372,18 +376,20 @@ Plus, when `mcpm guard enable` runs, each touched client config gets a
 | Client | Config path |
 |---|---|
 | Claude Desktop | `~/Library/Application Support/Claude/claude_desktop_config.json` |
+| Claude Code | `~/.claude.json` |
 | Cursor | `~/.cursor/mcp.json` |
 | VS Code | `~/Library/Application Support/Code/User/mcp.json` |
 | Windsurf | `~/.codeium/windsurf/mcp_config.json` |
+| Gemini CLI | `~/.gemini/settings.json` |
 
-Linux and Windows paths are also supported. Config key: `mcpServers` (Claude Desktop, Claude Code, Cursor, Windsurf) or `servers` (VS Code).
+Linux and Windows paths are also supported. Config key: `mcpServers` (Claude Desktop, Claude Code, Cursor, Windsurf, Gemini CLI) or `servers` (VS Code).
 
 All config writes use atomic file operations (write to `.tmp`, then `fs.rename`). Files are written with `mode: 0o600` and directories with `mode: 0o700` to restrict access.
 
 ## Testing
 
 - **Framework**: vitest with `@vitest/coverage-v8`
-- **Test count**: 812+ tests
+- **Test count**: ~1,800+ tests
 - **Coverage thresholds**: lines 80%, branches 75%
 - **Test locations**: `src/__tests__/` (command, config, store tests) + colocated `*.test.ts` (registry, scanner)
 - **Approach**: injectable `fetchImpl` for registry tests (no network calls), temp directories for config adapter tests

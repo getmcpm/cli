@@ -1,6 +1,6 @@
 # mcpm Security Hardening Plan — Supply Chain + Agent Tool-Call Defense
 
-> Status: **in delivery** (see *Delivery status* below) · Baseline: **v0.10.1** · Drafted: 2026-06-12 · Reconciled to shipped state: 2026-06-15
+> Status: **in delivery** (see *Delivery status* below) · Baseline: **v0.19.0** · Drafted: 2026-06-12 · Reconciled to shipped state: 2026-07-05
 >
 > **How this was produced:** a grounded multi-agent pass — (1) a file-and-function map of
 > mcpm's *current* protections and extension seams (`guard/`, `scanner/`, `stack/`,
@@ -18,7 +18,7 @@
 
 ---
 
-## Delivery status (reconciled to v0.10.1, 2026-06-15)
+## Delivery status (reconciled to v0.19.0, 2026-07-05)
 
 The recommended first slices (§7) shipped in **v0.10.0**. Status per control — the §5 bodies below
 retain the original design narrative, so cross-reference this table for what is actually built:
@@ -30,10 +30,10 @@ retain the original design narrative, so cross-reference this table for what is 
 | H4 · field-level drift tiering + `list_changed` re-validation | ✅ shipped | v0.10.0 | #77 |
 | H5 · initialize-handshake capability/grant drift | ✅ shipped | v0.10.0 | #79 |
 | H7 · sampling/elicitation prompt-injection scan (slice A) | ◑ slice shipped | v0.10.0 | #78 |
-| H7 · credential-phishing elicitation/sampling wedge (ROADMAP F6) | ✅ shipped | unreleased | — |
+| H7 · credential-phishing elicitation/sampling wedge (ROADMAP F6) | ✅ shipped | v0.11.0 | #88 |
 | H9 · fail-closed deny-by-default for un-guardable transport | ✅ shipped | v0.10.0 | #76 |
 | H11 · supply-chain integrity tripwire (npm same-version, slice 1) | ◑ slice shipped | v0.10.0 | #81 |
-| H11 · `up --frozen` fail-closed integrity BLOCK tier (ROADMAP F3) | ✅ shipped | unreleased | — |
+| H11 · `up --frozen` fail-closed integrity BLOCK tier (ROADMAP F3) | ✅ shipped | v0.13.0 | #95 |
 | H3 · approval-time pinning | ○ deferred (value-thin vs first-session pin) | — | — |
 | H6 · cross-origin dataflow correlator | ○ deferred (observability-first once FP measured) | — | — |
 | H8 · keyed-MAC integrity for pins/policy | ○ deferred | — | — |
@@ -43,14 +43,14 @@ retain the original design narrative, so cross-reference this table for what is 
 H7 now also blocks **credential-phishing** elicitation/sampling prompts (ROADMAP F6 — two
 `MCP-CREDENTIAL-PHISHING` signatures on the same server-initiated scan path). H7's remaining scope
 (quota / consent-gating / hard credential-field block) and H11's remaining scope (multi-registry,
-digest **BLOCK** / `--frozen`, Sigstore provenance) stay deferred — see §6 and ROADMAP F3/F8.
+Sigstore provenance) stay deferred — see §6 and ROADMAP F8.
 
 **Runtime containment now has an implementation.** Every H1–H12 control here is *detection*
 (reasoning about JSON-RPC bytes); ROADMAP **F1 `guard --confine`** (a separate track — see
 `docs/ROADMAP.md`) adds the first *enforcement* primitive by wrapping the relayed stdio child in an
 OS sandbox (macOS Seatbelt/`sandbox-exec` in v1) so it physically cannot read secret files or
 persist, regardless of the traffic it emits — complementary to frame detection (contain vs watch).
-Shipped across #108/#109/#110/#111, macOS-only, opt-in, **unreleased (next minor)**.
+Shipped across #108/#109/#110/#111, macOS-only, opt-in, **released in v0.16.0**.
 
 ---
 
@@ -102,10 +102,10 @@ theater or actively counterproductive. Every item in §5–§7 must obey:
 | Surface | When | mcpm chokepoint | Coverage today |
 |---|---|---|---|
 | **Supply chain** — compromised package, malicious postinstall, maintainer takeover, mirror tampering | install-time | `scanner/` (metadata-only, no source download) + `stack/` lockfile | heuristic trust score + release-age cooldown; **no provenance/signature verification** |
-| **Agent tool-calls** — poisoning, line-jumping, rug-pull, shadowing, result-injection, cross-server exfil, sampling abuse, consent fatigue | runtime | `guard/` stdio JSON-RPC MITM relay (sees both directions) | 4 inspected targets + structural drift pin |
+| **Agent tool-calls** — poisoning, line-jumping, rug-pull, shadowing, result-injection, cross-server exfil, sampling abuse, consent fatigue | runtime | `guard/` stdio JSON-RPC MITM relay (sees both directions) | 8 inspected targets + structural drift pin |
 
-The relay already has the two highest-leverage runtime seams **half-built** — the 4-target
-signature inspector (`patterns.ts`) and the structural drift pin (`drift.ts` / `pins.ts`).
+The relay already has the two highest-leverage runtime seams **half-built** — the 9-signature
+inspector (`patterns.ts`) and the structural drift pin (`drift.ts` / `pins.ts`).
 Most of this plan is *extension of existing seams*, not new architecture.
 
 ---
@@ -144,7 +144,7 @@ Most of this plan is *extension of existing seams*, not new architecture.
 - **Relay (`relay.ts`):** spawns the real child, `wireDirection()` parses newline-framed
   JSON-RPC both ways; `action === "block"` drops the frame and synthesizes a `-32099
   BLOCKED` error (preserving id; notifications dropped silently). 64 MB/direction buffer cap.
-- **Inspection (`patterns.ts inspectMessage` + `targetSubtree`):** exactly **4**
+- **Inspection (`patterns.ts inspectMessage` + `targetSubtree`):** exactly **4** (v0.5.0 baseline; expanded to 8 in v0.10.0)
   `SignatureTarget`s — `tool_response`, `tool_call_args`, `tool_description`,
   `tool_annotations`. Each string leaf is `normalizeForMatch`-folded (NFKC + zero-width/bidi
   strip + confusable fold, ReDoS-bounded) then tested against **3** signatures in

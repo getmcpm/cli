@@ -206,6 +206,7 @@ Without an external scanner installed, the maximum possible score is 80/100. The
 | `mcpm up` | Install all servers from mcpm.yaml with trust verification |
 | `mcpm verify` | Repo-only CI gate: verify lockfile integrity vs npm's published record (`--json`) |
 | `mcpm diff` | Compare installed servers against mcpm.yaml and lock file |
+| `mcpm sync` | Show cross-client config drift across all detected clients (`--check` gates CI with exit 2, `--json`) |
 | `mcpm completions <shell>` | Generate shell completion scripts (bash, zsh, fish) |
 | `mcpm why <name>` | Explain a server's trust score (breakdown of all components) |
 | `mcpm serve` | Start mcpm as an MCP server (stdio transport) |

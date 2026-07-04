@@ -24,7 +24,7 @@ Plus the `hidden-chars-in-metadata` presence detector (category OWASP-MCP-1, tar
 
 Plus the runtime drift detectors (`schema-drift`, `schema-drift-cosmetic`, `schema-drift-in-session`) — emitted by the relay, not by the signature engine. Drift is classified per changed field (H4): a **description-only** change is `schema-drift-cosmetic` (severity high → warn, forwarded — the parallel `tool_description` pattern scan still blocks any regex-detectable injection on the same frame, since the relay takes the MAX action); a **schema or annotations** change — or any pre-H4 pin with no stored field hashes — is `schema-drift` (critical → block). A server→client `notifications/tools/list_changed` arms a single-shot re-validation so an *announced* upgrade is classified against the pin rather than tripping the same-session guard. Cosmetic warn is bounded by the pattern-engine regex floor (a paraphrased poison the regexes miss degrades to a forwarded warn — the opt-in LLM-judge tier is the V2 answer, not the drift tier).
 
-> **Not signatures: confine + orig-hash spawn events.** The `--confine` OS-sandbox primitive (F1, unreleased — next minor) adds **no OWASP signatures** — the catalog above is unchanged (still 9 entries over 8 targets). It emits relay/spawn **events** (not detection signatures) to `guard-events.jsonl`: category `CONFINE` — `confine-applied`, `confine-hash-mismatch`, `confine-marker-stripped`, `confine-profile-missing`, `confine-backend-missing`, `confine-marker-malformed`; plus category `RELAY` — `orig-hash-mismatch` (the wrap marker's `--orig-hash` verified at spawn, #108). These reason about spawn-time enrollment/integrity, not JSON-RPC frame content, so they are outside the signature engine.
+> **Not signatures: confine + orig-hash spawn events.** The `--confine` OS-sandbox primitive (F1, released in v0.16.0) adds **no OWASP signatures** — the catalog above is unchanged (still 9 entries over 8 targets). It emits relay/spawn **events** (not detection signatures) to `guard-events.jsonl`: category `CONFINE` — `confine-applied`, `confine-hash-mismatch`, `confine-marker-stripped`, `confine-profile-missing`, `confine-backend-missing`, `confine-marker-malformed`; plus category `RELAY` — `orig-hash-mismatch` (the wrap marker's `--orig-hash` verified at spawn, #108). These reason about spawn-time enrollment/integrity, not JSON-RPC frame content, so they are outside the signature engine.
 
 ## Action mapping
 
@@ -111,10 +111,10 @@ When you write a new regex, validate it against these evasion shapes:
 - **The attack class is already covered.** Extend an existing pattern instead.
 - **The attack is too specific to one server.** Use a policy override per-server in user docs.
 - **The pattern would false-positive on benign content.** Validate against the FP-rate corpus (`src/guard/__tests__/fixtures/legitimate-corpus/`).
-- **The pattern requires LLM-as-judge to disambiguate.** Defer to the v0.5.1+ judge tier — flag in TODOS.
+- **The pattern requires LLM-as-judge to disambiguate.** Defer to the V2 opt-in LLM-as-judge tier — flag in TODOS.
 
 ## Signature versioning
 
 The shipped set is vendored at `src/guard/signatures.ts`. Each pin in `~/.mcpm/pins.json` records the `signature_list_version` active at capture time (`owasp-mcp-top-10@v0.5.0`). Bumping the version is a normal release operation; users see signature changes in the CHANGELOG.
 
-Separate signature repo + signature signing infrastructure are deferred to v0.7 (TODOS).
+Separate signature repo + signature signing infrastructure are deferred (V2 / until update cadence requires faster releases than @getmcpm/cli's normal cycle).

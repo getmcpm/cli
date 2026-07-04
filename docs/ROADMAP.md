@@ -4,7 +4,7 @@
 > enterprise-**adoption** track (distribution, org policy, SIEM/SBOM evidence, client
 > reach). This file is the security/DevX **feature** track.
 >
-> Status: in delivery · Baseline: **v0.10.1** · Drafted: 2026-06-09 · Reconciled: 2026-06-15
+> Status: in delivery · Baseline: **v0.19.0** · Drafted: 2026-06-09 · Reconciled: 2026-07-05
 >
 > **Delivery log:**
 > - ✅ **F4 — Release-age cooldown + install-script-shape awareness** — shipped (PR #70,
@@ -85,12 +85,12 @@ Scoring: `composite = impact + differentiation + alignment + 0.5·effort_cheapne
 | # | Feature | Cat | Effort | Score | Bucket |
 |---|---|---|---|---|---|
 | 1 | `guard --confine` — OS-native sandbox (standard tier) | sec | ~~L~~ **XL** | **16.5** | ✅ shipped (engine + enable-path; released v0.16.0); Linux/strict/per-server-CLI deferred |
-| 2 | Cross-server tool-shadowing detection (name-collision v1) | sec | S→M | **16.0** | v0.9 minor |
+| 2 | Cross-server tool-shadowing detection (name-collision v1) | sec | S→M | **16.0** | ◑ name-collision slice shipped v0.12.0 |
 | 3 | Content-pinned lockfile (digest tier) + `up --frozen` | both | M | **15.5** | ◑ digest WARN (H11 #81) + `--frozen` BLOCK shipped; multi-registry + registry-claim re-proof deferred |
 | 4 | Release-age cooldown + install-script-shape awareness ✅ **shipped (PR #70)** | sec | S→M | **15.5** | v0.9 minor |
 | 5 | Reject exfil-named schema params (DENY-tier, list-time) | sec | M | **15.5** | ✅ shipped (deny tier; SUSPECT tier deferred) |
-| 6 | Guard inspection of server-initiated channels (elicitation wedge) | sec | M | **15.0** | v1.0 major |
-| 7 | `mcpm sync --check` — cross-client drift dashboard | devx | M | **14.5** | v0.9 minor |
+| 6 | Guard inspection of server-initiated channels (elicitation wedge) | sec | M | **15.0** | ✅ shipped (wedge; v0.11.0) |
+| 7 | `mcpm sync --check` — cross-client drift dashboard | devx | M | **14.5** | ✅ shipped v0.15.0 (read-only; write/convergence deferred) |
 | 8 | `mcpm verify` — npm Sigstore provenance + identity-drift | sec | L | **14.0** | v1.0 major |
 | 9 | Doctor: plaintext-secret scan + keychain migration + login-PATH | both | L | **14.0** | v1.0 major |
 | 10 | Response-side credential DLP + decode-and-rescan | sec | M | **13.5** | v0.9 minor |
@@ -106,9 +106,9 @@ Scoring: `composite = impact + differentiation + alignment + 0.5·effort_cheapne
 
 ---
 
-# v0.9 — next minor (five cheap, deterministic detectors)
+# v0.9–v0.15 — deterministic detectors (shipped)
 
-Sequenced to keep momentum and the Dependabot surface clean (the v0.9 set adds **zero new runtime deps**).
+Sequenced to keep momentum and the Dependabot surface clean (the v0.9–v0.15 set added **zero new runtime deps**).
 
 ## F2 · Cross-server tool-shadowing detection ◑ **name-collision slice shipped**
 **Category:** security · **Effort:** S (name-collision) → M (full) · **Score 16.0**
@@ -194,7 +194,7 @@ Sequenced to keep momentum and the Dependabot surface clean (the v0.9 set adds *
 
 ---
 
-## F5 · Reject exfil-named tool-input-schema params (DENY-tier, list-time)
+## F5 · Reject exfil-named tool-input-schema params (DENY-tier, list-time) ✅ **shipped v0.14.0 (deny tier; SUSPECT tier deferred)**
 **Category:** security · **Effort:** M · **Score 15.5**
 
 **Problem.** Tool-poisoning attackers add input-schema params the model silently auto-fills from context — `_system_prompt_`, `_conversation_history_`, `_chain_of_thought_`, `reasoning`, `thinking` — leaking the conversation/system prompt with **zero user interaction** (HiddenLayer/CyberArk vs Claude 3.7). It bypasses network DLP because the data rides as an ordinary tool arg the agent populated. mcpm's `detectExfilArgs` only inspects package `environmentVariables` names (not params); the guard relay runs content-regex over string *leaves* and **cannot match an object KEY** like `_system_prompt_`.
@@ -210,7 +210,7 @@ Sequenced to keep momentum and the Dependabot surface clean (the v0.9 set adds *
 
 ---
 
-## F7 · `mcpm sync --check` — cross-client drift dashboard
+## F7 · `mcpm sync --check` — cross-client drift dashboard ✅ **shipped v0.15.0 (read-only drift dashboard; write/convergence deferred)**
 **Category:** devx · **Effort:** M · **Score 14.5**
 
 **Problem.** Config drift across Claude Desktop / Cursor / VS Code / Windsurf is the #1 daily pain: one server means hand-editing 3+ native files in 3+ shapes (`mcpServers` vs `servers`) that silently desync. mcpm can read/write each config and detect drift one direction (`diff` = installed-vs-stack), but there's no symmetric N-client drift view and `doctor` validates each file in isolation. Directly answers Claude Code issues #66474 (per-file-not-merged doctor) and #41003 (drift/duplicate-process).
@@ -369,20 +369,17 @@ The `strict` confinement tier (full default-deny read scope that still lets `nod
 
 ---
 
-## Suggested release sequence
+## Suggested release sequence (remaining work)
 
-1. **v0.9.0** — F4 (cooldown, fixes the live trust bug) + F2 name-collision slice + F3 digest lockfile. *Three deterministic wins, zero new deps, fixes a real bug.*
-2. **v0.9.1** — F5 (exfil-param denylist) + F7 (`sync --check`). *Closes the list-time exfil window; lands the #1-pain DevX feature.*
-3. **v0.9.2** — F10 A+B (response DLP + decode pass) + F6 wedge (credential-phishing elicitation block).
-4. **v1.0.0** — F1 `guard --confine` standard tier (flagship) + F8 npm provenance + drift + F9 PR1/PR2 (secret scan + PATH diagnosis).
-5. **post-1.0** — confine strict tier; F8 PyPI/strict; F9 mutators + handshake; the deferred shadowing text-heuristic + origin-index.
+1. **F10** A+B — response-side credential DLP + decode pass.
+2. **F8** — `mcpm verify` npm Sigstore provenance + identity-drift.
+3. **F9** — PR1/PR2: plaintext-secret scan + login-PATH diagnosis.
+4. **Later / research** — confine strict tier; F8 PyPI/strict; F9 mutators + handshake; the deferred shadowing text-heuristic + origin-index.
 
 ## Top quick-wins to start with
-1. **Release-age cooldown** (F4) — cheapest, fixes the live inversion bug, proven control.
-2. **Content-pinned lockfile digest tier** (F3) — zero deps, version-poison 0%→100%, CI gate + SBOM.
-3. **Cross-server name-collision shadowing** (F2) — pure deterministic, no persistence, competitor-proof.
-4. **`mcpm sync --check`** (F7) — closes the #1 daily pain, ~80% liftable, reuses `up --strict` for writes.
-5. **Response-credential DLP + decode** (F10 A+B) — executes backlog #17/#18 in one coherent change.
+1. **Response-credential DLP + decode** (F10 A+B) — executes backlog #17/#18 in one coherent change.
+2. **`mcpm verify` Sigstore provenance + identity-drift** (F8) — provenance drift is the postmark kill chain, orthogonal to schema-pinning.
+3. **Doctor secret-scan + login-PATH diagnosis** (F9 PR1/PR2) — highest-value, lowest-risk, most differentiated onboarding fix.
 
 ---
 
