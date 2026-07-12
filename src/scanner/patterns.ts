@@ -52,10 +52,16 @@ const SECRET_PATTERNS: ReadonlyArray<{ label: string; pattern: RegExp }> = [
     label: "API key or secret assignment",
     pattern: /(api[_-]?key|apikey|token|secret|password)\s*[:=]\s*['"][^'"]{8,}['"]/gi,
   },
-  // Bearer tokens (Authorization header pattern)
+  // Bearer tokens (Authorization header pattern).
+  // Require a real-looking credential after "Bearer ": ≥20 token chars AND at
+  // least one digit. Real bearer/JWT tokens satisfy both; the English phrase
+  // "Bearer token" / "Bearer credential" (short, no digits) and multi-word prose
+  // (spaces break the token) do not. A full-registry sweep (2026-07) showed the
+  // old `[A-Za-z0-9...]+` form flagged the documentation phrase "Bearer token"
+  // as CRITICAL across 164 servers — 0 real leaks. (see scanner/patterns.test.ts)
   {
     label: "Bearer token",
-    pattern: /Bearer\s+[A-Za-z0-9\-_.~+/]+=*/g,
+    pattern: /Bearer\s+(?=[A-Za-z0-9._~+/=-]{20,})[A-Za-z0-9._~+/=-]*[0-9][A-Za-z0-9._~+/=-]*/g,
   },
   // GitHub personal access tokens (ghp_, gho_, ghu_, ghs_, ghr_) — 30-40 chars
   {
@@ -125,7 +131,12 @@ const PROMPT_INJECTION_PATTERNS: ReadonlyArray<{ label: string; pattern: RegExp;
   { label: "ignore previous instructions", pattern: /ignore\s+(previous|all\s+previous|prior)\s+instructions?/i, severity: "critical" },
   { label: "forget previous instructions", pattern: /forget\s+(previous|prior|all)\s+instructions?/i, severity: "critical" },
   { label: "disregard instructions", pattern: /disregard\s+(all\s+)?(prior|previous|the)?\s*(?:instructions?|context|directives?)/i, severity: "critical" },
-  { label: "system prompt access", pattern: /system\s+prompt/i, severity: "high" },
+  // Require an exfil/override verb near "system prompt" — a bare "system prompt"
+  // mention is legitimate (prompt-management tools, "compiled into system prompts",
+  // "no system prompt injection"). A 2026-07 registry sweep showed the old bare
+  // /system\s+prompt/ flagged 6 legit servers HIGH (incl. one advertising "no
+  // system prompt injection"). Imperative attack phrasings still match.
+  { label: "system prompt access", pattern: /\b(?:reveal|show|print|repeat|echo|expose|leak|dump|disclose|output|send|exfiltrat|ignore|override|bypass|forget|access)\w*\b[^.!?]{0,30}?system\s+prompt/i, severity: "high" },
   { label: "you are now", pattern: /you\s+are\s+now\s+[a-z]/i, severity: "high" },
   { label: "act as persona", pattern: /act\s+as\s+(an?\s+)?(?:unrestricted|different|new|alternate)/i, severity: "high" },
   // Base64-encoded content in descriptions — threshold raised to 40 chars to reduce false positives
