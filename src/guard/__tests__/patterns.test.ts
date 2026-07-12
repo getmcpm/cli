@@ -456,3 +456,44 @@ describe("patterns: F6 credential-phishing signatures (prompt_content carrier)",
     expect(fires("enter the verification code we sent you")).toBe(false));
   test("does NOT match 'bip' outside a BIP-39 context", () => expect(fires("zip the bipartite graph")).toBe(false));
 });
+
+// F10 credential-egress DLP — a high-confidence credential in a tool RESPONSE is
+// warned (forwarded), and the caught secret is REDACTED out of the finding excerpt
+// so it never lands in the event log or warning message.
+describe("patterns: credential-egress DLP (F10)", () => {
+  const resp = (text: string): JSONRPCMessage => ({
+    jsonrpc: "2.0",
+    id: 1,
+    result: { content: [{ type: "text", text }] },
+  });
+
+  test("warns (forwards, not blocks) on a GitHub PAT in a response", () => {
+    const r = inspectMessage(resp("token: ghp_A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q7r8"), OWASP_MCP_TOP_10);
+    expect(r.action).toBe("warn");
+    expect(r.findings.some((f) => f.signature_id === "credential-egress-in-response")).toBe(true);
+  });
+
+  test("warns on a PEM private-key block", () => {
+    const r = inspectMessage(resp("-----BEGIN RSA PRIVATE KEY-----\nMIIBOgIB\n-----END RSA PRIVATE KEY-----"), OWASP_MCP_TOP_10);
+    expect(r.action).toBe("warn");
+  });
+
+  test("REDACTS the caught secret from the finding excerpt (never logs the token)", () => {
+    const secret = "ghp_A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q7r8";
+    const r = inspectMessage(resp(`leaked ${secret}`), OWASP_MCP_TOP_10);
+    const f = r.findings.find((f) => f.signature_id === "credential-egress-in-response");
+    expect(f).toBeDefined();
+    expect(f!.matched_text_excerpt).not.toContain(secret);
+    expect(f!.matched_text_excerpt).toMatch(/redacted/i);
+  });
+
+  test("does NOT warn on AWS's documentation example key", () => {
+    const r = inspectMessage(resp("export AWS_ACCESS_KEY_ID=AKIAIOSFODNN7EXAMPLE"), OWASP_MCP_TOP_10);
+    expect(r.findings.some((f) => f.signature_id === "credential-egress-in-response")).toBe(false);
+  });
+
+  test("does NOT warn on credential prose (API key / Bearer token wording)", () => {
+    const r = inspectMessage(resp("Send your API key as a Bearer token in the Authorization header."), OWASP_MCP_TOP_10);
+    expect(r.findings.some((f) => f.signature_id === "credential-egress-in-response")).toBe(false);
+  });
+});

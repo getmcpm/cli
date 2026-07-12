@@ -248,6 +248,52 @@ export const OWASP_MCP_TOP_10: readonly Signature[] = [
       "via `mcpm guard mute credential-phishing-financial-solicitation`.",
   },
   {
+    // F10 credential-egress DLP. A high-confidence credential appearing in a TOOL
+    // RESPONSE is a data-loss signal — a compromised/buggy server leaking secrets,
+    // or a tool returning a .env / key file through its output.
+    //
+    // WARN-tier (severity high → forward + log, NOT block): a secrets-manager or
+    // auth tool legitimately returns credentials, and tools returning docs/code
+    // carry EXAMPLE keys — so blocking would break legit flows. Promote-to-block is
+    // opt-in per-server via policy. (This overrides the ROADMAP's "deny-tier only"
+    // on the same benign-corpus evidence that a full-registry sweep gave the Tier-1
+    // scanner: match real shapes, warn don't break.)
+    //
+    // FP discipline (the 2026-07 "Bearer token" phrase lesson applies directly):
+    // ONLY prefix-anchored STRUCTURAL credential shapes are here — they cannot
+    // match prose. AWS's literal docs key (AKIAIOSFODNN7EXAMPLE) is excluded.
+    // Generic Bearer / bare JWT / 40-char base64 (no distinctive prefix) are the
+    // SUSPECT tier and are DEFERRED — they false-positive on legitimate auth tools
+    // that return a token the user asked for. `redact: true` keeps the caught
+    // secret out of the event log and the warning message.
+    id: "credential-egress-in-response",
+    category: "MCP-CREDENTIAL-EXFIL",
+    severity: "high",
+    description:
+      "High-confidence credential material in a tool response (credential egress / DLP)",
+    target: "tool_response",
+    redact: true,
+    patterns: [
+      /-----BEGIN (?:RSA |EC |OPENSSH |DSA |PGP )?PRIVATE KEY-----/,
+      /\bgh[pousr]_[A-Za-z0-9]{30,}/,
+      /\bsk-ant-[A-Za-z0-9_-]{80,}/,
+      /\bsk-(?:proj-)?[A-Za-z0-9]{40,}/,
+      /\bxox[baprs]-[0-9A-Za-z-]{10,}/,
+      /\bnpm_[A-Za-z0-9]{36}\b/,
+      /\bAIza[0-9A-Za-z_-]{35}\b/,
+      // AWS access key id — exclude AWS's literal documentation example key so a
+      // tool returning AWS docs/tutorials doesn't warn on it.
+      /\bAKIA(?!IOSFODNN7EXAMPLE\b)[0-9A-Z]{16}\b/,
+    ],
+    remediation:
+      "A tool response contained high-confidence credential material (private key, cloud/API " +
+      "token). This is a credential-egress (DLP) signal — a server may be leaking secrets " +
+      "through tool output. The response was forwarded with a warning and the secret is redacted " +
+      "in the log. If this tool legitimately returns credentials (e.g. a secrets manager), " +
+      "promote-to-block is opt-in per policy, or mute via " +
+      "`mcpm guard mute credential-egress-in-response`.",
+  },
+  {
     // F5 — STRUCTURAL exfil-param detector. The finding is emitted by
     // detectExfilParams (a property-KEY walker over tools/list inputSchemas, NOT a
     // content regex), so this catalog entry carries NO patterns. It exists only so

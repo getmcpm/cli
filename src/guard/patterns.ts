@@ -171,6 +171,17 @@ function truncate(s: string): string {
 }
 
 /**
+ * Redact a matched secret for the finding excerpt: keep only a short non-secret
+ * type hint (the public prefix, e.g. "ghp_"/"AKIA"/"----") and the length, never
+ * the secret body. Used for `redact: true` signatures (F10 credential DLP) so the
+ * caught credential is never written to the event log or shown in a message.
+ */
+function redactSecret(s: string): string {
+  const head = s.replace(/\s+/g, "").slice(0, 4);
+  return `${head}…‹redacted ${s.length}-char secret›`;
+}
+
+/**
  * NFKC-normalize + strip evasion characters + fold confusable homoglyphs
  * before pattern matching.
  *
@@ -286,7 +297,7 @@ function inspectAgainstSignatures(
           category: sig.category,
           severity: sig.severity,
           target: sig.target,
-          matched_text_excerpt: truncate(match[0]),
+          matched_text_excerpt: sig.redact ? redactSecret(match[0]) : truncate(match[0]),
           remediation: sig.remediation,
         });
         break; // one finding per signature per leaf is enough

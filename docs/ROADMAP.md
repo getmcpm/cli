@@ -48,7 +48,7 @@
 >   was built from scratch (#108) and effort was **XL, not L**. Deferred: Linux bwrap, the strict tier,
 >   orig-hash Phase-2 fail-closed, and the per-server `guard confine <server>` command (achievable today
 >   via `enable --confine --server X` + `disable --server X`).
-> - **Next up:** F10 (response DLP) · F8/F9 (v1.0 bets).
+> - **Next up:** F10 decode-pass + block-tier (Detector-A core shipped v0.20-pending) · F8/F9 (v1.0 bets).
 >
 > This roadmap was produced by a grounded research-and-planning pass: six parallel
 > web-research lenses (threat landscape, competitors, MCP protocol evolution, DevX,
@@ -231,6 +231,18 @@ Sequenced to keep momentum and the Dependabot surface clean (the v0.9–v0.15 se
 
 ## F10 · Response-side credential DLP + decode-and-rescan
 **Category:** security · **Effort:** M · **Score 13.5**
+
+> ◑ **Detector-A core shipped 2026-07-12** — a `credential-egress-in-response`
+> signature (target `tool_response`) matching STRUCTURAL, prefix-anchored
+> credential shapes (PEM private key, GitHub/OpenAI/Anthropic/Google/npm/Slack
+> tokens, AWS access-key id minus the docs example). **WARN-tier** (forward + log;
+> promote-to-block per policy — overrides "deny-tier only" on benign-corpus
+> evidence that secrets-manager/docs responses exist), with a new `redact` flag on
+> `Signature` so the caught secret never lands in the event log or message.
+> **Deferred:** the decode-and-rescan pass (Detector B), the entropy-gated generic
+> `key=`/`secret=` + PII detectors, the critical/block tier, and Detector C
+> (`outputSchema` in `hashToolDefinition`). No new deps; no `src/guard/dlp.ts`
+> (the first slice is one catalog signature + a redaction seam, not a module).
 
 **Problem.** A wrapped server attacks through tool **responses** — today only OWASP injection regexes run there. No credential-content DLP (a poisoned server returns a live AWS key / PAT / PEM block the model forwards on); no decode pass (base64/percent-encoded secrets slip past every signature because `stringLeaves` never decodes).
 

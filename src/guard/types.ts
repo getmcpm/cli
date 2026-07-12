@@ -30,6 +30,12 @@ export interface Signature {
   readonly target: SignatureTarget;
   readonly patterns: readonly RegExp[];
   readonly remediation: string;
+  /**
+   * When true, the matched text IS a secret — the finding's excerpt is replaced
+   * with a redacted placeholder so a caught credential never lands in the event
+   * log or the block/warn message. (F10 credential-egress DLP)
+   */
+  readonly redact?: boolean;
 }
 
 export interface InspectFinding {
