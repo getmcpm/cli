@@ -364,6 +364,7 @@ mcpm guard pause --off         # cancel an active pause
 - `docs/GUARD.md` — full command reference
 - `docs/SIGNATURES.md` — signature catalog + how to contribute new ones
 - `docs/POLICY.md` — `~/.mcpm/guard-policy.yaml` reference
+- `docs/VISION.md` — where the project is going (thesis, horizons, doctrine)
 
 ## Agent mode
 

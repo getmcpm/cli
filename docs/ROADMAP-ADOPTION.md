@@ -2,7 +2,8 @@
 
 > Status: **Active plan of record** · Current: **v0.19.0** · Baseline drafted at v0.16.0 (2026-07-03)
 >
-> Companion to [`ROADMAP.md`](./ROADMAP.md) (the security/DevX feature roadmap, now ~80%
+> Companion to [`VISION.md`](./VISION.md) (the strategy layer both roadmaps hang off) and
+> [`ROADMAP.md`](./ROADMAP.md) (the security/DevX feature roadmap, now ~80%
 > delivered). That roadmap answered *"what should mcpm detect and enforce?"* — this one
 > answers *"what makes developers install it and enterprises allowed to bless it?"*
 >

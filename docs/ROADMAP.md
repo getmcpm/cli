@@ -1,8 +1,9 @@
 # mcpm Roadmap — Security & Developer Experience
 
-> **Companion:** [`ROADMAP-ADOPTION.md`](./ROADMAP-ADOPTION.md) covers the developer- and
-> enterprise-**adoption** track (distribution, org policy, SIEM/SBOM evidence, client
-> reach). This file is the security/DevX **feature** track.
+> **Companions:** [`VISION.md`](./VISION.md) is the strategy layer (thesis, horizons,
+> doctrine) that both roadmaps hang off. [`ROADMAP-ADOPTION.md`](./ROADMAP-ADOPTION.md)
+> covers the developer- and enterprise-**adoption** track (distribution, org policy,
+> SIEM/SBOM evidence, client reach). This file is the security/DevX **feature** track.
 >
 > Status: in delivery · Baseline: **v0.19.0** · Drafted: 2026-06-09 · Reconciled: 2026-07-05
 >
@@ -370,6 +371,10 @@ The `strict` confinement tier (full default-deny read scope that still lets `nod
 ---
 
 ## Suggested release sequence (remaining work)
+
+> The H1 trust-flywheel items (public benchmark extraction, registry sweep +
+> disclosures) live in [`VISION.md`](./VISION.md); the sequence below is the
+> detector/feature track that runs alongside them.
 
 1. **F10** A+B — response-side credential DLP + decode pass.
 2. **F8** — `mcpm verify` npm Sigstore provenance + identity-drift.
