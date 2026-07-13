@@ -281,9 +281,11 @@ export const OWASP_MCP_TOP_10: readonly Signature[] = [
       /\bxox[baprs]-[0-9A-Za-z-]{10,}/,
       /\bnpm_[A-Za-z0-9]{36}\b/,
       /\bAIza[0-9A-Za-z_-]{35}\b/,
-      // AWS access key id — exclude AWS's literal documentation example key so a
-      // tool returning AWS docs/tutorials doesn't warn on it.
-      /\bAKIA(?!IOSFODNN7EXAMPLE\b)[0-9A-Z]{16}\b/,
+      // AWS access key id — exclude AWS's documentation example keys (there are
+      // several, all AKIA + a 16-char body ending in EXAMPLE, e.g.
+      // AKIAIOSFODNN7EXAMPLE / AKIAI44QH8DHBEXAMPLE) so a tool returning AWS
+      // docs/tutorials doesn't warn. A real key ending in "EXAMPLE" is ~2^-93.
+      /\bAKIA(?![0-9A-Z]{9}EXAMPLE\b)[0-9A-Z]{16}\b/,
     ],
     remediation:
       "A tool response contained high-confidence credential material (private key, cloud/API " +

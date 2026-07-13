@@ -171,14 +171,15 @@ function truncate(s: string): string {
 }
 
 /**
- * Redact a matched secret for the finding excerpt: keep only a short non-secret
- * type hint (the public prefix, e.g. "ghp_"/"AKIA"/"----") and the length, never
- * the secret body. Used for `redact: true` signatures (F10 credential DLP) so the
- * caught credential is never written to the event log or shown in a message.
+ * Redact a matched secret for the finding excerpt: emit ONLY the length, never any
+ * byte of the value. Used for `redact: true` signatures (F10 credential DLP) so the
+ * caught credential is never written to the event log or shown in a message. A
+ * fixed head slice is unsafe — credential prefixes differ in length (`sk-` is 3
+ * chars) so slice(0,4) would retain the first secret byte of a legacy OpenAI key.
+ * The credential TYPE is already conveyed by the finding's `signature_id`. (review 2026-07)
  */
 function redactSecret(s: string): string {
-  const head = s.replace(/\s+/g, "").slice(0, 4);
-  return `${head}…‹redacted ${s.length}-char secret›`;
+  return `‹redacted ${s.length}-char secret›`;
 }
 
 /**

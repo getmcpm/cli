@@ -478,6 +478,30 @@ describe("patterns: credential-egress DLP (F10)", () => {
     expect(r.action).toBe("warn");
   });
 
+  // Build synthetic credential tokens at RUNTIME from parts, so no credential-shaped
+  // literal appears in the source (GitHub push-protection scans file text, and these
+  // shapes are deliberately real-LOOKING to test detection). None are real secrets.
+  const fill = (n: number): string => "aB3cD4eF5".repeat(Math.ceil(n / 9)).slice(0, n);
+  // One positive-recall assertion PER credential branch — a regex regression on any
+  // single branch (e.g. nulling the AKIA alternative) would otherwise ship green.
+  const CREDENTIAL_CASES: Array<[string, string]> = [
+    ["GitHub PAT", "ghp_" + fill(36)],
+    ["OpenAI legacy sk-", "sk-" + fill(46)],
+    ["OpenAI project sk-proj-", "sk-proj-" + fill(42)],
+    ["Anthropic sk-ant-", "sk-ant-" + fill(88)],
+    ["Slack xoxb-", "xoxb-" + fill(40)],
+    ["npm token", "npm_" + fill(36)],
+    ["Google AIza", "AIza" + fill(35)],
+    ["AWS access key id (real)", "AKIA" + "A1B2C3D4E5F6G7H8"],
+  ];
+  for (const [label, cred] of CREDENTIAL_CASES) {
+    test(`warns on a ${label} in a response`, () => {
+      const r = inspectMessage(resp(`value: ${cred}`), OWASP_MCP_TOP_10);
+      expect(r.action).toBe("warn");
+      expect(r.findings.some((f) => f.signature_id === "credential-egress-in-response")).toBe(true);
+    });
+  }
+
   test("REDACTS the caught secret from the finding excerpt (never logs the token)", () => {
     const secret = "ghp_A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q7r8";
     const r = inspectMessage(resp(`leaked ${secret}`), OWASP_MCP_TOP_10);
@@ -487,9 +511,27 @@ describe("patterns: credential-egress DLP (F10)", () => {
     expect(f!.matched_text_excerpt).toMatch(/redacted/i);
   });
 
-  test("does NOT warn on AWS's documentation example key", () => {
-    const r = inspectMessage(resp("export AWS_ACCESS_KEY_ID=AKIAIOSFODNN7EXAMPLE"), OWASP_MCP_TOP_10);
-    expect(r.findings.some((f) => f.signature_id === "credential-egress-in-response")).toBe(false);
+  // The redaction must retain ZERO secret bytes — including for a legacy `sk-` key,
+  // whose 3-char public prefix used to let a fixed 4-char head keep the first secret
+  // byte. Assert no substring of the secret body survives. (review 2026-07)
+  test("retains no secret byte for a legacy sk- key (3-char prefix edge)", () => {
+    const secret = "sk-" + fill(46); // legacy sk- shape; 3-char public prefix
+    const r = inspectMessage(resp(`leaked ${secret}`), OWASP_MCP_TOP_10);
+    const f = r.findings.find((fi) => fi.signature_id === "credential-egress-in-response");
+    expect(f).toBeDefined();
+    const body = secret.slice(3); // everything after the "sk-" public prefix
+    // no 2+ char run of the secret body may appear in the excerpt
+    for (let i = 0; i + 2 <= body.length; i++) {
+      expect(f!.matched_text_excerpt.includes(body.slice(i, i + 2))).toBe(false);
+    }
+    expect(f!.matched_text_excerpt).toMatch(/^‹redacted \d+-char secret›$/);
+  });
+
+  test("does NOT warn on AWS's documentation example keys (both canonical)", () => {
+    for (const ex of ["AKIAIOSFODNN7EXAMPLE", "AKIAI44QH8DHBEXAMPLE"]) {
+      const r = inspectMessage(resp(`export AWS_ACCESS_KEY_ID=${ex}`), OWASP_MCP_TOP_10);
+      expect(r.findings.some((f) => f.signature_id === "credential-egress-in-response")).toBe(false);
+    }
   });
 
   test("does NOT warn on credential prose (API key / Bearer token wording)", () => {
