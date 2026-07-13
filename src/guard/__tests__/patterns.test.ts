@@ -487,7 +487,7 @@ describe("patterns: credential-egress DLP (F10)", () => {
   const CREDENTIAL_CASES: Array<[string, string]> = [
     ["GitHub PAT", "ghp_" + fill(36)],
     ["GitHub fine-grained PAT", "github_pat_" + fill(50)],
-    ["GitLab PAT", "glpat-" + fill(24)],
+    ["GitLab PAT", "glpat-" + fill(20)],
     ["OpenAI legacy sk-", "sk-" + fill(46)],
     ["OpenAI project sk-proj-", "sk-proj-" + fill(42)],
     ["Anthropic sk-ant-", "sk-ant-" + fill(88)],
@@ -540,5 +540,17 @@ describe("patterns: credential-egress DLP (F10)", () => {
   test("does NOT warn on credential prose (API key / Bearer token wording)", () => {
     const r = inspectMessage(resp("Send your API key as a Bearer token in the Authorization header."), OWASP_MCP_TOP_10);
     expect(r.findings.some((f) => f.signature_id === "credential-egress-in-response")).toBe(false);
+  });
+
+  // A `glpat-`-prefixed multi-word kebab slug is not a token (review PR #128): the
+  // exact-20 + trailing-boundary constraint must reject it.
+  test("does NOT warn on a glpat- kebab-case slug in prose", () => {
+    for (const slug of [
+      "See glpat-configuration-parameters-and-settings-reference for details.",
+      "class=\"glpat-primary-button-large-rounded-outline-variant\"",
+    ]) {
+      const r = inspectMessage(resp(slug), OWASP_MCP_TOP_10);
+      expect(r.findings.some((f) => f.signature_id === "credential-egress-in-response")).toBe(false);
+    }
   });
 });
