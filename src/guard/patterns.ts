@@ -479,10 +479,125 @@ function severityToAction(sev: Severity): InspectResult["action"] {
  */
 export function defaultActionForFinding(f: InspectFinding): InspectResult["action"] {
   const native = severityToAction(f.severity);
+  // Detector-B: a finding recovered from a DECODED synthetic leaf is heuristic —
+  // never BLOCK on it. This is the single clause that makes decode-and-rescan
+  // strictly additive (pass→warn only), so a decoded false positive on a
+  // block-capable carrier (e.g. an OWASP-2 critical on tool_response) degrades to
+  // warn instead of hard-failing the connection. An explicit policy override can
+  // still promote it (opt-in). Lives in this shared seam — not a call site — so
+  // applyPolicy re-derives through it and can't silently re-block (the 2026-05-17
+  // applyPolicy MAX-action hazard).
+  if (f.decoded === true && ACTION_RANK[native] > ACTION_RANK.warn) {
+    return "warn";
+  }
   if (WARN_ONLY_TARGETS.has(f.target) && ACTION_RANK[native] > ACTION_RANK.warn) {
     return "warn";
   }
   return native;
+}
+
+// ---------------------------------------------------------------------------
+// F10 Detector-B — decode-and-rescan
+// ---------------------------------------------------------------------------
+//
+// A server can base64-encode a poisoned payload (an injection phrase or a
+// credential) inside its response so it evades every regex. This pass finds
+// bounded base64/base64url runs, decodes ONLY those that yield printable text
+// (the texty gate — this is what preserves the deliberately-deferred binary-blob
+// decision: a PNG/audio/gzip/hash decodes to non-text and is dropped), and
+// re-runs the SAME target's signatures on the decoded text as synthetic leaves.
+//
+// Zero-FP posture (see the design's benign corpus: 5000 IDs + 200k random
+// base64-text → 0 hits): (1) the anchored-signature wall — only that carrier's
+// prefix/phrase-anchored sigs run, so decoded benign text (JSON config, JWT
+// payloads) matches nothing; (2) the decoded-origin warn-clamp in
+// defaultActionForFinding — a decoded finding can never block. DO NOT add a loose
+// generic-secret/entropy rule to the catalog: it would FP on this decoded path.
+//
+// Scope (slice 1): base64 + base64url only. Percent/hex are deferred (URL/hash
+// candidate volume is huge and the in-response carrier is rare — add when a real
+// fixture appears). One round only: synthetic leaves are never re-decoded or
+// JSON-parsed, so base64-of-base64 evades (documented gap, zero FP cost).
+// Residual evasion (bounded by design — Detector-B is a warn-only additive layer):
+// an attacker who fully controls a response can still hide an encoded payload
+// behind ≥8 base64 blobs that themselves decode to text (exhausting synthBudget) or
+// past the 64th candidate. Non-texty (binary/random) padding no longer works.
+
+const DECODE_TARGETS: ReadonlySet<SignatureTarget> = new Set<SignatureTarget>([
+  "tool_response",
+  "resource_content",
+  "prompt_content",
+]);
+const MAX_DECODE_RUNS = 8; // texty synthetic leaves rescanned per leaf (bounds rescan work)
+const MAX_DECODE_ATTEMPTS = 64; // total decode attempts per leaf (bounds Buffer.from / DoS)
+const TEXTY_MIN_RATIO = 0.85; // printable-ASCII ratio floor on DECODED bytes
+// A contiguous base64/base64url run (union alphabet), long enough (~16 bytes) to
+// be worth a decode. Global so we can walk multiple candidates per leaf.
+const BASE64_RUN = /[A-Za-z0-9+/_-]{24,}={0,2}/g;
+
+/** Fraction of chars that are printable ASCII (tab/newline/CR + 0x20–0x7E). */
+function printableRatio(s: string): number {
+  if (s.length === 0) return 0;
+  let printable = 0;
+  for (let i = 0; i < s.length; i++) {
+    const c = s.charCodeAt(i);
+    if (c === 9 || c === 10 || c === 13 || (c >= 0x20 && c <= 0x7e)) printable++;
+  }
+  return printable / s.length;
+}
+
+/** Decode a base64/base64url run to UTF-8 text, or null. Buffer.from is lenient. */
+function decodeBase64Run(run: string): string | null {
+  const std = run.replace(/-/g, "+").replace(/_/g, "/");
+  const buf = Buffer.from(std, "base64");
+  if (buf.length === 0) return null;
+  return buf.toString("utf8").slice(0, MATCH_SEGMENT_CAP);
+}
+
+/**
+ * Decode bounded base64 runs in `leaf` and inspect the decoded text against the
+ * same target's signatures. Returns findings tagged `decoded:true` with a
+ * `‹decoded:base64›` excerpt prefix. Never re-decodes or re-parses (one round).
+ */
+function inspectDecoded(
+  leaf: string,
+  signatures: readonly Signature[],
+  target: SignatureTarget,
+): InspectFinding[] {
+  // Bound the candidate scan to the same head+tail window the matcher uses.
+  const scan =
+    leaf.length <= MATCH_SEGMENT_CAP * 2
+      ? leaf
+      : leaf.slice(0, MATCH_SEGMENT_CAP) + leaf.slice(-MATCH_SEGMENT_CAP);
+
+  const out: InspectFinding[] = [];
+  // Two bounds: `attempts` caps Buffer.from calls (DoS), and `synthBudget` caps the
+  // texty synthetic leaves we actually rescan. Spending synthBudget only on a TEXTY
+  // decode (not every candidate) means non-texty junk padding — base64 of random
+  // bytes/images prepended before the real payload — no longer starves the budget,
+  // so it can't cheaply hide the payload. (review 2026-07-13: budget padding evasion)
+  let synthBudget = MAX_DECODE_RUNS;
+  let attempts = 0;
+  BASE64_RUN.lastIndex = 0;
+  for (
+    let m = BASE64_RUN.exec(scan);
+    m !== null && synthBudget > 0 && attempts < MAX_DECODE_ATTEMPTS;
+    m = BASE64_RUN.exec(scan)
+  ) {
+    attempts++;
+    const decoded = decodeBase64Run(m[0]);
+    if (decoded === null || printableRatio(decoded) < TEXTY_MIN_RATIO) continue;
+    synthBudget--;
+    for (const f of inspectAgainstSignatures(decoded, signatures, target)) {
+      out.push({
+        ...f,
+        decoded: true,
+        matched_text_excerpt: `‹decoded:base64› ${f.matched_text_excerpt}`,
+        remediation: `${f.remediation} NOTE: the payload was base64-encoded inside the response and decoded by mcpm-guard before matching (evasion attempt).`,
+      });
+    }
+  }
+  return out;
 }
 
 /**
@@ -516,6 +631,15 @@ export function inspectMessage(
         findings.push(...detectHiddenChars(leaf, target));
       }
       findings.push(...inspectAgainstSignatures(leaf, signatures, target));
+      // F10 Detector-B: decode bounded base64/base64url runs inside server-returned
+      // data and re-run the SAME target's signatures on the decoded text, so an
+      // encoded injection/credential can't evade the regex floor. Same target ⇒
+      // carrier warn-clamp + sig.target filter + redactSecret all still apply; the
+      // decoded-origin clamp keeps every such finding warn-only. NOT run on
+      // block-capable metadata carriers, and NEVER hidden-char-scanned.
+      if (DECODE_TARGETS.has(target)) {
+        findings.push(...inspectDecoded(leaf, signatures, target));
+      }
     }
   }
   if (findings.length === 0) return { action: "pass", findings: [] };

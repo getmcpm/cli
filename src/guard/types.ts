@@ -45,6 +45,14 @@ export interface InspectFinding {
   readonly target: SignatureTarget;
   readonly matched_text_excerpt: string;
   readonly remediation: string;
+  /**
+   * True when this finding came from a DECODED synthetic leaf (F10 Detector-B
+   * decode-and-rescan), not the raw wire text. Heuristic origin ⇒ the finding is
+   * clamped to `warn` (never block) in defaultActionForFinding, so decode is
+   * strictly additive (can only raise pass→warn). The excerpt is also prefixed
+   * `‹decoded:base64›` for triage.
+   */
+  readonly decoded?: boolean;
 }
 
 export type InspectAction = "pass" | "warn" | "block";

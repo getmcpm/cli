@@ -232,7 +232,17 @@ Sequenced to keep momentum and the Dependabot surface clean (the v0.9–v0.15 se
 ## F10 · Response-side credential DLP + decode-and-rescan
 **Category:** security · **Effort:** M · **Score 13.5**
 
-> ◑ **Detector-A core shipped 2026-07-12** — a `credential-egress-in-response`
+> ◑ **Detector-A + B shipped (2026-07-12 / 2026-07-13).** **Detector-B decode-and-rescan
+> shipped 2026-07-13:** on the three server-returned-data carriers, bounded
+> base64/base64url runs are decoded (printable-text gate — binary blobs dropped) and
+> the same signatures re-run on the decoded text, so an encoded injection/credential
+> can't evade the regex floor. Every decoded finding is WARN-only via a
+> decoded-origin clamp in `defaultActionForFinding` (strictly additive: pass→warn,
+> never block). Deferred: percent/hex encodings, double-encoding (one round), the
+> generic entropy detector (would FP on the decoded path). Perf-verified within the
+> relay budget (~+0.5 ms/large leaf; multi-MB frames were already slow pre-change).
+>
+> Detector-A (below) shipped 2026-07-12 — a `credential-egress-in-response`
 > signature (target `tool_response`) matching STRUCTURAL, prefix-anchored
 > credential shapes (PEM private key, GitHub/OpenAI/Anthropic/Google/npm/Slack
 > tokens, AWS access-key id minus the docs example). **WARN-tier** (forward + log;
