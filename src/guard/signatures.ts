@@ -276,8 +276,16 @@ export const OWASP_MCP_TOP_10: readonly Signature[] = [
     patterns: [
       /-----BEGIN (?:RSA |EC |OPENSSH |DSA |PGP )?PRIVATE KEY-----/,
       /\bgh[pousr]_[A-Za-z0-9]{30,}/,
+      // GitHub fine-grained PAT — a distinct `github_pat_` prefix the `gh[pousr]_`
+      // pattern does not cover (gh + p/o/u/s/r, not "github").
+      /\bgithub_pat_[A-Za-z0-9_]{40,}/,
+      // GitLab personal/project/group access token.
+      /\bglpat-[A-Za-z0-9_-]{20,}/,
       /\bsk-ant-[A-Za-z0-9_-]{80,}/,
       /\bsk-(?:proj-)?[A-Za-z0-9]{40,}/,
+      // Stripe live/test secret + restricted keys (underscore prefix, so the
+      // hyphen-anchored sk- above does not match them).
+      /\b[sr]k_(?:live|test)_[A-Za-z0-9]{20,}/,
       /\bxox[baprs]-[0-9A-Za-z-]{10,}/,
       /\bnpm_[A-Za-z0-9]{36}\b/,
       /\bAIza[0-9A-Za-z_-]{35}\b/,

@@ -486,9 +486,12 @@ describe("patterns: credential-egress DLP (F10)", () => {
   // single branch (e.g. nulling the AKIA alternative) would otherwise ship green.
   const CREDENTIAL_CASES: Array<[string, string]> = [
     ["GitHub PAT", "ghp_" + fill(36)],
+    ["GitHub fine-grained PAT", "github_pat_" + fill(50)],
+    ["GitLab PAT", "glpat-" + fill(24)],
     ["OpenAI legacy sk-", "sk-" + fill(46)],
     ["OpenAI project sk-proj-", "sk-proj-" + fill(42)],
     ["Anthropic sk-ant-", "sk-ant-" + fill(88)],
+    ["Stripe secret key", "sk_live_" + fill(24)],
     ["Slack xoxb-", "xoxb-" + fill(40)],
     ["npm token", "npm_" + fill(36)],
     ["Google AIza", "AIza" + fill(35)],
