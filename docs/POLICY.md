@@ -61,6 +61,13 @@ Security review Step 7 caught a critical bug where `log_only` on any one finding
 - The overall action is the MAX across all per-finding actions
 - `log_only` only suppresses the finding it overrides — never others
 
+**Decoded findings (F10 Detector-B).** A finding recovered from a base64-**decoded**
+payload is WARN-only by default (the decode is heuristic — see `docs/SIGNATURES.md`).
+An `action: block` override on that signature id **does** re-promote it to block for
+your session — an intentional opt-in escape hatch. Enable it only for a server you've
+confirmed should never emit that content encoded, since it reintroduces the decoded
+false-positive risk the default clamp exists to avoid.
+
 In practice: muting one signature can't silently disable detection on a co-occurring critical finding. Tested in `src/guard/__tests__/apply-policy.test.ts`.
 
 ## Integrity sidecar
