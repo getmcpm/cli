@@ -25,23 +25,39 @@ import type {
 // JSON leaf walk
 // ---------------------------------------------------------------------------
 
+// Total node-visit ceiling for the leaf walk. Replaces the old depth cap (32),
+// which silently dropped an injection buried in >32 nested objects/arrays inside
+// structuredContent — the buried leaf never reached the signature or decode pass.
+// A total-visit budget closes that blind spot AND the recursion stack-overflow
+// risk in one iterative walk. 100k is far above any real MCP frame's node count;
+// raise it if a legitimate payload ever trips it. (security: depth-cap bypass)
+const MAX_LEAF_WALK_NODES = 100_000;
+
 /**
  * Yields every string leaf in a JSON-ish value. Non-string leaves (number,
- * boolean, null) are skipped. Recurses into objects + arrays. Bounded by
- * depth to avoid pathological nesting; cycles are not possible in JSON.
+ * boolean, null) are skipped. Walks objects + arrays iteratively with an explicit
+ * stack (cycles are not possible in JSON), bounded by a total node-visit budget.
+ * Children are pushed in reverse so they pop in source order — leaf output for
+ * normal inputs is identical to the prior recursive walk.
  */
-function* stringLeaves(node: unknown, depth = 0, maxDepth = 32): Iterable<string> {
-  if (depth > maxDepth) return;
-  if (typeof node === "string") {
-    yield node;
-    return;
-  }
-  if (Array.isArray(node)) {
-    for (const child of node) yield* stringLeaves(child, depth + 1, maxDepth);
-    return;
-  }
-  if (node !== null && typeof node === "object") {
-    for (const value of Object.values(node)) yield* stringLeaves(value, depth + 1, maxDepth);
+function* stringLeaves(node: unknown): Iterable<string> {
+  const stack: unknown[] = [node];
+  let visited = 0;
+  while (stack.length > 0) {
+    if (++visited > MAX_LEAF_WALK_NODES) return;
+    const current = stack.pop();
+    if (typeof current === "string") {
+      yield current;
+      continue;
+    }
+    if (Array.isArray(current)) {
+      for (let i = current.length - 1; i >= 0; i--) stack.push(current[i]);
+      continue;
+    }
+    if (current !== null && typeof current === "object") {
+      const values = Object.values(current);
+      for (let i = values.length - 1; i >= 0; i--) stack.push(values[i]);
+    }
   }
 }
 

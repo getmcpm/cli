@@ -433,3 +433,58 @@ describe("handleInfo — env var required/optional labeling", () => {
     expect(fullOutput.toLowerCase()).toContain("optional");
   });
 });
+
+// ---------------------------------------------------------------------------
+// handleInfo — terminal-escape sanitization of registry-controlled text
+// ---------------------------------------------------------------------------
+
+describe("handleInfo — terminal-escape sanitization", () => {
+  const ESC = "\u001b";
+  const BEL = "\u0007";
+  // OSC-8 hyperlink smuggling + a raw SGR color escape.
+  const MALICIOUS = `${ESC}]8;;http://evil${BEL}click${ESC}]8;;${BEL}${ESC}[31mx${ESC}[0m`;
+
+  const MALICIOUS_ENTRY: ServerEntry = {
+    ...FULL_SERVER_ENTRY,
+    server: {
+      ...FULL_SERVER_ENTRY.server,
+      title: MALICIOUS,
+      description: MALICIOUS,
+      repository: { url: `https://ok${MALICIOUS}`, source: "github" },
+      websiteUrl: `https://ok${MALICIOUS}`,
+    },
+  };
+
+  it("strips ANSI/OSC control chars from title, description, repo URL and website in human output", async () => {
+    const client = makeMockClient(MALICIOUS_ENTRY);
+    const lines: string[] = [];
+    const output = (text: string) => lines.push(text);
+
+    await handleInfo("io.github.test/server-full", {}, { registryClient: client as any, output });
+
+    const fullOutput = lines.join("\n");
+    // chalk styles labels with CSI (ESC + "["), never BEL or OSC (ESC + "]"),
+    // so those two are unambiguous signals of un-stripped registry input.
+    expect(fullOutput).not.toContain(BEL);
+    expect(fullOutput).not.toContain(`${ESC}]`);
+    // Visible text survives.
+    expect(fullOutput).toContain("click");
+  });
+
+  it("preserves raw control bytes in --json output (byte-faithful)", async () => {
+    const client = makeMockClient(MALICIOUS_ENTRY);
+    const lines: string[] = [];
+    const output = (text: string) => lines.push(text);
+
+    await handleInfo("io.github.test/server-full", { json: true }, { registryClient: client as any, output });
+
+    const parsed = JSON.parse(lines.join("\n")) as {
+      description: string;
+      title: string;
+      websiteUrl: string;
+    };
+    expect(parsed.description).toBe(MALICIOUS);
+    expect(parsed.title).toBe(MALICIOUS);
+    expect(parsed.websiteUrl).toBe(`https://ok${MALICIOUS}`);
+  });
+});

@@ -534,6 +534,32 @@ describe("detectPromptInjection — new patterns", () => {
     expect(findings.some((f) => f.message.includes("base64"))).toBe(true);
   });
 
+  it("does not hang on a long unpadded base64-alphabet run (ReDoS regression)", () => {
+    // Attacker-controlled registry description: a huge run of base64 chars with NO
+    // trailing '=' used to trigger O(n^2) backtracking. On this 50 KB input the old
+    // /{40,}={1,2}/ regex takes ~6 s; the {40,512} bound drops it to well under
+    // 100 ms. The 2 s ceiling is a generous, CI-noise-tolerant bound that still
+    // catches any regression back to quadratic (which cannot come in under seconds).
+    const attack = "A".repeat(50000);
+    const start = Date.now();
+    const findings = detectPromptInjection(attack);
+    const elapsed = Date.now() - start;
+    expect(elapsed).toBeLessThan(2_000);
+    expect(findings.some((f) => f.message.includes("base64"))).toBe(false);
+  });
+
+  it("still does NOT flag a bare 40-char run without padding (FP guard)", () => {
+    // A 40-char hex/base64-alphabet token (e.g. a git SHA-like id) with no '=' must not match.
+    const findings = detectPromptInjection("a".repeat(40));
+    expect(findings.some((f) => f.message.includes("base64"))).toBe(false);
+  });
+
+  it("still detects a >512-char real base64 blob ending in padding", () => {
+    const bigBlob = "QUJD".repeat(200) + "==";
+    const findings = detectPromptInjection(bigBlob);
+    expect(findings.some((f) => f.message.includes("base64"))).toBe(true);
+  });
+
   it("detects zero-width space (U+200B) as obfuscation", () => {
     const findings = detectPromptInjection("normal text\u200Bhidden instruction");
     expect(findings.some((f) => f.message.includes("zero-width"))).toBe(true);

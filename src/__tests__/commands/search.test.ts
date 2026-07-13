@@ -436,3 +436,49 @@ describe("handleSearch — edge cases", () => {
     ).resolves.toBeUndefined();
   });
 });
+
+// ---------------------------------------------------------------------------
+// handleSearch — terminal-escape sanitization of registry-controlled text
+// ---------------------------------------------------------------------------
+
+describe("handleSearch — terminal-escape sanitization", () => {
+  const ESC = "\u001b";
+  const BEL = "\u0007";
+  // OSC-8 hyperlink smuggling + a raw SGR color escape in the description.
+  const MALICIOUS_DESC = `${ESC}]8;;http://evil${BEL}click${ESC}]8;;${BEL}${ESC}[31mred${ESC}[0m`;
+
+  function maliciousEntry() {
+    return {
+      ...BASE_SERVER_ENTRY,
+      server: { ...BASE_SERVER_ENTRY.server, description: MALICIOUS_DESC },
+    };
+  }
+
+  it("strips ANSI/OSC control chars from description in the human table", async () => {
+    const client = makeMockClient(makeSearchResult([maliciousEntry()]));
+    const lines: string[] = [];
+    const output = (text: string) => lines.push(text);
+
+    await handleSearch("test", { limit: 20 }, { registryClient: client as any, output });
+
+    const fullOutput = lines.join("\n");
+    // chalk styles headers/name with CSI (ESC + "["), never BEL or OSC (ESC + "]"),
+    // so those two are unambiguous signals of un-stripped registry input.
+    expect(fullOutput).not.toContain(BEL);
+    expect(fullOutput).not.toContain(`${ESC}]`);
+    // Visible text survives, control framing is gone.
+    expect(fullOutput).toContain("click");
+    expect(fullOutput).toContain("red");
+  });
+
+  it("preserves raw control bytes in --json output (byte-faithful)", async () => {
+    const client = makeMockClient(makeSearchResult([maliciousEntry()]));
+    const lines: string[] = [];
+    const output = (text: string) => lines.push(text);
+
+    await handleSearch("test", { limit: 20, json: true }, { registryClient: client as any, output });
+
+    const parsed = JSON.parse(lines.join("\n")) as Array<{ description: string }>;
+    expect(parsed[0].description).toBe(MALICIOUS_DESC);
+  });
+});

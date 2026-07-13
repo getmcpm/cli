@@ -58,6 +58,11 @@ describe("deriveDefaultProfile", () => {
     expect(p.read_deny).toContain("/home/u/.aws");
     expect(p.read_deny).toContain("/home/u/Library/Keychains");
     expect(p.read_deny).toContain("/home/u/.mcpm");
+    // Sibling MCP client configs holding plaintext env secrets must be denied too:
+    // Claude Code (~/.claude.json + ~/.claude state) and Gemini CLI (~/.gemini).
+    expect(p.read_deny).toContain("/home/u/.claude.json");
+    expect(p.read_deny).toContain("/home/u/.claude");
+    expect(p.read_deny).toContain("/home/u/.gemini");
     // Every configured secret segment is present.
     expect(p.read_deny.length).toBe(new Set(SECRET_DIR_SEGMENTS).size);
     expect(p.read_deny.every((d) => d.startsWith("/home/u/"))).toBe(true);
