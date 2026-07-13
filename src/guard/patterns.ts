@@ -518,13 +518,18 @@ export function defaultActionForFinding(f: InspectFinding): InspectResult["actio
 // candidate volume is huge and the in-response carrier is rare — add when a real
 // fixture appears). One round only: synthetic leaves are never re-decoded or
 // JSON-parsed, so base64-of-base64 evades (documented gap, zero FP cost).
+// Residual evasion (bounded by design — Detector-B is a warn-only additive layer):
+// an attacker who fully controls a response can still hide an encoded payload
+// behind ≥8 base64 blobs that themselves decode to text (exhausting synthBudget) or
+// past the 64th candidate. Non-texty (binary/random) padding no longer works.
 
 const DECODE_TARGETS: ReadonlySet<SignatureTarget> = new Set<SignatureTarget>([
   "tool_response",
   "resource_content",
   "prompt_content",
 ]);
-const MAX_DECODE_RUNS = 8; // decode attempts per leaf (perf/DoS bound)
+const MAX_DECODE_RUNS = 8; // texty synthetic leaves rescanned per leaf (bounds rescan work)
+const MAX_DECODE_ATTEMPTS = 64; // total decode attempts per leaf (bounds Buffer.from / DoS)
 const TEXTY_MIN_RATIO = 0.85; // printable-ASCII ratio floor on DECODED bytes
 // A contiguous base64/base64url run (union alphabet), long enough (~16 bytes) to
 // be worth a decode. Global so we can walk multiple candidates per leaf.
@@ -566,12 +571,23 @@ function inspectDecoded(
       : leaf.slice(0, MATCH_SEGMENT_CAP) + leaf.slice(-MATCH_SEGMENT_CAP);
 
   const out: InspectFinding[] = [];
-  let budget = MAX_DECODE_RUNS;
+  // Two bounds: `attempts` caps Buffer.from calls (DoS), and `synthBudget` caps the
+  // texty synthetic leaves we actually rescan. Spending synthBudget only on a TEXTY
+  // decode (not every candidate) means non-texty junk padding — base64 of random
+  // bytes/images prepended before the real payload — no longer starves the budget,
+  // so it can't cheaply hide the payload. (review 2026-07-13: budget padding evasion)
+  let synthBudget = MAX_DECODE_RUNS;
+  let attempts = 0;
   BASE64_RUN.lastIndex = 0;
-  for (let m = BASE64_RUN.exec(scan); m !== null && budget > 0; m = BASE64_RUN.exec(scan)) {
-    budget--; // count every ATTEMPT so a leaf full of junk base64 can't decode-storm
+  for (
+    let m = BASE64_RUN.exec(scan);
+    m !== null && synthBudget > 0 && attempts < MAX_DECODE_ATTEMPTS;
+    m = BASE64_RUN.exec(scan)
+  ) {
+    attempts++;
     const decoded = decodeBase64Run(m[0]);
     if (decoded === null || printableRatio(decoded) < TEXTY_MIN_RATIO) continue;
+    synthBudget--;
     for (const f of inspectAgainstSignatures(decoded, signatures, target)) {
       out.push({
         ...f,
