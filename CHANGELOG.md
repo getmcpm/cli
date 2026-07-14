@@ -2,6 +2,82 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.20.0] - 2026-07-14
+
+Response-side credential DLP lands (**F10 Detector-A + B**) and a full adversarial
+security review hardens the guard, scanner, relay, and confine sandbox. The guard now
+warns-and-redacts on credentials egressing in tool responses (including base64-encoded
+ones), and six independently-verified findings — from a zero-width-separator signature
+bypass to an O(n²) scanner ReDoS — are fixed.
+
+### Added
+
+- **F10 Detector-A — response-side credential DLP** — a 10th catalog signature,
+  `credential-egress-in-response` (WARN-tier), flags a high-confidence **structural**
+  credential returned in a `tool_response`: PEM private-key blocks, `gh[pousr]_` /
+  `github_pat_` (GitHub), `glpat-` (GitLab), `sk-` / `sk-ant-` / `sk-proj-` (OpenAI/
+  Anthropic), `[sr]k_(live|test)_` (Stripe), `xox[baprs]-` (Slack), `npm_`, `AIza`
+  (Google), and `AKIA…` (AWS, excluding the documented example key). Warn — not block —
+  because a secrets-manager/auth tool legitimately returns credentials; the caught
+  secret is **redacted** to `‹redacted N-char secret›` so it never reaches the warning
+  message or `guard-events.jsonl`.
+- **F10 Detector-B — decode-and-rescan** — the guard now decodes base64 / base64url
+  runs inside server-returned data (`tool_response`, `resource_content`,
+  `prompt_content`) and re-runs the signatures on the decoded text, closing the
+  encoding-evasion gap where a server base64-wraps an injection or credential to slip
+  past the regex floor. Decoded findings are **WARN-clamped** (strictly additive — a
+  decoded match can never block on its own), gated by a printable-ratio "texty" test
+  and the anchored-signature set to preserve the zero-false-positive contract.
+
+### Security
+
+Fixes from an adversarially-verified multi-lens review (each finding refute-tested
+before it counted):
+
+- **guard/signatures — zero-width-separator bypass of the instruction-injection family
+  (HIGH).** `PATTERN_BREAKERS` strips a zero-width space *before* matching, so
+  `ignore<U+200B>previous instructions` collapsed to adjacency and the `[\s]+`
+  (≥1 whitespace) separator failed to match → the frame passed. Internal separators are
+  now `[\s]*` across all five injection targets (parity with the credential family's
+  existing `[\s-]*` fix).
+- **guard/confine — read-denylist omitted Claude Code and Gemini CLI configs (HIGH).**
+  A confined server could read `~/.claude.json` / `~/.gemini` — which hold sibling
+  servers' plaintext `env` credentials — under the sandbox's `(allow default)` read
+  posture. Both are now in the secret-directory denylist (all six clients covered).
+- **guard/patterns — deep-nesting inspection blind spot (MEDIUM).** The leaf walk's
+  depth cap silently dropped an injection buried >32 levels deep in `structuredContent`.
+  Replaced the recursive depth-cap with an iterative, node-budget-bounded walk — closes
+  the blind spot and the recursion stack-overflow risk in one change.
+- **scanner — O(n²) ReDoS in the base64 pattern (MEDIUM).** A long unpadded
+  base64-alphabet run in attacker-controlled registry metadata made `search`/`audit`
+  backtrack ~2.5 s per 32 KB field. Bounded the quantifier (`{40,512}`) — padding stays
+  required, so nothing new matches on benign input.
+- **relay — malformed frame crashed the guard (LOW).** A non-JSON-RPC line on the
+  wrapped server's stdout (e.g. a startup banner) became an uncaught exception and
+  crash-looped the relay. All frame-read sites now fail closed: emit a RELAY
+  `malformed-frame` block event and tear down the source, forwarding nothing.
+- **search/info — terminal escape injection via registry free-text (LOW).**
+  Registry-controlled `description` / `title` / `repository.url` / `websiteUrl` reached
+  the terminal without stripping ANSI/OSC/control chars (link/window-title/line-overwrite
+  spoofing). The human-render branches now route through `sanitizeForTerminal`; `--json`
+  output stays byte-faithful.
+
+### Fixed
+
+- **Two Tier-1 scanner false-positive classes** surfaced by a full-registry sweep — the
+  "Bearer" credential phrase and the "system prompt" injection pattern no longer fire on
+  benign prose (structural/verb-anchored patterns; regression-tested).
+
+### Documentation
+
+- **`docs/VISION.md`** — the strategy layer (thesis, trust flywheel, horizons with exit
+  metrics, the "never" doctrine), cross-linked from the roadmap and README.
+
+### Dependencies
+
+- `ora` 9.4.0 → 9.4.1, `ossf/scorecard-action` bump, and the dev-dependency group
+  (`vitest` / `@vitest/coverage-v8` 4.1.9 → 4.1.10, `@types/node` patch).
+
 ## [0.19.0] - 2026-07-03
 
 The rest of Wave 1 in one release — developer reach and CI citizenship: mcpm now manages **Gemini CLI**, `mcpm verify` and `mcpm audit --sarif` make it a first-class CI gate (client-free integrity + SARIF code-scanning), `mcpm doctor` gains a structured `--json` and a redacted `--report`, and the README documents every collision-free install channel (npm/npx/pnpm/mise).
