@@ -48,7 +48,7 @@
 >   was built from scratch (#108) and effort was **XL, not L**. Deferred: Linux bwrap, the strict tier,
 >   orig-hash Phase-2 fail-closed, and the per-server `guard confine <server>` command (achievable today
 >   via `enable --confine --server X` + `disable --server X`).
-> - **Next up:** F10 decode-pass + block-tier (Detector-A core shipped v0.20-pending) · F8/F9 (v1.0 bets).
+> - **Next up:** F8/F9 (v1.0 bets) · then F10 block-tier + Detector-C (F10 Detector-A + B shipped v0.20.0).
 >
 > This roadmap was produced by a grounded research-and-planning pass: six parallel
 > web-research lenses (threat landscape, competitors, MCP protocol evolution, DevX,
@@ -232,7 +232,7 @@ Sequenced to keep momentum and the Dependabot surface clean (the v0.9–v0.15 se
 ## F10 · Response-side credential DLP + decode-and-rescan
 **Category:** security · **Effort:** M · **Score 13.5**
 
-> ◑ **Detector-A + B shipped (2026-07-12 / 2026-07-13).** **Detector-B decode-and-rescan
+> ◑ **Detector-A + B shipped (2026-07-12 / 2026-07-13; released v0.20.0).** **Detector-B decode-and-rescan
 > shipped 2026-07-13:** on the three server-returned-data carriers, bounded
 > base64/base64url runs are decoded (printable-text gate — binary blobs dropped) and
 > the same signatures re-run on the decoded text, so an encoded injection/credential
