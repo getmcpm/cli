@@ -239,7 +239,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: getmcpm/cli/.github/actions/mcpm-verify@v0.19.0   # or: run: npx @getmcpm/cli verify
+      - uses: getmcpm/cli/.github/actions/mcpm-verify@v0.20.0   # or: run: npx @getmcpm/cli verify
 ```
 
 The Action writes a job step summary from `--json`; the same verb works as a
@@ -302,10 +302,13 @@ The `demo` command boots an in-process synthetic malicious server that returns a
 | OWASP-MCP-2 | Instruction injection in tool responses | block |
 | OWASP-MCP-2 | Instruction injection in resource / prompt content | warn (forward) |
 | OWASP-MCP-7 | Sensitive-path exfil in tool arguments | warn (promote to block via policy) |
+| OWASP-MCP-1 | Exfil-named parameter in a tool's input schema (`_system_prompt_`, …) | block (list-time) |
+| Credential phishing | Server solicits a wallet seed phrase / private key / card CVV / SSN / PIN | block (to the server) |
+| Credential egress | High-confidence secret returned in a tool response | warn (secret redacted in the log) |
 | Hidden chars | Zero-width / bidi / non-printable in tool metadata | high (warn) |
 | Sampling | Injection in a server-initiated `sampling` prompt | block (to the server) |
 
-Detection is regex + structural; NFKC + zero-width-char stripping defeats the common Unicode evasions, and a separate hidden-character *presence* check flags evasion carriers before they're normalized away. See `mcpm guard list-signatures` for the current shipped set.
+Detection is regex + structural; NFKC + zero-width-char stripping defeats the common Unicode evasions, and a separate hidden-character *presence* check flags evasion carriers before they're normalized away. Base64 / base64url payloads inside server responses are also decoded and re-scanned, so an injection or credential hidden behind an encoding can't slip past the regex floor (decoded hits warn, never hard-block). See `mcpm guard list-signatures` for the current shipped set.
 
 ### Confinement (opt-in enforcement)
 
