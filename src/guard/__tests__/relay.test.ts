@@ -541,6 +541,45 @@ describe("startRelay — child-spawn failure fails closed (H9 B.2)", () => {
     expect(finding?.matched_text_excerpt).toContain("spawn ENOENT");
   });
 
+  test("a malformed / non-JSON-RPC line on child stdout does NOT crash the guard (Finding #5)", async () => {
+    const fakeChild = makeFakeChild();
+    const parentIn = new PassThrough();
+    const parentOut = new PassThrough();
+
+    let parentOutBytes = 0;
+    parentOut.on("data", (c: Buffer) => {
+      parentOutBytes += c.byteLength;
+    });
+
+    const events: GuardEvent[] = [];
+    startRelay({
+      command: "x",
+      args: [],
+      parentIn,
+      parentOut,
+      onEvent: (e) => events.push(e),
+      spawnChild: () => fakeChild,
+    });
+
+    // A wrapped server's startup banner: valid text, NOT a JSON-RPC frame. On
+    // the old code this makes the SDK parse throw inside the stream 'data'
+    // handler and propagates as an uncaughtException (the crash-loop). The fix
+    // must contain it: no throw, a RELAY/block event, nothing forwarded.
+    expect(() => fakeChild.stdout.write("Starting v1.0\n")).not.toThrow();
+    await new Promise((r) => setImmediate(r));
+    await new Promise((r) => setImmediate(r));
+
+    const block = events.find((e) => e.action === "block");
+    expect(block).toBeDefined();
+    expect(block?.direction).toBe("child->parent");
+    expect(block?.findings[0]?.signature_id).toBe("malformed-frame");
+    expect(block?.findings[0]?.category).toBe("RELAY");
+    // Fail closed: the malformed line was NOT forwarded to the client.
+    expect(parentOutBytes).toBe(0);
+    // Source torn down so no further uninspected bytes can flow.
+    expect(fakeChild.stdout.destroyed).toBe(true);
+  });
+
   test("after spawn-failure the child stdout is destroyed — no late bytes reach parentOut", async () => {
     const fakeChild = makeFakeChild();
     const parentOut = new PassThrough();

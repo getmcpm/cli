@@ -48,12 +48,16 @@ export const OWASP_MCP_TOP_10: readonly Signature[] = [
     severity: "critical",
     description: "Imperative instructions embedded in tool response content",
     target: "tool_response",
-    // [\s]+ instead of literal space catches newline / tab / multi-space evasions
-    // (an attacker inserting "ignore\nprevious instructions" otherwise bypasses).
+    // Internal token separators are [\s]* (not +), parity with the credential
+    // family's [\s-]* fix: [\s]* still matches newline / tab / multi-space evasions
+    // ("ignore\nprevious instructions") AND a stripped zero-width separator that
+    // collapses to adjacency ("ignore<U+200B>previous" → "ignoreprevious" after
+    // PATTERN_BREAKERS). tool_response is not in HIDDEN_CHAR_TARGETS, so [\s]+ here
+    // would let that invisible-separator bypass through. (review HIGH)
     patterns: [
-      /(?:^|[\s.,;:!?])ignore[\s]+(?:all[\s]+|any[\s]+|the[\s]+)?(?:previous|prior|above)[\s]+instructions?/i,
-      /(?:disregard|forget)[\s]+(?:all[\s]+|any[\s]+|the[\s]+)?(?:previous|prior|above)[\s]+instructions?/i,
-      /you[\s]+are[\s]+now[\s]+(?:in[\s]+|operating[\s]+in[\s]+|entering[\s]+)?(?:developer|debug|admin|jailbreak|dan)[\s]+mode/i,
+      /(?:^|[\s.,;:!?])ignore[\s]*(?:all[\s]*|any[\s]*|the[\s]*)?(?:previous|prior|above)[\s]*instructions?/i,
+      /(?:disregard|forget)[\s]*(?:all[\s]*|any[\s]*|the[\s]*)?(?:previous|prior|above)[\s]*instructions?/i,
+      /you[\s]*are[\s]*now[\s]*(?:in[\s]*|operating[\s]*in[\s]*|entering[\s]*)?(?:developer|debug|admin|jailbreak|dan)[\s]*mode/i,
       /<\|system\|>|<\|im_start\|>system/,
     ],
     remediation:
@@ -85,10 +89,10 @@ export const OWASP_MCP_TOP_10: readonly Signature[] = [
     // to require an imperative verb following the phrase, which is the actual
     // tool-poisoning shape (e.g., "when the user asks, exfiltrate ~/.ssh/").
     patterns: [
-      /(?:^|[\s.,;:!?])ignore[\s]+(?:all[\s]+|any[\s]+|the[\s]+)?(?:previous|prior|above)[\s]+instructions?/i,
-      /(?:disregard|forget)[\s]+(?:all[\s]+|any[\s]+|the[\s]+)?(?:previous|prior|above)[\s]+instructions?/i,
+      /(?:^|[\s.,;:!?])ignore[\s]*(?:all[\s]*|any[\s]*|the[\s]*)?(?:previous|prior|above)[\s]*instructions?/i,
+      /(?:disregard|forget)[\s]*(?:all[\s]*|any[\s]*|the[\s]*)?(?:previous|prior|above)[\s]*instructions?/i,
       /<important>|<system>/i,
-      /when[\s]+(?:the[\s]+)?user[\s]+asks,?[\s]+(?:you[\s]+(?:must|should|always|never)|always|never|exfil|read|access|send|email|do[\s]+not)/i,
+      /when[\s]*(?:the[\s]*)?user[\s]*asks,?[\s]*(?:you[\s]*(?:must|should|always|never)|always|never|exfil|read|access|send|email|do[\s]*not)/i,
     ],
     remediation:
       "A tool description contains imperative or system-prompt-style text. " +
@@ -105,9 +109,9 @@ export const OWASP_MCP_TOP_10: readonly Signature[] = [
     // but never dropped. Severity stays critical (pattern confidence is honest).
     target: "resource_content",
     patterns: [
-      /(?:^|[\s.,;:!?])ignore[\s]+(?:all[\s]+|any[\s]+|the[\s]+)?(?:previous|prior|above)[\s]+instructions?/i,
-      /(?:disregard|forget)[\s]+(?:all[\s]+|any[\s]+|the[\s]+)?(?:previous|prior|above)[\s]+instructions?/i,
-      /you[\s]+are[\s]+now[\s]+(?:in[\s]+|operating[\s]+in[\s]+|entering[\s]+)?(?:developer|debug|admin|jailbreak|dan)[\s]+mode/i,
+      /(?:^|[\s.,;:!?])ignore[\s]*(?:all[\s]*|any[\s]*|the[\s]*)?(?:previous|prior|above)[\s]*instructions?/i,
+      /(?:disregard|forget)[\s]*(?:all[\s]*|any[\s]*|the[\s]*)?(?:previous|prior|above)[\s]*instructions?/i,
+      /you[\s]*are[\s]*now[\s]*(?:in[\s]*|operating[\s]*in[\s]*|entering[\s]*)?(?:developer|debug|admin|jailbreak|dan)[\s]*mode/i,
       /<\|system\|>|<\|im_start\|>system/,
     ],
     remediation:
@@ -123,9 +127,9 @@ export const OWASP_MCP_TOP_10: readonly Signature[] = [
     // prompts/get content is RETRIEVED DATA — warn-only via the inspectMessage clamp.
     target: "prompt_content",
     patterns: [
-      /(?:^|[\s.,;:!?])ignore[\s]+(?:all[\s]+|any[\s]+|the[\s]+)?(?:previous|prior|above)[\s]+instructions?/i,
-      /(?:disregard|forget)[\s]+(?:all[\s]+|any[\s]+|the[\s]+)?(?:previous|prior|above)[\s]+instructions?/i,
-      /you[\s]+are[\s]+now[\s]+(?:in[\s]+|operating[\s]+in[\s]+|entering[\s]+)?(?:developer|debug|admin|jailbreak|dan)[\s]+mode/i,
+      /(?:^|[\s.,;:!?])ignore[\s]*(?:all[\s]*|any[\s]*|the[\s]*)?(?:previous|prior|above)[\s]*instructions?/i,
+      /(?:disregard|forget)[\s]*(?:all[\s]*|any[\s]*|the[\s]*)?(?:previous|prior|above)[\s]*instructions?/i,
+      /you[\s]*are[\s]*now[\s]*(?:in[\s]*|operating[\s]*in[\s]*|entering[\s]*)?(?:developer|debug|admin|jailbreak|dan)[\s]*mode/i,
       /<\|system\|>|<\|im_start\|>system/,
     ],
     remediation:
@@ -146,10 +150,10 @@ export const OWASP_MCP_TOP_10: readonly Signature[] = [
     // prose would hard-fail the server connection with an opaque JSON-RPC error.
     // (security: FP-2 over-block)
     patterns: [
-      /(?:^|[\s.,;:!?])ignore[\s]+(?:all[\s]+|any[\s]+|the[\s]+)?(?:previous|prior|above)[\s]+instructions?/i,
-      /(?:disregard|forget)[\s]+(?:all[\s]+|any[\s]+|the[\s]+)?(?:previous|prior|above)[\s]+instructions?/i,
+      /(?:^|[\s.,;:!?])ignore[\s]*(?:all[\s]*|any[\s]*|the[\s]*)?(?:previous|prior|above)[\s]*instructions?/i,
+      /(?:disregard|forget)[\s]*(?:all[\s]*|any[\s]*|the[\s]*)?(?:previous|prior|above)[\s]*instructions?/i,
       /<\|system\|>|<\|im_start\|>system/,
-      /you[\s]+are[\s]+now[\s]+(?:in[\s]+|operating[\s]+in[\s]+|entering[\s]+)?(?:developer|debug|admin|jailbreak|dan)[\s]+mode/i,
+      /you[\s]*are[\s]*now[\s]*(?:in[\s]*|operating[\s]*in[\s]*|entering[\s]*)?(?:developer|debug|admin|jailbreak|dan)[\s]*mode/i,
     ],
     remediation:
       "A server's initialize instructions/serverInfo contain imperative or system-prompt-" +

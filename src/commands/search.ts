@@ -19,6 +19,7 @@ import type { RegistryClient } from "../registry/client.js";
 import type { ServerEntry } from "../registry/types.js";
 import { OFFICIAL_META_KEY } from "../utils/format-trust.js";
 import { stdoutOutput } from "../utils/output.js";
+import { sanitizeForTerminal } from "../guard/sanitize.js";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -129,7 +130,9 @@ export async function handleSearch(
     const official = _meta?.[OFFICIAL_META_KEY] ?? {};
     const transport = resolveTransport(entry);
     const status = official?.status === "active" ? chalk.green("active") : (official?.status ?? "-");
-    const description = server.description ?? "";
+    // Registry-controlled free text — strip ANSI/OSC/control chars before it
+    // reaches the terminal (cli-table3 does not sanitize). See guard/sanitize.
+    const description = sanitizeForTerminal(server.description ?? "");
 
     table.push([
       chalk.white(server.name),

@@ -58,6 +58,9 @@ export const SECRET_DIR_SEGMENTS: readonly string[] = [
   ".cursor",
   ".vscode",
   ".codeium",
+  ".claude.json", // Claude Code user-global config (see src/config/paths.ts getConfigPath)
+  ".claude", // Claude Code also keeps state under ~/.claude/
+  ".gemini", // Gemini CLI user-global config (~/.gemini/settings.json)
 ];
 
 /**

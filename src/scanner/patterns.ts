@@ -140,7 +140,10 @@ const PROMPT_INJECTION_PATTERNS: ReadonlyArray<{ label: string; pattern: RegExp;
   { label: "you are now", pattern: /you\s+are\s+now\s+[a-z]/i, severity: "high" },
   { label: "act as persona", pattern: /act\s+as\s+(an?\s+)?(?:unrestricted|different|new|alternate)/i, severity: "high" },
   // Base64-encoded content in descriptions — threshold raised to 40 chars to reduce false positives
-  { label: "base64-encoded content", pattern: /[A-Za-z0-9+/]{40,}={1,2}/, severity: "high" },
+  // ponytail: {40,512} bound (not {40,}) caps regex backtracking to O(n*512) on a long
+  // unpadded base64-alphabet run (no trailing '=') — was O(n^2), ~2.5s on a 32KB attacker
+  // description. Padding stays required, so nothing new matches on benign input.
+  { label: "base64-encoded content", pattern: /[A-Za-z0-9+/]{40,512}={1,2}/, severity: "high" },
   // Zero-width / invisible characters and bidirectional overrides used for obfuscation
   { label: "zero-width characters (obfuscation)", pattern: /[\u200B\u200C\u200D\uFEFF\u00AD\u202A-\u202F\u2028\u2029]/, severity: "high" },
   // Exfil patterns — sending data to external URLs

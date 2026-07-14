@@ -20,6 +20,7 @@ import type { EnvVar, Package, Remote } from "../registry/types.js";
 import { NotFoundError } from "../registry/errors.js";
 import { OFFICIAL_META_KEY } from "../utils/format-trust.js";
 import { stdoutOutput } from "../utils/output.js";
+import { sanitizeForTerminal } from "../guard/sanitize.js";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -143,13 +144,15 @@ export async function handleInfo(
   lines.push(divider);
   lines.push(`${chalk.bold.white(server.name)}  ${chalk.dim(`v${server.version}`)}`);
 
+  // Registry-controlled free text — strip ANSI/OSC/control chars before it
+  // reaches the terminal (chalk does not sanitize). See guard/sanitize.
   if (server.title) {
-    lines.push(chalk.dim(server.title));
+    lines.push(chalk.dim(sanitizeForTerminal(server.title)));
   }
 
   if (server.description) {
     lines.push("");
-    lines.push(server.description);
+    lines.push(sanitizeForTerminal(server.description));
   }
 
   lines.push("");
@@ -159,11 +162,11 @@ export async function handleInfo(
   lines.push(chalk.cyan("Published:    ") + formatDate(official?.publishedAt));
 
   if (server.repository) {
-    lines.push(chalk.cyan("Repository:   ") + (server.repository.url ?? "—"));
+    lines.push(chalk.cyan("Repository:   ") + (server.repository.url ? sanitizeForTerminal(server.repository.url) : "—"));
   }
 
   if (server.websiteUrl) {
-    lines.push(chalk.cyan("Website:      ") + server.websiteUrl);
+    lines.push(chalk.cyan("Website:      ") + sanitizeForTerminal(server.websiteUrl));
   }
 
   lines.push("");

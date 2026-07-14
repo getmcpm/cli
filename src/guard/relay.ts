@@ -338,7 +338,17 @@ export function startInProcessRelay(opts: InProcessRelayOptions): InProcessRelay
   const buffer = new ReadBuffer();
   opts.parentIn.on("data", (chunk: Buffer) => {
     buffer.append(chunk);
-    let parentMsg = buffer.readMessage();
+    let parentMsg: JSONRPCMessage | null;
+    try {
+      parentMsg = buffer.readMessage();
+    } catch {
+      // Malformed / non-JSON-RPC frame — same fail-closed posture as
+      // wireDirection: emit a RELAY block event, tear the source down, forward
+      // nothing, rather than crashing the guard with an uncaughtException.
+      opts.onEvent?.(malformedFrameEvent("parent->child"));
+      opts.parentIn.destroy();
+      return;
+    }
     while (parentMsg !== null) {
       const blocked = inspectAndWrite(parentMsg, "parent->child", opts.inspectParentRequest);
       if (!blocked) {
@@ -348,7 +358,13 @@ export function startInProcessRelay(opts: InProcessRelayOptions): InProcessRelay
           if (!respBlocked) opts.parentOut.write(serializeMessage(response));
         }
       }
-      parentMsg = buffer.readMessage();
+      try {
+        parentMsg = buffer.readMessage();
+      } catch {
+        opts.onEvent?.(malformedFrameEvent("parent->child"));
+        opts.parentIn.destroy();
+        return;
+      }
     }
   });
 
@@ -406,7 +422,19 @@ function wireDirection(w: DirectionWiring): void {
       return;
     }
     buffer.append(chunk);
-    let msg = buffer.readMessage();
+    let msg: JSONRPCMessage | null;
+    try {
+      msg = buffer.readMessage();
+    } catch {
+      // A malformed / non-JSON-RPC line (startup banner, garbage, valid-JSON
+      // that isn't a JSON-RPC frame) makes the SDK parse throw. Mirror the
+      // buffer-cap branch: emit a RELAY block event and tear the source down —
+      // NO bytes forwarded (the throw is before any target write) — instead of
+      // letting it propagate as an uncaughtException and crash the guard.
+      w.onEvent?.(malformedFrameEvent(w.direction));
+      w.source.destroy();
+      return;
+    }
     while (msg !== null) {
       bufferedBytes = 0; // reset on every consumed frame
       const decision = w.inspect?.(msg);
@@ -431,7 +459,13 @@ function wireDirection(w: DirectionWiring): void {
         logEvent(decision, w.direction, w.onEvent);
         w.target(serializeMessage(msg));
       }
-      msg = buffer.readMessage();
+      try {
+        msg = buffer.readMessage();
+      } catch {
+        w.onEvent?.(malformedFrameEvent(w.direction));
+        w.source.destroy();
+        return;
+      }
     }
   });
   w.source.on("end", () => {
@@ -443,6 +477,33 @@ function wireDirection(w: DirectionWiring): void {
 // ---------------------------------------------------------------------------
 // Event helper
 // ---------------------------------------------------------------------------
+
+/**
+ * Build the RELAY block event for a malformed / non-JSON-RPC frame. A single
+ * bad line on the wrapped server's stdout (a startup banner, garbage, or
+ * valid-JSON-that-isn't-JSONRPC) makes the SDK's parse throw; without this the
+ * throw becomes an uncaughtException and the relay crash-loops. Mirrors the
+ * spawn-failure finding shape so an operator triaging guard-events.jsonl can
+ * tell a malformed frame apart from a content-level block.
+ */
+function malformedFrameEvent(direction: GuardEvent["direction"]): GuardEvent {
+  return {
+    ts: new Date().toISOString(),
+    direction,
+    action: "block",
+    findings: [
+      {
+        signature_id: "malformed-frame",
+        category: "RELAY",
+        severity: "critical",
+        target: "tool_response",
+        matched_text_excerpt: "malformed JSON-RPC frame on stdio",
+        remediation:
+          "The wrapped MCP server emitted a non-JSON-RPC line (e.g. a startup banner). It must write only JSON-RPC frames to stdout.",
+      },
+    ],
+  };
+}
 
 function logEvent(
   result: InspectResult | undefined,
