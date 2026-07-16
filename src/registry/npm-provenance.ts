@@ -20,6 +20,7 @@
  */
 
 import type { NpmProvenanceSnapshot, ProvenanceIdentity } from "../stack/schema.js";
+import { NpmProvenanceSnapshotSchema } from "../stack/schema.js";
 
 export type { NpmProvenanceSnapshot, ProvenanceIdentity } from "../stack/schema.js";
 
@@ -51,10 +52,12 @@ const SLSA_V02 = "https://slsa.dev/provenance/v0.2";
  * mistaken for a signed→unsigned rug-pull):
  *   - a DEFINITIVE 404 → `{ status: "unsigned" }` (no attestations for a
  *     resolved coordinate; the caller only asks for packages it just resolved)
- *   - 200 with a parseable SLSA attestation → `{ status: "attested", identity }`
- *   - 200 whose body is unparseable / an unknown bundle shape → `{ status: "unsupported" }`
- *   - ANYTHING ELSE (5xx, timeout, redirect, oversize, network error) →
- *     `undefined` = FAIL-OPEN, deliberately distinct from "unsigned"
+ *   - 200 with a parseable SLSA attestation carrying a comparable anchor →
+ *     `{ status: "attested", identity }`
+ *   - 200 with valid JSON but no recognizable/comparable SLSA attestation, or a
+ *     record that violates its own snapshot caps → `{ status: "unsupported" }`
+ *   - ANYTHING ELSE (5xx, timeout, redirect, oversize, malformed/non-JSON body,
+ *     network error) → `undefined` = FAIL-OPEN, deliberately distinct from "unsigned"
  *
  * The host is hard-coded and HTTPS is guaranteed by the literal URL; redirects
  * are refused (`redirect: "manual"`). NEVER throws.
@@ -67,13 +70,14 @@ export async function fetchNpmProvenance(
   const fetchImpl = opts?.fetchImpl ?? fetch;
   const timeoutMs = opts?.timeoutMs ?? DEFAULT_TIMEOUT_MS;
 
-  // encodeURIComponent the whole "<name>@<version>" spec (verified: the fully
-  // percent-encoded form resolves at this endpoint), so a crafted name/version
-  // cannot escape the path segment.
-  const spec = encodeURIComponent(`${identifier}@${npmVersion}`);
-  const url = `https://${NPM_REGISTRY_HOST}/-/npm/v1/attestations/${spec}`;
-
   try {
+    // encodeURIComponent the whole "<name>@<version>" spec (verified: the fully
+    // percent-encoded form resolves at this endpoint), so a crafted name/version
+    // cannot escape the path segment. Inside the try so a URIError (lone
+    // surrogate) also fails-open rather than throwing (honors "NEVER throws").
+    const spec = encodeURIComponent(`${identifier}@${npmVersion}`);
+    const url = `https://${NPM_REGISTRY_HOST}/-/npm/v1/attestations/${spec}`;
+
     const controller = new AbortController();
     const timerId = setTimeout(() => controller.abort(), timeoutMs);
     let response: Response;
@@ -98,12 +102,27 @@ export async function fetchNpmProvenance(
     if (raw === undefined) return undefined; // oversize / unreadable body → fail-open
 
     const identity = extractIdentity(raw);
-    // 200 with a body we cannot map to a known SLSA attestation → unsupported
-    // (fail-CLOSED vocabulary — an unknown shape must never read as "attested").
+    // 200 with a body we cannot map to a known+comparable SLSA attestation →
+    // unsupported (fail-CLOSED vocabulary — an unknown/anchorless shape must
+    // never read as "attested").
     if (identity === undefined) {
       return { npmVersion, status: "unsupported", mode: "registry-record" };
     }
-    return { npmVersion, status: "attested", mode: "registry-record", identity };
+    // Validate the UNVERIFIED, registry-derived snapshot against its own caps
+    // BEFORE it can reach the lock. An over-cap/malformed field is by definition
+    // not a supported attestation shape, and would otherwise write a lock that
+    // parseLockFile (safeParse) later THROWS on — bricking up/verify/diff. So an
+    // over-cap record degrades to "unsupported" rather than a poisoned lock.
+    const snap: NpmProvenanceSnapshot = {
+      npmVersion,
+      status: "attested",
+      mode: "registry-record",
+      identity,
+    };
+    const parsed = NpmProvenanceSnapshotSchema.safeParse(snap);
+    return parsed.success
+      ? parsed.data
+      : { npmVersion, status: "unsupported", mode: "registry-record" };
   } catch {
     return undefined;
   }
@@ -205,7 +224,14 @@ function extractIdentity(raw: unknown): ProvenanceIdentity | undefined {
       predicateType === SLSA_V1
         ? extractSlsaV1(statement)
         : extractSlsaV02(statement);
-    if (identity !== undefined) {
+    // Require at least one COMPARABLE anchor (immutable numeric repo id or the
+    // source repo URL). An anchorless payload could never drift-compare, so it
+    // must not read as a hollow "attested" — fall through to the next
+    // attestation and ultimately to "unsupported".
+    if (
+      identity !== undefined &&
+      (identity.repositoryId !== undefined || identity.sourceRepo !== undefined)
+    ) {
       return { ...identity, predicateType, subjectDigestSha512: subjectSha512(statement) };
     }
   }
@@ -292,7 +318,7 @@ export function compareProvenance(
 }
 
 function normRepo(url: string | undefined): string | undefined {
-  return url?.trim().toLowerCase().replace(/\.git$/, "").replace(/\/+$/, "");
+  return url?.trim().toLowerCase().replace(/\/+$/, "").replace(/\.git$/, "");
 }
 
 function identityChanged(
@@ -302,7 +328,14 @@ function identityChanged(
   if (a === undefined || b === undefined) return false; // can't tell → not a drift
   // Prefer immutable numeric ids (survive repo renames / org display changes).
   if (a.repositoryId !== undefined && b.repositoryId !== undefined) {
-    return a.repositoryId !== b.repositoryId || a.repositoryOwnerId !== b.repositoryOwnerId;
+    // Compare owner ids only when BOTH are present — an asymmetrically-absent
+    // owner id (one snapshot has it, the other doesn't) is a shape difference,
+    // not an ownership change, so it must not false-positive as drift.
+    const ownerChanged =
+      a.repositoryOwnerId !== undefined &&
+      b.repositoryOwnerId !== undefined &&
+      a.repositoryOwnerId !== b.repositoryOwnerId;
+    return a.repositoryId !== b.repositoryId || ownerChanged;
   }
   // Fallback for legacy snapshots without numeric ids: normalized source repo.
   const ra = normRepo(a.sourceRepo);

@@ -147,4 +147,28 @@ describe("handleLock — provenance-identity drift (report-only)", () => {
     await handleLock({ stackFile: await writeTempStack() }, deps);
     expect(outputText(deps)).not.toContain("provenance");
   });
+
+  it("carries a known-good baseline forward through a transient fetch failure (same version)", async () => {
+    const deps = makeDeps(entry(), {
+      fetchNpmProvenance: vi.fn().mockResolvedValue(undefined), // fail-open this run
+      readExistingLock: vi.fn().mockResolvedValue(prevLockWith(attested("1"))),
+    });
+    await handleLock({ stackFile: await writeTempStack() }, deps);
+    const locked = lockedFromWrite(deps) as { provenance?: NpmProvenanceSnapshot };
+    // baseline preserved (NOT erased → the tripwire stays armed for the next run)
+    expect(locked.provenance?.status).toBe("attested");
+    expect(locked.provenance?.identity?.repositoryId).toBe("1");
+    expect(outputText(deps)).not.toContain("provenance"); // transient failure = no drift noise
+  });
+
+  it("sanitizes ANSI/OSC in a drift warning's repo label (warning can't become an injection carrier)", async () => {
+    const evil = "https://github.com/a/b\u001b]0;pwn\u0007\u001b[2K";
+    const deps = makeDeps(entry(), {
+      fetchNpmProvenance: vi.fn().mockResolvedValue(attested("2", "9", "https://github.com/x/y")),
+      readExistingLock: vi.fn().mockResolvedValue(prevLockWith(attested("1", "9", evil))),
+    });
+    await handleLock({ stackFile: await writeTempStack() }, deps);
+    expect(outputText(deps)).toContain("provenance identity changed");
+    expect(outputText(deps)).not.toContain("\u001b"); // escapes stripped
+  });
 });

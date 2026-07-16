@@ -34,6 +34,7 @@ import {
   isLockedRegistryServer,
 } from "../stack/schema.js";
 import { compareProvenance } from "../registry/npm-provenance.js";
+import { sanitizeForTerminal } from "../guard/sanitize.js";
 import { resolveVersion, resolveWithSingleVersion } from "../stack/resolve.js";
 import { valid as semverValid } from "semver";
 import { assessReleaseAge, DEFAULT_MIN_RELEASE_AGE_HOURS } from "../scanner/cooldown.js";
@@ -118,10 +119,18 @@ export async function handleLock(
   const minAgeHours =
     stackFile.policy?.minReleaseAgeHours ?? DEFAULT_MIN_RELEASE_AGE_HOURS;
 
+  // F8: read the PREVIOUS lock up front — it feeds BOTH the drift baseline and
+  // the carry-forward that keeps a known-good provenance snapshot sticky across a
+  // transient re-read failure of the same immutable coordinate.
+  const prevLock = deps.readExistingLock
+    ? await deps.readExistingLock(lockPath).catch(() => null)
+    : null;
+  const prevProvenance = buildPrevProvenanceMap(prevLock);
+
   // Resolve all servers in parallel
   const settlements = await Promise.all(
     entries.map(([name, server]) =>
-      resolveServer(name, server, scannerAvailable, minAgeHours, deps)
+      resolveServer(name, server, scannerAvailable, minAgeHours, deps, prevProvenance.get(name))
         .then((locked): LockResult => ({ name, locked }))
         .catch((err): LockError => ({
           name,
@@ -153,11 +162,6 @@ export async function handleLock(
     servers: lockedServers,
   };
 
-  // F8: read the PREVIOUS lock BEFORE overwriting it, for provenance-drift.
-  const prevLock = deps.readExistingLock
-    ? await deps.readExistingLock(lockPath).catch(() => null)
-    : null;
-
   await deps.writeLockFile(lockPath, serializeYaml(lockFile));
   deps.output(`Locked ${results.length} servers to ${lockPath}`);
 
@@ -180,8 +184,23 @@ function provenanceOf(server: LockedServer | undefined): NpmProvenanceSnapshot |
   return server && isLockedRegistryServer(server) ? server.provenance : undefined;
 }
 
+/** Human label for a provenance source — SANITIZED: the value is unverified
+ * registry / committed-lockfile free text, so strip ANSI/OSC (and bound length)
+ * before it reaches a terminal inside a security warning. */
 function repoLabel(snap: NpmProvenanceSnapshot | undefined): string {
-  return snap?.identity?.sourceRepo ?? snap?.identity?.repositoryId ?? "unknown source";
+  const raw = snap?.identity?.sourceRepo ?? snap?.identity?.repositoryId ?? "unknown source";
+  return sanitizeForTerminal(raw);
+}
+
+/** Index the previous lock's provenance snapshots by server name. */
+function buildPrevProvenanceMap(prevLock: LockFile | null): Map<string, NpmProvenanceSnapshot> {
+  const map = new Map<string, NpmProvenanceSnapshot>();
+  if (!prevLock) return map;
+  for (const [name, server] of Object.entries(prevLock.servers)) {
+    const prov = provenanceOf(server);
+    if (prov) map.set(name, prov);
+  }
+  return map;
 }
 
 /**
@@ -226,7 +245,8 @@ async function resolveServer(
   server: StackServer,
   scannerAvailable: boolean,
   minAgeHours: number,
-  deps: LockDeps
+  deps: LockDeps,
+  prevProvenance?: NpmProvenanceSnapshot
 ): Promise<LockedServer> {
   // URL-based servers: pin directly, no version resolution or trust
   if (isUrlServer(server)) {
@@ -326,6 +346,21 @@ async function resolveServer(
       pkg.identifier,
       pkg.version as string
     );
+  }
+
+  // F8: keep a known-good baseline STICKY across a transient failure or an
+  // unparseable re-read of the SAME immutable coordinate. A published version's
+  // provenance does not change, so one bad run must not erase the recorded
+  // baseline and silently disarm the drift tripwire. A DEFINITIVE change — a
+  // 404→unsigned, or a different attested identity — is NOT caught here (it is
+  // neither undefined nor unsupported), so it still overwrites and warns.
+  if (
+    isConcreteNpm &&
+    prevProvenance?.status === "attested" &&
+    prevProvenance.npmVersion === pkg?.version &&
+    (provenanceSnap === undefined || provenanceSnap.status === "unsupported")
+  ) {
+    provenanceSnap = prevProvenance;
   }
 
   return {

@@ -138,7 +138,7 @@ export type ProvenanceIdentity = z.infer<typeof ProvenanceIdentitySchema>;
  * literal reserving the shape for a future crypto slice (which alone may report
  * a "verified" mode). `identity` is present only when `status: "attested"`.
  */
-const NpmProvenanceSnapshotSchema = z.object({
+export const NpmProvenanceSnapshotSchema = z.object({
   npmVersion: z.string(),
   status: z.enum(["attested", "unsigned", "unsupported"]),
   mode: z.literal("registry-record"),

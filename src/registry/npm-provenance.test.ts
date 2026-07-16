@@ -43,6 +43,32 @@ function b64(obj: unknown): string {
   return Buffer.from(JSON.stringify(obj)).toString("base64");
 }
 
+// Build an attestations response with a synthetic SLSA v1 predicate.
+function v1Response(over: { repository?: string; repositoryId?: string; ownerId?: string; path?: string } = {}) {
+  return {
+    attestations: [
+      {
+        predicateType: "https://slsa.dev/provenance/v1",
+        bundle: {
+          dsseEnvelope: {
+            payload: b64({
+              subject: [{ digest: { sha512: "abc" } }],
+              predicate: {
+                buildDefinition: {
+                  externalParameters: { workflow: { repository: over.repository, path: over.path, ref: "refs/tags/v1" } },
+                  internalParameters: { github: { repository_id: over.repositoryId, repository_owner_id: over.ownerId } },
+                  resolvedDependencies: [{ digest: { gitCommit: "deadbeef" } }],
+                },
+                runDetails: { builder: { id: "https://github.com/actions/runner" } },
+              },
+            }),
+          },
+        },
+      },
+    ],
+  };
+}
+
 describe("fetchNpmProvenance — TRI-STATE (network blip must NOT read as a rug-pull)", () => {
   const call = (f: typeof fetch) => fetchNpmProvenance("@scope/pkg", "1.2.3", { fetchImpl: f });
 
@@ -118,6 +144,19 @@ describe("fetchNpmProvenance — parse-only identity extraction", () => {
     expect(r?.identity?.sourceRepo).toBe("https://github.com/owner/repo");
     expect(r?.identity?.repositoryId).toBeUndefined(); // v0.2 has no numeric ids
   });
+
+  it("an over-cap field → unsupported (must never write a lock its own schema rejects)", async () => {
+    const overcap = v1Response({ repository: "https://github.com/a/b", repositoryId: "1".repeat(100) }); // cap 64
+    const r = await fetchNpmProvenance("a-b", "1.0.0", { fetchImpl: fetchReturning(mockResponse({ json: overcap })) });
+    expect(r?.status).toBe("unsupported");
+    expect(r?.identity).toBeUndefined();
+  });
+
+  it("an anchorless attestation (no repo id AND no source repo) → unsupported, not a hollow attested", async () => {
+    const anchorless = v1Response({ path: ".github/workflows/x.yml" }); // no repository, no repository_id
+    const r = await fetchNpmProvenance("x", "1.0.0", { fetchImpl: fetchReturning(mockResponse({ json: anchorless })) });
+    expect(r?.status).toBe("unsupported");
+  });
 });
 
 describe("compareProvenance — drift classifier (report-only)", () => {
@@ -148,6 +187,13 @@ describe("compareProvenance — drift classifier (report-only)", () => {
   it("a stable numeric id is NOT drift even if the URL/workflow changed (repo rename)", () => {
     const renamed = snap({ identity: { repositoryId: "1", repositoryOwnerId: "9", sourceRepo: "https://github.com/a/RENAMED" } });
     expect(compareProvenance(snap(), renamed)).toBe("none");
+  });
+
+  it("an asymmetrically-absent owner id (stable repo id) is NOT drift", () => {
+    const withOwner = snap({ identity: { repositoryId: "1", repositoryOwnerId: "9" } });
+    const noOwner = snap({ identity: { repositoryId: "1" } }); // owner id absent this run
+    expect(compareProvenance(withOwner, noOwner)).toBe("none");
+    expect(compareProvenance(noOwner, withOwner)).toBe("none");
   });
 
   it("falls back to normalized source repo when numeric ids are absent (legacy)", () => {
