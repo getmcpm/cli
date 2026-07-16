@@ -76,10 +76,14 @@ function valueLooksPlaintextSecret(value: string): boolean {
   // the raw value, so a shaped credential embedded alongside a ref is still caught.
   if (/\$\{[^}]*\}/.test(v)) return false; // ${VAR} template (embedded or leading)
   if (/^\$[A-Za-z_]/.test(v)) return false; // leading $VAR reference
-  if (/^%[A-Za-z_][A-Za-z0-9_]*%$/.test(v)) return false; // %VAR% (Windows) reference
+  if (/^%[A-Za-z_][A-Za-z0-9_]*%([\\/].*)?$/.test(v)) return false; // %VAR% ref or %VAR%-rooted path
   // A URI of ANY scheme: real endpoints AND secret-manager references that are the
-  // safe state — op:// (1Password), vault:// (Vault). (Inline connection-string creds
-  // like postgres://u:p@host remain a documented deferred gap.)
+  // safe state — op:// (1Password), vault:// (Vault). ACCEPTED FALSE-NEGATIVE: a URI
+  // that itself CARRIES a credential (connection-string userinfo postgres://u:p@host,
+  // or a query-param secret like otpauth://…?secret=SEED) is excluded too. Detector 1
+  // still catches any prefix-shaped credential embedded in the value, and the bare
+  // (non-URI) secret form is still caught by detector 2. Zero-FP is the hard invariant;
+  // re-catching these would need query-param parsing that risks FPs on real endpoints.
   if (/^[a-z][a-z0-9+.-]*:\/\//i.test(v)) return false;
   // Filesystem path — POSIX (~ . /) or Windows (drive-letter, UNC).
   if (/^[~./]/.test(v) || /^[A-Za-z]:[\\/]/.test(v) || /^\\\\/.test(v)) return false;

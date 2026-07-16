@@ -79,6 +79,8 @@ describe("config-secrets · exclusions", () => {
       VAULT_TOKEN: "https://vault.example.com/v1/lease", // http(s) URL under a *_TOKEN key
       GITHUB_TOKEN: "op://Private/GitHub PAT/token", // 1Password secret-manager reference
       API_TOKEN: "%API_TOKEN%", // Windows %VAR% reference
+      GOOGLE_SA_CREDENTIALS_WIN: "%USERPROFILE%\\gcp\\sa.json", // %VAR%-rooted Windows path
+      AZURE_CREDENTIALS: "%APPDATA%/azure/creds.json", // %VAR%-rooted path, forward slash
       SIGNING_KEY_ROTATION: "120000", // plain number under a *_KEY key
     };
     expect(scanServerConfigSecrets("srv", server({ env: benign }))).toEqual([]);
