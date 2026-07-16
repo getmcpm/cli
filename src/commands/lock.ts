@@ -24,13 +24,16 @@ import type {
   LockedServer,
   TrustSnapshot,
   NpmIntegritySnapshot,
+  NpmProvenanceSnapshot,
 } from "../stack/schema.js";
 import {
   parseStackFile,
   serializeYaml,
   isRegistryServer,
   isUrlServer,
+  isLockedRegistryServer,
 } from "../stack/schema.js";
+import { compareProvenance } from "../registry/npm-provenance.js";
 import { resolveVersion, resolveWithSingleVersion } from "../stack/resolve.js";
 import { valid as semverValid } from "semver";
 import { assessReleaseAge, DEFAULT_MIN_RELEASE_AGE_HOURS } from "../scanner/cooldown.js";
@@ -64,6 +67,19 @@ export interface LockDeps {
     identifier: string,
     npmVersion: string
   ) => Promise<NpmIntegritySnapshot | undefined>;
+  /**
+   * F8 slice 1: fetch npm's parse-only provenance record for an exact npm
+   * coordinate. Optional — capture is skipped when absent. FAIL-OPEN (undefined).
+   */
+  fetchNpmProvenance?: (
+    identifier: string,
+    npmVersion: string
+  ) => Promise<NpmProvenanceSnapshot | undefined>;
+  /**
+   * F8 slice 1: read the PREVIOUS lock (before overwrite) so provenance-identity
+   * drift can be reported. Optional — drift check is skipped when absent.
+   */
+  readExistingLock?: (lockPath: string) => Promise<LockFile | null>;
 }
 
 // ---------------------------------------------------------------------------
@@ -137,8 +153,15 @@ export async function handleLock(
     servers: lockedServers,
   };
 
+  // F8: read the PREVIOUS lock BEFORE overwriting it, for provenance-drift.
+  const prevLock = deps.readExistingLock
+    ? await deps.readExistingLock(lockPath).catch(() => null)
+    : null;
+
   await deps.writeLockFile(lockPath, serializeYaml(lockFile));
   deps.output(`Locked ${results.length} servers to ${lockPath}`);
+
+  reportProvenanceDrift(prevLock, results, deps.output);
 
   if (errors.length > 0) {
     deps.output("");
@@ -146,6 +169,51 @@ export async function handleLock(
       deps.output(`  Failed: ${name} — ${error}`);
     }
     deps.output(`\n${errors.length} server(s) failed to resolve.`);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// F8 slice 1 — provenance-identity drift reporting (report-only)
+// ---------------------------------------------------------------------------
+
+function provenanceOf(server: LockedServer | undefined): NpmProvenanceSnapshot | undefined {
+  return server && isLockedRegistryServer(server) ? server.provenance : undefined;
+}
+
+function repoLabel(snap: NpmProvenanceSnapshot | undefined): string {
+  return snap?.identity?.sourceRepo ?? snap?.identity?.repositoryId ?? "unknown source";
+}
+
+/**
+ * Compare each freshly-locked server's provenance to the previous lock's and
+ * WARN on identity drift / a signed→unsigned drop. Report-only: never blocks,
+ * never re-pins (consistent with the H4/H5/H11 tripwire posture). Copy is
+ * careful — legitimate repo renames / org transfers happen, so it advises, and
+ * never claims "verified".
+ */
+function reportProvenanceDrift(
+  prevLock: LockFile | null,
+  results: LockResult[],
+  output: (text: string) => void
+): void {
+  if (!prevLock) return;
+  for (const { name, locked } of results) {
+    const prev = provenanceOf(prevLock.servers[name]);
+    const next = provenanceOf(locked);
+    switch (compareProvenance(prev, next)) {
+      case "identity-drift":
+        output(
+          `  ⚠ provenance identity changed for ${name}: ${repoLabel(prev)} → ${repoLabel(next)} — ` +
+            `expected if the project moved repos/CI; investigate if not.`
+        );
+        break;
+      case "signed-to-unsigned":
+        output(
+          `  ⚠ provenance dropped for ${name}: was attested (${repoLabel(prev)}), now unsigned — ` +
+            `a poisoned republish can look like this; verify before shipping.`
+        );
+        break;
+    }
   }
 }
 
@@ -239,9 +307,22 @@ async function resolveServer(
   // per-version endpoint uses the npm package version, not the registry's
   // MCP server version field. Fail-open: if fetchNpmIntegrity returns
   // undefined, omit the snapshot and proceed; lock never blocks on this.
+  const isConcreteNpm =
+    pkg?.registryType === "npm" && semverValid(pkg.version ?? null) !== null;
+
   let npmIntegritySnap: NpmIntegritySnapshot | undefined;
-  if (pkg?.registryType === "npm" && semverValid(pkg.version ?? null) !== null) {
+  if (isConcreteNpm) {
     npmIntegritySnap = await deps.fetchNpmIntegrity(
+      pkg.identifier,
+      pkg.version as string
+    );
+  }
+
+  // F8 slice 1: capture the parse-only provenance snapshot behind the SAME gate.
+  // Fail-open: undefined omits the block; lock never blocks on this.
+  let provenanceSnap: NpmProvenanceSnapshot | undefined;
+  if (isConcreteNpm && deps.fetchNpmProvenance) {
+    provenanceSnap = await deps.fetchNpmProvenance(
       pkg.identifier,
       pkg.version as string
     );
@@ -253,6 +334,7 @@ async function resolveServer(
     identifier: pkg?.identifier ?? name,
     trust: snapshot,
     ...(npmIntegritySnap ? { npmIntegrity: npmIntegritySnap } : {}),
+    ...(provenanceSnap ? { provenance: provenanceSnap } : {}),
   };
 }
 
@@ -270,6 +352,8 @@ import {
 } from "../scanner/tier2.js";
 import { computeTrustScore as _computeTrustScore } from "../scanner/trust-score.js";
 import { fetchNpmIntegrity as _fetchNpmIntegrity } from "../registry/npm-integrity.js";
+import { fetchNpmProvenance as _fetchNpmProvenance } from "../registry/npm-provenance.js";
+import { parseLockFile } from "../stack/schema.js";
 import { stdoutOutput } from "../utils/output.js";
 
 export function registerLockCommand(program: Command): void {
@@ -298,6 +382,8 @@ export function registerLockCommand(program: Command): void {
             writeLockFile: (path, content) =>
               writeFile(path, content, { encoding: "utf-8", mode: 0o600 }),
             fetchNpmIntegrity: _fetchNpmIntegrity,
+            fetchNpmProvenance: _fetchNpmProvenance,
+            readExistingLock: (p) => parseLockFile(p),
             output: stdoutOutput,
           }
         );

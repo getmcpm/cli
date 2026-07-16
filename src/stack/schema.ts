@@ -111,6 +111,42 @@ const NpmIntegritySnapshotSchema = z.object({
 
 export type NpmIntegritySnapshot = z.infer<typeof NpmIntegritySnapshotSchema>;
 
+/**
+ * Parsed build-identity tuple from an npm Sigstore attestation (F8 slice 1).
+ * Extracted by parsing only — NOT cryptographically verified. Every field is
+ * optional because attestation shapes vary (SLSA v1 vs v0.2) and legacy bundles
+ * lack the numeric ids. The numeric repository/owner ids are the drift anchors
+ * (immutable across repo renames).
+ */
+const ProvenanceIdentitySchema = z.object({
+  sourceRepo: z.string().max(2048).optional(),
+  repositoryId: z.string().max(64).optional(),
+  repositoryOwnerId: z.string().max(64).optional(),
+  workflowPath: z.string().max(2048).optional(),
+  workflowRef: z.string().max(2048).optional(),
+  builderId: z.string().max(2048).optional(),
+  commitSha: z.string().max(128).optional(),
+  predicateType: z.string().max(256).optional(),
+  /** subject digest — a free cross-bind to dist.integrity's tarball record. */
+  subjectDigestSha512: z.string().max(256).optional(),
+});
+
+export type ProvenanceIdentity = z.infer<typeof ProvenanceIdentitySchema>;
+
+/**
+ * npm provenance snapshot (F8 slice 1 — parse-only, WARN-only). `mode` is a
+ * literal reserving the shape for a future crypto slice (which alone may report
+ * a "verified" mode). `identity` is present only when `status: "attested"`.
+ */
+const NpmProvenanceSnapshotSchema = z.object({
+  npmVersion: z.string(),
+  status: z.enum(["attested", "unsigned", "unsupported"]),
+  mode: z.literal("registry-record"),
+  identity: ProvenanceIdentitySchema.optional(),
+});
+
+export type NpmProvenanceSnapshot = z.infer<typeof NpmProvenanceSnapshotSchema>;
+
 /** Trust snapshot as recorded at lock time. */
 const TrustSnapshotSchema = z.object({
   score: z.number(),
@@ -132,6 +168,11 @@ const LockedRegistryServerSchema = z.object({
    * schema is non-strict and this field is bare .optional().
    */
   npmIntegrity: NpmIntegritySnapshotSchema.optional(),
+  /**
+   * npm provenance snapshot (F8 slice 1). Optional/bare like npmIntegrity: absent
+   * on old lockfiles and non-npm coordinates. Parse-only, never blocks.
+   */
+  provenance: NpmProvenanceSnapshotSchema.optional(),
 });
 
 /** A locked URL server entry (no version resolution). */
