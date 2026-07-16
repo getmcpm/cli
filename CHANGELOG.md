@@ -2,6 +2,29 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.21.0] - 2026-07-16
+
+`mcpm doctor` now surfaces plaintext secrets pasted into client config (F9 · PR1).
+
+### Added
+
+- **`doctor` plaintext-secret scan** — `mcpm doctor` scans installed servers' `env`
+  and `header` values for plaintext secrets and reports them as a read-only advisory,
+  so you can move them into the encrypted store (`mcpm secrets` / `--secrets keychain`).
+  Two detectors: known-format credential shapes (AWS / GitHub — including fine-grained
+  `github_pat_` — / OpenAI / Stripe / Slack / … keys), and a secret-named-key heuristic
+  for generic passwords/tokens, gated by a benign corpus to hold the zero-false-positive
+  line. Findings report the **key name and a label only — never the value**, and values
+  already stored as `mcpm:keychain:` placeholders are skipped. The advisory flows to the
+  text output, `--json`, `--report` (a count only — no names), and the MCP `doctor` tool.
+  It is **advisory and non-gating**: it never changes `doctor`'s exit code.
+
+  Known false-positive-safe by design: templated references (`Bearer ${input:key}`,
+  `%VAR%`), secret-manager URIs (`op://`, `vault://`), and file paths (POSIX + Windows)
+  are excluded. Known deferred gaps (documented): the login-shell PATH probe and `--fix`
+  mutators (F9 PR2–PR4), inline connection-string credentials, and credential-carrying
+  URIs such as `otpauth://…?secret=`.
+
 ## [0.20.1] - 2026-07-16
 
 A patch closing the three follow-ups flagged during the v0.20.0 security review
