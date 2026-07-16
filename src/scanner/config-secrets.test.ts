@@ -72,8 +72,48 @@ describe("config-secrets · exclusions", () => {
       TOKEN: "${MY_TOKEN}", // reference
       APIKEY_FORMAT: "hex", // FORMAT qualifier
       CONTENT_TYPE: "application/json",
+      // secret-NAMED keys carrying benign values — these reach valueLooksPlaintextSecret,
+      // exercising each value-exclusion (closes the review's mutation-coverage gap):
+      GOOGLE_APPLICATION_CREDENTIALS: "C:\\Users\\me\\gcp\\sa.json", // Windows path
+      GCP_SA_CREDENTIALS: "/home/me/sa.json", // POSIX path
+      VAULT_TOKEN: "https://vault.example.com/v1/lease", // http(s) URL under a *_TOKEN key
+      GITHUB_TOKEN: "op://Private/GitHub PAT/token", // 1Password secret-manager reference
+      API_TOKEN: "%API_TOKEN%", // Windows %VAR% reference
+      SIGNING_KEY_ROTATION: "120000", // plain number under a *_KEY key
     };
     expect(scanServerConfigSecrets("srv", server({ env: benign }))).toEqual([]);
+  });
+
+  test("BENIGN — templated auth headers (Bearer ${...}) are the client-recommended safe state", () => {
+    const headers = {
+      Authorization: "Bearer ${input:api-key}", // VS Code / Cursor prompt-once idiom
+      "X-Auth-Token": "Bearer ${env:GITHUB_TOKEN}", // Claude Code embedded env reference
+    };
+    expect(scanServerConfigSecrets("srv", server({ headers }))).toEqual([]);
+  });
+});
+
+describe("config-secrets · GitHub fine-grained PAT + multi-pattern dedup", () => {
+  test("detector 1 flags a github_pat_ value (value-shape gap closed)", () => {
+    const pat = "github_pat_" + "1AbCdEfGhI".repeat(5); // github_pat_ + 50 chars
+    const f = scanServerConfigSecrets("srv", server({ env: { GITHUB_PAT: pat } }));
+    expect(f).toHaveLength(1);
+    expect(JSON.stringify(f)).not.toContain(pat); // value never surfaced
+  });
+
+  test("detector 2 flags a generic long value under a *_PAT key", () => {
+    const f = scanServerConfigSecrets("srv", server({ env: { GH_PAT: "abcdef123456ghijkl" } }));
+    expect(f).toHaveLength(1);
+    expect(f[0].label).toContain("secret-named");
+  });
+
+  test("emits exactly ONE finding when a value matches multiple patterns", () => {
+    // Digit-bearing token so BOTH the Bearer pattern (requires a digit) and the
+    // GitHub ghp_ pattern match the same value.
+    const wrapped = "Bearer " + "gh" + "p_" + "1" + "A".repeat(35);
+    const f = scanServerConfigSecrets("srv", server({ headers: { Authorization: wrapped } }));
+    expect(f).toHaveLength(1);
+    expect(f[0].label).toContain(","); // combined labels, not duplicate findings
   });
 });
 

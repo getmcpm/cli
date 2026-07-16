@@ -489,4 +489,24 @@ describe("doctorHandler — plaintext-secret scan (F9)", () => {
     await doctorHandler(deps);
     expect(cap.text()).not.toContain("Plaintext secrets");
   });
+
+  it("strips ANSI/OSC escapes from an attacker-influenced key in the advisory", async () => {
+    const cap = captureOutput();
+    const evilKey = "GITHUB_TOKEN\u001b[2K\u001b[1A"; // CSI erase-line / cursor-up
+    const deps = oneClientWith({ srv: { command: "npx", args: ["x"], env: { [evilKey]: ghToken } } });
+    deps.output = cap.fn;
+    await doctorHandler(deps);
+    expect(cap.text()).not.toContain("\u001b"); // escapes cannot spoof/erase the warning
+    expect(cap.text()).toContain("GITHUB_TOKEN"); // name still shown, minus escapes
+  });
+
+  it("gives header-specific remediation (not the env-only keychain advice) for a header finding", async () => {
+    const cap = captureOutput();
+    const bearer = "Bearer " + "a".repeat(30) + "1";
+    const deps = oneClientWith({ srv: { url: "https://x", headers: { Authorization: bearer } } });
+    deps.output = cap.fn;
+    await doctorHandler(deps);
+    expect(cap.text()).toContain("rotate the credential");
+    expect(cap.text()).not.toContain("mcpm secrets set"); // env-only advice suppressed
+  });
 });

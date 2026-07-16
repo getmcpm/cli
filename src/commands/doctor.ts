@@ -24,6 +24,7 @@ import type { getConfigPath } from "../config/paths.js";
 import { buildDriftModel, type ClientState } from "../config/drift.js";
 import { isWrapped } from "../guard/wrap.js";
 import { scanConfigSecrets, type ConfigSecretFinding } from "../scanner/config-secrets.js";
+import { sanitizeForTerminal } from "../guard/sanitize.js";
 
 // ---------------------------------------------------------------------------
 // Deps interface
@@ -312,11 +313,24 @@ export function renderDoctorText(model: DoctorModel, output: (text: string) => v
     output("");
     output("Plaintext secrets (advisory):");
     for (const s of model.secrets) {
-      output(`  ⚠ ${s.client} · ${s.server} · ${s.field} '${s.key}' — ${s.label}`);
+      // s.server / s.key are attacker-influenceable (registry env-var names, imported
+      // configs) — strip ANSI/OSC so a crafted key can't erase or spoof the advisory.
+      output(
+        `  ⚠ ${s.client} · ${sanitizeForTerminal(s.server)} · ${s.field} '${sanitizeForTerminal(s.key)}' — ${s.label}`
+      );
     }
-    output(
-      "  Move these to the encrypted store: `mcpm secrets set <server> <KEY>` or re-install with `--secrets keychain`."
-    );
+    // Remediation is field-specific: the keychain/placeholder path is env-only
+    // (guard resolves placeholders in env, not headers; HTTP servers aren't wrapped).
+    if (model.secrets.some((s) => s.field === "env")) {
+      output(
+        "  Move env secrets to the encrypted store: `mcpm secrets set <server> <KEY>` or re-install with `--secrets keychain`."
+      );
+    }
+    if (model.secrets.some((s) => s.field === "header")) {
+      output(
+        "  Header secrets have no keychain path yet — rotate the credential and keep it out of committed config."
+      );
+    }
   }
 
   if (model.issues.length > 0) {

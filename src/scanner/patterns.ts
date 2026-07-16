@@ -68,6 +68,12 @@ const SECRET_PATTERNS: ReadonlyArray<{ label: string; pattern: RegExp }> = [
     label: "GitHub token",
     pattern: /gh[pousr]_[A-Za-z0-9]{20,}/g,
   },
+  // GitHub fine-grained PATs — a distinct `github_pat_` prefix the `gh[pousr]_`
+  // form above does not cover (parity with the F10 guard signature).
+  {
+    label: "GitHub fine-grained token",
+    pattern: /github_pat_[A-Za-z0-9_]{40,}/g,
+  },
   // Slack bot/user tokens
   {
     label: "Slack token",

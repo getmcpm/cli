@@ -43,11 +43,16 @@ const GENERIC_LABEL = "secret-named key holds a plaintext value";
 // deliberately NOT a word (PUBLIC_KEY / KEY_ID / SORT_KEY are not secrets) — only
 // the listed `*_KEY` compounds count.
 const SECRET_KEY_RE =
-  /(?:^|_)(?:PASSWORD|PASSWD|PASSPHRASE|SECRET|TOKEN|APIKEY|AUTHORIZATION|CREDENTIALS?|(?:API|ACCESS|PRIVATE|SECRET|SESSION|SIGNING|ENCRYPTION)_KEY)(?:_|$)/;
+  /(?:^|_)(?:PASSWORD|PASSWD|PASSPHRASE|SECRET|TOKEN|PAT|APIKEY|AUTHORIZATION|CREDENTIALS?|(?:API|ACCESS|PRIVATE|SECRET|SESSION|SIGNING|ENCRYPTION)_KEY)(?:_|$)/;
 
 // Tokens that mean the field is a descriptor of a secret, not the secret itself
 // (an id, url, name, endpoint, …). Any one vetoes a key-name match, so
 // `TOKEN_URL` / `AWS_ACCESS_KEY_ID` / `SECRET_NAME` / `PUBLIC_KEY` do not fire.
+// KNOWN GAP (advisory tool, accepted): the veto matches a qualifier ANYWHERE in the
+// key, so `ID_TOKEN` (where `ID` is the credential TYPE, not a descriptor) is missed.
+// A suffix-anchored fix would newly false-POSITIVE on `MAPBOX_PUBLIC_TOKEN`; since a
+// false negative in an advisory scan is acceptable but a false positive is not, we
+// keep the anywhere-match.
 const NON_SECRET_QUALIFIER_RE =
   /(?:^|_)(?:URL|URI|ENDPOINT|HOST|PORT|ID|NAME|PATH|FILE|DIR|ENABLED|DISABLED|TYPE|MODE|REGION|TIMEOUT|VERSION|PUBLIC|FORMAT|HEADER|PREFIX|SUFFIX|COUNT|SIZE|TTL|EXPIRY|EXPIRES|ISSUER|AUDIENCE|ALGORITHM|ALG|SCOPE|METHOD)(?:_|$)/;
 
@@ -65,9 +70,19 @@ function valueLooksPlaintextSecret(value: string): boolean {
   const v = value.trim();
   if (v.length < 6) return false; // too short to be a credential
   if (parsePlaceholder(value) !== null) return false; // mcpm keychain placeholder
-  if (/^(https?|wss?|ftp):\/\//i.test(v)) return false; // URL / endpoint
-  if (/^\$\{?[A-Za-z_]/.test(v)) return false; // ${VAR} / $VAR env reference
-  if (/^[~./]/.test(v)) return false; // filesystem path
+  // Reference, not a literal secret. `${...}` is matched ANYWHERE (not just leading):
+  // `Bearer ${input:key}` / `Bearer ${env:VAR}` is VS Code / Cursor / Claude Code's
+  // documented header idiom — the recommended SAFE state. Detector 1 already ran on
+  // the raw value, so a shaped credential embedded alongside a ref is still caught.
+  if (/\$\{[^}]*\}/.test(v)) return false; // ${VAR} template (embedded or leading)
+  if (/^\$[A-Za-z_]/.test(v)) return false; // leading $VAR reference
+  if (/^%[A-Za-z_][A-Za-z0-9_]*%$/.test(v)) return false; // %VAR% (Windows) reference
+  // A URI of ANY scheme: real endpoints AND secret-manager references that are the
+  // safe state — op:// (1Password), vault:// (Vault). (Inline connection-string creds
+  // like postgres://u:p@host remain a documented deferred gap.)
+  if (/^[a-z][a-z0-9+.-]*:\/\//i.test(v)) return false;
+  // Filesystem path — POSIX (~ . /) or Windows (drive-letter, UNC).
+  if (/^[~./]/.test(v) || /^[A-Za-z]:[\\/]/.test(v) || /^\\\\/.test(v)) return false;
   if (/^(true|false|\d+)$/i.test(v)) return false; // boolean / plain number
   return true;
 }
@@ -84,9 +99,10 @@ function scanMap(
     if (parsePlaceholder(value) !== null) continue; // already stored safely — not a leak
     const labels = detectSecretLabels(value);
     if (labels.length > 0) {
-      // Value-shape is the more specific, higher-confidence signal — use it and
-      // skip the key heuristic for this field.
-      for (const label of labels) out.push({ server, field, key, label });
+      // Value-shape is the more specific, higher-confidence signal — ONE finding per
+      // (field, key) even when several patterns match (e.g. a Bearer-wrapped ghp_
+      // token hits both), so the --report count is not inflated. Skip the heuristic.
+      out.push({ server, field, key, label: labels.join(", ") });
       continue;
     }
     if (keyLooksSecret(key) && valueLooksPlaintextSecret(value)) {
