@@ -48,7 +48,7 @@
 >   was built from scratch (#108) and effort was **XL, not L**. Deferred: Linux bwrap, the strict tier,
 >   orig-hash Phase-2 fail-closed, and the per-server `guard confine <server>` command (achievable today
 >   via `enable --confine --server X` + `disable --server X`).
-> - **Next up:** F8/F9 (v1.0 bets) · then F10 block-tier + Detector-C (F10 Detector-A + B shipped v0.20.0).
+> - **Next up:** F8 (v1.0 bet) · F9 PR2 (login-PATH probe) · then F10 block-tier + Detector-C. (F9 PR1 doctor plaintext-secret scan shipped v0.21.0; F10 Detector-A + B shipped v0.20.0.)
 >
 > This roadmap was produced by a grounded research-and-planning pass: six parallel
 > web-research lenses (threat landscape, competitors, MCP protocol evolution, DevX,
@@ -372,7 +372,7 @@ Sequenced to keep momentum and the Dependabot surface clean (the v0.9–v0.15 se
 **Problem.** Top onboarding failures are launcher-level: `spawn npx ENOENT` because GUI-launched IDEs never inherit the login-shell PATH (nvm/Homebrew shims live in rc files), and servers that install but list zero tools when the handshake silently fails. Separately, 24,008 plaintext secrets leaked via config. mcpm has `doctor`, a JSON-RPC handshake (`scanner/health-check.ts`), a pure `detectSecrets()`, and the keychain placeholder model — but `doctor` wires none together.
 
 **🎯 Ship this slice first (critique: REVISE — split into PRs, don't change two defaults at once).** Sequence by value-density/risk:
-- **PR1 — plaintext-secret SCAN** (read-only, reuses `detectSecrets`, key-name+label only): highest-value, lowest-risk, most differentiated. **Note:** `detectSecrets` hardcodes `location:'tool description'` — add a caller-supplied location or config findings mislabel.
+- **PR1 — plaintext-secret SCAN** ✅ SHIPPED v0.21.0 (#132): read-only advisory over installed servers' env/header values, key+label never value, skips keychain placeholders, non-gating. `src/scanner/config-secrets.ts` (detector-1 value-shape via extracted `detectSecretLabels` + detector-2 benign-corpus-gated secret-named-key heuristic). Two adversarial FP-hunter review rounds hardened the zero-FP surface (embedded `${...}`/Windows-path/`%VAR%`/`op://` exclusions). Implementation chose its own structured findings so the `detectSecrets` `location` mislabel note was moot for PR1.
 - **PR2 — login-shell PATH DIAGNOSIS only**, report-only, no `--fix` (the ENOENT smoking gun = 80% of the value; the cross-platform probe + nvm/asdf/pyenv shim fallback + Windows `where`/`PATHEXT` is itself a full L).
 - **PR3 — the `--fix` mutators** (PATH rewrite + keychain migration) behind a mandatory **dry-run/diff-then-confirm**, gated on guard actually wrapping the server.
 - **PR4 — handshake preflight as opt-in `--handshake`** (never spawn third-party servers by default) + keychain-first install default.

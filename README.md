@@ -105,7 +105,7 @@ $ mcpm list
 
 ### Doctor: check your MCP setup health
 
-Find misconfigurations, missing runtimes, and broken servers.
+Find misconfigurations, missing runtimes, broken servers, and plaintext secrets pasted into client config.
 
 ```
 $ mcpm doctor
@@ -115,7 +115,11 @@ $ mcpm doctor
   [pass] npx runtime available
   [warn] Cursor config not found
   [pass] 3 servers installed, 0 with errors
+  [warn] plaintext secret (advisory): github-mcp · env 'GITHUB_TOKEN' — GitHub token
+         Move it to the encrypted store: mcpm secrets set <server> <KEY>
 ```
+
+The plaintext-secret scan reports the key name and label only — never the value — and skips values already stored as `mcpm:keychain:` placeholders. It's advisory (never fails `doctor`).
 
 ### Stack files: docker-compose for MCP
 
