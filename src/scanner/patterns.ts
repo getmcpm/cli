@@ -68,6 +68,12 @@ const SECRET_PATTERNS: ReadonlyArray<{ label: string; pattern: RegExp }> = [
     label: "GitHub token",
     pattern: /gh[pousr]_[A-Za-z0-9]{20,}/g,
   },
+  // GitHub fine-grained PATs — a distinct `github_pat_` prefix the `gh[pousr]_`
+  // form above does not cover (parity with the F10 guard signature).
+  {
+    label: "GitHub fine-grained token",
+    pattern: /github_pat_[A-Za-z0-9_]{40,}/g,
+  },
   // Slack bot/user tokens
   {
     label: "Slack token",
@@ -103,23 +109,22 @@ const SECRET_PATTERNS: ReadonlyArray<{ label: string; pattern: RegExp }> = [
  * Bare NFKC does not fold confusables, so such keys evaded the regexes. (#30)
  * Returns a new Finding[] (never mutates input).
  */
-export function detectSecrets(text: string): Finding[] {
+export function detectSecretLabels(text: string): string[] {
   if (!text) return [];
-  text = normalizeForMatch(text);
-
-  const findings: Finding[] = [];
-
+  const normalized = normalizeForMatch(text);
+  const labels: string[] = [];
   for (const { label, pattern } of SECRET_PATTERNS) {
-    // Use a new RegExp to avoid stateful lastIndex issues with /g
+    // New RegExp per test to avoid stateful lastIndex issues with /g.
     const re = new RegExp(pattern.source, pattern.flags);
-    if (re.test(text)) {
-      findings.push(
-        makeFinding("critical", "secrets", `Potential ${label} detected in text`, "tool description"),
-      );
-    }
+    if (re.test(normalized)) labels.push(label);
   }
+  return labels;
+}
 
-  return findings;
+export function detectSecrets(text: string): Finding[] {
+  return detectSecretLabels(text).map((label) =>
+    makeFinding("critical", "secrets", `Potential ${label} detected in text`, "tool description"),
+  );
 }
 
 // ---------------------------------------------------------------------------
