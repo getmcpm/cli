@@ -64,7 +64,13 @@ function makeHealthyDeps(overrides: Partial<DoctorDeps> = {}): DoctorDeps {
 // Import the handler (will fail until implementation exists)
 // ---------------------------------------------------------------------------
 
-import { doctorHandler } from "../../commands/doctor.js";
+import {
+  doctorHandler,
+  buildDoctorModel,
+  buildDoctorReport,
+  renderReportText,
+  type DoctorReportEnv,
+} from "../../commands/doctor.js";
 
 // ---------------------------------------------------------------------------
 // Tests — client detection
@@ -420,5 +426,67 @@ describe("doctorHandler — cross-client (advisory)", () => {
     });
     await doctorHandler(deps);
     expect(cap.text()).not.toContain("Cross-client");
+  });
+});
+
+describe("doctorHandler — plaintext-secret scan (F9)", () => {
+  beforeEach(() => vi.resetAllMocks());
+
+  // ghp_ token assembled at runtime (never a real-looking literal in source).
+  const ghToken = "gh" + "p_" + "A".repeat(36);
+
+  const oneClientWith = (servers: Record<string, McpServerEntry>): DoctorDeps =>
+    makeHealthyDeps({
+      checkConfigExists: vi.fn((id: ClientId) => Promise.resolve(id === "claude-desktop")),
+      getAdapter: vi.fn((id: ClientId) => makeAdapter(id, servers)),
+    });
+
+  it("surfaces a plaintext secret in the model but does NOT fail doctor (advisory)", async () => {
+    const deps = oneClientWith({ srv: { command: "npx", args: ["x"], env: { GITHUB_TOKEN: ghToken } } });
+    const model = await buildDoctorModel(deps);
+    expect(model.secrets).toHaveLength(1);
+    expect(model.secrets[0]).toMatchObject({
+      client: "claude-desktop",
+      server: "srv",
+      field: "env",
+      key: "GITHUB_TOKEN",
+    });
+    expect(model.ok).toBe(true);
+    expect(await doctorHandler(deps)).toBe(0); // exit unchanged per spec
+  });
+
+  it("prints the advisory (key + label + remediation only, never the value)", async () => {
+    const cap = captureOutput();
+    const deps = oneClientWith({ srv: { command: "npx", args: ["x"], env: { GITHUB_TOKEN: ghToken } } });
+    deps.output = cap.fn;
+    await doctorHandler(deps);
+    expect(cap.text()).toContain("Plaintext secrets (advisory):");
+    expect(cap.text()).toContain("GITHUB_TOKEN");
+    expect(cap.text()).toContain("mcpm secrets set");
+    expect(cap.text()).not.toContain(ghToken); // value never rendered
+  });
+
+  it("--report emits a COUNT only (server name, key, and value all redacted)", async () => {
+    const deps = oneClientWith({ "secret-srv": { command: "npx", args: ["x"], env: { GITHUB_TOKEN: ghToken } } });
+    const model = await buildDoctorModel(deps);
+    const env: DoctorReportEnv = {
+      mcpm: "0", node: "v0", platform: "linux", arch: "x64", osRelease: "0",
+      confineBackend: false, secretStore: "machine-key",
+    };
+    const report = renderReportText(buildDoctorReport(model, env));
+    expect(report).toContain("1 plaintext secret(s)");
+    expect(report).not.toContain("secret-srv");
+    expect(report).not.toContain("GITHUB_TOKEN");
+    expect(report).not.toContain(ghToken);
+  });
+
+  it("clean config yields no secrets and no advisory section", async () => {
+    const cap = captureOutput();
+    const deps = oneClientWith({ srv: { command: "npx", args: ["x"], env: { LOG_LEVEL: "debug" } } });
+    deps.output = cap.fn;
+    const model = await buildDoctorModel(deps);
+    expect(model.secrets).toEqual([]);
+    await doctorHandler(deps);
+    expect(cap.text()).not.toContain("Plaintext secrets");
   });
 });

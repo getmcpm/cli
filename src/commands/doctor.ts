@@ -23,6 +23,7 @@ import type { detectInstalledClients } from "../config/detector.js";
 import type { getConfigPath } from "../config/paths.js";
 import { buildDriftModel, type ClientState } from "../config/drift.js";
 import { isWrapped } from "../guard/wrap.js";
+import { scanConfigSecrets, type ConfigSecretFinding } from "../scanner/config-secrets.js";
 
 // ---------------------------------------------------------------------------
 // Deps interface
@@ -85,12 +86,23 @@ export interface DoctorIssue {
   message: string;
 }
 
+export interface DoctorSecretFinding {
+  client: ClientId;
+  server: string;
+  field: ConfigSecretFinding["field"];
+  /** The env var / header NAME — never the value (F9 redaction contract). */
+  key: string;
+  label: string;
+}
+
 export interface DoctorModel {
   schemaVersion: 1;
   clients: DoctorClientHealth[];
   runtimes: DoctorRuntimeHealth[];
   /** Advisory cross-client consistency; null when <2 clients have a readable config. */
   crossClient: DoctorCrossClient | null;
+  /** Plaintext secrets in client config — advisory (F9); does NOT affect `ok`/exit. */
+  secrets: DoctorSecretFinding[];
   /** Critical issues — these drive the exit code. */
   issues: DoctorIssue[];
   /** true iff issues is empty. */
@@ -201,7 +213,20 @@ export async function buildDoctorModel(deps: DoctorModelDeps): Promise<DoctorMod
   );
   const crossClient = driftStates.length >= 2 ? toCrossClient(driftStates) : null;
 
-  return { schemaVersion: 1, clients, runtimes, crossClient, issues, ok: issues.length === 0 };
+  // 5. Plaintext-secret scan (advisory — never an issue, never fails doctor).
+  const secrets: DoctorSecretFinding[] = reads.flatMap(({ clientId, read }) =>
+    read.servers ? scanConfigSecrets(read.servers).map((f) => ({ client: clientId, ...f })) : []
+  );
+
+  return {
+    schemaVersion: 1,
+    clients,
+    runtimes,
+    crossClient,
+    secrets,
+    issues,
+    ok: issues.length === 0,
+  };
 }
 
 function toCrossClient(states: ClientState[]): DoctorCrossClient {
@@ -283,6 +308,17 @@ export function renderDoctorText(model: DoctorModel, output: (text: string) => v
     }
   }
 
+  if (model.secrets.length > 0) {
+    output("");
+    output("Plaintext secrets (advisory):");
+    for (const s of model.secrets) {
+      output(`  ⚠ ${s.client} · ${s.server} · ${s.field} '${s.key}' — ${s.label}`);
+    }
+    output(
+      "  Move these to the encrypted store: `mcpm secrets set <server> <KEY>` or re-install with `--secrets keychain`."
+    );
+  }
+
   if (model.issues.length > 0) {
     output("");
     output("Issues:");
@@ -321,8 +357,8 @@ export interface DoctorReport {
   secretStore: "os-keychain" | "machine-key";
   clients: Array<Omit<DoctorClientHealth, "label">>;
   runtimes: DoctorRuntimeHealth[];
-  /** Counts only — issue messages embed server names, so they are NOT included. */
-  issues: { malformedConfigs: number; missingRuntime: number };
+  /** Counts only — issue messages + secret keys embed server names, so NOT included. */
+  issues: { malformedConfigs: number; missingRuntime: number; plaintextSecrets: number };
 }
 
 export function buildDoctorReport(model: DoctorModel, env: DoctorReportEnv): DoctorReport {
@@ -345,6 +381,7 @@ export function buildDoctorReport(model: DoctorModel, env: DoctorReportEnv): Doc
     issues: {
       malformedConfigs: model.issues.filter((i) => i.kind === "malformed-config").length,
       missingRuntime: model.issues.filter((i) => i.kind === "missing-runtime").length,
+      plaintextSecrets: model.secrets.length,
     },
   };
 }
@@ -374,7 +411,7 @@ export function renderReportText(r: DoctorReport): string {
     lines.push(`  ${rt.name}: ${rt.available ? "available" : "missing"}`);
   }
   lines.push(
-    `issues: ${r.issues.malformedConfigs} malformed config(s), ${r.issues.missingRuntime} missing-runtime`
+    `issues: ${r.issues.malformedConfigs} malformed config(s), ${r.issues.missingRuntime} missing-runtime, ${r.issues.plaintextSecrets} plaintext secret(s)`
   );
   return lines.join("\n");
 }
