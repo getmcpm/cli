@@ -1,4 +1,7 @@
+import os from "node:os";
+import path from "node:path";
 import { describe, expect, test } from "vitest";
+import { CLIENT_IDS, getConfigPath } from "../../../config/paths.js";
 import {
   classifyNet,
   deriveDefaultProfile,
@@ -100,4 +103,26 @@ describe("deriveDefaultProfile", () => {
   test("throws on an empty command (caller-contract guard)", () => {
     expect(() => deriveDefaultProfile(input({ command: "" }))).toThrow();
   });
+});
+
+describe("SECRET_DIR_SEGMENTS drift guard", () => {
+  // The confine read-denylist must cover every first-class client's config file
+  // (each can hold another server's plaintext env secrets). derive.ts is a pure,
+  // I/O-free function so it stays testable on ubuntu-only CI — the denylist is
+  // therefore hand-maintained. This test fails the build if a client adapter is
+  // added without denying its config path (the exact drift the 2026-07-14 review
+  // caught: .claude.json / .gemini were missing). macOS paths — confine is macOS-only.
+  const components = (p: string): string[] => p.split(/[\\/]+/).filter(Boolean);
+  const deniedSegments = SECRET_DIR_SEGMENTS.map(components);
+  const isCovered = (relComponents: string[]): boolean =>
+    deniedSegments.some((seg) => seg.every((c, i) => relComponents[i] === c));
+
+  for (const id of CLIENT_IDS) {
+    test(`client "${id}" config path is under a denied secret segment`, () => {
+      const home = os.homedir();
+      const rel = path.relative(home, getConfigPath(id, "darwin"));
+      expect(rel.startsWith("..")).toBe(false); // sanity: config lives under $HOME
+      expect(isCovered(components(rel))).toBe(true);
+    });
+  }
 });

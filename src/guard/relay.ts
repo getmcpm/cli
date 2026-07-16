@@ -418,7 +418,11 @@ function wireDirection(w: DirectionWiring): void {
         action: "block",
         findings: [],
       });
-      w.source.destroy(new Error("mcpm-guard: buffer cap exceeded — possible DoS"));
+      // No-arg destroy() — NOT destroy(new Error(...)): the source (child.stdout)
+      // has no 'error' listener, so destroy(err) re-emits as an uncaughtException
+      // and crash-loops the relay. Same fail-closed teardown as the malformed
+      // branch below; the block event above already records the DoS signal.
+      w.source.destroy();
       return;
     }
     buffer.append(chunk);
