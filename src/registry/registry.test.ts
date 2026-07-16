@@ -13,7 +13,7 @@
 import { readFileSync } from "node:fs";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { RegistryClient } from "./client.js";
-import { SearchResponseSchema } from "./schemas.js";
+import { SearchResponseSchema, ServerSchema } from "./schemas.js";
 import {
   RegistryError,
   NetworkError,
@@ -1114,5 +1114,29 @@ describe("RegistryClient — baseUrl validation (SSRF) [security #21]", () => {
 
   it("accepts the default base URL", () => {
     expect(() => new RegistryClient()).not.toThrow();
+  });
+});
+
+describe("registry schemas — free-text length caps [DoS]", () => {
+  const base = { name: "io.github.acme/server", version: "1.0.0" };
+
+  it("accepts a realistically-large description (well within the ceiling)", () => {
+    const desc = "x".repeat(64 * 1024); // MAX_TEXT — the generous ceiling
+    expect(ServerSchema.safeParse({ ...base, description: desc }).success).toBe(true);
+  });
+
+  it("rejects a description past the ceiling (bounds scanner input length)", () => {
+    const desc = "x".repeat(64 * 1024 + 1);
+    expect(ServerSchema.safeParse({ ...base, description: desc }).success).toBe(false);
+  });
+
+  it("rejects a multi-MB DoS payload in a free-text field", () => {
+    const huge = "A".repeat(5 * 1024 * 1024);
+    expect(ServerSchema.safeParse({ ...base, description: huge }).success).toBe(false);
+    expect(ServerSchema.safeParse({ ...base, name: huge }).success).toBe(false);
+  });
+
+  it("rejects an over-cap short identifier (name)", () => {
+    expect(ServerSchema.safeParse({ ...base, name: "n".repeat(1025) }).success).toBe(false);
   });
 });
