@@ -2,6 +2,36 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.20.1] - 2026-07-16
+
+A patch closing the three follow-ups flagged during the v0.20.0 security review
+(#131). No API changes.
+
+### Fixed
+
+- **guard/relay — the 64 MB buffer-cap teardown no longer crash-loops the guard.**
+  When a wrapped server exceeded the unframed-input cap, the relay called
+  `source.destroy(new Error(...))`; the source (`child.stdout`) has no `'error'`
+  listener, so that re-emitted as an uncaughtException and crash-looped the guard —
+  the same vector the v0.20.0 review fixed at the four `readMessage()` sites but left
+  on the buffer-cap branch. It is now a no-arg `destroy()`, matching the
+  malformed-frame teardown; the DoS `block` event is still emitted.
+
+### Security
+
+- **registry — free-text response fields are now length-bounded.** The v0.20.0 ReDoS
+  fix bounded per-regex cost; these Zod `.max()` ceilings (1 KB identifiers / 8 KB
+  URLs / 64 KB free text) bound the input length itself at the untrusted registry
+  boundary. Ceilings are deliberately generous — `safeParse` drops the whole page on
+  a single over-ceiling field, so they deny only multi-MB DoS payloads and never clip
+  legitimate data; `icon.src` is intentionally left uncapped (it may be a large
+  `data:` URI and is never scanned or rendered).
+- **guard/confine — a drift-guard test locks the secret-dir read-denylist to the
+  supported client set.** The denylist is hand-maintained and had silently drifted
+  behind two clients before the review caught it; a new test walks every supported
+  client's config path and fails the build if one is not covered by a denied segment,
+  so the denylist can no longer rot behind a newly-added client adapter.
+
 ## [0.20.0] - 2026-07-14
 
 Response-side credential DLP lands (**F10 Detector-A + B**) and a full adversarial
