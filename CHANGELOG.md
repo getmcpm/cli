@@ -2,6 +2,35 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.22.0] - 2026-07-18
+
+`mcpm lock` gains npm provenance-identity drift detection (F8 · slice 1).
+
+### Added
+
+- **npm provenance-identity drift tripwire** — `mcpm lock` now records each npm
+  server's published Sigstore attestation identity (source repo + the immutable
+  numeric GitHub repository/owner ids + workflow + commit) into the lockfile and
+  WARNs when it drifts across versions: a repo/owner change or a signed→unsigned
+  drop — the shape of a hijacked-publish (Postmark) attack, which schema-pinning
+  structurally cannot see.
+
+  It is **parse-only and report-only**, with **zero new dependencies**: it parses
+  npm's published attestation record (JSON + base64, no cryptographic verification)
+  over TLS from a hard-coded host — the same anchor the `dist.integrity` tripwire
+  already trusts. It **never blocks the lock** and never changes exit codes.
+
+  **Honesty boundary:** `attested` means an *unverified registry record* — build
+  **identity, not safety**. This slice never reports "verified"; cryptographic
+  Sigstore verification (which would add dependencies) is a separate, opt-in
+  follow-up. It cannot catch a same-repo CI compromise that produces a valid
+  attestation with an unchanged identity.
+
+  Drift comparison is tiered on the immutable numeric ids so a legitimate repo
+  rename (stable id, changed URL) is not a false positive, and a transient fetch
+  failure carries the last known-good baseline forward rather than silently
+  disarming the tripwire.
+
 ## [0.21.0] - 2026-07-16
 
 `mcpm doctor` now surfaces plaintext secrets pasted into client config (F9 · PR1).
