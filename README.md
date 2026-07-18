@@ -206,7 +206,7 @@ Without an external scanner installed, the maximum possible score is 80/100. The
 | `mcpm import` | Import existing MCP servers from client config files |
 | `mcpm alias` | Create short aliases for long MCP server names |
 | `mcpm export` | Export installed servers as an mcpm.yaml stack file |
-| `mcpm lock` | Resolve versions and create mcpm-lock.yaml with trust snapshots |
+| `mcpm lock` | Resolve versions and create mcpm-lock.yaml with trust snapshots (+ npm provenance identity, WARNs on drift) |
 | `mcpm up` | Install all servers from mcpm.yaml with trust verification |
 | `mcpm verify` | Repo-only CI gate: verify lockfile integrity vs npm's published record (`--json`) |
 | `mcpm diff` | Compare installed servers against mcpm.yaml and lock file |
@@ -235,6 +235,14 @@ Run `mcpm <command> --help` for options and flags.
 non-zero on integrity drift, an unverifiable record, a format mismatch, or a
 suspicious missing baseline. Because it needs no AI clients installed, it runs on a
 hosted CI runner (where `mcpm up` cannot).
+
+`mcpm lock` also records each npm server's **published provenance identity** (the
+source repo + immutable GitHub repo/owner ids behind the build) and WARNs when it
+drifts across versions — a repo/owner change or a signed→unsigned drop, the shape
+of a hijacked-publish (Postmark) attack. This is a **parse-only, report-only**
+advisory over npm's published attestation record: `attested` means an *unverified*
+registry record — build **identity, not safety** — and it never says "verified"
+(cryptographic Sigstore verification is a separate, opt-in follow-up).
 
 ```yaml
 # .github/workflows/mcpm.yml

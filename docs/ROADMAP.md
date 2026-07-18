@@ -48,7 +48,7 @@
 >   was built from scratch (#108) and effort was **XL, not L**. Deferred: Linux bwrap, the strict tier,
 >   orig-hash Phase-2 fail-closed, and the per-server `guard confine <server>` command (achievable today
 >   via `enable --confine --server X` + `disable --server X`).
-> - **Next up:** F8 (v1.0 bet) · F9 PR2 (login-PATH probe) · then F10 block-tier + Detector-C. (F9 PR1 doctor plaintext-secret scan shipped v0.21.0; F10 Detector-A + B shipped v0.20.0.)
+> - **Next up:** the F8 crypto slice (@sigstore offline verify — its own dep sign-off gate) · F9 PR2 (login-PATH probe) · then F10 block-tier + Detector-C. (F8 slice 1 npm provenance-identity drift [parse-only] shipped v0.22.0; F9 PR1 doctor plaintext-secret scan shipped v0.21.0; F10 Detector-A + B shipped v0.20.0.)
 >
 > This roadmap was produced by a grounded research-and-planning pass: six parallel
 > web-research lenses (threat landscape, competitors, MCP protocol evolution, DevX,
@@ -352,6 +352,8 @@ Sequenced to keep momentum and the Dependabot surface clean (the v0.9–v0.15 se
 
 ## F8 · `mcpm verify` — npm Sigstore provenance + identity-drift detection
 **Category:** security · **Effort:** L · **Score 14.0** · (Phase 2 of the lockfile work, F3)
+
+> **✅ SLICE 1 SHIPPED v0.22.0 (#133) — PARSE-ONLY, zero-dep.** A feasibility pass (run live against @getmcpm/cli's own attestation) overrode the "v1 = @sigstore/verify" mechanism below: the provenance-identity DRIFT headline is fully detectable by PARSING the attestation (JSON + base64, no crypto/deps), trusting the same anchor H11 dist.integrity trusts. `mcpm lock` captures npm's attestation identity (source repo + immutable numeric repo/owner ids + workflow + commit) into the lock and WARNs on drift / signed→unsigned (report-only, never "verified"). **The crypto slice below (@sigstore offline verify — the only slice allowed to say "verified" + feed the trust score) is the deferred fast-follow, gated on an explicit dependency sign-off.** Also deferred: verify-time re-check, `mcpm why` section, PyPI, `--strict`, Fulcio-cert OIDC issuer/SAN extraction.
 
 **Problem.** mcpm's trust score answers "does this look safe?" but never "are these provably the publisher's bytes, built from the source repo they claim?" No cryptographic attestation verification — the sharpest gap vs Docker/ToolHive and the registry itself (an "unverified pointer"). It can't make "unsigned" a penalty or "provenance drift" a signal.
 
