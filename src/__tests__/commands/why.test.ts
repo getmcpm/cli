@@ -11,6 +11,7 @@ import type { Finding } from "../../scanner/tier1.js";
 import { computeTrustScore } from "../../scanner/trust-score.js";
 import type { TrustScore } from "../../scanner/trust-score.js";
 import { NotFoundError } from "../../registry/errors.js";
+import type { NpmProvenanceSnapshot } from "../../registry/npm-provenance.js";
 
 function makeServerEntry(over: Partial<ServerEntry["server"]> = {}): ServerEntry {
   return {
@@ -227,5 +228,82 @@ describe("mcpm why — release-age cooldown (F4)", () => {
     });
     await handleWhy("x", {}, deps);
     expect(out(deps)).toMatch(/35\/40/);
+  });
+});
+
+describe("mcpm why — F8 Provenance section", () => {
+  const npmEntry = () =>
+    makeServerEntry({
+      packages: [{ registryType: "npm", identifier: "@test/srv", version: "1.0.0", environmentVariables: [], runtimeArguments: [] }],
+    });
+  const attestedSnap = (idOver: Partial<NpmProvenanceSnapshot["identity"]> = {}): NpmProvenanceSnapshot => ({
+    npmVersion: "1.0.0", status: "attested", mode: "registry-record",
+    identity: { sourceRepo: "https://github.com/a/b", repositoryId: "1", workflowPath: ".github/workflows/x.yml", commitSha: "abc123", ...idOver },
+  });
+
+  it("renders an attested Provenance section and NEVER says 'verified'", async () => {
+    const deps = makeDeps({
+      registryClient: { getServer: vi.fn().mockResolvedValue(npmEntry()) },
+      fetchNpmProvenance: vi.fn().mockResolvedValue(attestedSnap()),
+    });
+    await handleWhy("x", {}, deps);
+    const o = out(deps);
+    expect(deps.fetchNpmProvenance).toHaveBeenCalledWith("@test/srv", "1.0.0");
+    expect(o).toContain("Provenance:");
+    expect(o).toContain("attested");
+    expect(o).toContain("github.com/a/b");
+    // honesty boundary: never the standalone claim "verified" (the honest copy
+    // says "unverified", which must NOT trip this).
+    expect(o.toLowerCase()).not.toMatch(/\bverified\b/);
+  });
+
+  it("sanitizes ANSI/OSC in the (unverified) identity strings", async () => {
+    const deps = makeDeps({
+      registryClient: { getServer: vi.fn().mockResolvedValue(npmEntry()) },
+      fetchNpmProvenance: vi.fn().mockResolvedValue(attestedSnap({ sourceRepo: "https://github.com/a/b\u001b]0;pwn\u0007" })),
+    });
+    await handleWhy("x", {}, deps);
+    // The attacker's OSC introducer (ESC + "]") must be gone; chalk's own
+    // color codes use ESC + "[" (CSI), so assert specifically the OSC form.
+    expect(out(deps)).not.toContain("\u001b]");
+  });
+
+  it("shows unsigned as explicitly neutral", async () => {
+    const deps = makeDeps({
+      registryClient: { getServer: vi.fn().mockResolvedValue(npmEntry()) },
+      fetchNpmProvenance: vi.fn().mockResolvedValue({ npmVersion: "1.0.0", status: "unsigned", mode: "registry-record" } as NpmProvenanceSnapshot),
+    });
+    await handleWhy("x", {}, deps);
+    expect(out(deps)).toMatch(/unsigned.*neutral/i);
+  });
+
+  it("omits the section for a non-concrete version (fetch not called)", async () => {
+    const deps = makeDeps({
+      registryClient: { getServer: vi.fn().mockResolvedValue(makeServerEntry()) }, // package has no version
+      fetchNpmProvenance: vi.fn().mockResolvedValue(attestedSnap()),
+    });
+    await handleWhy("x", {}, deps);
+    expect(deps.fetchNpmProvenance).not.toHaveBeenCalled();
+    expect(out(deps)).not.toContain("Provenance:");
+  });
+
+  it("renders the workflow ref for a legacy v0.2 attestation (ref present, no path)", async () => {
+    const deps = makeDeps({
+      registryClient: { getServer: vi.fn().mockResolvedValue(npmEntry()) },
+      fetchNpmProvenance: vi.fn().mockResolvedValue(
+        attestedSnap({ workflowPath: undefined, workflowRef: "refs/tags/v1.2.3" })
+      ),
+    });
+    await handleWhy("x", {}, deps);
+    expect(out(deps)).toContain("refs/tags/v1.2.3");
+  });
+
+  it("--json includes the provenance snapshot", async () => {
+    const deps = makeDeps({
+      registryClient: { getServer: vi.fn().mockResolvedValue(npmEntry()) },
+      fetchNpmProvenance: vi.fn().mockResolvedValue(attestedSnap()),
+    });
+    await handleWhy("x", { json: true }, deps);
+    expect(JSON.parse(out(deps)).provenance.status).toBe("attested");
   });
 });

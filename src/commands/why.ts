@@ -22,6 +22,9 @@ import { NotFoundError } from "../registry/errors.js";
 import { assessReleaseAge } from "../scanner/cooldown.js";
 import { scoreBar, levelColor, extractRegistryMeta } from "../utils/format-trust.js";
 import { stdoutOutput } from "../utils/output.js";
+import { valid as semverValid } from "semver";
+import { sanitizeForTerminal } from "../guard/sanitize.js";
+import type { NpmProvenanceSnapshot } from "../registry/npm-provenance.js";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -40,6 +43,14 @@ export interface WhyDeps {
   output: (text: string) => void;
   /** Epoch-ms clock for release-age assessment; defaults to Date.now at the CLI boundary. */
   now?: () => number;
+  /**
+   * F8: fetch npm's parse-only provenance record for the npm coordinate.
+   * Optional — the Provenance section is skipped when absent. FAIL-OPEN.
+   */
+  fetchNpmProvenance?: (
+    identifier: string,
+    npmVersion: string
+  ) => Promise<NpmProvenanceSnapshot | undefined>;
 }
 
 // ---------------------------------------------------------------------------
@@ -74,6 +85,36 @@ function componentLine(label: string, earned: number, max: number, note?: string
   const score = color(`${earned}/${max}`.padStart(6));
   const suffix = note ? chalk.dim(`  ${note}`) : "";
   return `  ${label.padEnd(16)}${score}${suffix}`;
+}
+
+/**
+ * Render the F8 Provenance section. HONESTY: "attested" is an UNVERIFIED registry
+ * record (build identity, NOT safety) — never "verified". Identity strings are
+ * unverified registry free text, so sanitizeForTerminal them before display. An
+ * undefined snapshot (non-npm, non-concrete version, or fetch fail-open) yields
+ * no section.
+ */
+function provenanceLines(snap: NpmProvenanceSnapshot | undefined): string[] {
+  if (snap === undefined) return [];
+  const lines = ["", chalk.cyan("Provenance:")];
+  if (snap.status === "attested") {
+    const id = snap.identity;
+    lines.push(`  ${chalk.green("attested")} ${chalk.dim("(unverified registry record — build identity, not safety)")}`);
+    if (id?.sourceRepo) lines.push(`  ${"source".padEnd(10)}${sanitizeForTerminal(id.sourceRepo)}`);
+    if (id?.workflowPath || id?.workflowRef) {
+      // Legacy SLSA v0.2 attestations carry a ref but no workflow path — render
+      // the ref regardless so it is not silently dropped (it is in --json anyway).
+      const path = id.workflowPath ? sanitizeForTerminal(id.workflowPath) : "";
+      const ref = id.workflowRef ? `${path ? " @ " : ""}${sanitizeForTerminal(id.workflowRef)}` : "";
+      lines.push(`  ${"workflow".padEnd(10)}${path}${ref}`);
+    }
+    if (id?.commitSha) lines.push(`  ${"commit".padEnd(10)}${sanitizeForTerminal(id.commitSha)}`);
+  } else if (snap.status === "unsigned") {
+    lines.push(`  ${chalk.dim("unsigned")} ${chalk.dim("(no published attestation — neutral, no penalty)")}`);
+  } else {
+    lines.push(`  ${chalk.dim("unsupported")} ${chalk.dim("(attestation present but not a recognized shape)")}`);
+  }
+  return lines;
 }
 
 // ---------------------------------------------------------------------------
@@ -116,6 +157,15 @@ export async function handleWhy(
     ...(releaseAge.finding ? [releaseAge.finding] : []),
   ];
 
+  // F8: parse-only provenance for a concrete npm coordinate (fail-open; no
+  // section for non-npm, non-concrete versions, or a failed fetch). Fetched
+  // while the spinner is still up.
+  const pkg = bestPackage(entry);
+  let provenance: NpmProvenanceSnapshot | undefined;
+  if (deps.fetchNpmProvenance && pkg?.registryType === "npm" && semverValid(pkg.version ?? null) !== null) {
+    provenance = await deps.fetchNpmProvenance(pkg.identifier, pkg.version as string);
+  }
+
   spinner.stop();
 
   const trust = computeTrustScore({
@@ -126,7 +176,7 @@ export async function handleWhy(
   });
 
   const metaCapped = hasCriticalOrHigh(findings);
-  const envVars: EnvVar[] = bestPackage(entry)?.environmentVariables ?? [];
+  const envVars: EnvVar[] = pkg?.environmentVariables ?? [];
 
   if (options.json === true) {
     output(
@@ -140,6 +190,7 @@ export async function handleWhy(
           breakdown: trust.breakdown,
           externalScannerAvailable: scannerAvailable,
           registryMetaCapped: metaCapped,
+          provenance: provenance ?? null,
           findings,
           environmentVariables: envVars.map((ev) => ({
             name: ev.name,
@@ -186,6 +237,8 @@ export async function handleWhy(
     }
   }
 
+  lines.push(...provenanceLines(provenance));
+
   if (envVars.length > 0) {
     lines.push("");
     lines.push(chalk.cyan("Environment variables:"));
@@ -215,6 +268,7 @@ export function registerWhyCommand(program: Command): void {
       const { scanTier1 } = await import("../scanner/tier1.js");
       const { checkScannerAvailable, scanTier2 } = await import("../scanner/tier2.js");
       const { computeTrustScore } = await import("../scanner/trust-score.js");
+      const { fetchNpmProvenance } = await import("../registry/npm-provenance.js");
 
       try {
         await handleWhy(
@@ -228,6 +282,7 @@ export function registerWhyCommand(program: Command): void {
             computeTrustScore,
             output: stdoutOutput,
             now: () => Date.now(),
+            fetchNpmProvenance,
           }
         );
       } catch (err) {
