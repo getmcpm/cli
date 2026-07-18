@@ -287,6 +287,17 @@ describe("mcpm why — F8 Provenance section", () => {
     expect(out(deps)).not.toContain("Provenance:");
   });
 
+  it("renders the workflow ref for a legacy v0.2 attestation (ref present, no path)", async () => {
+    const deps = makeDeps({
+      registryClient: { getServer: vi.fn().mockResolvedValue(npmEntry()) },
+      fetchNpmProvenance: vi.fn().mockResolvedValue(
+        attestedSnap({ workflowPath: undefined, workflowRef: "refs/tags/v1.2.3" })
+      ),
+    });
+    await handleWhy("x", {}, deps);
+    expect(out(deps)).toContain("refs/tags/v1.2.3");
+  });
+
   it("--json includes the provenance snapshot", async () => {
     const deps = makeDeps({
       registryClient: { getServer: vi.fn().mockResolvedValue(npmEntry()) },

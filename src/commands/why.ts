@@ -101,9 +101,12 @@ function provenanceLines(snap: NpmProvenanceSnapshot | undefined): string[] {
     const id = snap.identity;
     lines.push(`  ${chalk.green("attested")} ${chalk.dim("(unverified registry record — build identity, not safety)")}`);
     if (id?.sourceRepo) lines.push(`  ${"source".padEnd(10)}${sanitizeForTerminal(id.sourceRepo)}`);
-    if (id?.workflowPath) {
-      const ref = id.workflowRef ? ` @ ${sanitizeForTerminal(id.workflowRef)}` : "";
-      lines.push(`  ${"workflow".padEnd(10)}${sanitizeForTerminal(id.workflowPath)}${ref}`);
+    if (id?.workflowPath || id?.workflowRef) {
+      // Legacy SLSA v0.2 attestations carry a ref but no workflow path — render
+      // the ref regardless so it is not silently dropped (it is in --json anyway).
+      const path = id.workflowPath ? sanitizeForTerminal(id.workflowPath) : "";
+      const ref = id.workflowRef ? `${path ? " @ " : ""}${sanitizeForTerminal(id.workflowRef)}` : "";
+      lines.push(`  ${"workflow".padEnd(10)}${path}${ref}`);
     }
     if (id?.commitSha) lines.push(`  ${"commit".padEnd(10)}${sanitizeForTerminal(id.commitSha)}`);
   } else if (snap.status === "unsigned") {
