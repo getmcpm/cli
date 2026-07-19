@@ -212,11 +212,15 @@ describe("fetchNpmProvenance — crypto verification wiring (F8 crypto slice)", 
   const realSri = "sha512-" + Buffer.from(subjectHex, "hex").toString("base64");
   const serveReal = fetchReturning(mockResponse({ json: REAL }));
 
-  it("attaches a VERIFIED verdict when integritySri subject-binds the attestation", async () => {
+  it("attaches a VERIFIED verdict and swaps to the UNFORGEABLE SAN identity", async () => {
     const r = await fetchNpmProvenance("@getmcpm/cli", "0.21.0", { fetchImpl: serveReal, integritySri: realSri });
     expect(r?.status).toBe("attested"); // status never changes — additive
     expect(r?.verification?.outcome).toBe("verified");
     expect(r?.verification?.signerIssuer).toBe("https://token.actions.githubusercontent.com");
+    // On verify, identity is derived from the cert SAN (unforgeable), NOT the
+    // parse-only payload — so the forgeable numeric repository_id is dropped.
+    expect(r?.identity?.sourceRepo).toBe("https://github.com/getmcpm/cli");
+    expect(r?.identity?.repositoryId).toBeUndefined();
   });
 
   it("a wrong SRI records could-not-verify but KEEPS the attested snapshot (no erase)", async () => {

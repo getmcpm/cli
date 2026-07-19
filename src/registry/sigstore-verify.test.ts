@@ -11,56 +11,49 @@ const V1 = fixture.attestations.find(
   (a: { predicateType: string }) => a.predicateType === "https://slsa.dev/provenance/v1"
 );
 
-// Derive the REAL subject sha512 (hex) + the matching dist.integrity SRI from the
-// fixture — the subject-binding oracle.
+// Derive the REAL dist.integrity SRI from the fixture's verified subject digest.
 const payload = JSON.parse(Buffer.from(V1.bundle.dsseEnvelope.payload, "base64").toString("utf8"));
 const subjectHex: string = payload.subject[0].digest.sha512;
 const realSri = "sha512-" + Buffer.from(subjectHex, "hex").toString("base64");
-const identity = { subjectDigestSha512: subjectHex } as Parameters<typeof cryptoVerifySlsaBundle>[1]["identity"];
 
 const flipB64 = (b64: string, from: string, to: string): string =>
   Buffer.from(Buffer.from(b64, "base64").toString("utf8").replace(from, to)).toString("base64");
 
 describe("cryptoVerifySlsaBundle — offline crypto verification", () => {
-  it("VERIFIES the real bundle against the vendored trusted root, binds the subject digest", () => {
-    const r = cryptoVerifySlsaBundle(V1.bundle, { identity, integritySri: realSri });
-    expect(r.outcome).toBe("verified");
-    expect(r.signerIssuer).toBe("https://token.actions.githubusercontent.com");
-    expect(r.signerSan).toContain("github.com/getmcpm/cli");
+  it("VERIFIES the real bundle offline; subject bound from the VERIFIED payload, identity from the SAN", () => {
+    const r = cryptoVerifySlsaBundle(V1.bundle, { integritySri: realSri });
+    expect(r.verification.outcome).toBe("verified");
+    expect(r.verification.signerIssuer).toBe("https://token.actions.githubusercontent.com");
+    expect(r.verification.signerSan).toContain("github.com/getmcpm/cli");
+    // The trusted identity comes from the UNFORGEABLE cert SAN, NOT the payload.
+    expect(r.verifiedIdentity?.sourceRepo).toBe("https://github.com/getmcpm/cli");
+    expect(r.verifiedIdentity?.workflowPath).toBe(".github/workflows/publish.yml");
   });
 
-  it("REFUSES (subject-digest-mismatch) when the SRI does not match the attested subject", () => {
+  it("REFUSES (subject-digest-mismatch) when the target SRI ≠ the VERIFIED payload's subject", () => {
     const wrongSri = "sha512-" + Buffer.from("0".repeat(128), "hex").toString("base64");
-    const r = cryptoVerifySlsaBundle(V1.bundle, { identity, integritySri: wrongSri });
-    expect(r.outcome).toBe("could-not-verify");
-    expect(r.reason).toBe("subject-digest-mismatch");
-  });
-
-  it("REFUSES when there is no subject digest to bind", () => {
-    const r = cryptoVerifySlsaBundle(V1.bundle, { identity: {}, integritySri: realSri });
-    expect(r.outcome).toBe("could-not-verify");
-    expect(r.reason).toBe("subject-digest-mismatch");
+    const r = cryptoVerifySlsaBundle(V1.bundle, { integritySri: wrongSri });
+    expect(r.verification.outcome).toBe("could-not-verify");
+    expect(r.verification.reason).toBe("subject-digest-mismatch");
+    expect(r.verifiedIdentity).toBeUndefined();
   });
 
   it("REFUSES a tampered DSSE payload (tlog body hash mismatch), never throws", () => {
     const bad = structuredClone(V1.bundle);
     bad.dsseEnvelope.payload = flipB64(bad.dsseEnvelope.payload, "getmcpm", "evilpkg");
-    const r = cryptoVerifySlsaBundle(bad, { identity, integritySri: realSri });
-    expect(r.outcome).toBe("could-not-verify");
+    expect(cryptoVerifySlsaBundle(bad, { integritySri: realSri }).verification.outcome).toBe("could-not-verify");
   });
 
   it("REFUSES a tampered signature, never throws", () => {
     const bad = structuredClone(V1.bundle);
     const sig: string = bad.dsseEnvelope.signatures[0].sig;
-    // Flip the last base64 char to a different valid one.
     bad.dsseEnvelope.signatures[0].sig = sig.slice(0, -2) + (sig.slice(-2, -1) === "A" ? "B" : "A") + "=";
-    const r = cryptoVerifySlsaBundle(bad, { identity, integritySri: realSri });
-    expect(r.outcome).toBe("could-not-verify");
+    expect(cryptoVerifySlsaBundle(bad, { integritySri: realSri }).verification.outcome).toBe("could-not-verify");
   });
 
   it("REFUSES a malformed bundle (bundleFromJSON throws), never throws", () => {
-    expect(cryptoVerifySlsaBundle({}, { identity, integritySri: realSri }).outcome).toBe("could-not-verify");
-    expect(cryptoVerifySlsaBundle(null, { identity, integritySri: realSri }).outcome).toBe("could-not-verify");
+    expect(cryptoVerifySlsaBundle({}, { integritySri: realSri }).verification.outcome).toBe("could-not-verify");
+    expect(cryptoVerifySlsaBundle(null, { integritySri: realSri }).verification.outcome).toBe("could-not-verify");
   });
 });
 

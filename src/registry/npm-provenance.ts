@@ -119,15 +119,20 @@ export async function fetchNpmProvenance(
     // stays dependency-free). A crypto-side failure only DROPS the verification
     // block — it must never erase the parse-only "attested" snapshot.
     let verification: NpmProvenanceVerification | undefined;
+    let effectiveIdentity: ProvenanceIdentity = identity; // parse-only unless crypto verifies
     if (opts?.integritySri !== undefined && identity.predicateType === SLSA_V1) {
       const bundle = findSlsaV1Bundle(raw);
       if (bundle !== undefined) {
         try {
           const { cryptoVerifySlsaBundle } = await import("./sigstore-verify.js");
-          verification = cryptoVerifySlsaBundle(bundle, {
-            identity,
-            integritySri: opts.integritySri,
-          });
+          const result = cryptoVerifySlsaBundle(bundle, { integritySri: opts.integritySri });
+          verification = result.verification;
+          // On a VERIFIED verdict the trusted identity is the unforgeable SAN —
+          // replace the parse-only (forgeable) payload tuple so drift + display
+          // reflect the cryptographically-attested signer, not a self-claim.
+          if (verification.outcome === "verified" && result.verifiedIdentity !== undefined) {
+            effectiveIdentity = { ...result.verifiedIdentity, predicateType: SLSA_V1 };
+          }
         } catch {
           verification = undefined; // crypto module unavailable → leave parse-only intact
         }
@@ -143,7 +148,7 @@ export async function fetchNpmProvenance(
       npmVersion,
       status: "attested",
       mode: "registry-record",
-      identity,
+      identity: effectiveIdentity,
       ...(verification !== undefined ? { verification } : {}),
     };
     const parsed = NpmProvenanceSnapshotSchema.safeParse(snap);

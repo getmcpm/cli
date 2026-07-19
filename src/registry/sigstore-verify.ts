@@ -50,12 +50,16 @@ function getVerifier(): Verifier {
   return _verifier;
 }
 
+// Fields are RECORDED not gated, so cap at source — an over-cap value must never
+// fail the snapshot schema and degrade the whole attested record to "unsupported".
+const cap = (s: string | undefined, n = 2048): string | undefined => s?.slice(0, n);
+
 function couldNotVerify(reason: string, san?: string, issuer?: string): NpmProvenanceVerification {
   return {
     outcome: "could-not-verify",
     reason,
-    ...(san !== undefined ? { signerSan: san } : {}),
-    ...(issuer !== undefined ? { signerIssuer: issuer } : {}),
+    ...(san !== undefined ? { signerSan: cap(san) } : {}),
+    ...(issuer !== undefined ? { signerIssuer: cap(issuer) } : {}),
   };
 }
 
@@ -71,16 +75,65 @@ function subjectBindsToIntegrity(hexSha512: string | undefined, sri: string): bo
 }
 
 /**
+ * Read the subject sha512 (hex) from the CRYPTO-VERIFIED bundle's OWN DSSE payload.
+ * `rawBundle.dsseEnvelope.payload` is the exact base64 that `bundleFromJSON` decoded
+ * and `verify()` authenticated — so AFTER verify passes, this is verified data. The
+ * subject must be derived from here, never from a value parsed out of a possibly
+ * DIFFERENT attestation, or the crypto signature is decoupled from the tarball bind.
+ */
+function verifiedSubjectHex(rawBundle: unknown): string | undefined {
+  const b64 = (rawBundle as { dsseEnvelope?: { payload?: unknown } })?.dsseEnvelope?.payload;
+  if (typeof b64 !== "string") return undefined;
+  try {
+    const stmt = JSON.parse(Buffer.from(b64, "base64").toString("utf-8")) as {
+      subject?: Array<{ digest?: { sha512?: unknown } }>;
+    };
+    if (!Array.isArray(stmt.subject)) return undefined;
+    for (const s of stmt.subject) {
+      if (typeof s?.digest?.sha512 === "string") return s.digest.sha512;
+    }
+  } catch {
+    return undefined;
+  }
+  return undefined;
+}
+
+/**
+ * Derive the UNFORGEABLE build identity from the Fulcio cert SAN. The DSSE
+ * payload's self-claimed repo / repository_id are attacker-forgeable — an
+ * attacker signs an arbitrary statement (claiming any repo) with their OWN valid
+ * GitHub-Actions OIDC cert. Only the cert SAN is bound to the real OIDC identity,
+ * so a "verified" verdict's identity MUST come from here, not the payload.
+ * SAN form: https://github.com/OWNER/REPO/.github/workflows/FILE@REF
+ */
+function parseSanIdentity(san: string | undefined): ProvenanceIdentity | undefined {
+  if (san === undefined) return undefined;
+  const m = /^(https:\/\/github\.com\/[^/]+\/[^/]+)\/(.+?)@([^@]+)$/.exec(san);
+  if (m === null) return { sourceRepo: cap(san) }; // non-standard SAN — record verbatim (capped)
+  return { sourceRepo: cap(m[1]), workflowPath: cap(m[2]), workflowRef: cap(m[3]) };
+}
+
+export interface CryptoResult {
+  verification: NpmProvenanceVerification;
+  /**
+   * Present ONLY on "verified": the unforgeable SAN-derived identity. The caller
+   * uses this as the snapshot identity so drift + display reflect the
+   * cryptographically-attested signer — the parse-only payload tuple is a
+   * self-claim and must not ride under a "verified" badge.
+   */
+  verifiedIdentity?: ProvenanceIdentity;
+}
+
+/**
  * Verify an npm SLSA provenance bundle offline. Returns a verdict; NEVER throws.
  *
  * @param rawBundle  the matched attestation's `bundle` object (SLSA v1)
- * @param ctx.identity      the parsed identity (subjectDigestSha512 is the bind oracle)
  * @param ctx.integritySri  the package's dist.integrity SRI (H11 anchor)
  */
 export function cryptoVerifySlsaBundle(
   rawBundle: unknown,
-  ctx: { identity: ProvenanceIdentity; integritySri: string }
-): NpmProvenanceVerification {
+  ctx: { integritySri: string }
+): CryptoResult {
   try {
     const bundle = bundleFromJSON(rawBundle); // throws ValidationError on a bad shape
     // NO policy argument — the policy param is verified as an UNANCHORED regex
@@ -89,15 +142,21 @@ export function cryptoVerifySlsaBundle(
     const san = signer.identity?.subjectAlternativeName;
     const issuer = signer.identity?.extensions?.issuer;
 
-    if (issuer !== GITHUB_OIDC_ISSUER) return couldNotVerify("issuer-not-github-actions", san, issuer);
-    // Bind the crypto-verified payload to THIS package's published tarball.
-    if (!subjectBindsToIntegrity(ctx.identity.subjectDigestSha512, ctx.integritySri)) {
-      return couldNotVerify("subject-digest-mismatch", san, issuer);
+    if (issuer !== GITHUB_OIDC_ISSUER) {
+      return { verification: couldNotVerify("issuer-not-github-actions", san, issuer) };
+    }
+    // Bind THIS package's tarball to the subject inside the CRYPTO-VERIFIED payload
+    // — never a caller-supplied digest from a possibly-different attestation.
+    if (!subjectBindsToIntegrity(verifiedSubjectHex(rawBundle), ctx.integritySri)) {
+      return { verification: couldNotVerify("subject-digest-mismatch", san, issuer) };
     }
     return {
-      outcome: "verified",
-      ...(san !== undefined ? { signerSan: san } : {}),
-      ...(issuer !== undefined ? { signerIssuer: issuer } : {}),
+      verification: {
+        outcome: "verified",
+        ...(san !== undefined ? { signerSan: cap(san) } : {}),
+        ...(issuer !== undefined ? { signerIssuer: cap(issuer) } : {}),
+      },
+      verifiedIdentity: parseSanIdentity(san),
     };
   } catch (e) {
     // ANY failure → could-not-verify (fail-CLOSED). Record the error code for `why`.
@@ -105,6 +164,6 @@ export function cryptoVerifySlsaBundle(
       (e as { code?: unknown })?.code ??
       (e as Error)?.constructor?.name ??
       "verify-error";
-    return { outcome: "could-not-verify", reason: String(code).slice(0, 300) };
+    return { verification: { outcome: "could-not-verify", reason: String(code).slice(0, 300) } };
   }
 }
