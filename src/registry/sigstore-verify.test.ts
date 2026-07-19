@@ -38,6 +38,15 @@ describe("cryptoVerifySlsaBundle — offline crypto verification", () => {
     expect(r.verifiedIdentity).toBeUndefined();
   });
 
+  it("REFUSES a multi-token SRI unless EVERY sha512 entry is the attested digest (ssri any-match seam)", () => {
+    // Attacker SRI: token 1 = the attested (legit) digest; token 2 = a different
+    // digest that npm's strongest-algo check would also accept for a swapped tarball.
+    const otherB64 = Buffer.from("ab".repeat(64), "hex").toString("base64");
+    const r = cryptoVerifySlsaBundle(V1.bundle, { integritySri: `${realSri} sha512-${otherB64}` });
+    expect(r.verification.outcome).toBe("could-not-verify");
+    expect(r.verification.reason).toBe("subject-digest-mismatch");
+  });
+
   it("REFUSES a tampered DSSE payload (tlog body hash mismatch), never throws", () => {
     const bad = structuredClone(V1.bundle);
     bad.dsseEnvelope.payload = flipB64(bad.dsseEnvelope.payload, "getmcpm", "evilpkg");

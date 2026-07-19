@@ -63,15 +63,25 @@ function couldNotVerify(reason: string, san?: string, issuer?: string): NpmProve
   };
 }
 
-/** True iff the attestation subject's hex sha512 matches an sha512 entry in the SRI. */
+/**
+ * True iff the verified subject sha512 matches EVERY sha512 entry in the SRI (and
+ * at least one). NOT any-match: npm/ssri enforces the STRONGEST algorithm present,
+ * so a multi-token SRI `sha512-<A> sha512-<B>` could otherwise pass this bind on A
+ * (a stolen genuine attestation's digest) while npm installs the tarball matching
+ * B (the attacker's) — a false "verified" wearing the victim's identity. Pinning
+ * every sha512 entry to the attested digest makes "verified" ⟹ the tarball npm
+ * installs IS the attested one. Weaker-algo tokens are ignorable (ssri picks
+ * sha512 when present); a sha512-less SRI fails closed.
+ */
 function subjectBindsToIntegrity(hexSha512: string | undefined, sri: string): boolean {
   if (hexSha512 === undefined || !/^[0-9a-f]{128}$/i.test(hexSha512)) return false;
   const subjectB64 = Buffer.from(hexSha512, "hex").toString("base64");
-  for (const token of sri.trim().split(/\s+/)) {
-    const m = /^sha512-(.+)$/.exec(token);
-    if (m && m[1] === subjectB64) return true;
-  }
-  return false;
+  const sha512Digests = sri
+    .trim()
+    .split(/\s+/)
+    .map((t) => /^sha512-(.+)$/.exec(t)?.[1])
+    .filter((d): d is string => d !== undefined);
+  return sha512Digests.length > 0 && sha512Digests.every((d) => d === subjectB64);
 }
 
 /**
