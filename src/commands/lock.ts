@@ -74,7 +74,9 @@ export interface LockDeps {
    */
   fetchNpmProvenance?: (
     identifier: string,
-    npmVersion: string
+    npmVersion: string,
+    /** F8 crypto slice: dist.integrity SRI for subject-binding the attestation. */
+    integritySri?: string
   ) => Promise<NpmProvenanceSnapshot | undefined>;
   /**
    * F8 slice 1: read the PREVIOUS lock (before overwrite) so provenance-identity
@@ -342,9 +344,13 @@ async function resolveServer(
   // Fail-open: undefined omits the block; lock never blocks on this.
   let provenanceSnap: NpmProvenanceSnapshot | undefined;
   if (isConcreteNpm && deps.fetchNpmProvenance) {
+    // Pass the H11 dist.integrity SRI (may be undefined if that fetch failed) so
+    // the provenance layer can subject-bind a crypto "verified" verdict to THIS
+    // tarball. Without it, only the parse-only "attested" record is produced.
     provenanceSnap = await deps.fetchNpmProvenance(
       pkg.identifier,
-      pkg.version as string
+      pkg.version as string,
+      npmIntegritySnap?.integrity
     );
   }
 
@@ -417,7 +423,7 @@ export function registerLockCommand(program: Command): void {
             writeLockFile: (path, content) =>
               writeFile(path, content, { encoding: "utf-8", mode: 0o600 }),
             fetchNpmIntegrity: _fetchNpmIntegrity,
-            fetchNpmProvenance: _fetchNpmProvenance,
+            fetchNpmProvenance: (id, ver, sri) => _fetchNpmProvenance(id, ver, { integritySri: sri }),
             readExistingLock: (p) => parseLockFile(p),
             output: stdoutOutput,
           }

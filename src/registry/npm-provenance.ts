@@ -19,7 +19,11 @@
  * attestation with an unchanged identity (the TanStack lesson).
  */
 
-import type { NpmProvenanceSnapshot, ProvenanceIdentity } from "../stack/schema.js";
+import type {
+  NpmProvenanceSnapshot,
+  NpmProvenanceVerification,
+  ProvenanceIdentity,
+} from "../stack/schema.js";
 import { NpmProvenanceSnapshotSchema } from "../stack/schema.js";
 
 export type { NpmProvenanceSnapshot, ProvenanceIdentity } from "../stack/schema.js";
@@ -65,7 +69,7 @@ const SLSA_V02 = "https://slsa.dev/provenance/v0.2";
 export async function fetchNpmProvenance(
   identifier: string,
   npmVersion: string,
-  opts?: { fetchImpl?: typeof fetch; timeoutMs?: number }
+  opts?: { fetchImpl?: typeof fetch; timeoutMs?: number; integritySri?: string }
 ): Promise<NpmProvenanceSnapshot | undefined> {
   const fetchImpl = opts?.fetchImpl ?? fetch;
   const timeoutMs = opts?.timeoutMs ?? DEFAULT_TIMEOUT_MS;
@@ -108,6 +112,28 @@ export async function fetchNpmProvenance(
     if (identity === undefined) {
       return { npmVersion, status: "unsupported", mode: "registry-record" };
     }
+
+    // F8 crypto slice: when the caller supplies the package's dist.integrity SRI
+    // and the record is a SLSA v1 attestation, cryptographically verify the bundle
+    // OFFLINE (lazily loading @sigstore only here, so the parse-only path above
+    // stays dependency-free). A crypto-side failure only DROPS the verification
+    // block — it must never erase the parse-only "attested" snapshot.
+    let verification: NpmProvenanceVerification | undefined;
+    if (opts?.integritySri !== undefined && identity.predicateType === SLSA_V1) {
+      const bundle = findSlsaV1Bundle(raw);
+      if (bundle !== undefined) {
+        try {
+          const { cryptoVerifySlsaBundle } = await import("./sigstore-verify.js");
+          verification = cryptoVerifySlsaBundle(bundle, {
+            identity,
+            integritySri: opts.integritySri,
+          });
+        } catch {
+          verification = undefined; // crypto module unavailable → leave parse-only intact
+        }
+      }
+    }
+
     // Validate the UNVERIFIED, registry-derived snapshot against its own caps
     // BEFORE it can reach the lock. An over-cap/malformed field is by definition
     // not a supported attestation shape, and would otherwise write a lock that
@@ -118,6 +144,7 @@ export async function fetchNpmProvenance(
       status: "attested",
       mode: "registry-record",
       identity,
+      ...(verification !== undefined ? { verification } : {}),
     };
     const parsed = NpmProvenanceSnapshotSchema.safeParse(snap);
     return parsed.success
@@ -198,6 +225,17 @@ function asString(v: unknown): string | undefined {
  * Extract the build-identity tuple from an attestations response, or undefined
  * if no recognizable SLSA provenance attestation is present (→ "unsupported").
  */
+/** Return the raw `bundle` object of the SLSA v1 attestation (for crypto verify), or undefined. */
+function findSlsaV1Bundle(raw: unknown): unknown {
+  const atts = asObject(raw)?.attestations;
+  if (!Array.isArray(atts)) return undefined;
+  for (const att of atts) {
+    const attObj = asObject(att);
+    if (asString(attObj?.predicateType) === SLSA_V1) return attObj?.bundle;
+  }
+  return undefined;
+}
+
 function extractIdentity(raw: unknown): ProvenanceIdentity | undefined {
   const root = asObject(raw);
   const atts = root?.attestations;

@@ -88,7 +88,7 @@ describe("handleLock — provenance capture", () => {
   it("captures the provenance snapshot for a concrete npm coordinate", async () => {
     const deps = makeDeps(entry());
     await handleLock({ stackFile: await writeTempStack() }, deps);
-    expect(deps.fetchNpmProvenance).toHaveBeenCalledWith("@test/my-server", "1.0.0");
+    expect(deps.fetchNpmProvenance).toHaveBeenCalledWith("@test/my-server", "1.0.0", undefined);
     const locked = lockedFromWrite(deps);
     expect((locked as { provenance?: NpmProvenanceSnapshot }).provenance?.status).toBe("attested");
     expect(LockFileSchema.safeParse(parseYaml((deps.writeLockFile as ReturnType<typeof vi.fn>).mock.calls[0][1])).success).toBe(true);

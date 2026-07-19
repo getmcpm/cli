@@ -49,8 +49,18 @@ export interface WhyDeps {
    */
   fetchNpmProvenance?: (
     identifier: string,
-    npmVersion: string
+    npmVersion: string,
+    /** F8 crypto slice: dist.integrity SRI to subject-bind a "verified" verdict. */
+    integritySri?: string
   ) => Promise<NpmProvenanceSnapshot | undefined>;
+  /**
+   * F8 crypto slice: fetch dist.integrity so `why` can verify provenance LIVE.
+   * Optional — without it the section still renders the parse-only record.
+   */
+  fetchNpmIntegrity?: (
+    identifier: string,
+    npmVersion: string
+  ) => Promise<{ integrity: string } | undefined>;
 }
 
 // ---------------------------------------------------------------------------
@@ -109,6 +119,19 @@ function provenanceLines(snap: NpmProvenanceSnapshot | undefined): string[] {
       lines.push(`  ${"workflow".padEnd(10)}${path}${ref}`);
     }
     if (id?.commitSha) lines.push(`  ${"commit".padEnd(10)}${sanitizeForTerminal(id.commitSha)}`);
+    // F8 crypto slice: the cryptographic verdict (only present when the caller
+    // supplied dist.integrity to subject-bind it). "verified" is the ONLY place
+    // that word appears — and it is honest about what it means.
+    const v = snap.verification;
+    if (v?.outcome === "verified") {
+      lines.push(
+        `  ${chalk.green("✓ cryptographically verified")} ${chalk.dim("(build identity attested via GitHub Actions OIDC — NOT a code-safety claim)")}`
+      );
+      if (v.signerSan) lines.push(`  ${"signer".padEnd(10)}${sanitizeForTerminal(v.signerSan)}`);
+    } else if (v?.outcome === "could-not-verify") {
+      const why = v.reason ? ` (${sanitizeForTerminal(v.reason)})` : "";
+      lines.push(`  ${chalk.dim(`could not cryptographically verify${why}`)}`);
+    }
   } else if (snap.status === "unsigned") {
     lines.push(`  ${chalk.dim("unsigned")} ${chalk.dim("(no published attestation — neutral, no penalty)")}`);
   } else {
@@ -163,7 +186,17 @@ export async function handleWhy(
   const pkg = bestPackage(entry);
   let provenance: NpmProvenanceSnapshot | undefined;
   if (deps.fetchNpmProvenance && pkg?.registryType === "npm" && semverValid(pkg.version ?? null) !== null) {
-    provenance = await deps.fetchNpmProvenance(pkg.identifier, pkg.version as string);
+    // Fetch dist.integrity too (when available) so the provenance layer can
+    // subject-bind a crypto "verified" verdict live; without it, the section
+    // still renders the parse-only record.
+    const integrity = deps.fetchNpmIntegrity
+      ? await deps.fetchNpmIntegrity(pkg.identifier, pkg.version as string)
+      : undefined;
+    provenance = await deps.fetchNpmProvenance(
+      pkg.identifier,
+      pkg.version as string,
+      integrity?.integrity
+    );
   }
 
   spinner.stop();
@@ -269,6 +302,7 @@ export function registerWhyCommand(program: Command): void {
       const { checkScannerAvailable, scanTier2 } = await import("../scanner/tier2.js");
       const { computeTrustScore } = await import("../scanner/trust-score.js");
       const { fetchNpmProvenance } = await import("../registry/npm-provenance.js");
+      const { fetchNpmIntegrity } = await import("../registry/npm-integrity.js");
 
       try {
         await handleWhy(
@@ -282,7 +316,8 @@ export function registerWhyCommand(program: Command): void {
             computeTrustScore,
             output: stdoutOutput,
             now: () => Date.now(),
-            fetchNpmProvenance,
+            fetchNpmProvenance: (id, ver, sri) => fetchNpmProvenance(id, ver, { integritySri: sri }),
+            fetchNpmIntegrity,
           }
         );
       } catch (err) {

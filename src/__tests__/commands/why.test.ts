@@ -248,7 +248,7 @@ describe("mcpm why — F8 Provenance section", () => {
     });
     await handleWhy("x", {}, deps);
     const o = out(deps);
-    expect(deps.fetchNpmProvenance).toHaveBeenCalledWith("@test/srv", "1.0.0");
+    expect(deps.fetchNpmProvenance).toHaveBeenCalledWith("@test/srv", "1.0.0", undefined);
     expect(o).toContain("Provenance:");
     expect(o).toContain("attested");
     expect(o).toContain("github.com/a/b");
