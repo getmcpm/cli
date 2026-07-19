@@ -138,11 +138,30 @@ export type ProvenanceIdentity = z.infer<typeof ProvenanceIdentitySchema>;
  * literal reserving the shape for a future crypto slice (which alone may report
  * a "verified" mode). `identity` is present only when `status: "attested"`.
  */
+/**
+ * Cryptographic-verification outcome (F8 crypto slice). ADDITIVE and bare-optional
+ * on the snapshot: `status`/`mode` stay byte-identical so v0.22.0 lockfiles (whose
+ * parseLockFile safeParse-throws on an unknown enum/literal) keep parsing. Crypto
+ * NEVER downgrades `status` — a crypto miss leaves "attested" as "attested".
+ */
+const NpmProvenanceVerificationSchema = z.object({
+  outcome: z.enum(["verified", "could-not-verify"]),
+  /** Short machine reason on could-not-verify (a @sigstore error code or our gate). */
+  reason: z.string().max(300).optional(),
+  /** Verified signer workflow identity (SAN) — recorded, not gated on equality. */
+  signerSan: z.string().max(2048).optional(),
+  /** Verified signer OIDC issuer. */
+  signerIssuer: z.string().max(2048).optional(),
+});
+
+export type NpmProvenanceVerification = z.infer<typeof NpmProvenanceVerificationSchema>;
+
 export const NpmProvenanceSnapshotSchema = z.object({
   npmVersion: z.string(),
   status: z.enum(["attested", "unsigned", "unsupported"]),
   mode: z.literal("registry-record"),
   identity: ProvenanceIdentitySchema.optional(),
+  verification: NpmProvenanceVerificationSchema.optional(),
 });
 
 export type NpmProvenanceSnapshot = z.infer<typeof NpmProvenanceSnapshotSchema>;

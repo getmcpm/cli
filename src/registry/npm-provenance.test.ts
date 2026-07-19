@@ -204,3 +204,35 @@ describe("compareProvenance — drift classifier (report-only)", () => {
     expect(compareProvenance(a, other)).toBe("identity-drift");
   });
 });
+
+describe("fetchNpmProvenance — crypto verification wiring (F8 crypto slice)", () => {
+  // Derive the REAL dist.integrity SRI from the fixture's SLSA-v1 subject digest.
+  const v1 = REAL.attestations.find((a: { predicateType: string }) => a.predicateType === "https://slsa.dev/provenance/v1");
+  const subjectHex = JSON.parse(Buffer.from(v1.bundle.dsseEnvelope.payload, "base64").toString("utf-8")).subject[0].digest.sha512;
+  const realSri = "sha512-" + Buffer.from(subjectHex, "hex").toString("base64");
+  const serveReal = fetchReturning(mockResponse({ json: REAL }));
+
+  it("attaches a VERIFIED verdict and swaps to the UNFORGEABLE SAN identity", async () => {
+    const r = await fetchNpmProvenance("@getmcpm/cli", "0.21.0", { fetchImpl: serveReal, integritySri: realSri });
+    expect(r?.status).toBe("attested"); // status never changes — additive
+    expect(r?.verification?.outcome).toBe("verified");
+    expect(r?.verification?.signerIssuer).toBe("https://token.actions.githubusercontent.com");
+    // On verify, identity is derived from the cert SAN (unforgeable), NOT the
+    // parse-only payload — so the forgeable numeric repository_id is dropped.
+    expect(r?.identity?.sourceRepo).toBe("https://github.com/getmcpm/cli");
+    expect(r?.identity?.repositoryId).toBeUndefined();
+  });
+
+  it("a wrong SRI records could-not-verify but KEEPS the attested snapshot (no erase)", async () => {
+    const r = await fetchNpmProvenance("@getmcpm/cli", "0.21.0", { fetchImpl: serveReal, integritySri: "sha512-" + "A".repeat(88) });
+    expect(r?.status).toBe("attested");
+    expect(r?.verification?.outcome).toBe("could-not-verify");
+    expect(r?.identity?.repositoryId).toBe("1194736883"); // parse-only identity intact
+  });
+
+  it("no integritySri → no crypto attempt, snapshot stays parse-only (verification absent)", async () => {
+    const r = await fetchNpmProvenance("@getmcpm/cli", "0.21.0", { fetchImpl: serveReal });
+    expect(r?.status).toBe("attested");
+    expect(r?.verification).toBeUndefined();
+  });
+})
