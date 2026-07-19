@@ -465,20 +465,6 @@ export function clearServerPins(pins: PinsFile, serverName: string): PinsFile {
   return { ...pins, servers: rest };
 }
 
-export function clearToolPin(
-  pins: PinsFile,
-  serverName: string,
-  toolName: string,
-): PinsFile {
-  const server = pins.servers[serverName];
-  if (!server || !server[toolName]) return pins;
-  const { [toolName]: _removed, ...rest } = server;
-  return {
-    ...pins,
-    servers: { ...pins.servers, [serverName]: rest },
-  };
-}
-
 /**
  * Move the current hash into previous_hashes + set a new current.
  * Used when a drift is "accepted" — preserves history without losing

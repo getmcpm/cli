@@ -1085,7 +1085,7 @@ import {
 } from "../scanner/tier2.js";
 import { computeTrustScore as _computeTrustScore } from "../scanner/trust-score.js";
 import { handleLock } from "./lock.js";
-import { createConfirm } from "../utils/confirm.js";
+import { confirm } from "../utils/confirm.js";
 import { stdoutOutput } from "../utils/output.js";
 import { fetchNpmIntegrity as _fetchNpmIntegrity } from "../registry/npm-integrity.js";
 
@@ -1164,7 +1164,7 @@ export function registerUpCommand(program: Command): void {
                   }
                 );
               },
-              confirm: createConfirm(),
+              confirm,
               promptEnvVar: async (name, isSecret) => {
                 if (isSecret) {
                   return password({ message: `${name}:` });

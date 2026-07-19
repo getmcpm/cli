@@ -165,13 +165,6 @@ export async function resetPolicyIntegrity(): Promise<boolean> {
   return true;
 }
 
-export async function deletePolicy(): Promise<void> {
-  const p = await policyPath();
-  const sidecarP = await integrityPath();
-  await unlink(p).catch(() => undefined);
-  await unlink(sidecarP).catch(() => undefined);
-}
-
 // ---------------------------------------------------------------------------
 // Pure mutation helpers
 // ---------------------------------------------------------------------------

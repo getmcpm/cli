@@ -22,7 +22,6 @@ import {
   emptyPinsFile,
   upsertToolPin,
   clearServerPins,
-  clearToolPin,
   acceptDrift,
   readPins,
   writePins,
@@ -308,15 +307,6 @@ describe("mutation helpers", () => {
     const next = upsertToolPin(orig, "fs", "read_file", makeEntry("sha256:abc"));
     expect(next.servers.fs?.read_file?.current_hash).toBe("sha256:abc");
     expect(orig.servers.fs).toBeUndefined();
-  });
-
-  test("clearToolPin removes only the named tool", () => {
-    let p = emptyPinsFile();
-    p = upsertToolPin(p, "fs", "read", makeEntry("a"));
-    p = upsertToolPin(p, "fs", "write", makeEntry("b"));
-    const next = clearToolPin(p, "fs", "read");
-    expect(next.servers.fs?.read).toBeUndefined();
-    expect(next.servers.fs?.write?.current_hash).toBe("b");
   });
 
   test("clearServerPins removes the whole server", () => {

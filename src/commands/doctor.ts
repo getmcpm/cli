@@ -19,7 +19,6 @@
 import { access } from "fs/promises";
 import type { ClientId } from "../config/paths.js";
 import type { ConfigAdapter, McpServerEntry } from "../config/adapters/index.js";
-import type { detectInstalledClients } from "../config/detector.js";
 import type { getConfigPath } from "../config/paths.js";
 import { buildDriftModel, type ClientState } from "../config/drift.js";
 import { isWrapped } from "../guard/wrap.js";
@@ -31,7 +30,6 @@ import { sanitizeForTerminal } from "../guard/sanitize.js";
 // ---------------------------------------------------------------------------
 
 export interface DoctorDeps {
-  detectClients: typeof detectInstalledClients;
   getAdapter: (clientId: ClientId) => ConfigAdapter;
   getConfigPath: typeof getConfigPath;
   /** Returns true if the config file exists for this client. */
@@ -465,12 +463,11 @@ export async function doctorHandler(deps: DoctorDeps, opts: DoctorOpts = {}): Pr
 // ---------------------------------------------------------------------------
 
 import { Command } from "commander";
-import chalk from "chalk";
 import os from "os";
 import { execFile } from "child_process";
-import { detectInstalledClients as _detectClients } from "../config/detector.js";
 import { getConfigPath as _getConfigPath, CLIENT_IDS } from "../config/paths.js";
 import { getAdapter as getAdapterDefault } from "../config/index.js";
+import { coloredOutput } from "../utils/output.js";
 import { isConfineBackendAvailable } from "../guard/confine/apply.js";
 import { isSupportedPlatform as isKeychainSupported } from "../store/os-keychain.js";
 
@@ -515,18 +512,6 @@ function gatherReportEnv(): DoctorReportEnv {
   };
 }
 
-function coloredOutput(text: string): void {
-  if (text.startsWith("  ✓")) {
-    console.log(chalk.green(text));
-  } else if (text.startsWith("  ✗")) {
-    console.log(chalk.red(text));
-  } else if (text.startsWith("  ⚠")) {
-    console.log(chalk.yellow(text));
-  } else {
-    console.log(text);
-  }
-}
-
 export function registerDoctorCommand(program: Command): void {
   program
     .command("doctor")
@@ -537,7 +522,6 @@ export function registerDoctorCommand(program: Command): void {
       // --json / --report are machine/paste output — never colorize.
       const plain = options.json || options.report;
       const deps: DoctorDeps = {
-        detectClients: _detectClients,
         getAdapter: getAdapterDefault,
         getConfigPath: _getConfigPath,
         checkConfigExists: checkConfigExistsDefault,

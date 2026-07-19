@@ -8,7 +8,6 @@ import { RegistryError } from "../../registry/errors.js";
 import type { PublishManifest } from "./manifest.js";
 import type { ServerEntry } from "../../registry/types.js";
 import type { Finding } from "../../scanner/tier1.js";
-import type { TrustScore, TrustScoreInput } from "../../scanner/trust-score.js";
 import { PublishErrors } from "../../errors/publish-errors.js";
 import { manifestToEntry, assertTrustGate } from "./check.js";
 
@@ -19,7 +18,6 @@ export interface SubmitResult {
 export interface PublishSubmitDeps {
   readManifest: () => Promise<PublishManifest | null>;
   scanTier1: (entry: ServerEntry) => Finding[];
-  computeTrustScore: (input: TrustScoreInput) => TrustScore;
   submitToRegistry: (manifest: PublishManifest, token: string, registryUrl: string) => Promise<SubmitResult>;
   getToken: () => string | null;
   output: (text: string) => void;

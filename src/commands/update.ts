@@ -53,7 +53,6 @@ interface UpdateResult {
   oldVersion: string;
   newVersion: string;
   updated: boolean;
-  trustScore?: TrustScore;
   error?: string;
 }
 
@@ -121,7 +120,7 @@ export async function handleUpdate(
     | { kind: "ok"; installed: InstalledServer; entry: ServerEntry }
     | { kind: "error"; installed: InstalledServer; error: string };
 
-  const fetchSettled = await Promise.allSettled(
+  const fetchResults = await Promise.all(
     servers.map(async (installed): Promise<FetchOutcome> => {
       try {
         const entry = await getServer(installed.name);
@@ -132,14 +131,9 @@ export async function handleUpdate(
     })
   );
 
-  // Build the entry map and initial results list from settled outcomes
+  // Build the entry map and initial results list from fetch outcomes
   const entryMap = new Map<string, ServerEntry>();
-  const results: UpdateResult[] = fetchSettled.map((settled) => {
-    if (settled.status === "rejected") {
-      // Should not happen — the async fn above never rejects — but guard anyway
-      return { name: "unknown", oldVersion: "", newVersion: "", updated: false, error: String(settled.reason) };
-    }
-    const outcome = settled.value;
+  const results: UpdateResult[] = fetchResults.map((outcome) => {
     if (outcome.kind === "error") {
       return {
         name: outcome.installed.name,
@@ -327,7 +321,7 @@ export async function handleUpdate(
             oldVersion: r.oldVersion,
             newVersion: r.newVersion,
             updated: outcome?.updated ?? r.updated,
-            trustScore: outcome?.trustScore ?? r.trustScore ?? null,
+            trustScore: outcome?.trustScore ?? null,
             error: r.error ?? null,
             clientErrors: clientErrors.length > 0 ? clientErrors : null,
           };
@@ -356,7 +350,7 @@ export function registerUpdateCommand(program: Command): void {
       const { scanTier1 } = await import("../scanner/tier1.js");
       const { computeTrustScore } = await import("../scanner/trust-score.js");
       const { getAdapter: getAdapterDefault, getConfigPath } = await import("../config/index.js");
-      const { createConfirm } = await import("../utils/confirm.js");
+      const { confirm } = await import("../utils/confirm.js");
 
       const client = new RegistryClient();
 
@@ -369,7 +363,7 @@ export function registerUpdateCommand(program: Command): void {
         getConfigPath,
         scanTier1,
         computeTrustScore,
-        confirm: createConfirm(),
+        confirm,
         output: stdoutOutput,
       };
 

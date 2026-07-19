@@ -14,7 +14,6 @@ import type { ConfigAdapter, McpServerEntry } from "../../config/adapters/index.
 // ---------------------------------------------------------------------------
 
 export interface DoctorDeps {
-  detectClients: () => Promise<ClientId[]>;
   getAdapter: (clientId: ClientId) => ConfigAdapter;
   getConfigPath: (clientId: ClientId) => string;
   checkConfigExists: (clientId: ClientId) => Promise<boolean>;
@@ -48,7 +47,6 @@ function makeAdapter(
 
 function makeHealthyDeps(overrides: Partial<DoctorDeps> = {}): DoctorDeps {
   return {
-    detectClients: vi.fn().mockResolvedValue(["claude-desktop", "cursor"] as ClientId[]),
     getAdapter: vi.fn().mockImplementation((id: ClientId) =>
       makeAdapter(id, { "my-server": { command: "npx", args: ["-y", "my-server"] } })
     ),
@@ -108,9 +106,7 @@ describe("doctorHandler — client detection", () => {
     const deps = makeHealthyDeps({
       checkConfigExists: vi.fn().mockImplementation((id: ClientId) =>
         Promise.resolve(id === "claude-desktop")
-      ),
-      detectClients: vi.fn().mockResolvedValue(["claude-desktop"] as ClientId[]),
-    });
+      ),    });
     await doctorHandler(deps);
     const allOutput = (deps.output as ReturnType<typeof vi.fn>).mock.calls.flat().join("\n");
     // claude-desktop found, others not — output uses human-readable labels
@@ -121,9 +117,7 @@ describe("doctorHandler — client detection", () => {
 
   it("when no clients found, still completes without throwing", async () => {
     const deps = makeHealthyDeps({
-      checkConfigExists: vi.fn().mockResolvedValue(false),
-      detectClients: vi.fn().mockResolvedValue([] as ClientId[]),
-    });
+      checkConfigExists: vi.fn().mockResolvedValue(false),    });
     await expect(doctorHandler(deps)).resolves.not.toThrow();
   });
 });
@@ -135,9 +129,7 @@ describe("doctorHandler — client detection", () => {
 describe("doctorHandler — config validity", () => {
   it("reports server count for valid config files", async () => {
     const deps = makeHealthyDeps({
-      checkConfigExists: vi.fn().mockResolvedValue(true),
-      detectClients: vi.fn().mockResolvedValue(["claude-desktop"] as ClientId[]),
-      getAdapter: vi.fn().mockReturnValue(
+      checkConfigExists: vi.fn().mockResolvedValue(true),      getAdapter: vi.fn().mockReturnValue(
         makeAdapter("claude-desktop", {
           "server-a": { command: "npx" },
           "server-b": { command: "npx" },
@@ -152,9 +144,7 @@ describe("doctorHandler — config validity", () => {
 
   it("reports malformed config as an issue", async () => {
     const deps = makeHealthyDeps({
-      checkConfigExists: vi.fn().mockResolvedValue(true),
-      detectClients: vi.fn().mockResolvedValue(["claude-desktop"] as ClientId[]),
-      getAdapter: vi.fn().mockReturnValue(
+      checkConfigExists: vi.fn().mockResolvedValue(true),      getAdapter: vi.fn().mockReturnValue(
         makeAdapter("claude-desktop", {}, true /* shouldThrow */)
       ),
     });
@@ -168,9 +158,7 @@ describe("doctorHandler — config validity", () => {
     const deps = makeHealthyDeps({
       checkConfigExists: vi.fn().mockImplementation((id: ClientId) =>
         Promise.resolve(id === "claude-desktop")
-      ),
-      detectClients: vi.fn().mockResolvedValue(["claude-desktop"] as ClientId[]),
-      getAdapter: vi.fn().mockReturnValue(adapter),
+      ),      getAdapter: vi.fn().mockReturnValue(adapter),
     });
     await doctorHandler(deps);
     // listServers should only be called for found clients
@@ -224,9 +212,7 @@ describe("doctorHandler — runtime checks", () => {
 describe("doctorHandler — server runtime cross-check", () => {
   it("warns when a server uses a runtime that is not available", async () => {
     const deps = makeHealthyDeps({
-      checkConfigExists: vi.fn().mockResolvedValue(true),
-      detectClients: vi.fn().mockResolvedValue(["claude-desktop"] as ClientId[]),
-      getAdapter: vi.fn().mockReturnValue(
+      checkConfigExists: vi.fn().mockResolvedValue(true),      getAdapter: vi.fn().mockReturnValue(
         makeAdapter("claude-desktop", {
           "uvx-server": { command: "uvx", args: ["uvx-server"] },
         })
@@ -243,9 +229,7 @@ describe("doctorHandler — server runtime cross-check", () => {
 
   it("does not warn when all server runtimes are available", async () => {
     const deps = makeHealthyDeps({
-      checkConfigExists: vi.fn().mockResolvedValue(true),
-      detectClients: vi.fn().mockResolvedValue(["claude-desktop"] as ClientId[]),
-      getAdapter: vi.fn().mockReturnValue(
+      checkConfigExists: vi.fn().mockResolvedValue(true),      getAdapter: vi.fn().mockReturnValue(
         makeAdapter("claude-desktop", {
           "npx-server": { command: "npx", args: ["-y", "npx-server"] },
         })
@@ -259,9 +243,7 @@ describe("doctorHandler — server runtime cross-check", () => {
 
   it("skips runtime check for HTTP servers (no command field)", async () => {
     const deps = makeHealthyDeps({
-      checkConfigExists: vi.fn().mockResolvedValue(true),
-      detectClients: vi.fn().mockResolvedValue(["cursor"] as ClientId[]),
-      getAdapter: vi.fn().mockReturnValue(
+      checkConfigExists: vi.fn().mockResolvedValue(true),      getAdapter: vi.fn().mockReturnValue(
         makeAdapter("cursor", {
           "http-server": { url: "http://localhost:3000" },
         })
@@ -297,9 +279,7 @@ describe("doctorHandler — summary", () => {
 
   it("outputs issues section when problems exist", async () => {
     const deps = makeHealthyDeps({
-      checkConfigExists: vi.fn().mockResolvedValue(true),
-      detectClients: vi.fn().mockResolvedValue(["claude-desktop"] as ClientId[]),
-      getAdapter: vi.fn().mockReturnValue(
+      checkConfigExists: vi.fn().mockResolvedValue(true),      getAdapter: vi.fn().mockReturnValue(
         makeAdapter("claude-desktop", {
           "bad-server": { command: "uvx", args: ["bad-server"] },
         })
@@ -328,9 +308,7 @@ describe("doctorHandler — return value (exit code signal)", () => {
 
   it("returns 1 when critical issues exist (malformed config)", async () => {
     const deps = makeHealthyDeps({
-      checkConfigExists: vi.fn().mockResolvedValue(true),
-      detectClients: vi.fn().mockResolvedValue(["claude-desktop"] as ClientId[]),
-      getAdapter: vi.fn().mockReturnValue(
+      checkConfigExists: vi.fn().mockResolvedValue(true),      getAdapter: vi.fn().mockReturnValue(
         makeAdapter("claude-desktop", {}, true /* shouldThrow */)
       ),
     });
@@ -340,9 +318,7 @@ describe("doctorHandler — return value (exit code signal)", () => {
 
   it("returns 1 when a server uses an unavailable runtime", async () => {
     const deps = makeHealthyDeps({
-      checkConfigExists: vi.fn().mockResolvedValue(true),
-      detectClients: vi.fn().mockResolvedValue(["claude-desktop"] as ClientId[]),
-      getAdapter: vi.fn().mockReturnValue(
+      checkConfigExists: vi.fn().mockResolvedValue(true),      getAdapter: vi.fn().mockReturnValue(
         makeAdapter("claude-desktop", {
           "docker-server": { command: "docker", args: ["run", "my-image"] },
         })
@@ -355,9 +331,7 @@ describe("doctorHandler — return value (exit code signal)", () => {
 
   it("returns 0 when all clients are missing (no config installed) — not critical", async () => {
     const deps = makeHealthyDeps({
-      checkConfigExists: vi.fn().mockResolvedValue(false),
-      detectClients: vi.fn().mockResolvedValue([] as ClientId[]),
-      execCheck: vi.fn().mockResolvedValue(true),
+      checkConfigExists: vi.fn().mockResolvedValue(false),      execCheck: vi.fn().mockResolvedValue(true),
     });
     const code = await doctorHandler(deps);
     expect(code).toBe(0);

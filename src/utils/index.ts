@@ -2,7 +2,7 @@
  * Barrel export for src/utils/.
  */
 
-export { createConfirm } from "./confirm.js";
+export { confirm } from "./confirm.js";
 export {
   OFFICIAL_META_KEY,
   extractRegistryMeta,

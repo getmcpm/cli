@@ -140,28 +140,6 @@ function hasToolsList(msg: JSONRPCMessage): boolean {
   return Array.isArray(result?.tools);
 }
 
-/**
- * H7: true if `msg` is a server-INITIATED `sampling/createMessage` REQUEST (has
- * an id). Fail-closed on the notification shape: a frame carrying the method but
- * NO id is NOT eligible for block-to-origin — you can't error-reply a
- * notification, so block-to-origin would strand it.
- */
-export function isSamplingRequest(msg: JSONRPCMessage): boolean {
-  return isServerRequestMethod(msg, "sampling/createMessage");
-}
-
-/** H7: true if `msg` is a server-INITIATED `elicitation/create` REQUEST (has an id). */
-export function isElicitationRequest(msg: JSONRPCMessage): boolean {
-  return isServerRequestMethod(msg, "elicitation/create");
-}
-
-function isServerRequestMethod(msg: JSONRPCMessage, method: string): boolean {
-  if (!("method" in msg) || (msg as { method?: unknown }).method !== method) return false;
-  // A request MUST carry an id; a notification-shaped frame (no id) is not
-  // eligible for block-to-origin (no reply channel) — fail closed.
-  return "id" in msg && (msg as { id?: unknown }).id !== undefined;
-}
-
 /** H7: a server-INITIATED sampling/elicitation method frame (id OR no-id — used
  * for content SCANNING; block-to-origin eligibility separately requires an id). */
 function isServerInitiatedMethod(msg: JSONRPCMessage): boolean {

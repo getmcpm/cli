@@ -14,6 +14,7 @@
  */
 
 import type { NpmIntegritySnapshot } from "../stack/schema.js";
+import { readCappedJsonOrUndefined } from "./http-utils.js";
 
 export type { NpmIntegritySnapshot } from "../stack/schema.js";
 
@@ -109,81 +110,7 @@ async function fetchManifest(
 
   if (!response.ok) return undefined;
 
-  return readCappedJson(url, response);
-}
-
-// ---------------------------------------------------------------------------
-// Capped body reader
-// ---------------------------------------------------------------------------
-
-/**
- * Read and JSON-parse the response body up to BODY_CAP_BYTES.
- * Returns undefined if the declared Content-Length exceeds the cap,
- * if JSON parsing fails, or if the body cannot be read.
- */
-async function readCappedJson(
-  url: string,
-  response: Response
-): Promise<unknown> {
-  // Guard on declared Content-Length first (fast path for huge responses).
-  const declared = response.headers?.get?.("content-length");
-  if (declared !== null && declared !== undefined) {
-    const len = Number(declared);
-    if (Number.isFinite(len) && len > BODY_CAP_BYTES) {
-      return undefined;
-    }
-  }
-
-  const body = response.body;
-  if (body && typeof body.getReader === "function") {
-    const text = await readCappedStream(body);
-    if (text === undefined) return undefined;
-    try {
-      return JSON.parse(text);
-    } catch {
-      return undefined;
-    }
-  }
-
-  // No readable stream (e.g. injected mock). The Content-Length guard above
-  // is our cap in this path.
-  try {
-    return await response.json();
-  } catch {
-    return undefined;
-  }
-}
-
-async function readCappedStream(
-  body: ReadableStream<Uint8Array>
-): Promise<string | undefined> {
-  const reader = body.getReader();
-  const chunks: Uint8Array[] = [];
-  let total = 0;
-  try {
-    for (;;) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      if (value) {
-        total += value.byteLength;
-        if (total > BODY_CAP_BYTES) {
-          return undefined;
-        }
-        chunks.push(value);
-      }
-    }
-  } catch {
-    return undefined;
-  } finally {
-    await reader.cancel().catch(() => {});
-  }
-  const out = new Uint8Array(total);
-  let offset = 0;
-  for (const chunk of chunks) {
-    out.set(chunk, offset);
-    offset += chunk.byteLength;
-  }
-  return new TextDecoder().decode(out);
+  return readCappedJsonOrUndefined(response, BODY_CAP_BYTES);
 }
 
 // ---------------------------------------------------------------------------

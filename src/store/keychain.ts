@@ -313,15 +313,6 @@ export async function deleteSecret(server: string, key: string): Promise<boolean
   return removed;
 }
 
-// Intentionally UNLOCKED: read-only key enumeration, eventual consistency.
-export async function listSecretKeys(server: string): Promise<string[]> {
-  assertSafeId(server, "server");
-  const prefix = `${server}/`;
-  return Object.keys(await readStore())
-    .filter((k) => k.startsWith(prefix))
-    .map((k) => k.slice(prefix.length));
-}
-
 /** Produces the placeholder string stored in config files. */
 export function toPlaceholder(server: string, key: string): string {
   return `${PLACEHOLDER_PREFIX}${server}/${key}`;

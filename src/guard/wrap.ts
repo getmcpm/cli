@@ -335,13 +335,3 @@ export function unwrapEntry(entry: McpServerEntry): McpServerEntry | null {
   if (entry.disabled !== undefined) unwrapped.disabled = entry.disabled;
   return unwrapped;
 }
-
-/**
- * Extract the wrapped server's display name from a guard-wrapped entry.
- * Returns null if the entry isn't wrapped or the name slot is malformed.
- */
-export function getWrappedServerName(entry: McpServerEntry): string | null {
-  if (!entry.args) return null;
-  const marker = parseMarker(entry.args);
-  return marker?.serverName ?? null;
-}

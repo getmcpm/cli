@@ -3,7 +3,6 @@
  *
  * Exports:
  * - handleImport()   — pure handler with injectable deps for testing
- * - checkFirstRun()  — first-run hint (called from main entry point)
  * - registerImportCommand() — registers the command on a Commander program
  *
  * Architecture:
@@ -40,7 +39,6 @@ export interface ImportDeps {
   getConfigPath: (clientId: ClientId) => string;
   getInstalledServers: () => Promise<InstalledServer[]>;
   addToStore: (server: InstalledServer) => Promise<void>;
-  storeExists: () => Promise<boolean>;
   confirm: (message: string) => Promise<boolean>;
   output: (text: string) => void;
   // #23: import must run the same tier-1 trust assessment that install does,
@@ -323,47 +321,6 @@ export async function handleImport(
 }
 
 // ---------------------------------------------------------------------------
-// First-run detection
-// ---------------------------------------------------------------------------
-
-/**
- * Check if this is the first run (store doesn't exist yet).
- * If so, scan clients for existing MCP servers and show a hint.
- * Does NOT auto-import — just shows the hint.
- */
-export async function checkFirstRun(deps: ImportDeps): Promise<void> {
-  // If the store already exists, this is not the first run
-  const exists = await deps.storeExists();
-  if (exists) {
-    return;
-  }
-
-  // Detect clients and count servers
-  const clients = await deps.detectClients();
-  if (clients.length === 0) {
-    return;
-  }
-
-  const perClientResults = await Promise.all(
-    clients.map((clientId) => readClientServers(clientId, deps))
-  );
-  const discovered: DiscoveredServer[] = perClientResults.flat();
-
-  const uniqueServers = deduplicateServers(discovered);
-  if (uniqueServers.length === 0) {
-    return;
-  }
-
-  const count = uniqueServers.length;
-  deps.output(
-    chalk.cyan(
-      `I see you have ${count} MCP server${count === 1 ? "" : "s"} configured. ` +
-      `Run ${chalk.bold("mcpm import")} to manage them with mcpm.`
-    )
-  );
-}
-
-// ---------------------------------------------------------------------------
 // Commander registration
 // ---------------------------------------------------------------------------
 
@@ -378,14 +335,9 @@ export function registerImportCommand(program: Command): void {
       const { getConfigPath } = await import("../config/paths.js");
       const { getAdapter } = await import("../config/index.js");
       const { getInstalledServers, addInstalledServer } = await import("../store/servers.js");
-      const { readJson } = await import("../store/index.js");
       const { scanTier1 } = await import("../scanner/tier1.js");
       const { computeTrustScore } = await import("../scanner/trust-score.js");
       const { confirm } = await import("@inquirer/prompts");
-
-      async function storeExists(): Promise<boolean> {
-        return (await readJson<unknown>("servers.json")) !== null;
-      }
 
       const deps: ImportDeps = {
         detectClients: detectInstalledClients,
@@ -393,7 +345,6 @@ export function registerImportCommand(program: Command): void {
         getConfigPath,
         getInstalledServers,
         addToStore: addInstalledServer,
-        storeExists,
         confirm: (message: string) => confirm({ message }),
         output: stdoutOutput,
         scanTier1,

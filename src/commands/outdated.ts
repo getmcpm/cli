@@ -1,7 +1,6 @@
 /**
  * `mcpm outdated` — show installed servers with newer registry versions or trust regressions.
  *
- * Shares version-drift logic with `mcpm update` via checkVersionDrift().
  * Always bypasses the cache to return fresh results.
  */
 
@@ -46,14 +45,14 @@ export interface DriftRow {
 }
 
 // ---------------------------------------------------------------------------
-// Shared drift-check logic (reused by `mcpm update`)
+// Drift-check logic
 // ---------------------------------------------------------------------------
 
 /**
  * Compare installed servers against the registry and return drift rows.
  * Pure function — no I/O side effects beyond the injected deps.
  */
-export async function checkVersionDrift(
+async function checkVersionDrift(
   installed: InstalledServer[],
   getServer: OutdatedDeps["getServer"],
   scanTier1: OutdatedDeps["scanTier1"],
@@ -226,8 +225,7 @@ export function registerOutdatedCommand(program: Command): void {
 
       await handleOutdated({ json: opts.json }, {
         getInstalledServers,
-        // forceRefresh: RegistryClient has no cache internally — cache lives in commands
-        // that wrap it with store/cache.ts. Calling getServer directly bypasses it.
+        // RegistryClient has no internal cache, so calling getServer always fetches fresh.
         getServer: (name) => client.getServer(name),
         scanTier1,
         computeTrustScore,

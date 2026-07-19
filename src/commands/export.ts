@@ -40,7 +40,6 @@ function inferSecret(envName: string): boolean {
 
 export interface ExportOptions {
   output?: string;
-  json?: boolean;
 }
 
 export interface ExportDeps {

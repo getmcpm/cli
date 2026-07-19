@@ -58,6 +58,20 @@ export function _resetCachedStorePath(): void {
 // ---------------------------------------------------------------------------
 
 /**
+ * Resolve a relative store filename to an absolute path inside ~/.mcpm/,
+ * refusing any path that escapes the store directory (path traversal).
+ */
+async function resolveStoreFile(filename: string): Promise<string> {
+  const storePath = await getStorePath();
+  const resolved = path.resolve(storePath, filename);
+  const storeResolved = path.resolve(storePath);
+  if (!resolved.startsWith(storeResolved + path.sep)) {
+    throw new Error(`Path traversal attempt blocked: "${filename}"`);
+  }
+  return resolved;
+}
+
+/**
  * Read and parse a JSON file from the store directory.
  *
  * @param filename - Relative filename inside ~/.mcpm/ (e.g. "servers.json").
@@ -65,13 +79,7 @@ export function _resetCachedStorePath(): void {
  * @throws For malformed JSON or permission errors.
  */
 export async function readJson<T>(filename: string): Promise<T | null> {
-  const storePath = await getStorePath();
-  const resolved = path.resolve(storePath, filename);
-  const storeResolved = path.resolve(storePath);
-  if (!resolved.startsWith(storeResolved + path.sep)) {
-    throw new Error(`Path traversal attempt blocked: "${filename}"`);
-  }
-  const filePath = resolved;
+  const filePath = await resolveStoreFile(filename);
 
   let raw: string;
   try {
@@ -96,13 +104,7 @@ export async function writeJson(
   filename: string,
   data: unknown
 ): Promise<void> {
-  const storePath = await getStorePath();
-  const resolved = path.resolve(storePath, filename);
-  const storeResolved = path.resolve(storePath);
-  if (!resolved.startsWith(storeResolved + path.sep)) {
-    throw new Error(`Path traversal attempt blocked: "${filename}"`);
-  }
-  const filePath = resolved;
+  const filePath = await resolveStoreFile(filename);
 
   // Symlink-safe atomic write (mirrors config adapter #26 hardening): refuses a
   // symlinked destination/.tmp, writes the .tmp exclusively, and re-checks

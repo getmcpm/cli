@@ -7,7 +7,6 @@ import {
   wrapEntry,
   unwrapEntry,
   isWrapped,
-  getWrappedServerName,
   hashOriginalEntry,
   resolveMcpmBinaryPath,
   defaultWrapContext,
@@ -132,11 +131,6 @@ describe("isWrapped + unwrapEntry round-trip", () => {
       args: ["guard", "run", "--inner", "--server-name", "x"],
     };
     expect(unwrapEntry(malformed)).toBeNull();
-  });
-
-  test("getWrappedServerName extracts the name (with marker flags present)", () => {
-    const wrapped = wrapEntry("my-server", { command: "x", env: { K: "v" } }, { mcpmBinary: "mcpm" });
-    expect(getWrappedServerName(wrapped)).toBe("my-server");
   });
 });
 
@@ -269,10 +263,9 @@ describe("confine marker NEUTRALITY (orig-hash + unwrap unaffected)", () => {
     expect(back!.env).toEqual({ API_KEY: "x", B: "y" });
   });
 
-  test("isWrapped + getWrappedServerName work with confine tokens present", () => {
+  test("isWrapped works with confine tokens present", () => {
     const wrapped = wrapEntry("fs", orig, ctx, { profileHash: HEX64, required: false });
     expect(isWrapped(wrapped)).toBe(true);
-    expect(getWrappedServerName(wrapped)).toBe("fs");
   });
 
   test("a wrapped-with-confine entry's --orig-hash equals the confine-free hash (excluded from hash)", () => {

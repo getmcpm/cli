@@ -153,8 +153,6 @@ async function printEnableDryRun(opts: EnableOpts): Promise<void> {
 export interface ConfineComputeOpts {
   readonly client?: ClientId;
   readonly server?: string;
-  readonly net?: "all" | "none";
-  readonly requireConfine?: boolean;
   readonly write: (s: string) => void;
 }
 
@@ -269,8 +267,6 @@ async function resolveConfineMarkers(
       sandboxRoot,
       tmpDir,
       capturedAt,
-      requireConfine: opts.requireConfine,
-      net: opts.net,
     });
     next = withProfile(next, name, profile);
     added += 1;

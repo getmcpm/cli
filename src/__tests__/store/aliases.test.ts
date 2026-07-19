@@ -3,7 +3,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { getAliases, setAlias, removeAlias, resolveAlias } from "../../store/aliases.js";
+import { getAliases, setAlias, removeAlias } from "../../store/aliases.js";
 
 // Mock the store index to avoid real filesystem I/O.
 vi.mock("../../store/index.js", () => {
@@ -63,16 +63,5 @@ describe("aliases store", () => {
 
   it("throws when removing non-existent alias", async () => {
     await expect(removeAlias("nonexistent")).rejects.toThrow(/not found/i);
-  });
-
-  it("resolves alias to server name", async () => {
-    await setAlias("fs", "io.github.domdomegg/filesystem-mcp");
-    const resolved = await resolveAlias("fs");
-    expect(resolved).toBe("io.github.domdomegg/filesystem-mcp");
-  });
-
-  it("returns input when no alias matches", async () => {
-    const resolved = await resolveAlias("io.github.domdomegg/filesystem-mcp");
-    expect(resolved).toBe("io.github.domdomegg/filesystem-mcp");
   });
 });

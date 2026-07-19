@@ -153,13 +153,12 @@ export function computeTrustScore(input: TrustScoreInput): TrustScore {
   // deduct nothing. That should not happen in normal flow, but we route such
   // orphans into the static bucket as a safe fallback so they still deduct
   // rather than vanish.
-  const externalScannerFindings = input.hasExternalScanner
+  const externalFindings = input.hasExternalScanner
     ? input.findings.filter((f) => f.source === "external")
     : [];
   const staticFindings = input.hasExternalScanner
     ? input.findings.filter((f) => f.source !== "external")
     : input.findings;
-  const externalFindings = externalScannerFindings;
 
   const breakdown: TrustScoreBreakdown = {
     healthCheck: scoreHealthCheck(input.healthCheckPassed),

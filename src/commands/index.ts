@@ -44,7 +44,7 @@ export { registerAuditCommand } from "./audit.js";
 export { registerUpdateCommand } from "./update.js";
 export { registerInitCommand, handleInit, STARTER_STACK } from "./init.js";
 export type { InitDeps, InitOptions } from "./init.js";
-export { registerImportCommand, handleImport, checkFirstRun } from "./import.js";
+export { registerImportCommand, handleImport } from "./import.js";
 export type { ImportDeps, ImportOptions } from "./import.js";
 export { registerServeCommand } from "./serve.js";
 export { handleToggleServer } from "./toggle.js";

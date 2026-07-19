@@ -124,7 +124,7 @@ import { detectInstalledClients as _detectClients } from "../config/detector.js"
 import { getConfigPath as _getConfigPath } from "../config/paths.js";
 import { removeInstalledServer as _removeFromStore } from "../store/servers.js";
 import { getAdapter as getAdapterDefault } from "../config/index.js";
-import { createConfirm } from "../utils/confirm.js";
+import { confirm } from "../utils/confirm.js";
 import { stdoutOutput } from "../utils/output.js";
 
 export function registerRemoveCommand(program: Command): void {
@@ -139,7 +139,7 @@ export function registerRemoveCommand(program: Command): void {
         getAdapter: getAdapterDefault,
         getConfigPath: _getConfigPath,
         removeFromStore: _removeFromStore,
-        confirm: createConfirm(),
+        confirm,
         output: stdoutOutput,
       };
 

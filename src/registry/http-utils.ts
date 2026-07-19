@@ -106,3 +106,69 @@ function concatChunks(chunks: Uint8Array[], total: number): Uint8Array {
   }
   return out;
 }
+
+/**
+ * FAIL-OPEN capped-body reader shared by the npm tripwires (npm-integrity.ts /
+ * npm-provenance.ts). Unlike readCappedBody (which THROWS a ValidationError on
+ * an over-cap / unparseable body), this returns `undefined` on ANY failure —
+ * over-cap Content-Length, over-cap stream, unreadable body, or non-JSON — so
+ * a tripwire can fail OPEN and never crash the command it guards.
+ *
+ * @param response - the fetch Response to read
+ * @param capBytes - hard byte cap for the body
+ */
+export async function readCappedJsonOrUndefined(
+  response: Response,
+  capBytes: number
+): Promise<unknown> {
+  // Guard on declared Content-Length first (fast path for huge responses).
+  const declared = response.headers?.get?.("content-length");
+  if (declared !== null && declared !== undefined) {
+    const len = Number(declared);
+    if (Number.isFinite(len) && len > capBytes) return undefined;
+  }
+
+  const body = response.body;
+  if (body && typeof body.getReader === "function") {
+    const text = await readCappedStreamOrUndefined(body, capBytes);
+    if (text === undefined) return undefined;
+    try {
+      return JSON.parse(text);
+    } catch {
+      return undefined;
+    }
+  }
+
+  // No readable stream (e.g. injected mock). The Content-Length guard above
+  // is our cap in this path.
+  try {
+    return await response.json();
+  } catch {
+    return undefined;
+  }
+}
+
+async function readCappedStreamOrUndefined(
+  body: ReadableStream<Uint8Array>,
+  capBytes: number
+): Promise<string | undefined> {
+  const reader = body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (value) {
+        total += value.byteLength;
+        if (total > capBytes) return undefined;
+        chunks.push(value);
+      }
+    }
+  } catch {
+    return undefined;
+  } finally {
+    await reader.cancel().catch(() => {});
+  }
+  return new TextDecoder().decode(concatChunks(chunks, total));
+}
