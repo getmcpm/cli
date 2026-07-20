@@ -15,9 +15,6 @@ export {
   ValidationError,
 } from "./errors.js";
 
-export { paginateServers } from "./pagination.js";
-export type { PaginateOptions } from "./pagination.js";
-
 export * from "./schemas.js";
 export * from "./types.js";
 

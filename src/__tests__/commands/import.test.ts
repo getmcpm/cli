@@ -14,9 +14,6 @@
  * - handleImport: --client filter limits to one client
  * - handleImport: user declines confirmation
  * - handleImport: all servers already tracked
- * - checkFirstRun: store exists → returns early (no output)
- * - checkFirstRun: store doesn't exist and servers found → shows hint
- * - checkFirstRun: store doesn't exist and no servers → silent (no output)
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
@@ -32,7 +29,6 @@ import { computeTrustScore } from "../../scanner/trust-score.js";
 
 import {
   handleImport,
-  checkFirstRun,
   type ImportDeps,
   type ImportOptions,
 } from "../../commands/import.js";
@@ -70,7 +66,6 @@ function makeDeps(overrides: Partial<ImportDeps> = {}): ImportDeps {
     getConfigPath: vi.fn().mockReturnValue("/fake/path/config.json"),
     getInstalledServers: vi.fn().mockResolvedValue([]),
     addToStore: vi.fn().mockResolvedValue(undefined),
-    storeExists: vi.fn().mockResolvedValue(false),
     confirm: vi.fn().mockResolvedValue(true),
     output: vi.fn(),
     // #23: use the real (pure) scanner + trust-score functions by default so
@@ -520,142 +515,6 @@ describe("handleImport — adapter errors", () => {
     const out = lines.join("\n");
     // Should still find cursor's servers
     expect(out).toContain("postgres");
-  });
-});
-
-// ---------------------------------------------------------------------------
-// checkFirstRun — store exists (early return)
-// ---------------------------------------------------------------------------
-
-describe("checkFirstRun — store exists", () => {
-  it("returns immediately without output when store already exists", async () => {
-    const outputMock = vi.fn();
-    const deps = makeDeps({
-      storeExists: vi.fn().mockResolvedValue(true),
-      detectClients: vi.fn(),
-      output: outputMock,
-    });
-    await checkFirstRun(deps);
-    expect(outputMock).not.toHaveBeenCalled();
-    expect(deps.detectClients).not.toHaveBeenCalled();
-  });
-
-  it("does not check for clients or adapters when store exists", async () => {
-    const detectClientsMock = vi.fn().mockResolvedValue(["claude-desktop"]);
-    const getAdapterMock = vi.fn();
-    const deps = makeDeps({
-      storeExists: vi.fn().mockResolvedValue(true),
-      detectClients: detectClientsMock,
-      getAdapter: getAdapterMock,
-    });
-    await checkFirstRun(deps);
-    expect(detectClientsMock).not.toHaveBeenCalled();
-    expect(getAdapterMock).not.toHaveBeenCalled();
-  });
-});
-
-// ---------------------------------------------------------------------------
-// checkFirstRun — store doesn't exist, servers found
-// ---------------------------------------------------------------------------
-
-describe("checkFirstRun — store doesn't exist, servers found", () => {
-  it("shows a hint message mentioning the count of servers", async () => {
-    const lines: string[] = [];
-    const deps = makeDeps({
-      storeExists: vi.fn().mockResolvedValue(false),
-      detectClients: vi.fn().mockResolvedValue(["claude-desktop"]),
-      getAdapter: vi.fn().mockReturnValue(
-        makeAdapter("claude-desktop", {
-          "filesystem": { command: "npx" },
-          "github": { command: "npx" },
-        })
-      ),
-      output: (t) => lines.push(t),
-    });
-    await checkFirstRun(deps);
-    const out = lines.join("\n");
-    expect(out).toMatch(/2/);
-    expect(out).toMatch(/mcp server/i);
-  });
-
-  it("shows a hint mentioning `mcpm import` command", async () => {
-    const lines: string[] = [];
-    const deps = makeDeps({
-      storeExists: vi.fn().mockResolvedValue(false),
-      detectClients: vi.fn().mockResolvedValue(["claude-desktop"]),
-      getAdapter: vi.fn().mockReturnValue(
-        makeAdapter("claude-desktop", { "filesystem": { command: "npx" } })
-      ),
-      output: (t) => lines.push(t),
-    });
-    await checkFirstRun(deps);
-    const out = lines.join("\n");
-    expect(out).toMatch(/mcpm import/);
-  });
-
-  it("does NOT auto-import — only shows the hint", async () => {
-    const addToStoreMock = vi.fn();
-    const deps = makeDeps({
-      storeExists: vi.fn().mockResolvedValue(false),
-      detectClients: vi.fn().mockResolvedValue(["claude-desktop"]),
-      getAdapter: vi.fn().mockReturnValue(
-        makeAdapter("claude-desktop", { "filesystem": { command: "npx" } })
-      ),
-      addToStore: addToStoreMock,
-    });
-    await checkFirstRun(deps);
-    expect(addToStoreMock).not.toHaveBeenCalled();
-  });
-
-  it("counts servers across multiple clients for the hint", async () => {
-    const lines: string[] = [];
-    const deps = makeDeps({
-      storeExists: vi.fn().mockResolvedValue(false),
-      detectClients: vi.fn().mockResolvedValue(["claude-desktop", "cursor"]),
-      getAdapter: vi.fn().mockImplementation((clientId: ClientId) => {
-        if (clientId === "claude-desktop") {
-          return makeAdapter("claude-desktop", {
-            "filesystem": { command: "npx" },
-            "github": { command: "npx" },
-          });
-        }
-        return makeAdapter("cursor", { "postgres": { command: "npx" } });
-      }),
-      output: (t) => lines.push(t),
-    });
-    await checkFirstRun(deps);
-    const out = lines.join("\n");
-    // 3 total servers across two clients
-    expect(out).toMatch(/3/);
-  });
-});
-
-// ---------------------------------------------------------------------------
-// checkFirstRun — store doesn't exist, no servers
-// ---------------------------------------------------------------------------
-
-describe("checkFirstRun — store doesn't exist, no servers", () => {
-  it("produces no output when no servers are found on first run", async () => {
-    const outputMock = vi.fn();
-    const deps = makeDeps({
-      storeExists: vi.fn().mockResolvedValue(false),
-      detectClients: vi.fn().mockResolvedValue(["claude-desktop"]),
-      getAdapter: vi.fn().mockReturnValue(makeAdapter("claude-desktop", {})),
-      output: outputMock,
-    });
-    await checkFirstRun(deps);
-    expect(outputMock).not.toHaveBeenCalled();
-  });
-
-  it("produces no output when no clients are detected on first run", async () => {
-    const outputMock = vi.fn();
-    const deps = makeDeps({
-      storeExists: vi.fn().mockResolvedValue(false),
-      detectClients: vi.fn().mockResolvedValue([]),
-      output: outputMock,
-    });
-    await checkFirstRun(deps);
-    expect(outputMock).not.toHaveBeenCalled();
   });
 });
 

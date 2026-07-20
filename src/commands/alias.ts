@@ -7,8 +7,7 @@
  *   mcpm alias --list
  *   mcpm alias --remove fs
  *
- * Aliases are stored in ~/.mcpm/aliases.json and resolved automatically
- * in install, info, remove, enable, and disable commands.
+ * Aliases are stored in ~/.mcpm/aliases.json.
  */
 
 import { Command } from "commander";

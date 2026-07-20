@@ -30,7 +30,7 @@ export interface ListOptions {
 
 export interface ListDeps {
   detectClients: () => Promise<ClientId[]>;
-  getAdapter: (clientId: ClientId) => Pick<ConfigAdapter, "read" | "addServer" | "removeServer">;
+  getAdapter: (clientId: ClientId) => Pick<ConfigAdapter, "read">;
   getPath: (clientId: ClientId) => string;
   output: (text: string) => void;
 }
@@ -134,28 +134,16 @@ export function registerList(program: Command): void {
   program
     .command("list")
     .description("List all installed MCP servers across detected AI clients")
-    .option("--client <id>", "Filter output to a single client (claude-desktop, cursor, vscode, windsurf)")
+    .option("--client <id>", "Filter output to a single client (claude-desktop, claude-code, cursor, vscode, windsurf, gemini-cli)")
     .option("--json", "Output raw JSON instead of a formatted table")
     .action(async (opts: { client?: string; json?: boolean }) => {
-      const { detectInstalledClients } = await import("../config/detector.js");
-      const { getConfigPath } = await import("../config/paths.js");
-      const { ClaudeDesktopAdapter } = await import("../config/adapters/claude-desktop.js");
-      const { CursorAdapter } = await import("../config/adapters/cursor.js");
-      const { VSCodeAdapter } = await import("../config/adapters/vscode.js");
-      const { WindsurfAdapter } = await import("../config/adapters/windsurf.js");
-
-      const adapterMap = new Map<ClientId, ConfigAdapter>([
-        ["claude-desktop", new ClaudeDesktopAdapter()],
-        ["cursor", new CursorAdapter()],
-        ["vscode", new VSCodeAdapter()],
-        ["windsurf", new WindsurfAdapter()],
-      ]);
+      const { detectInstalledClients, getConfigPath, getAdapter } = await import("../config/index.js");
 
       await handleList(
         { client: opts.client, json: opts.json },
         {
           detectClients: detectInstalledClients,
-          getAdapter: (clientId) => adapterMap.get(clientId) as ConfigAdapter,
+          getAdapter,
           getPath: getConfigPath,
           output: stdoutOutput,
         }

@@ -772,7 +772,7 @@ import { scanTier1 as _scanTier1 } from "../scanner/tier1.js";
 import { checkScannerAvailable as _checkScannerAvailable, scanTier2 as _scanTier2 } from "../scanner/tier2.js";
 import { computeTrustScore as _computeTrustScore } from "../scanner/trust-score.js";
 import { getAdapter as getAdapterDefault } from "../config/index.js";
-import { createConfirm } from "../utils/confirm.js";
+import { confirm } from "../utils/confirm.js";
 import { stdoutOutput } from "../utils/output.js";
 
 async function promptEnvVarsDefault(
@@ -888,7 +888,7 @@ export function registerInstallCommand(program: Command): void {
         scanTier2: (serverName: string) => _scanTier2(serverName),
         computeTrustScore: _computeTrustScore,
         addToStore: _addToStore,
-        confirm: createConfirm(),
+        confirm,
         promptEnvVars: promptEnvVarsDefault,
         output: stdoutOutput,
         setSecrets: _setSecrets,

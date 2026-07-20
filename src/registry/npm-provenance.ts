@@ -25,6 +25,7 @@ import type {
   ProvenanceIdentity,
 } from "../stack/schema.js";
 import { NpmProvenanceSnapshotSchema } from "../stack/schema.js";
+import { readCappedJsonOrUndefined } from "./http-utils.js";
 
 export type { NpmProvenanceSnapshot, ProvenanceIdentity } from "../stack/schema.js";
 
@@ -102,7 +103,7 @@ export async function fetchNpmProvenance(
     if (response.status >= 300 && response.status < 400) return undefined;
     if (!response.ok) return undefined;
 
-    const raw = await readCappedJson(response);
+    const raw = await readCappedJsonOrUndefined(response, BODY_CAP_BYTES);
     if (raw === undefined) return undefined; // oversize / unreadable body → fail-open
 
     const identity = extractIdentity(raw);
@@ -158,61 +159,6 @@ export async function fetchNpmProvenance(
   } catch {
     return undefined;
   }
-}
-
-// ---------------------------------------------------------------------------
-// Capped body reader (mirrors npm-integrity.ts)
-// ---------------------------------------------------------------------------
-
-async function readCappedJson(response: Response): Promise<unknown> {
-  const declared = response.headers?.get?.("content-length");
-  if (declared !== null && declared !== undefined) {
-    const len = Number(declared);
-    if (Number.isFinite(len) && len > BODY_CAP_BYTES) return undefined;
-  }
-  const body = response.body;
-  if (body && typeof body.getReader === "function") {
-    const text = await readCappedStream(body);
-    if (text === undefined) return undefined;
-    try {
-      return JSON.parse(text);
-    } catch {
-      return undefined;
-    }
-  }
-  try {
-    return await response.json();
-  } catch {
-    return undefined;
-  }
-}
-
-async function readCappedStream(body: ReadableStream<Uint8Array>): Promise<string | undefined> {
-  const reader = body.getReader();
-  const chunks: Uint8Array[] = [];
-  let total = 0;
-  try {
-    for (;;) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      if (value) {
-        total += value.byteLength;
-        if (total > BODY_CAP_BYTES) return undefined;
-        chunks.push(value);
-      }
-    }
-  } catch {
-    return undefined;
-  } finally {
-    await reader.cancel().catch(() => {});
-  }
-  const out = new Uint8Array(total);
-  let offset = 0;
-  for (const chunk of chunks) {
-    out.set(chunk, offset);
-    offset += chunk.byteLength;
-  }
-  return new TextDecoder().decode(out);
 }
 
 // ---------------------------------------------------------------------------

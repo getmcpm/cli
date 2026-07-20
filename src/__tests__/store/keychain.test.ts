@@ -49,10 +49,10 @@ describe("keychain store", () => {
   });
 
   it("lists secret keys without revealing values", async () => {
-    const { setSecret, listSecretKeys } = await import("../../store/keychain.js");
+    const { setSecret, listAll } = await import("../../store/keychain.js");
     await setSecret("my-server", "API_KEY", "v1");
     await setSecret("my-server", "TOKEN", "v2");
-    const keys = await listSecretKeys("my-server");
+    const keys = (await listAll())["my-server"];
     expect(keys).toContain("API_KEY");
     expect(keys).toContain("TOKEN");
     expect(keys.length).toBe(2);

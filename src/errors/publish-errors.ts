@@ -7,20 +7,9 @@
 // before interpolating into user-facing error output.
 const stripAnsi = (s: string) => s.replace(/[\x00-\x1F\x7F]|\x1B\[[0-9;]*m/g, "");
 
-export class PublishError extends Error {
-  constructor(
-    public readonly code: string,
-    message: string
-  ) {
-    super(message);
-    this.name = "PublishError";
-  }
-}
-
 export const PublishErrors = {
-  manifestNotFound(): PublishError {
-    return new PublishError(
-      "MANIFEST_NOT_FOUND",
+  manifestNotFound(): Error {
+    return new Error(
       [
         "mcpm publish: No .mcpm-publish.yaml found in this directory.",
         "  Cause: The publish manifest has not been created yet.",
@@ -32,12 +21,11 @@ export const PublishErrors = {
   /** Pass blocking findings — callers pre-filter. Includes exfil-arg mediums (issue #24). */
   trustGateBlocked(
     findings: Array<{ severity: "critical" | "high" | "medium" | "low"; message: string }>
-  ): PublishError {
+  ): Error {
     const list = findings
       .map((f) => `    [${f.severity.toUpperCase()}] ${stripAnsi(f.message)}`)
       .join("\n");
-    return new PublishError(
-      "TRUST_GATE_BLOCKED",
+    return new Error(
       [
         "mcpm publish: Security findings block submission.",
         "  Cause: The server has critical/high findings, or data-exfiltration-shaped arguments.",
@@ -47,9 +35,8 @@ export const PublishErrors = {
     );
   },
 
-  registryApiUnavailable(): PublishError {
-    return new PublishError(
-      "REGISTRY_API_UNAVAILABLE",
+  registryApiUnavailable(): Error {
+    return new Error(
       [
         "mcpm publish: The official registry publish API is not yet available.",
         "  Cause: registry.modelcontextprotocol.io does not yet accept CLI submissions.",
@@ -58,9 +45,8 @@ export const PublishErrors = {
     );
   },
 
-  tokenRequired(): PublishError {
-    return new PublishError(
-      "TOKEN_REQUIRED",
+  tokenRequired(): Error {
+    return new Error(
       [
         "mcpm publish: GitHub authentication required.",
         "  Cause: No GitHub token found in environment.",

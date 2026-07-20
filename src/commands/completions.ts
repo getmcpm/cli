@@ -12,6 +12,7 @@
 
 import { Command } from "commander";
 import chalk from "chalk";
+import { CLIENT_IDS } from "../config/paths.js";
 import { stdoutOutput } from "../utils/output.js";
 
 // ---------------------------------------------------------------------------
@@ -40,8 +41,6 @@ export const SUBCOMMANDS = [
 export const GUARD_SUBCOMMANDS =
   "enable disable status demo accept-drift mute unmute pause cleanup list-signatures doctor-confine reset-integrity run";
 export const SECRETS_SUBCOMMANDS = "set get list rm migrate";
-
-const CLIENT_IDS = ["claude-desktop", "claude-code", "cursor", "vscode", "windsurf", "gemini-cli"];
 
 function bashScript(): string {
   return `# mcpm bash completions

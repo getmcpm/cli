@@ -24,7 +24,7 @@ import path from "path";
 import lockfile from "proper-lockfile";
 import { writeJson, readJson, _resetCachedStorePath } from "../../store/index.js";
 import { withStoreLock } from "../../store/atomic.js";
-import { setSecret, getSecret, listSecretKeys } from "../../store/keychain.js";
+import { setSecret, getSecret, listAll } from "../../store/keychain.js";
 
 const realHomedir = os.homedir;
 let home: string;
@@ -146,7 +146,7 @@ describe("withStoreLock — locking around read-modify-write", () => {
     await setSecret("srv", "B", "valueB");
     await setSecret("srv", "C", "valueC");
 
-    const keys = (await listSecretKeys("srv")).sort();
+    const keys = (await listAll())["srv"].sort();
     expect(keys).toEqual(["A", "B", "C"]);
     expect(await getSecret("srv", "A")).toBe("valueA");
     expect(await getSecret("srv", "C")).toBe("valueC");

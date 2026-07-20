@@ -373,7 +373,7 @@ export function registerAuditCommand(program: Command): void {
       const { getAdapter } = await import("../config/index.js");
       const { getConfigPath } = await import("../config/paths.js");
       const { removeInstalledServer } = await import("../store/servers.js");
-      const { createConfirm } = await import("../utils/confirm.js");
+      const { confirm } = await import("../utils/confirm.js");
 
       const client = new RegistryClient();
 
@@ -388,7 +388,7 @@ export function registerAuditCommand(program: Command): void {
         getAdapter,
         getConfigPath,
         removeFromStore: removeInstalledServer,
-        confirm: createConfirm(),
+        confirm,
       };
 
       const exitCode = await handleAudit(

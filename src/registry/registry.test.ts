@@ -20,7 +20,6 @@ import {
   NotFoundError,
   ValidationError,
 } from "./errors.js";
-import { paginateServers } from "./pagination.js";
 import type { SearchResult, ServerEntry, ServerVersion } from "./types.js";
 
 // Real captured /v0.1/servers?search=filesystem payload (10 servers; named -i/--rm
@@ -798,100 +797,6 @@ describe("RegistryClient — immutability", () => {
     const result2 = await client.searchServers("test");
 
     expect(result1.servers).not.toBe(result2.servers);
-  });
-});
-
-// ---------------------------------------------------------------------------
-// paginateServers — async generator
-// ---------------------------------------------------------------------------
-
-describe("paginateServers — async generator", () => {
-  it("yields all servers from a single page (no nextCursor)", async () => {
-    const fetchImpl = mockFetch(
-      makeSearchResponse([makeServerEntry(), makeServerEntry()], undefined, 2)
-    );
-    const client = new RegistryClient({ fetchImpl });
-
-    const results: ServerEntry[] = [];
-    for await (const entry of paginateServers(client, "test")) {
-      results.push(entry);
-    }
-
-    expect(results).toHaveLength(2);
-  });
-
-  it("follows nextCursor across multiple pages", async () => {
-    const page1 = makeSearchResponse(
-      [makeServerEntry()],
-      "cursor-page-2",
-      2
-    );
-    const page2 = makeSearchResponse([makeServerEntry()], undefined, 2);
-
-    const fetchImpl = vi
-      .fn()
-      .mockResolvedValueOnce({ ok: true, status: 200, json: vi.fn().mockResolvedValue(page1) })
-      .mockResolvedValueOnce({ ok: true, status: 200, json: vi.fn().mockResolvedValue(page2) });
-
-    const client = new RegistryClient({ fetchImpl });
-
-    const results: ServerEntry[] = [];
-    for await (const entry of paginateServers(client, "test")) {
-      results.push(entry);
-    }
-
-    expect(results).toHaveLength(2);
-    expect(fetchImpl).toHaveBeenCalledTimes(2);
-  });
-
-  it("stops after three pages even if nextCursor keeps appearing (safety limit)", async () => {
-    // Always returns a nextCursor to simulate infinite pagination
-    const infinitePage = makeSearchResponse(
-      [makeServerEntry()],
-      "always-has-next",
-      9999
-    );
-    const fetchImpl = vi.fn().mockResolvedValue({
-      ok: true,
-      status: 200,
-      json: vi.fn().mockResolvedValue(infinitePage),
-    });
-
-    const client = new RegistryClient({ fetchImpl });
-
-    const results: ServerEntry[] = [];
-    for await (const entry of paginateServers(client, "test", { maxPages: 3 })) {
-      results.push(entry);
-    }
-
-    expect(fetchImpl).toHaveBeenCalledTimes(3);
-    expect(results).toHaveLength(3);
-  });
-
-  it("yields zero items on empty response", async () => {
-    const fetchImpl = mockFetch(makeSearchResponse([]));
-    const client = new RegistryClient({ fetchImpl });
-
-    const results: ServerEntry[] = [];
-    for await (const entry of paginateServers(client, "zzz")) {
-      results.push(entry);
-    }
-
-    expect(results).toHaveLength(0);
-    expect(fetchImpl).toHaveBeenCalledTimes(1);
-  });
-
-  it("propagates RegistryError thrown by client", async () => {
-    const fetchImpl = mockFetch({ error: "server error" }, 500);
-    const client = new RegistryClient({ fetchImpl });
-
-    async function drain() {
-      for await (const _ of paginateServers(client, "test")) {
-        // drain
-      }
-    }
-
-    await expect(drain()).rejects.toThrow(RegistryError);
   });
 });
 

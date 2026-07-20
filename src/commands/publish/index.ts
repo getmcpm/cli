@@ -77,7 +77,6 @@ export function registerPublishCommand(program: Command): void {
         {
           readManifest,
           scanTier1,
-          computeTrustScore,
           submitToRegistry,
           getToken: getTokenFromEnv,
           output: stdoutOutput,

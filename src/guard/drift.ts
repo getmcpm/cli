@@ -18,6 +18,7 @@
 import type { JSONRPCMessage } from "@modelcontextprotocol/sdk/types.js";
 import type { InspectFinding, InspectResult } from "./types.js";
 import { defaultActionForFinding, ACTION_RANK } from "./patterns.js";
+import { sanitizeForTerminal } from "./sanitize.js";
 import {
   PinsIntegrityError,
   hashToolDefinition,
@@ -89,11 +90,7 @@ export function classifyDrift(pinned: PinEntry, liveFields: FieldHashes): DriftC
 
 /** Strip control + ANSI escape sequences from tool/server names (security F9). */
 function sanitizeLabel(s: string): string {
-  // eslint-disable-next-line no-control-regex
-  return s.replace(/\x1B(?:[@-Z\\\-_]|\[[0-9;]*[a-zA-Z])/g, "")
-    // eslint-disable-next-line no-control-regex
-    .replace(/[\x00-\x1F\x7F\x80-\x9F]/g, "")
-    .slice(0, 128);
+  return sanitizeForTerminal(s, 128);
 }
 
 /** Safe pin lookup using Object.hasOwn — defeats `__proto__` / `constructor` shenanigans (security F13). */
@@ -321,24 +318,7 @@ export async function inspectForDrift(
     // would let a tampered pins.json (matched-back sidecar from a same-user
     // attacker) silently disable drift detection. Transient I/O errors fail
     // open since they're recoverable.
-    if (err instanceof PinsIntegrityError) {
-      return {
-        action: "block",
-        findings: [
-          {
-            signature_id: "pins-integrity-failure",
-            category: "OWASP-MCP-1",
-            severity: "critical",
-            target: "tool_description",
-            matched_text_excerpt: "pins.json integrity check failed",
-            remediation:
-              "Schema-drift enforcement is offline. Review ~/.mcpm/pins.json " +
-              "for unauthorized edits, then run `mcpm guard reset-integrity` to " +
-              "re-acknowledge the file contents.",
-          },
-        ],
-      };
-    }
+    if (err instanceof PinsIntegrityError) return pinsIntegrityBlock();
     return { action: "pass", findings: [] };
   }
 
@@ -437,11 +417,7 @@ export async function inspectForDrift(
 // H5: async initialize-handshake capture + cross-session warn-once dedup
 // ---------------------------------------------------------------------------
 
-export interface HandshakeDriftDeps {
-  readonly read: () => Promise<PinsFile>;
-  readonly write: (pins: PinsFile) => Promise<void>;
-  readonly signatureListVersion: string;
-}
+export type HandshakeDriftDeps = DriftCheckDeps;
 
 interface InitializeResult {
   capabilities?: unknown;

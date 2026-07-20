@@ -177,16 +177,9 @@ function renderVerifyText(model: VerifyModel, output: (text: string) => void): v
 // ---------------------------------------------------------------------------
 
 import { Command } from "commander";
-import chalk from "chalk";
 import { parseLockFile } from "../stack/schema.js";
 import { fetchNpmIntegrity as _fetchNpmIntegrity } from "../registry/npm-integrity.js";
-
-function coloredOutput(text: string): void {
-  if (text.startsWith("  ✓")) console.log(chalk.green(text));
-  else if (text.startsWith("  ✗")) console.log(chalk.red(text));
-  else if (text.startsWith("  ⚠")) console.log(chalk.yellow(text));
-  else console.log(text);
-}
+import { coloredOutput } from "../utils/output.js";
 
 export function registerVerifyCommand(program: Command): void {
   program

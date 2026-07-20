@@ -45,11 +45,3 @@ export async function removeAlias(alias: string): Promise<void> {
     await writeJson(FILENAME, remaining);
   });
 }
-
-/**
- * Resolves an alias to a server name. Returns the input if no alias exists.
- */
-export async function resolveAlias(nameOrAlias: string): Promise<string> {
-  const aliases = await getAliases();
-  return aliases[nameOrAlias] ?? nameOrAlias;
-}
