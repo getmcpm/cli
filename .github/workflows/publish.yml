@@ -4,6 +4,13 @@ on:
   push:
     tags: ['v*']
 
+# Least-privilege default for the workflow. The publish job below explicitly
+# opts into exactly what it needs (contents: write for the GitHub Release,
+# id-token: write for npm provenance), which fully overrides this default for
+# that job — so publishing is unaffected; any other/future step defaults to read.
+permissions:
+  contents: read
+
 jobs:
   publish:
     runs-on: ubuntu-latest
