@@ -239,10 +239,17 @@ hosted CI runner (where `mcpm up` cannot).
 `mcpm lock` also records each npm server's **published provenance identity** (the
 source repo + immutable GitHub repo/owner ids behind the build) and WARNs when it
 drifts across versions — a repo/owner change or a signed→unsigned drop, the shape
-of a hijacked-publish (Postmark) attack. This is a **parse-only, report-only**
-advisory over npm's published attestation record: `attested` means an *unverified*
-registry record — build **identity, not safety** — and it never says "verified"
-(cryptographic Sigstore verification is a separate, opt-in follow-up).
+of a hijacked-publish (Postmark) attack.
+
+`mcpm lock` and `mcpm why` additionally **cryptographically verify** the provenance
+**offline** — the attestation's Sigstore bundle is checked against a vendored trust
+root (no network at verify time), and the attested subject digest is bound to the
+package's `dist.integrity`, so a valid attestation for a *different* tarball can't
+pass. When it holds, the record reads `verified`; otherwise `attested` — an
+*unverified* registry record — or `unsigned` (neutral). Report-only, and honest
+about scope: `verified` means the **build identity** is cryptographically attested
+by the CI's OIDC token — **not** that the code is safe (a same-repo CI compromise
+mints a valid attestation).
 
 ```yaml
 # .github/workflows/mcpm.yml

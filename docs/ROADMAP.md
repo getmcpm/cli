@@ -48,7 +48,7 @@
 >   was built from scratch (#108) and effort was **XL, not L**. Deferred: Linux bwrap, the strict tier,
 >   orig-hash Phase-2 fail-closed, and the per-server `guard confine <server>` command (achievable today
 >   via `enable --confine --server X` + `disable --server X`).
-> - **Next up:** the F8 crypto slice (@sigstore offline verify — its own dep sign-off gate) · F9 PR2 (login-PATH probe) · then F10 block-tier + Detector-C. (F8 slice 1 npm provenance-identity drift [parse-only] shipped v0.22.0; F9 PR1 doctor plaintext-secret scan shipped v0.21.0; F10 Detector-A + B shipped v0.20.0.)
+> - **Next up:** F8 verify-time re-check (`mcpm verify` / `up --frozen`) · F9 PR2 (login-PATH probe) · then F10 block-tier + Detector-C. (F8 CRYPTO slice [offline @sigstore verify — "verified"] shipped v0.23.0; F8 slice 1 provenance-identity drift [parse-only] shipped v0.22.0; F9 PR1 doctor plaintext-secret scan shipped v0.21.0; F10 Detector-A + B shipped v0.20.0.)
 >
 > This roadmap was produced by a grounded research-and-planning pass: six parallel
 > web-research lenses (threat landscape, competitors, MCP protocol evolution, DevX,
