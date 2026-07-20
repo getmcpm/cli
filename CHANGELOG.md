@@ -2,6 +2,44 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.23.0] - 2026-07-20
+
+Offline cryptographic verification of npm provenance (F8 crypto slice).
+
+### Added
+
+- **Offline Sigstore verification of npm provenance** — `mcpm lock` and `mcpm why`
+  now cryptographically verify a package's SLSA provenance **offline**: the
+  attestation's Sigstore bundle is checked against a vendored, authenticity-verified
+  trust root (no Rekor/Fulcio network call — the bundle inlines the transparency-log
+  entry and certificate chain). A record reads `verified` only when **all** hold:
+  the signature + Fulcio chain + SCT + Rekor inclusion verify, the signer's OIDC
+  issuer is GitHub Actions, and the attested subject digest binds to **every**
+  `sha512` entry of the package's `dist.integrity` (so a valid attestation for a
+  *different* tarball cannot pass). The reported build identity is derived from the
+  unforgeable signing certificate, not the self-claimed payload.
+
+  Uses three focused `@sigstore` packages (verify / bundle / protobuf-specs; no
+  foreign transitive dependencies) and raises the Node floor to `>=22.9.0`.
+  **Report-only**, and honest about scope: `verified` means the *build identity* is
+  cryptographically attested by the CI's OIDC token — **not** that the code is safe.
+  The `mcpm why` Provenance section now renders this verdict.
+
+### Changed
+
+- Removed ~871 lines of dead code and duplication across the repo (two unused
+  modules, several unused functions/fields, and behavior-identical consolidations),
+  and fixed a bug the cleanup surfaced: `mcpm list` had silently omitted the
+  Claude Code and Gemini CLI clients.
+
+### CI
+
+- The release pipeline now **dogfoods the packed artifact before publishing**:
+  it packs the tarball, installs it into a clean project, and smoke-runs the real
+  `mcpm` binary — failing the release *before* publish if the shipped bytes are
+  broken (so a bad `bin`, an unresolved dependency, an engines mismatch, or an
+  un-bundled asset can never reach npm).
+
 ## [0.22.0] - 2026-07-18
 
 `mcpm lock` gains npm provenance-identity drift detection (F8 · slice 1).
