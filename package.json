@@ -21,6 +21,7 @@
     "typecheck": "tsc --noEmit",
     "clean": "rm -rf dist coverage",
     "dogfood:confine": "pnpm build && bash scripts/dogfood-confine.sh",
+    "dogfood:release": "bash scripts/dogfood-release.sh",
     "prepublishOnly": "npm run build"
   },
   "keywords": [

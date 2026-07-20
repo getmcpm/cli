@@ -34,6 +34,14 @@ jobs:
       - run: pnpm run build
       - run: pnpm run test
 
+      # PRE-PUBLISH GATE: pack the tarball, install it into a clean project, and
+      # smoke-run the real `mcpm` binary. Source tests pass on a broken pack —
+      # this exercises the exact bytes users get (bin, files:["dist"], prod dep
+      # resolution + engines, the bundled Sigstore trusted root, lazy imports).
+      # Fail-closed: a broken artifact aborts here, before `pnpm publish`.
+      - name: Dogfood the packed artifact (pre-publish gate)
+        run: pnpm run dogfood:release
+
       - run: pnpm publish --no-git-checks --provenance
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
