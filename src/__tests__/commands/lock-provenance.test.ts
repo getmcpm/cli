@@ -283,6 +283,22 @@ describe("handleLock — provenance-identity drift (report-only)", () => {
     expect(outputText(deps)).toMatch(/verification downgraded/i);
   });
 
+  it("downgrade warn ALSO fires when the new version's attestation is unsupported (anchorless shape)", async () => {
+    const prevVerified: NpmProvenanceSnapshot = {
+      npmVersion: "0.9.0",
+      status: "attested",
+      mode: "registry-record",
+      identity: { sourceRepo: "https://github.com/a/b" },
+      verification: { outcome: "verified", signerSan: "https://github.com/a/b/.github/workflows/x.yml@refs/tags/v1", signerIssuer: "https://token.actions.githubusercontent.com" },
+    };
+    const deps = makeDeps(entry(), {
+      fetchNpmProvenance: vi.fn().mockResolvedValue({ npmVersion: "1.0.0", status: "unsupported", mode: "registry-record" } as NpmProvenanceSnapshot),
+      readExistingLock: vi.fn().mockResolvedValue(prevLockWith(prevVerified)),
+    });
+    await handleLock({ stackFile: await writeTempStack() }, deps);
+    expect(outputText(deps)).toMatch(/verification downgraded/i);
+  });
+
   it("sanitizes ANSI/OSC in a drift warning's repo label (warning can't become an injection carrier)", async () => {
     const evil = "https://github.com/a/b\u001b]0;pwn\u0007\u001b[2K";
     const deps = makeDeps(entry(), {

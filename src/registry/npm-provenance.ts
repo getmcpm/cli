@@ -308,16 +308,19 @@ export function compareProvenance(
   if (next.status === "unsigned") return "signed-to-unsigned";
   if (next.status !== "attested") return "none"; // unsupported this run → not comparable
 
-  // Namespace guard (drives off OUR verdict, NOT an attacker-forgeable payload field):
-  // a crypto-`verified` snapshot's `identity` is SAN-derived (sourceRepo = the CALLED
-  // reusable workflow's repo, no repositoryId), while a parse-only snapshot's is
-  // payload-derived (the CALLER's repo, WITH a repositoryId). Comparing those two
-  // directly false-positives for any reusable-workflow publish. So when the two
-  // derivations differ, compare the PAYLOAD tuple of each side instead (a verified
-  // snapshot retains it as `payloadIdentity`; a parse-only one carries it as `identity`)
-  // — that stays in one namespace and still catches an attested-only → verified-by-a-
-  // DIFFERENT-publisher swap (the Postmark shape), which a naive SAN-vs-payload guard
-  // would silence. "verified" is unforgeable, so this can't be gamed to dodge drift.
+  // Namespace guard: the DERIVATION selector drives off OUR verdict (verification.outcome,
+  // unforgeable — a real crypto pass), but the COMPARED CONTENTS are the parse-only PAYLOAD
+  // tuple, which is attacker-forgeable (the same honesty boundary as slice 1). A
+  // crypto-`verified` snapshot's `identity` is SAN-derived (sourceRepo = the CALLED reusable
+  // workflow's repo, no repositoryId) while a parse-only snapshot's is payload-derived (the
+  // CALLER's repo, WITH a repositoryId) — comparing those directly false-positives for any
+  // reusable-workflow publish. So when derivations differ, compare the PAYLOAD tuple of each
+  // side (a verified snapshot retains it as `payloadIdentity`, a parse-only one as `identity`):
+  // that stays in one namespace and catches a TRUTHFUL attested-only → verified-by-a-
+  // DIFFERENT-publisher swap (the Postmark shape). HONESTY: an attacker who FORGES the
+  // payload's workflow.repository to the victim's prior repo can silence THIS advisory warn;
+  // it is a tamper-EVIDENCE tripwire, not proof. (The enforcing F8 gate is unaffected — it
+  // never trusted a payload field.)
   const prevSan = prev.verification?.outcome === "verified";
   const nextSan = next.verification?.outcome === "verified";
   if (prevSan !== nextSan) {
