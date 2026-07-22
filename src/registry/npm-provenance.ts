@@ -303,6 +303,18 @@ export function compareProvenance(
   if (next.status === "unsigned") return "signed-to-unsigned";
   if (next.status !== "attested") return "none"; // unsupported this run → not comparable
 
+  // Namespace guard (drives off OUR verdict, NOT an attacker-forgeable payload field):
+  // a crypto-`verified` snapshot's identity is SAN-derived (sourceRepo = the CALLED
+  // reusable workflow's repo, no repositoryId), while a parse-only snapshot's is
+  // payload-derived (the CALLER's repo, WITH a repositoryId). Their sourceRepos
+  // legitimately differ for any reusable-workflow publish, so comparing across
+  // derivations would false-positive. Only compare identities from the SAME derivation;
+  // "verified" is unforgeable (it requires a real crypto pass), so it can't be gamed to
+  // dodge drift. Same-derivation drift (SAN↔SAN, payload↔payload) is still detected.
+  const prevSan = prev.verification?.outcome === "verified";
+  const nextSan = next.verification?.outcome === "verified";
+  if (prevSan !== nextSan) return "none";
+
   return identityChanged(prev.identity, next.identity) ? "identity-drift" : "none";
 }
 
@@ -315,13 +327,8 @@ function identityChanged(
   b: ProvenanceIdentity | undefined
 ): boolean {
   if (a === undefined || b === undefined) return false; // can't tell → not a drift
-  // A repositoryId present on EXACTLY ONE side means the two identities were derived
-  // differently and live in different namespaces: a crypto-`verified` identity is
-  // SAN-derived (sourceRepo = the CALLED reusable workflow's repo, no repositoryId),
-  // while a parse-only identity is payload-derived (sourceRepo = the CALLER's repo, WITH
-  // a repositoryId). Their sourceRepos legitimately differ for any reusable-workflow
-  // publish, so a normRepo comparison would false-positive. Incomparable → not a drift.
-  if ((a.repositoryId === undefined) !== (b.repositoryId === undefined)) return false;
+  // (Cross-derivation SAN-vs-payload pairs are filtered by compareProvenance's namespace
+  // guard before reaching here, so both identities are same-derivation.)
   // Prefer immutable numeric ids (survive repo renames / org display changes).
   if (a.repositoryId !== undefined && b.repositoryId !== undefined) {
     // Compare owner ids only when BOTH are present — an asymmetrically-absent

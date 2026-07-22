@@ -204,15 +204,28 @@ describe("compareProvenance — drift classifier (report-only)", () => {
     expect(compareProvenance(a, other)).toBe("identity-drift");
   });
 
-  it("a repositoryId on EXACTLY ONE side is cross-namespace (SAN- vs payload-derived) → NOT drift", () => {
-    // SAN-derived (crypto-verified) identity: sourceRepo = the reusable workflow's repo,
-    // NO repositoryId. Payload-derived (parse-only) identity: caller repo, WITH repositoryId.
-    // For a reusable-workflow publish these sourceRepos differ legitimately — comparing
-    // them must NOT false-positive as drift.
-    const sanDerived = snap({ identity: { sourceRepo: "https://github.com/shared/reusable-wf" } });
-    const payloadDerived = snap({ identity: { repositoryId: "1", repositoryOwnerId: "9", sourceRepo: "https://github.com/caller/pkg" } });
-    expect(compareProvenance(sanDerived, payloadDerived)).toBe("none");
-    expect(compareProvenance(payloadDerived, sanDerived)).toBe("none");
+  it("a crypto-VERIFIED (SAN-derived) snapshot vs a parse-only attested one is cross-namespace → NOT drift", () => {
+    // Cross-namespace is decided by OUR verdict (verified ⟹ SAN-derived identity), not an
+    // attacker-forgeable payload field. A verified baseline (SAN = reusable-workflow repo)
+    // vs a parse-only fresh read (payload = caller repo) differ legitimately for reusable
+    // workflows — must NOT read as drift.
+    const verifiedSan = snap({
+      identity: { sourceRepo: "https://github.com/shared/reusable-wf" },
+      verification: {
+        outcome: "verified",
+        signerSan: "https://github.com/shared/reusable-wf/.github/workflows/x.yml@refs/tags/v1",
+        signerIssuer: "https://token.actions.githubusercontent.com",
+      },
+    });
+    const parseOnly = snap({ identity: { repositoryId: "1", repositoryOwnerId: "9", sourceRepo: "https://github.com/caller/pkg" } });
+    expect(compareProvenance(verifiedSan, parseOnly)).toBe("none");
+    expect(compareProvenance(parseOnly, verifiedSan)).toBe("none"); // improvement direction too
+  });
+
+  it("SAME-namespace payload drift is STILL detected (both parse-only, asymmetric repoId, different repos)", () => {
+    const a = snap({ identity: { repositoryId: "1", sourceRepo: "https://github.com/good/pkg" } });
+    const b = snap({ identity: { sourceRepo: "https://github.com/evil/pkg" } }); // no repoId, different repo
+    expect(compareProvenance(a, b)).toBe("identity-drift");
   });
 });
 

@@ -375,48 +375,44 @@ async function resolveServer(
     );
   }
 
-  // F8: keep a known-good baseline STICKY across a fresh read that is transient or
-  // worse-than-verified for the SAME immutable coordinate + identifier. One bad run
-  // must not ERASE the recorded baseline — NOR silently DOWNGRADE a crypto-`verified`
-  // one, which would DROP the server from the F8 verify-time checked set (a silent
-  // disarm). Crypto NEVER throws, so a failure surfaces as verification.outcome ===
-  // "could-not-verify" (a present block) — the common regression/attack shape — or, if
-  // the body no longer parses, status "unsupported"; verification === undefined is only
-  // an @sigstore import miss. All are caught. Carrying keeps the verified baseline armed
-  // so the NEXT `mcpm verify`/`up --frozen` hard-blocks it instead of passing vacuously.
-  //
-  // NO identity gate on the carry: a crypto-regressed fresh snapshot's identity is
-  // PARSE-ONLY (caller repo, forgeable) while the verified baseline's is SAN-derived
-  // (the reusable-workflow repo) — comparing them cross-namespace both false-positives
-  // for reusable-workflow publishes AND would hand an attacker a lever (forge a
-  // DIFFERENT identity to force eviction → downgrade the gate to warn-only). On an
-  // immutable coordinate a drifted identity is itself an attack signal, never an escape
-  // from the carry. Guarded ONLY on identifier equality (no cross-package carry).
+  // F8 sticky baseline — the COMPLETE invariant (inverts a fragile enumeration). For the
+  // SAME immutable coordinate + identifier, a crypto-`verified` baseline may be REPLACED
+  // only by a fresh read that is ALSO crypto-`verified` (a legitimate re-sign). EVERY
+  // other fresh outcome — fetch-fail (undefined), 404 (unsigned), unparseable body
+  // (unsupported), attested-but-could-not-verify, attested-without-verification — is
+  // transient-or-attack, so we CARRY the verified baseline forward to keep the F8
+  // verify-time gate ARMED (it re-fetches and hard-blocks a real regression). Enumerating
+  // the "bad" states missed one every review round (could-not-verify, then unsigned);
+  // "carry unless the fresh read verifies" is exhaustive by construction. Attested-ONLY
+  // baselines keep only the original transient carry (undefined/unsupported), preserving
+  // drift-report stability without touching the F8 gate. Guarded on identifier equality
+  // (no cross-package carry).
   const prevSnap = prevProvenance?.snapshot;
   const sameCoordinate =
     isConcreteNpm &&
     prevProvenance?.identifier === pkg?.identifier &&
     prevSnap?.status === "attested" &&
     prevSnap.npmVersion === pkg?.version;
-  const freshUnreadable = provenanceSnap === undefined || provenanceSnap.status === "unsupported";
   const prevWasVerified = prevSnap?.verification?.outcome === "verified";
-  const freshCryptoNotVerified =
-    provenanceSnap?.status === "attested" && provenanceSnap.verification?.outcome !== "verified";
+  const freshVerified =
+    provenanceSnap?.status === "attested" && provenanceSnap.verification?.outcome === "verified";
+  const freshUnreadable = provenanceSnap === undefined || provenanceSnap.status === "unsupported";
 
-  if (sameCoordinate && (freshUnreadable || (prevWasVerified && freshCryptoNotVerified))) {
-    // A previously-VERIFIED coordinate that ACTIVELY fails to verify now (crypto ran and
-    // returned could-not-verify, or its body no longer parses as SLSA) is suspicious —
-    // warn, hedged for the benign mcpm/@sigstore-upgrade case. A mere crypto-didn't-run
-    // (verification === undefined, e.g. an integrity blip) is benign → stays silent.
-    const activelyFailed =
+  if (sameCoordinate && ((prevWasVerified && !freshVerified) || freshUnreadable)) {
+    // Warn when the fresh read ACTIVELY contradicts a verified baseline (a 404 dropping
+    // the attestation, an unparseable body, or a present-but-failed crypto) — hedged for
+    // the benign mcpm/@sigstore-upgrade case, and naming the re-baseline escape. A bare
+    // fetch-fail / crypto-didn't-run (undefined verification) is benign → stays silent.
+    const activelyContradicts =
+      provenanceSnap?.status === "unsigned" ||
       provenanceSnap?.status === "unsupported" ||
       provenanceSnap?.verification?.outcome === "could-not-verify";
-    if (prevWasVerified && activelyFailed) {
+    if (prevWasVerified && activelyContradicts) {
       deps.output(
         `  ⚠ provenance verification regressed for ${name}: was cryptographically verified, now fails to ` +
           `verify — a poisoned attestation swap can look like this. If npm's record is unchanged, your ` +
-          `mcpm/@sigstore version may have changed since you locked; run \`mcpm verify\`, and re-baseline ` +
-          `only if the change is expected.`
+          `mcpm/@sigstore version may have changed since you locked; run \`mcpm verify\`. If the change is ` +
+          `expected, remove this server's \`provenance:\` block from the lock and re-lock to re-baseline.`
       );
     }
     provenanceSnap = prevSnap;

@@ -203,6 +203,23 @@ describe("handleLock — provenance-identity drift (report-only)", () => {
     expect(outputText(deps)).toMatch(/verification regressed/i); // and loudly warned
   });
 
+  it("carries the verified baseline + WARNS when the attestation is served as a 404 (fresh unsigned) — no eviction lever", async () => {
+    // The R4 eviction lever: an attacker serving a 404 for the attestation on a routine
+    // re-lock must NOT drop the verified baseline (which would disarm the F8 gate).
+    const verifiedProv: NpmProvenanceSnapshot = {
+      ...attested("1"),
+      verification: { outcome: "verified", signerSan: "https://github.com/a/b/.github/workflows/x.yml@refs/tags/v1", signerIssuer: "https://token.actions.githubusercontent.com" },
+    };
+    const deps = makeDeps(entry(), {
+      fetchNpmProvenance: vi.fn().mockResolvedValue({ npmVersion: "1.0.0", status: "unsigned", mode: "registry-record" } as NpmProvenanceSnapshot),
+      readExistingLock: vi.fn().mockResolvedValue(prevLockWith(verifiedProv)),
+    });
+    await handleLock({ stackFile: await writeTempStack() }, deps);
+    const locked = lockedFromWrite(deps) as { provenance?: NpmProvenanceSnapshot };
+    expect(locked.provenance?.verification?.outcome).toBe("verified"); // carried, gate stays armed
+    expect(outputText(deps)).toMatch(/verification regressed/i); // and warned
+  });
+
   it("STILL carries the verified baseline when a could-not-verify fresh snapshot has a different (forgeable) payload identity — no attacker-chosen eviction", async () => {
     // A crypto-regressed fresh snapshot's identity is parse-only (forgeable). If a
     // differing identity could evict the baseline, an attacker would just forge a
