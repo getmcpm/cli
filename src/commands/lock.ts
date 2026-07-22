@@ -194,13 +194,20 @@ function repoLabel(snap: NpmProvenanceSnapshot | undefined): string {
   return sanitizeForTerminal(raw);
 }
 
-/** Index the previous lock's provenance snapshots by server name. */
-function buildPrevProvenanceMap(prevLock: LockFile | null): Map<string, NpmProvenanceSnapshot> {
-  const map = new Map<string, NpmProvenanceSnapshot>();
+/** The previous lock's provenance baseline + the identifier it was recorded for. */
+type PrevProvenance = { identifier: string; snapshot: NpmProvenanceSnapshot };
+
+/** Index the previous lock's provenance snapshots (with identifier) by server name. */
+function buildPrevProvenanceMap(prevLock: LockFile | null): Map<string, PrevProvenance> {
+  const map = new Map<string, PrevProvenance>();
   if (!prevLock) return map;
   for (const [name, server] of Object.entries(prevLock.servers)) {
-    const prov = provenanceOf(server);
-    if (prov) map.set(name, prov);
+    // Carry the identifier alongside the snapshot: the sticky carry-forward must NOT
+    // apply a previous baseline to a DIFFERENT package the user swapped in under the
+    // same server name (that would false-positive the F8 verify-time signer gate).
+    if (isLockedRegistryServer(server) && server.provenance) {
+      map.set(name, { identifier: server.identifier, snapshot: server.provenance });
+    }
   }
   return map;
 }
@@ -219,13 +226,27 @@ function reportProvenanceDrift(
 ): void {
   if (!prevLock) return;
   for (const { name, locked } of results) {
-    const prev = provenanceOf(prevLock.servers[name]);
+    const prevServer = prevLock.servers[name];
+    const prev = provenanceOf(prevServer);
     const next = provenanceOf(locked);
+    // The "same immutable coordinate" hard-copy applies only when the package IDENTIFIER
+    // is unchanged too — a user re-pointing the entry at a DIFFERENT npm package that
+    // happens to share a version string is a legit swap, not an attestation swap.
+    const prevId = isLockedRegistryServer(prevServer) ? prevServer.identifier : undefined;
+    const nextId = isLockedRegistryServer(locked) ? locked.identifier : undefined;
+    const sameCoordinate = prevId !== undefined && prevId === nextId && prev?.npmVersion === next?.npmVersion;
     switch (compareProvenance(prev, next)) {
       case "identity-drift":
+        // On the SAME immutable coordinate the org-transfer hedge does NOT apply — a
+        // pinned coordinate's attestation can't legitimately change publisher, so this
+        // is a swap to investigate, not a rename to wave through.
         output(
-          `  ⚠ provenance identity changed for ${name}: ${repoLabel(prev)} → ${repoLabel(next)} — ` +
-            `expected if the project moved repos/CI; investigate if not.`
+          sameCoordinate
+            ? `  ⚠ provenance identity changed for ${name} on the SAME version ${next?.npmVersion} ` +
+                `(${repoLabel(prev)} → ${repoLabel(next)}) — an immutable coordinate's attestation should ` +
+                `never change publisher; treat as a possible attestation swap and verify before shipping.`
+            : `  ⚠ provenance identity changed for ${name}: ${repoLabel(prev)} → ${repoLabel(next)} — ` +
+                `expected if the project moved repos/CI; investigate if not.`
         );
         break;
       case "signed-to-unsigned":
@@ -234,6 +255,29 @@ function reportProvenanceDrift(
             `a poisoned republish can look like this; verify before shipping.`
         );
         break;
+    }
+
+    // Verification DOWNGRADE (F8): a coordinate that was crypto-`verified` is now anything
+    // that no longer verifies — attested-but-unverified OR an unrecognized/anchorless
+    // ("unsupported") attestation shape. On the SAME coordinate the sticky carry keeps
+    // `next` verified, so this fires only across a VERSION BUMP (or a genuine re-baseline),
+    // where compareProvenance's cross-derivation guard returns "none" and would otherwise
+    // stay silent while the F8 gate quietly stops covering this server. Mirrors the carry's
+    // exhaustive "unless the fresh read verifies" doctrine rather than enumerating states.
+    // `unsigned` is excluded (already surfaced by signed-to-unsigned above); `undefined`
+    // is excluded (a transient fetch-fail, fail-open by design).
+    if (
+      prev?.status === "attested" &&
+      prev.verification?.outcome === "verified" &&
+      next !== undefined &&
+      next.status !== "unsigned" &&
+      !(next.status === "attested" && next.verification?.outcome === "verified")
+    ) {
+      output(
+        `  ⚠ provenance verification downgraded for ${name}: was cryptographically verified, now ` +
+          `unverified — \`mcpm verify\`/\`up --frozen\` no longer crypto-check it. Investigate a swap; if ` +
+          `the new version legitimately dropped or changed provenance, re-baseline knowingly.`
+      );
     }
   }
 }
@@ -248,7 +292,7 @@ async function resolveServer(
   scannerAvailable: boolean,
   minAgeHours: number,
   deps: LockDeps,
-  prevProvenance?: NpmProvenanceSnapshot
+  prevProvenance?: PrevProvenance
 ): Promise<LockedServer> {
   // URL-based servers: pin directly, no version resolution or trust
   if (isUrlServer(server)) {
@@ -354,19 +398,47 @@ async function resolveServer(
     );
   }
 
-  // F8: keep a known-good baseline STICKY across a transient failure or an
-  // unparseable re-read of the SAME immutable coordinate. A published version's
-  // provenance does not change, so one bad run must not erase the recorded
-  // baseline and silently disarm the drift tripwire. A DEFINITIVE change — a
-  // 404→unsigned, or a different attested identity — is NOT caught here (it is
-  // neither undefined nor unsupported), so it still overwrites and warns.
-  if (
+  // F8 sticky baseline — the COMPLETE invariant (inverts a fragile enumeration). For the
+  // SAME immutable coordinate + identifier, a crypto-`verified` baseline may be REPLACED
+  // only by a fresh read that is ALSO crypto-`verified` (a legitimate re-sign). EVERY
+  // other fresh outcome — fetch-fail (undefined), 404 (unsigned), unparseable body
+  // (unsupported), attested-but-could-not-verify, attested-without-verification — is
+  // transient-or-attack, so we CARRY the verified baseline forward to keep the F8
+  // verify-time gate ARMED (it re-fetches and hard-blocks a real regression). Enumerating
+  // the "bad" states missed one every review round (could-not-verify, then unsigned);
+  // "carry unless the fresh read verifies" is exhaustive by construction. Attested-ONLY
+  // baselines keep only the original transient carry (undefined/unsupported), preserving
+  // drift-report stability without touching the F8 gate. Guarded on identifier equality
+  // (no cross-package carry).
+  const prevSnap = prevProvenance?.snapshot;
+  const sameCoordinate =
     isConcreteNpm &&
-    prevProvenance?.status === "attested" &&
-    prevProvenance.npmVersion === pkg?.version &&
-    (provenanceSnap === undefined || provenanceSnap.status === "unsupported")
-  ) {
-    provenanceSnap = prevProvenance;
+    prevProvenance?.identifier === pkg?.identifier &&
+    prevSnap?.status === "attested" &&
+    prevSnap.npmVersion === pkg?.version;
+  const prevWasVerified = prevSnap?.verification?.outcome === "verified";
+  const freshVerified =
+    provenanceSnap?.status === "attested" && provenanceSnap.verification?.outcome === "verified";
+  const freshUnreadable = provenanceSnap === undefined || provenanceSnap.status === "unsupported";
+
+  if (sameCoordinate && ((prevWasVerified && !freshVerified) || freshUnreadable)) {
+    // Warn when the fresh read ACTIVELY contradicts a verified baseline (a 404 dropping
+    // the attestation, an unparseable body, or a present-but-failed crypto) — hedged for
+    // the benign mcpm/@sigstore-upgrade case, and naming the re-baseline escape. A bare
+    // fetch-fail / crypto-didn't-run (undefined verification) is benign → stays silent.
+    const activelyContradicts =
+      provenanceSnap?.status === "unsigned" ||
+      provenanceSnap?.status === "unsupported" ||
+      provenanceSnap?.verification?.outcome === "could-not-verify";
+    if (prevWasVerified && activelyContradicts) {
+      deps.output(
+        `  ⚠ provenance verification regressed for ${name}: was cryptographically verified, now fails to ` +
+          `verify — a poisoned attestation swap can look like this. If npm's record is unchanged, your ` +
+          `mcpm/@sigstore version may have changed since you locked; run \`mcpm verify\`. If the change is ` +
+          `expected, remove this server's \`provenance:\` block from the lock and re-lock to re-baseline.`
+      );
+    }
+    provenanceSnap = prevSnap;
   }
 
   return {

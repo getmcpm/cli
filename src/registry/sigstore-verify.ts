@@ -25,11 +25,14 @@
  *
  * HONESTY: "verified" means the build IDENTITY is cryptographically attested by
  * the CI's OIDC token — NOT that the code is safe. A same-repo CI compromise
- * mints a valid attestation (the TanStack lesson). The signer SAN/issuer are
- * RECORDED, not gated on SAN-equality: a reusable workflow legitimately signs
- * from a different repo than the payload names, so hard-gating the SAN would be a
- * false negative. Drift on the payload identity tuple (slice 1) is what surfaces
- * a pipeline swap.
+ * mints a valid attestation (the TanStack lesson). Granting "verified" here does
+ * NOT require the SAN to match any EXPECTED value — a reusable workflow legitimately
+ * signs from a different repo than the payload names, so hard-gating the SAN against
+ * an anticipated identity would be a false negative. The SAN/issuer ARE recorded, and
+ * the verify-time gate (B3, frozen-provenance) later compares them for EQUALITY against
+ * the lock's own recorded signer — that catches a swap on a pinned coordinate without
+ * needing to know the "right" identity up front. (A `verified` verdict always carries a
+ * SAN; a crypto pass with no SAN is refused below.)
  */
 
 import { bundleFromJSON } from "@sigstore/bundle";
@@ -160,12 +163,16 @@ export function cryptoVerifySlsaBundle(
     if (!subjectBindsToIntegrity(verifiedSubjectHex(rawBundle), ctx.integritySri)) {
       return { verification: couldNotVerify("subject-digest-mismatch", san, issuer) };
     }
+    // A GitHub-Actions OIDC cert always carries a SAN; if one is somehow absent we
+    // CANNOT record an equality-checkable signer identity, so a downstream verify-time
+    // gate would have nothing to compare. Refuse the "verified" verdict (fail closed)
+    // rather than mint a SAN-less one that later reads as an un-checkable baseline.
+    if (san === undefined) {
+      return { verification: couldNotVerify("no-signer-san", san, issuer) };
+    }
+    // san is defined here (guarded above); issuer === GITHUB_OIDC_ISSUER (checked above).
     return {
-      verification: {
-        outcome: "verified",
-        ...(san !== undefined ? { signerSan: cap(san) } : {}),
-        ...(issuer !== undefined ? { signerIssuer: cap(issuer) } : {}),
-      },
+      verification: { outcome: "verified", signerSan: cap(san), signerIssuer: cap(issuer) },
       verifiedIdentity: parseSanIdentity(san),
     };
   } catch (e) {

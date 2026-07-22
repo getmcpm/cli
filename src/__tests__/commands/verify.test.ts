@@ -9,12 +9,14 @@
 
 import { describe, it, expect, vi } from "vitest";
 import { verifyHandler, type VerifyDeps, type VerifyModel } from "../../commands/verify.js";
-import type { LockFile, NpmIntegritySnapshot } from "../../stack/schema.js";
+import type { LockFile, NpmIntegritySnapshot, NpmProvenanceSnapshot } from "../../stack/schema.js";
 
 const SRI_OLD = "sha512-" + "A".repeat(86) + "==";
 const SRI_NEW = "sha512-" + "B".repeat(86) + "==";
 
 const TRUST = { score: 75, maxPossible: 80, level: "safe", assessedAt: "2026-04-05T10:00:00Z" };
+const ISSUER = "https://token.actions.githubusercontent.com";
+const SAN = "https://github.com/acme/a/.github/workflows/publish.yml@refs/tags/v1.0.0";
 
 type Entry = Record<string, unknown>;
 
@@ -28,6 +30,29 @@ function npmEntry(identifier: string, integrity?: string): Entry {
   };
 }
 
+/** An npm entry whose lock recorded a crypto-`verified` provenance baseline. */
+function verifiedNpmEntry(identifier: string, integrity: string): Entry {
+  return {
+    ...npmEntry(identifier, integrity),
+    provenance: {
+      npmVersion: "1.0.0",
+      status: "attested",
+      mode: "registry-record",
+      identity: { sourceRepo: "https://github.com/acme/a" },
+      verification: { outcome: "verified", signerSan: SAN, signerIssuer: ISSUER },
+    },
+  };
+}
+
+const provSnap = (over: Partial<NpmProvenanceSnapshot> = {}): NpmProvenanceSnapshot => ({
+  npmVersion: "1.0.0",
+  status: "attested",
+  mode: "registry-record",
+  identity: { sourceRepo: "https://github.com/acme/a" },
+  verification: { outcome: "verified", signerSan: SAN, signerIssuer: ISSUER },
+  ...over,
+});
+
 function pypiEntry(identifier: string): Entry {
   return { version: "1.0.0", registryType: "pypi", identifier, trust: TRUST };
 }
@@ -38,7 +63,12 @@ function lockOf(servers: Record<string, Entry>): LockFile {
 
 function deps(
   lock: LockFile | null,
-  fetch: (id: string, v: string) => Promise<NpmIntegritySnapshot | undefined>
+  fetch: (id: string, v: string) => Promise<NpmIntegritySnapshot | undefined>,
+  fetchProv: (
+    id: string,
+    v: string,
+    o: { integritySri: string }
+  ) => Promise<NpmProvenanceSnapshot | undefined> = async () => undefined
 ): { deps: VerifyDeps; out: () => string; fetch: ReturnType<typeof vi.fn> } {
   const lines: string[] = [];
   const fetchMock = vi.fn(fetch);
@@ -46,6 +76,7 @@ function deps(
     deps: {
       parseLock: vi.fn().mockResolvedValue(lock),
       fetchNpmIntegrity: fetchMock,
+      fetchNpmProvenance: vi.fn(fetchProv),
       output: (t: string) => lines.push(t),
     },
     out: () => lines.join("\n"),
@@ -170,5 +201,109 @@ describe("verifyHandler — honesty + --json", () => {
     expect(model.ok).toBe(true);
     expect(model.verified).toBe(2);
     expect(model.checkedNpmCount).toBe(2);
+  });
+});
+
+describe("verifyHandler — provenance gate (F8/B3)", () => {
+  it("verified baseline that re-verifies with the same signer → ok, exit 0, re-verified line", async () => {
+    const d = deps(
+      lockOf({ a: verifiedNpmEntry("@test/a", SRI_OLD) }),
+      async () => snap(SRI_OLD),
+      async () => provSnap()
+    );
+    const code = await verifyHandler(d.deps);
+    expect(code).toBe(0);
+    expect(d.out()).toMatch(/cryptographically re-verified/i);
+  });
+
+  it("verified baseline whose fresh attestation no longer verifies → BLOCK, exit 1", async () => {
+    const d = deps(
+      lockOf({ a: verifiedNpmEntry("@test/a", SRI_OLD) }),
+      async () => snap(SRI_OLD),
+      async () => provSnap({ verification: { outcome: "could-not-verify", reason: "tlog-fail" } })
+    );
+    const code = await verifyHandler(d.deps);
+    expect(code).toBe(1);
+    expect(d.out()).toMatch(/provenance regressed/i);
+    expect(d.out()).toMatch(/verification failed: 1 server/);
+  });
+
+  it("signer-changed → BLOCK, exit 1", async () => {
+    const d = deps(
+      lockOf({ a: verifiedNpmEntry("@test/a", SRI_OLD) }),
+      async () => snap(SRI_OLD),
+      async () =>
+        provSnap({
+          verification: {
+            outcome: "verified",
+            signerSan: "https://github.com/evil/a/.github/workflows/publish.yml@refs/tags/v1.0.0",
+            signerIssuer: ISSUER,
+          },
+        })
+    );
+    const code = await verifyHandler(d.deps);
+    expect(code).toBe(1);
+    expect(d.out()).toMatch(/signer identity changed/i);
+  });
+
+  it("integrity CLEAN but provenance regressed → still fails (both gates OR)", async () => {
+    const d = deps(
+      lockOf({ a: verifiedNpmEntry("@test/a", SRI_OLD) }),
+      async () => snap(SRI_OLD), // integrity matches
+      async () => undefined // provenance can't re-verify → unverifiable
+    );
+    const code = await verifyHandler(d.deps);
+    expect(code).toBe(1);
+    expect(d.out()).toMatch(/could not cryptographically re-verify/i);
+  });
+
+  it("--json includes provenanceBlocked + checkedProvenanceCount", async () => {
+    const d = deps(
+      lockOf({ a: verifiedNpmEntry("@test/a", SRI_OLD) }),
+      async () => snap(SRI_OLD),
+      async () => ({ npmVersion: "1.0.0", status: "unsigned", mode: "registry-record" })
+    );
+    const code = await verifyHandler(d.deps, { json: true });
+    expect(code).toBe(1);
+    const model = JSON.parse(d.out()) as VerifyModel;
+    expect(model.checkedProvenanceCount).toBe(1);
+    expect(model.provenanceBlocked).toHaveLength(1);
+    expect(model.provenanceBlocked[0]).toMatchObject({ name: "a", reason: "regression" });
+  });
+
+  it("a lock with NO verified baseline is provenance-silent (evidence-gated)", async () => {
+    const d = deps(lockOf({ a: npmEntry("@test/a", SRI_OLD) }), async () => snap(SRI_OLD));
+    const code = await verifyHandler(d.deps, { json: true });
+    expect(code).toBe(0);
+    const model = JSON.parse(d.out()) as VerifyModel;
+    expect(model.checkedProvenanceCount).toBe(0);
+    expect(model.provenanceBlocked).toEqual([]);
+  });
+
+  it("noBaselines lock that ALSO carries a regressed verified baseline → block is NOT hidden, exit 1", async () => {
+    // A verified provenance baseline with NO npmIntegrity baseline (the sticky
+    // carry-forward shape): integrity is noBaselines, but provenance still regresses.
+    const provOnly: Entry = {
+      version: "1.0.0",
+      registryType: "npm",
+      identifier: "@test/a",
+      trust: TRUST,
+      provenance: {
+        npmVersion: "1.0.0",
+        status: "attested",
+        mode: "registry-record",
+        identity: { sourceRepo: "https://github.com/acme/a" },
+        verification: { outcome: "verified", signerSan: SAN, signerIssuer: ISSUER },
+      },
+    };
+    const d = deps(
+      lockOf({ a: provOnly }),
+      async () => snap(SRI_OLD),
+      async () => ({ npmVersion: "1.0.0", status: "unsigned", mode: "registry-record" })
+    );
+    const code = await verifyHandler(d.deps);
+    expect(code).toBe(1);
+    expect(d.out()).toMatch(/no integrity baselines/i); // benign note still shown
+    expect(d.out()).toMatch(/provenance regressed/i); // but the real block is NOT hidden behind it
   });
 });

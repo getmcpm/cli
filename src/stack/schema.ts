@@ -162,6 +162,15 @@ export const NpmProvenanceSnapshotSchema = z.object({
   mode: z.literal("registry-record"),
   identity: ProvenanceIdentitySchema.optional(),
   verification: NpmProvenanceVerificationSchema.optional(),
+  /**
+   * On a crypto-`verified` snapshot, `identity` is the UNFORGEABLE SAN-derived tuple —
+   * but that lives in a different namespace than a parse-only snapshot's payload tuple
+   * (the SAN names the CALLED reusable workflow's repo; the payload names the CALLER's).
+   * To drift-compare a verified snapshot against a parse-only one WITHOUT false-positiving
+   * on reusable workflows, we also retain the original parse-only payload tuple here.
+   * Present only on `verified` snapshots (bare-optional: absent on all others + old locks).
+   */
+  payloadIdentity: ProvenanceIdentitySchema.optional(),
 });
 
 export type NpmProvenanceSnapshot = z.infer<typeof NpmProvenanceSnapshotSchema>;

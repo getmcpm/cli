@@ -161,6 +161,144 @@ describe("handleLock — provenance-identity drift (report-only)", () => {
     expect(outputText(deps)).not.toContain("provenance"); // transient failure = no drift noise
   });
 
+  it("carries a VERIFIED baseline forward when crypto didn't run this re-lock (attested-without-verification)", async () => {
+    // Fresh snapshot is attested but has NO verification block (integrity blipped, or
+    // @sigstore failed to load) — this must NOT downgrade a prior crypto-`verified`
+    // baseline, or the F8 verify-time tripwire silently disarms for that server.
+    const verifiedProv: NpmProvenanceSnapshot = {
+      ...attested("1"),
+      verification: {
+        outcome: "verified",
+        signerSan: "https://github.com/a/b/.github/workflows/x.yml@refs/tags/v1",
+        signerIssuer: "https://token.actions.githubusercontent.com",
+      },
+    };
+    const deps = makeDeps(entry(), {
+      fetchNpmProvenance: vi.fn().mockResolvedValue(attested("1")), // attested, verification ABSENT
+      readExistingLock: vi.fn().mockResolvedValue(prevLockWith(verifiedProv)),
+    });
+    await handleLock({ stackFile: await writeTempStack() }, deps);
+    const locked = lockedFromWrite(deps) as { provenance?: NpmProvenanceSnapshot };
+    expect(locked.provenance?.verification?.outcome).toBe("verified"); // preserved, not downgraded
+  });
+
+  it("carries a VERIFIED baseline forward + WARNS when crypto RAN and FAILED this re-lock (could-not-verify)", async () => {
+    // The common regression/attack shape: crypto ran and returned could-not-verify (a
+    // PRESENT verification block), not verification===undefined. Must NOT disarm the gate.
+    const verifiedProv: NpmProvenanceSnapshot = {
+      ...attested("1"),
+      verification: { outcome: "verified", signerSan: "https://github.com/a/b/.github/workflows/x.yml@refs/tags/v1", signerIssuer: "https://token.actions.githubusercontent.com" },
+    };
+    const freshFailed: NpmProvenanceSnapshot = {
+      ...attested("1"), // SAME identity as the baseline
+      verification: { outcome: "could-not-verify", reason: "subject-digest-mismatch" },
+    };
+    const deps = makeDeps(entry(), {
+      fetchNpmProvenance: vi.fn().mockResolvedValue(freshFailed),
+      readExistingLock: vi.fn().mockResolvedValue(prevLockWith(verifiedProv)),
+    });
+    await handleLock({ stackFile: await writeTempStack() }, deps);
+    const locked = lockedFromWrite(deps) as { provenance?: NpmProvenanceSnapshot };
+    expect(locked.provenance?.verification?.outcome).toBe("verified"); // baseline preserved, gate stays armed
+    expect(outputText(deps)).toMatch(/verification regressed/i); // and loudly warned
+  });
+
+  it("carries the verified baseline + WARNS when the attestation is served as a 404 (fresh unsigned) — no eviction lever", async () => {
+    // The R4 eviction lever: an attacker serving a 404 for the attestation on a routine
+    // re-lock must NOT drop the verified baseline (which would disarm the F8 gate).
+    const verifiedProv: NpmProvenanceSnapshot = {
+      ...attested("1"),
+      verification: { outcome: "verified", signerSan: "https://github.com/a/b/.github/workflows/x.yml@refs/tags/v1", signerIssuer: "https://token.actions.githubusercontent.com" },
+    };
+    const deps = makeDeps(entry(), {
+      fetchNpmProvenance: vi.fn().mockResolvedValue({ npmVersion: "1.0.0", status: "unsigned", mode: "registry-record" } as NpmProvenanceSnapshot),
+      readExistingLock: vi.fn().mockResolvedValue(prevLockWith(verifiedProv)),
+    });
+    await handleLock({ stackFile: await writeTempStack() }, deps);
+    const locked = lockedFromWrite(deps) as { provenance?: NpmProvenanceSnapshot };
+    expect(locked.provenance?.verification?.outcome).toBe("verified"); // carried, gate stays armed
+    expect(outputText(deps)).toMatch(/verification regressed/i); // and warned
+  });
+
+  it("STILL carries the verified baseline when a could-not-verify fresh snapshot has a different (forgeable) payload identity — no attacker-chosen eviction", async () => {
+    // A crypto-regressed fresh snapshot's identity is parse-only (forgeable). If a
+    // differing identity could evict the baseline, an attacker would just forge a
+    // different one to downgrade the gate to warn-only. On the same immutable
+    // coordinate+identifier the baseline is ALWAYS carried (gate stays armed); the
+    // actual signer check happens at verify time (SAN vs SAN).
+    const verifiedProv: NpmProvenanceSnapshot = {
+      ...attested("1"),
+      verification: { outcome: "verified", signerSan: "https://github.com/a/b/.github/workflows/x.yml@refs/tags/v1", signerIssuer: "https://token.actions.githubusercontent.com" },
+    };
+    const freshDifferent: NpmProvenanceSnapshot = {
+      ...attested("2", "9", "https://github.com/evil/pkg"), // DIFFERENT (forged) payload identity
+      verification: { outcome: "could-not-verify", reason: "subject-digest-mismatch" },
+    };
+    const deps = makeDeps(entry(), {
+      fetchNpmProvenance: vi.fn().mockResolvedValue(freshDifferent),
+      readExistingLock: vi.fn().mockResolvedValue(prevLockWith(verifiedProv)),
+    });
+    await handleLock({ stackFile: await writeTempStack() }, deps);
+    const locked = lockedFromWrite(deps) as { provenance?: NpmProvenanceSnapshot };
+    expect(locked.provenance?.verification?.outcome).toBe("verified"); // carried, gate stays armed
+    expect(outputText(deps)).toMatch(/verification regressed/i); // and warned
+  });
+
+  it("does NOT carry the verified baseline across an identifier swap (different package, same name+version)", async () => {
+    const verifiedProv: NpmProvenanceSnapshot = {
+      ...attested("1"),
+      verification: { outcome: "verified", signerSan: "https://github.com/a/b/.github/workflows/x.yml@refs/tags/v1", signerIssuer: "https://token.actions.githubusercontent.com" },
+    };
+    // Server entry now resolves a DIFFERENT npm identifier under the same server name.
+    const swapped: ServerEntry = {
+      server: { name: SERVER, version: "1.0.0", packages: [{ registryType: "npm", identifier: "@rival/other", version: "1.0.0", environmentVariables: [] }] },
+    };
+    const deps = makeDeps(swapped, {
+      fetchNpmProvenance: vi.fn().mockResolvedValue(attested("1")), // fresh attested-no-verification for the NEW pkg
+      readExistingLock: vi.fn().mockResolvedValue(prevLockWith(verifiedProv)), // prev verified for @test/my-server
+    });
+    await handleLock({ stackFile: await writeTempStack() }, deps);
+    const locked = lockedFromWrite(deps) as { provenance?: NpmProvenanceSnapshot };
+    // The prior verified baseline must NOT ride onto the swapped package.
+    expect(locked.provenance?.verification).toBeUndefined();
+  });
+
+  it("WARNS on a verified→unverified downgrade across a version bump (F8 coverage silently lost otherwise)", async () => {
+    // prev 0.9.0 crypto-verified; fresh resolves 1.0.0 attested-but-NOT-verified. Different
+    // version → no sticky carry → the coordinate drops out of the F8 checked set. The
+    // cross-derivation compareProvenance guard returns "none", so a dedicated downgrade
+    // warn must surface it.
+    const prevVerified: NpmProvenanceSnapshot = {
+      npmVersion: "0.9.0",
+      status: "attested",
+      mode: "registry-record",
+      identity: { sourceRepo: "https://github.com/a/b" },
+      verification: { outcome: "verified", signerSan: "https://github.com/a/b/.github/workflows/x.yml@refs/tags/v1", signerIssuer: "https://token.actions.githubusercontent.com" },
+    };
+    const deps = makeDeps(entry(), {
+      fetchNpmProvenance: vi.fn().mockResolvedValue(attested("1")), // 1.0.0 attested, NOT verified
+      readExistingLock: vi.fn().mockResolvedValue(prevLockWith(prevVerified)),
+    });
+    await handleLock({ stackFile: await writeTempStack() }, deps);
+    expect(outputText(deps)).toMatch(/verification downgraded/i);
+  });
+
+  it("downgrade warn ALSO fires when the new version's attestation is unsupported (anchorless shape)", async () => {
+    const prevVerified: NpmProvenanceSnapshot = {
+      npmVersion: "0.9.0",
+      status: "attested",
+      mode: "registry-record",
+      identity: { sourceRepo: "https://github.com/a/b" },
+      verification: { outcome: "verified", signerSan: "https://github.com/a/b/.github/workflows/x.yml@refs/tags/v1", signerIssuer: "https://token.actions.githubusercontent.com" },
+    };
+    const deps = makeDeps(entry(), {
+      fetchNpmProvenance: vi.fn().mockResolvedValue({ npmVersion: "1.0.0", status: "unsupported", mode: "registry-record" } as NpmProvenanceSnapshot),
+      readExistingLock: vi.fn().mockResolvedValue(prevLockWith(prevVerified)),
+    });
+    await handleLock({ stackFile: await writeTempStack() }, deps);
+    expect(outputText(deps)).toMatch(/verification downgraded/i);
+  });
+
   it("sanitizes ANSI/OSC in a drift warning's repo label (warning can't become an injection carrier)", async () => {
     const evil = "https://github.com/a/b\u001b]0;pwn\u0007\u001b[2K";
     const deps = makeDeps(entry(), {

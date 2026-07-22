@@ -19,14 +19,21 @@ import type { LockFile } from "../stack/schema.js";
 import {
   classifyIntegrity,
   frozenVerdict,
+  memoizeIntegrity,
   type FetchNpmIntegrity,
   type FrozenBlock,
 } from "../stack/frozen-verify.js";
+import {
+  classifyProvenance,
+  type FetchNpmProvenance,
+  type ProvenanceBlock,
+} from "../stack/frozen-provenance.js";
 
 export interface VerifyDeps {
   /** Returns the parsed lock, or null when the file does not exist. */
   parseLock: (path: string) => Promise<LockFile | null>;
   fetchNpmIntegrity: FetchNpmIntegrity;
+  fetchNpmProvenance: FetchNpmProvenance;
   output: (text: string) => void;
 }
 
@@ -49,6 +56,13 @@ export interface VerifyModel {
   blocked: VerifyBlocked[];
   /** pypi/oci/url servers with no baseline mechanism — reported, never blocked. */
   unenforceable: string[];
+  /**
+   * npm servers whose crypto-`verified` provenance baseline regressed (F8 / B3).
+   * Empty for every lock without a `verification.outcome==="verified"` server.
+   */
+  provenanceBlocked: ProvenanceBlock[];
+  /** npm servers that carried a crypto-`verified` provenance baseline to re-check. */
+  checkedProvenanceCount: number;
   /** set only when the lock could not be loaded at all. */
   error?: string;
 }
@@ -77,7 +91,15 @@ export async function verifyHandler(deps: VerifyDeps, opts: VerifyOpts = {}): Pr
       return emitError(deps, opts, `no lock file found at ${lockPath} — run \`mcpm lock\` first.`);
     }
 
-    const v = frozenVerdict(await classifyIntegrity(lockFile, deps.fetchNpmIntegrity));
+    // Two independent, fail-closed gates run in parallel: integrity drift (H11) and
+    // provenance crypto-regression (F8/B3). The run passes only if BOTH pass. Both
+    // read npm's integrity per checked coordinate, so memoize the fetcher — one GET
+    // per coordinate, and the two gates can never disagree about the same record.
+    const fetchIntegrity = memoizeIntegrity(deps.fetchNpmIntegrity);
+    const [v, pv] = await Promise.all([
+      classifyIntegrity(lockFile, fetchIntegrity).then(frozenVerdict),
+      classifyProvenance(lockFile, fetchIntegrity, deps.fetchNpmProvenance),
+    ]);
 
     const blocked: VerifyBlocked[] = v.blocks.map((b) =>
       b.reason === "missing-baseline"
@@ -90,12 +112,14 @@ export async function verifyHandler(deps: VerifyDeps, opts: VerifyOpts = {}): Pr
 
     const model: VerifyModel = {
       schemaVersion: 1,
-      ok: v.ok,
+      ok: v.ok && pv.ok,
       verified: v.checkedNpmCount - failedCheckable,
       checkedNpmCount: v.checkedNpmCount,
       noBaselines: v.noBaselines,
       blocked,
       unenforceable: v.unenforceable,
+      provenanceBlocked: pv.blocks,
+      checkedProvenanceCount: pv.checkedVerifiedCount,
     };
 
     if (opts.json) {
@@ -120,6 +144,8 @@ function emitError(deps: VerifyDeps, opts: VerifyOpts, error: string): number {
     noBaselines: false,
     blocked: [],
     unenforceable: [],
+    provenanceBlocked: [],
+    checkedProvenanceCount: 0,
     error,
   };
   if (opts.json) deps.output(JSON.stringify(model, null, 2));
@@ -137,39 +163,76 @@ const REASON_PHRASE: Record<FrozenBlock["reason"], string> = {
     "no integrity baseline recorded, though other servers in this lock have one — re-run `mcpm lock` online",
 };
 
+const PROVENANCE_PHRASE: Record<ProvenanceBlock["reason"], string> = {
+  "signer-changed":
+    "cryptographic signer identity changed since you locked it — re-pin with `mcpm lock` only if this re-sign is expected",
+  regression:
+    "provenance regressed — the attestation verified when you locked it and no longer does",
+  unverifiable:
+    "could not cryptographically re-verify this run — re-run; if it persists, investigate before dropping the check",
+};
+
 function renderVerifyText(model: VerifyModel, output: (text: string) => void): void {
   output("");
   output("mcpm verify");
   output("");
 
+  // Integrity dimension (H11).
   if (model.noBaselines) {
+    // Lock-wide integrity gap — benign (predates baselines / offline lock), normally a
+    // refuse-to-run. But the sticky provenance carry-forward (lock.ts) can leave a
+    // crypto-`verified` baseline on a lock whose integrity fetch failed, so a
+    // provenance regression can coexist — print the benign note but DON'T stop before
+    // the provenance blocks below (hiding a real signer swap behind it).
     output(
       "  ✗ this lock has no integrity baselines (it predates them, or was last locked offline)."
     );
     output("    Run `mcpm lock` online once to record them, then `mcpm verify`.");
-    return;
+    if (model.provenanceBlocked.length === 0) return;
+  } else {
+    if (model.unenforceable.length > 0) {
+      output(
+        `  ⚠ ${model.unenforceable.length} server(s) (pypi/oci/url) have no integrity baseline mechanism — verify cannot enforce them (multi-registry pinning is deferred).`
+      );
+    }
+    if (model.blocked.length === 0) {
+      const word = model.verified === 1 ? "server" : "servers";
+      output(`  ✓ ${model.verified} npm ${word} verified against npm's published integrity record.`);
+    } else {
+      for (const b of model.blocked) {
+        const who = b.identifier ? `${b.identifier}@${b.npmVersion}` : b.name;
+        output(`  ✗ ${who}: ${REASON_PHRASE[b.reason]}`);
+      }
+    }
   }
 
-  if (model.unenforceable.length > 0) {
+  // Provenance dimension (F8/B3) — only surfaces when the lock had crypto-verified
+  // baselines to re-check; otherwise silent (evidence-gated, zero output).
+  if (model.provenanceBlocked.length > 0) {
+    for (const b of model.provenanceBlocked) {
+      output(`  ✗ ${b.identifier}@${b.npmVersion}: ${PROVENANCE_PHRASE[b.reason]} (${b.detail})`);
+    }
+  } else if (model.checkedProvenanceCount > 0) {
+    // Verb on the ATTESTATION, not the server — "re-verified the server" would
+    // over-claim the code was checked; only the build-identity attestation was.
+    const word = model.checkedProvenanceCount === 1 ? "attestation" : "attestations";
     output(
-      `  ⚠ ${model.unenforceable.length} server(s) (pypi/oci/url) have no integrity baseline mechanism — verify cannot enforce them (multi-registry pinning is deferred).`
+      `  ✓ ${model.checkedProvenanceCount} npm server ${word} cryptographically re-verified (signer unchanged).`
     );
   }
 
-  if (model.ok) {
-    const word = model.verified === 1 ? "server" : "servers";
-    output(`  ✓ ${model.verified} npm ${word} verified against npm's published record.`);
-    return;
+  if (!model.ok) {
+    // Count DISTINCT servers — a server that fails both integrity and provenance is
+    // one failure, not two.
+    const failed = new Set([
+      ...model.blocked.map((b) => b.name),
+      ...model.provenanceBlocked.map((b) => b.name),
+    ]);
+    output("");
+    output(
+      `verification failed: ${failed.size} server(s). mcpm checks the registry's published record, not the code your agent runs.`
+    );
   }
-
-  for (const b of model.blocked) {
-    const who = b.identifier ? `${b.identifier}@${b.npmVersion}` : b.name;
-    output(`  ✗ ${who}: ${REASON_PHRASE[b.reason]}`);
-  }
-  output("");
-  output(
-    `verification failed: ${model.blocked.length} server(s). mcpm checks the registry's published record, not the code your agent runs.`
-  );
 }
 
 // ---------------------------------------------------------------------------
@@ -179,12 +242,15 @@ function renderVerifyText(model: VerifyModel, output: (text: string) => void): v
 import { Command } from "commander";
 import { parseLockFile } from "../stack/schema.js";
 import { fetchNpmIntegrity as _fetchNpmIntegrity } from "../registry/npm-integrity.js";
+import { fetchNpmProvenance as _fetchNpmProvenance } from "../registry/npm-provenance.js";
 import { coloredOutput } from "../utils/output.js";
 
 export function registerVerifyCommand(program: Command): void {
   program
     .command("verify")
-    .description("Verify mcpm-lock.yaml integrity against npm's published record (repo-only CI gate)")
+    .description(
+      "Verify mcpm-lock.yaml against npm's published record — integrity drift + Sigstore provenance regression (repo-only CI gate)"
+    )
     .option("--json", "emit the structured verify model as JSON (shape UNSTABLE)")
     .option("-f, --file <path>", "path to mcpm.yaml (the lock is derived as <name>-lock.yaml)")
     .action(async (opts: { json?: boolean; file?: string }) => {
@@ -192,6 +258,7 @@ export function registerVerifyCommand(program: Command): void {
         {
           parseLock: parseLockFile,
           fetchNpmIntegrity: (id, v) => _fetchNpmIntegrity(id, v),
+          fetchNpmProvenance: (id, v, o) => _fetchNpmProvenance(id, v, o),
           output: opts.json ? (t) => console.log(t) : coloredOutput,
         },
         { json: opts.json, stackFile: opts.file }

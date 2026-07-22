@@ -203,6 +203,64 @@ describe("compareProvenance — drift classifier (report-only)", () => {
     expect(compareProvenance(a, same)).toBe("none");
     expect(compareProvenance(a, other)).toBe("identity-drift");
   });
+
+  it("a crypto-VERIFIED (SAN-derived) snapshot vs a parse-only attested one is cross-namespace → NOT drift", () => {
+    // Cross-namespace is decided by OUR verdict (verified ⟹ SAN-derived identity), not an
+    // attacker-forgeable payload field. A verified baseline (SAN = reusable-workflow repo)
+    // vs a parse-only fresh read (payload = caller repo) differ legitimately for reusable
+    // workflows — must NOT read as drift.
+    const verifiedSan = snap({
+      identity: { sourceRepo: "https://github.com/shared/reusable-wf" },
+      verification: {
+        outcome: "verified",
+        signerSan: "https://github.com/shared/reusable-wf/.github/workflows/x.yml@refs/tags/v1",
+        signerIssuer: "https://token.actions.githubusercontent.com",
+      },
+    });
+    const parseOnly = snap({ identity: { repositoryId: "1", repositoryOwnerId: "9", sourceRepo: "https://github.com/caller/pkg" } });
+    expect(compareProvenance(verifiedSan, parseOnly)).toBe("none");
+    expect(compareProvenance(parseOnly, verifiedSan)).toBe("none"); // improvement direction too
+  });
+
+  it("SAME-namespace payload drift is STILL detected (both parse-only, asymmetric repoId, different repos)", () => {
+    const a = snap({ identity: { repositoryId: "1", sourceRepo: "https://github.com/good/pkg" } });
+    const b = snap({ identity: { sourceRepo: "https://github.com/evil/pkg" } }); // no repoId, different repo
+    expect(compareProvenance(a, b)).toBe("identity-drift");
+  });
+
+  const VERIF = {
+    outcome: "verified" as const,
+    signerSan: "https://github.com/shared/wf/.github/workflows/x.yml@refs/tags/v1",
+    signerIssuer: "https://token.actions.githubusercontent.com",
+  };
+
+  it("attested-only → verified-by-a-DIFFERENT-publisher is drift (payload compared cross-namespace — Postmark tripwire restored)", () => {
+    // Victim had attested-only (payload = good repo); attacker serves a valid attestation
+    // from THEIR repo (SAN = shared wf, payloadIdentity = evil caller). Must still warn.
+    const attestedOnly = snap({ identity: { repositoryId: "1", sourceRepo: "https://github.com/good/pkg" } });
+    const verifiedByAttacker = snap({
+      identity: { sourceRepo: "https://github.com/shared/wf" }, // SAN tuple
+      payloadIdentity: { repositoryId: "999", sourceRepo: "https://github.com/evil/pkg" },
+      verification: VERIF,
+    });
+    expect(compareProvenance(attestedOnly, verifiedByAttacker)).toBe("identity-drift");
+  });
+
+  it("benign attested-only → verified upgrade (SAME package payload) is NOT drift (reusable-workflow FP stays suppressed)", () => {
+    const attestedOnly = snap({ identity: { repositoryId: "1", sourceRepo: "https://github.com/good/pkg" } });
+    const verifiedSame = snap({
+      identity: { sourceRepo: "https://github.com/shared/reusable-wf" }, // SAN = shared workflow
+      payloadIdentity: { repositoryId: "1", sourceRepo: "https://github.com/good/pkg" }, // SAME payload
+      verification: VERIF,
+    });
+    expect(compareProvenance(attestedOnly, verifiedSame)).toBe("none");
+  });
+
+  it("cross-namespace with a legacy verified snapshot lacking payloadIdentity → none (can't compare)", () => {
+    const attestedOnly = snap({ identity: { repositoryId: "1", sourceRepo: "https://github.com/good/pkg" } });
+    const legacyVerified = snap({ identity: { sourceRepo: "https://github.com/x/y" }, verification: VERIF }); // no payloadIdentity
+    expect(compareProvenance(attestedOnly, legacyVerified)).toBe("none");
+  });
 });
 
 describe("fetchNpmProvenance — crypto verification wiring (F8 crypto slice)", () => {

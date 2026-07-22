@@ -1,22 +1,22 @@
 /**
- * npm provenance-identity tripwire (F8 slice 1 — parse-only, WARN-only).
+ * npm provenance tripwire — parse-only identity drift PLUS the lazy-loaded F8 crypto
+ * verdict.
  *
- * Fetches npm's published Sigstore attestation bundle for an exact package
- * coordinate and extracts the build-identity tuple (source repo + the immutable
- * numeric GitHub repository/owner ids + workflow + commit) by PARSING the
- * attestation JSON — NO cryptographic verification, NO new dependencies. This
- * lets `mcpm lock` detect provenance-IDENTITY DRIFT: the pipeline/repo identity
- * behind a package changing across versions, or a signed package going unsigned
- * — the Postmark republish shape that schema-pinning structurally cannot see.
+ * Fetches npm's published Sigstore attestation bundle for an exact package coordinate
+ * and, by PARSING the attestation JSON (no dependencies), extracts the build-identity
+ * tuple (source repo + the immutable numeric GitHub repository/owner ids + workflow +
+ * commit). When the caller supplies the package's dist.integrity SRI, it ADDITIONALLY
+ * lazy-imports the @sigstore crypto slice (sigstore-verify.js) to OFFLINE-verify the
+ * SLSA v1 bundle — so a snapshot may carry a `verification` verdict of "verified" or
+ * "could-not-verify". This lets `mcpm lock` detect provenance-IDENTITY DRIFT (the
+ * pipeline/repo behind a package changing, or a signed package going unsigned — the
+ * Postmark republish shape) and record a crypto baseline the F8 verify-time gate enforces.
  *
- * HONESTY BOUNDARY (enforced in review): this checks npm's PUBLISHED attestation
- * RECORD, fetched over TLS from a hard-coded host — the same anchor the H11
- * dist.integrity tripwire already trusts. It is tamper-EVIDENCE, NOT
- * cryptographic proof: this slice NEVER says "verified" (that word is reserved
- * for the future @sigstore crypto slice) and NEVER feeds the trust score.
- * "attested" means an UNVERIFIED registry record; it reflects build IDENTITY,
- * not safety, and cannot catch a same-repo CI compromise that produces a valid
- * attestation with an unchanged identity (the TanStack lesson).
+ * HONESTY BOUNDARY (enforced in review): the parse-only "attested" state is tamper-
+ * EVIDENCE, NOT proof — it reflects an UNVERIFIED registry record and cannot catch a
+ * same-repo CI compromise with an unchanged identity (the TanStack lesson). Only the
+ * crypto slice may conclude "verified", and even that attests the build IDENTITY via the
+ * CI's OIDC token — NOT that the code is safe. Neither feeds the trust score.
  */
 
 import type {
@@ -121,6 +121,9 @@ export async function fetchNpmProvenance(
     // block — it must never erase the parse-only "attested" snapshot.
     let verification: NpmProvenanceVerification | undefined;
     let effectiveIdentity: ProvenanceIdentity = identity; // parse-only unless crypto verifies
+    // On a VERIFIED verdict we replace `identity` with the SAN tuple; retain the original
+    // parse-only payload tuple so cross-derivation drift comparison stays possible.
+    let payloadIdentity: ProvenanceIdentity | undefined;
     if (opts?.integritySri !== undefined && identity.predicateType === SLSA_V1) {
       const bundle = findSlsaV1Bundle(raw);
       if (bundle !== undefined) {
@@ -133,6 +136,7 @@ export async function fetchNpmProvenance(
           // reflect the cryptographically-attested signer, not a self-claim.
           if (verification.outcome === "verified" && result.verifiedIdentity !== undefined) {
             effectiveIdentity = { ...result.verifiedIdentity, predicateType: SLSA_V1 };
+            payloadIdentity = identity; // keep the parse-only tuple for cross-namespace drift
           }
         } catch {
           verification = undefined; // crypto module unavailable → leave parse-only intact
@@ -151,6 +155,7 @@ export async function fetchNpmProvenance(
       mode: "registry-record",
       identity: effectiveIdentity,
       ...(verification !== undefined ? { verification } : {}),
+      ...(payloadIdentity !== undefined ? { payloadIdentity } : {}),
     };
     const parsed = NpmProvenanceSnapshotSchema.safeParse(snap);
     return parsed.success
@@ -303,6 +308,28 @@ export function compareProvenance(
   if (next.status === "unsigned") return "signed-to-unsigned";
   if (next.status !== "attested") return "none"; // unsupported this run → not comparable
 
+  // Namespace guard: the DERIVATION selector drives off OUR verdict (verification.outcome,
+  // unforgeable — a real crypto pass), but the COMPARED CONTENTS are the parse-only PAYLOAD
+  // tuple, which is attacker-forgeable (the same honesty boundary as slice 1). A
+  // crypto-`verified` snapshot's `identity` is SAN-derived (sourceRepo = the CALLED reusable
+  // workflow's repo, no repositoryId) while a parse-only snapshot's is payload-derived (the
+  // CALLER's repo, WITH a repositoryId) — comparing those directly false-positives for any
+  // reusable-workflow publish. So when derivations differ, compare the PAYLOAD tuple of each
+  // side (a verified snapshot retains it as `payloadIdentity`, a parse-only one as `identity`):
+  // that stays in one namespace and catches a TRUTHFUL attested-only → verified-by-a-
+  // DIFFERENT-publisher swap (the Postmark shape). HONESTY: an attacker who FORGES the
+  // payload's workflow.repository to the victim's prior repo can silence THIS advisory warn;
+  // it is a tamper-EVIDENCE tripwire, not proof. (The enforcing F8 gate is unaffected — it
+  // never trusted a payload field.)
+  const prevSan = prev.verification?.outcome === "verified";
+  const nextSan = next.verification?.outcome === "verified";
+  if (prevSan !== nextSan) {
+    const pa = prevSan ? prev.payloadIdentity : prev.identity;
+    const pb = nextSan ? next.payloadIdentity : next.identity;
+    if (pa === undefined || pb === undefined) return "none"; // legacy verified lock w/o payload tuple
+    return identityChanged(pa, pb) ? "identity-drift" : "none";
+  }
+
   return identityChanged(prev.identity, next.identity) ? "identity-drift" : "none";
 }
 
@@ -315,6 +342,8 @@ function identityChanged(
   b: ProvenanceIdentity | undefined
 ): boolean {
   if (a === undefined || b === undefined) return false; // can't tell → not a drift
+  // (Cross-derivation SAN-vs-payload pairs are filtered by compareProvenance's namespace
+  // guard before reaching here, so both identities are same-derivation.)
   // Prefer immutable numeric ids (survive repo renames / org display changes).
   if (a.repositoryId !== undefined && b.repositoryId !== undefined) {
     // Compare owner ids only when BOTH are present — an asymmetrically-absent
