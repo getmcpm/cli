@@ -194,13 +194,20 @@ function repoLabel(snap: NpmProvenanceSnapshot | undefined): string {
   return sanitizeForTerminal(raw);
 }
 
-/** Index the previous lock's provenance snapshots by server name. */
-function buildPrevProvenanceMap(prevLock: LockFile | null): Map<string, NpmProvenanceSnapshot> {
-  const map = new Map<string, NpmProvenanceSnapshot>();
+/** The previous lock's provenance baseline + the identifier it was recorded for. */
+type PrevProvenance = { identifier: string; snapshot: NpmProvenanceSnapshot };
+
+/** Index the previous lock's provenance snapshots (with identifier) by server name. */
+function buildPrevProvenanceMap(prevLock: LockFile | null): Map<string, PrevProvenance> {
+  const map = new Map<string, PrevProvenance>();
   if (!prevLock) return map;
   for (const [name, server] of Object.entries(prevLock.servers)) {
-    const prov = provenanceOf(server);
-    if (prov) map.set(name, prov);
+    // Carry the identifier alongside the snapshot: the sticky carry-forward must NOT
+    // apply a previous baseline to a DIFFERENT package the user swapped in under the
+    // same server name (that would false-positive the F8 verify-time signer gate).
+    if (isLockedRegistryServer(server) && server.provenance) {
+      map.set(name, { identifier: server.identifier, snapshot: server.provenance });
+    }
   }
   return map;
 }
@@ -248,7 +255,7 @@ async function resolveServer(
   scannerAvailable: boolean,
   minAgeHours: number,
   deps: LockDeps,
-  prevProvenance?: NpmProvenanceSnapshot
+  prevProvenance?: PrevProvenance
 ): Promise<LockedServer> {
   // URL-based servers: pin directly, no version resolution or trust
   if (isUrlServer(server)) {
@@ -354,19 +361,30 @@ async function resolveServer(
     );
   }
 
-  // F8: keep a known-good baseline STICKY across a transient failure or an
-  // unparseable re-read of the SAME immutable coordinate. A published version's
-  // provenance does not change, so one bad run must not erase the recorded
-  // baseline and silently disarm the drift tripwire. A DEFINITIVE change — a
-  // 404→unsigned, or a different attested identity — is NOT caught here (it is
-  // neither undefined nor unsupported), so it still overwrites and warns.
+  // F8: keep a known-good baseline STICKY across a transient failure, an unparseable
+  // re-read, OR a re-lock where CRYPTO didn't run (integrity fetch blipped / @sigstore
+  // failed to load) for the SAME immutable coordinate AND identifier. A published
+  // version's provenance does not change, so one bad run must not erase the recorded
+  // baseline — NOR silently DOWNGRADE a crypto-`verified` baseline to
+  // attested-without-verification, which would disarm the F8 verify-time tripwire for
+  // that server. Guarded on identifier equality so a deliberate package swap under the
+  // same name/version is NOT carried. A DEFINITIVE change — a 404→unsigned, or a
+  // different attested identity — is NOT caught here, so it still overwrites and warns.
+  const prevSnap = prevProvenance?.snapshot;
+  const cryptoDidNotRun =
+    provenanceSnap?.status === "attested" &&
+    provenanceSnap.verification === undefined &&
+    prevSnap?.verification?.outcome === "verified";
   if (
     isConcreteNpm &&
-    prevProvenance?.status === "attested" &&
-    prevProvenance.npmVersion === pkg?.version &&
-    (provenanceSnap === undefined || provenanceSnap.status === "unsupported")
+    prevProvenance?.identifier === pkg?.identifier &&
+    prevSnap?.status === "attested" &&
+    prevSnap.npmVersion === pkg?.version &&
+    (provenanceSnap === undefined ||
+      provenanceSnap.status === "unsupported" ||
+      cryptoDidNotRun)
   ) {
-    provenanceSnap = prevProvenance;
+    provenanceSnap = prevSnap;
   }
 
   return {

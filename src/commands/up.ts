@@ -46,7 +46,12 @@ import { extractRegistryMeta } from "../utils/format-trust.js";
 import { assessServerStatus } from "../scanner/registry-status.js";
 import { applyKeychainSecrets, type SecretsMode, setSecrets as _setSecrets } from "../store/keychain.js";
 import { isNewUnguarded } from "../guard/unguarded.js";
-import { classifyIntegrity, frozenVerdict } from "../stack/frozen-verify.js";
+import { classifyIntegrity, frozenVerdict, memoizeIntegrity } from "../stack/frozen-verify.js";
+import {
+  classifyProvenance,
+  type FetchNpmProvenance,
+  type ProvenanceBlock,
+} from "../stack/frozen-provenance.js";
 import type { PinsFile } from "../guard/pins.js";
 import { readPins as _readPins } from "../guard/pins.js";
 import {
@@ -168,6 +173,16 @@ export interface UpDeps {
     identifier: string,
     npmVersion: string
   ) => Promise<NpmIntegritySnapshot | undefined>;
+  /**
+   * F8/B3: re-fetch npm's published Sigstore attestation for an exact coordinate,
+   * crypto-verifying it OFFLINE when a dist.integrity SRI is supplied. FAIL-OPEN
+   * (undefined on any error). Drives the --frozen provenance re-check, which gates
+   * servers the lock recorded as crypto-`verified`. REQUIRED (not optional): a
+   * documented fail-closed gate must never silently no-op because a production
+   * surface forgot to wire it — making it required means tsc flags every handleUp
+   * call site (CLI + the mcpm_up MCP surface) that omits it.
+   */
+  fetchNpmProvenance: FetchNpmProvenance;
   /**
    * F2: read ~/.mcpm/pins.json for the cross-server shadow check. Injectable for
    * tests; defaults to the real store at the CLI boundary. When omitted, the
@@ -724,9 +739,18 @@ async function runIntegrityPass(
  */
 async function runFrozenPass(
   lockFile: LockFile,
-  deps: Pick<UpDeps, "fetchNpmIntegrity" | "output">
+  deps: Pick<UpDeps, "fetchNpmIntegrity" | "fetchNpmProvenance" | "output">
 ): Promise<void> {
-  const v = frozenVerdict(await classifyIntegrity(lockFile, deps.fetchNpmIntegrity));
+  // Two independent fail-closed gates in parallel: integrity drift (H11) and
+  // provenance crypto-regression (F8/B3, evidence-gated to crypto-`verified`
+  // servers). Both read npm's integrity for a checked coordinate, so memoize the
+  // fetcher — one GET per coordinate, and the two gates can never disagree.
+  const fetchIntegrity = memoizeIntegrity(deps.fetchNpmIntegrity);
+  const [v, pv] = await Promise.all([
+    classifyIntegrity(lockFile, fetchIntegrity).then(frozenVerdict),
+    classifyProvenance(lockFile, fetchIntegrity, deps.fetchNpmProvenance),
+  ]);
+  const provBlocks = pv.blocks;
 
   // Servers --frozen can't integrity-check (pypi/oci have no baseline mechanism;
   // url servers have no package coordinate) — name them loudly rather than let a
@@ -738,18 +762,22 @@ async function runFrozenPass(
     );
   }
 
-  // A lock where NO npm server has a baseline is benign (pre-baseline or offline
-  // lock), not an attack — refuse with instructions instead of a per-server verdict.
-  if (v.noBaselines) {
+  // A lock where NO npm server has an integrity baseline is benign (pre-baseline or
+  // offline lock), not an attack — refuse with instructions. BUT the sticky
+  // provenance carry-forward (lock.ts) can leave a crypto-`verified` baseline on a
+  // lock whose integrity fetch failed at lock time, so a provenance regression can
+  // coexist with noBaselines — surface those blocks first rather than hide them
+  // behind the benign refuse-to-run.
+  if (v.noBaselines && provBlocks.length === 0) {
     throw new Error(
       "--frozen: this lock has no integrity baselines (it predates them, or was last locked" +
         " offline). Run `mcpm lock` online once to record them, then `mcpm up --frozen`."
     );
   }
 
-  if (v.ok) return;
+  if (v.ok && provBlocks.length === 0) return;
 
-  const blocks = v.blocks.map((b) => {
+  const integrityMessages = v.blocks.map((b) => {
     switch (b.reason) {
       case "drift":
         return (
@@ -786,11 +814,45 @@ async function runFrozenPass(
     }
   });
 
-  deps.output(`\n${blocks.join("\n")}`);
+  const provenanceMessages = provBlocks.map(frozenProvenanceMessage);
+
+  const allMessages = [...integrityMessages, ...provenanceMessages];
+  deps.output(`\n${allMessages.join("\n")}`);
   deps.output("\nmcpm verifies the registry's published record, not the code your agent runs at launch.");
   throw new Error(
-    `frozen: ${blocks.length} server(s) failed integrity verification; nothing was installed.`
+    `frozen: ${allMessages.length} server(s) failed verification; nothing was installed.`
   );
+}
+
+/** Render a --frozen-flavored message for a provenance regression block (F8/B3). */
+function frozenProvenanceMessage(b: ProvenanceBlock): string {
+  switch (b.reason) {
+    case "signer-changed":
+      return (
+        `✗ FROZEN: the cryptographic signer for ${b.identifier}@${b.npmVersion} changed since you` +
+        ` locked it (${b.detail}). --frozen refuses to install on a provenance signer swap. Re-pin` +
+        ` with \`mcpm lock\` only if this re-sign is expected.`
+      );
+    case "regression":
+      return (
+        `✗ FROZEN: provenance for ${b.identifier}@${b.npmVersion} regressed — it cryptographically` +
+        ` verified when you locked it and no longer does (${b.detail}). --frozen refuses to install.` +
+        ` If npm's record is unchanged, your mcpm/@sigstore crypto stack may have changed since you` +
+        ` locked (e.g. after an mcpm upgrade) — re-run \`mcpm lock\` to re-baseline.`
+      );
+    case "unverifiable":
+      // NON-deterministic (a transient attestation-endpoint blip) — distinct "re-run"
+      // message, separate from the deterministic signer-changed / regression cases.
+      return (
+        `✗ FROZEN: could not cryptographically re-verify provenance for ${b.identifier}@${b.npmVersion}` +
+        ` this run (${b.detail}). --frozen requires proof the attestation still verifies — this may be` +
+        ` a transient error, so re-run; if it persists, investigate before dropping --frozen.`
+      );
+    default: {
+      const _never: never = b.reason;
+      throw new Error(`unhandled provenance block reason: ${JSON.stringify(_never)}`);
+    }
+  }
 }
 
 /**
@@ -1088,6 +1150,7 @@ import { handleLock } from "./lock.js";
 import { confirm } from "../utils/confirm.js";
 import { stdoutOutput } from "../utils/output.js";
 import { fetchNpmIntegrity as _fetchNpmIntegrity } from "../registry/npm-integrity.js";
+import { fetchNpmProvenance as _fetchNpmProvenance } from "../registry/npm-provenance.js";
 
 export function registerUpCommand(program: Command): void {
   program
@@ -1102,7 +1165,7 @@ export function registerUpCommand(program: Command): void {
     .option("--secrets <mode>", "where to store secret env vars: 'keychain' (encrypted in ~/.mcpm, resolved by mcpm guard at launch) or 'plaintext' (default); 'keychain' is rejected with --ci", parseSecretsMode)
     .option("--allow-unguarded", "permit URL/HTTP-transport servers to run WITHOUT runtime guard inspection (no relay wraps a non-stdio transport); records consent so future runs stay quiet")
     .option("--check-shadowing", "report tool-name collisions across guarded servers (a shadowing signal); advisory interactively, exits nonzero under --ci")
-    .option("--frozen", "fail closed: verify every locked npm server's published integrity BEFORE installing and BLOCK (install nothing, exit nonzero) on drift / unverifiable / missing baseline — the CI supply-chain freeze gate")
+    .option("--frozen", "fail closed: BEFORE installing, verify every locked npm server's published integrity AND re-verify Sigstore provenance for crypto-verified servers, then BLOCK (install nothing, exit nonzero) on integrity drift / provenance regression / unverifiable / missing baseline — the CI supply-chain freeze gate")
     .action(
       async (opts: {
         file?: string;
@@ -1160,6 +1223,9 @@ export function registerUpCommand(program: Command): void {
                     writeLockFile: (path, content) =>
                       writeFile(path, content, { encoding: "utf-8", mode: 0o600 }),
                     fetchNpmIntegrity: _fetchNpmIntegrity,
+                    // F8/B3: auto-lock must record the crypto-`verified` provenance
+                    // baseline too, or the verify-time gate is vacuous for up-locked repos.
+                    fetchNpmProvenance: (id, ver, sri) => _fetchNpmProvenance(id, ver, { integritySri: sri }),
                     output: stdoutOutput,
                   }
                 );
@@ -1174,6 +1240,7 @@ export function registerUpCommand(program: Command): void {
               output: stdoutOutput,
               setSecrets: _setSecrets,
               fetchNpmIntegrity: _fetchNpmIntegrity,
+              fetchNpmProvenance: (id, v, o) => _fetchNpmProvenance(id, v, o),
               readPins: _readPins,
               readUnguardedConsent,
               recordUnguardedConsent: async (names) => {

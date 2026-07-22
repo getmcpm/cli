@@ -17,6 +17,7 @@ import { formatMcpEntryCommand } from "../utils/format-entry.js";
 import { resolveInstallEntry } from "../commands/install.js";
 import { buildDoctorModel, makeCheckConfigExists, execCheckDefault } from "../commands/doctor.js";
 import { fetchNpmIntegrity as _fetchNpmIntegrity } from "../registry/npm-integrity.js";
+import { fetchNpmProvenance as _fetchNpmProvenance } from "../registry/npm-provenance.js";
 import { readPins as _readPins } from "../guard/pins.js";
 
 // ---------------------------------------------------------------------------
@@ -540,6 +541,7 @@ export async function handleMcpUp(
               writeLockFile: (path, content) =>
                 writeFile(path, content, { encoding: "utf-8", mode: 0o600 }),
               fetchNpmIntegrity: _fetchNpmIntegrity,
+              fetchNpmProvenance: (id, ver, sri) => _fetchNpmProvenance(id, ver, { integritySri: sri }),
               output: (text) => outputLines.push(text),
             }
           );
@@ -554,6 +556,9 @@ export async function handleMcpUp(
         promptEnvVar: async () => "",
         output: (text) => outputLines.push(text),
         fetchNpmIntegrity: _fetchNpmIntegrity,
+        // F8/B3: wire the provenance re-check on the MCP surface too, or a
+        // policy.frozen: true stack run through mcpm_up would silently skip it.
+        fetchNpmProvenance: (id, v, o) => _fetchNpmProvenance(id, v, o),
         readPins: _readPins,
         recordResult: (r) => records.push(r),
       }
