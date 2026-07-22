@@ -2,6 +2,37 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.24.0] - 2026-07-23
+
+Verify-time Sigstore provenance enforcement (F8 "B3" — the enforcing gate).
+
+### Added
+
+- **`mcpm verify` and `mcpm up --frozen` now re-verify provenance and fail closed.**
+  Where the crypto slice (v0.23.0) *reported* provenance, these commands now
+  **enforce** it: for every npm server whose lock recorded a cryptographically
+  `verified` baseline, the gate re-runs the offline crypto verification against
+  npm's **current** published record and blocks on a regression —
+  - `signer-changed` — still verifies, but under a different (unforgeable) signer
+    identity than the lock recorded (an attestation swap),
+  - `regression` — was verified; now the attestation fails to verify or is gone,
+  - `unverifiable` — couldn't cryptographically re-verify this run (re-run).
+
+  The gate is **evidence-gated**: only servers with a `verified` baseline are
+  checked, so a lock with none — every pre-crypto lock and the overwhelmingly
+  unsigned MCP ecosystem — is unaffected. `mcpm verify` reports the provenance
+  dimension in its text and `--json` model; `up --frozen` runs the integrity +
+  provenance freeze before installing anything.
+
+### Changed
+
+- `mcpm lock` keeps a crypto-`verified` baseline **sticky** across a re-lock whose
+  fresh read is transient or no longer verifies (for the same immutable
+  coordinate), so a network blip can't silently disarm the verify-time gate; it
+  warns loudly on a genuine verification regression or downgrade.
+- Honest boundary unchanged: a block means npm's **published record** diverged from
+  your lock — not that mcpm inspected the bytes your agent runs at launch.
+
 ## [0.23.0] - 2026-07-20
 
 Offline cryptographic verification of npm provenance (F8 crypto slice).
