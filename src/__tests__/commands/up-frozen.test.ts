@@ -360,6 +360,8 @@ describe("handleUp — F8/B3 --frozen provenance gate", () => {
 
     await expect(handleUp({ stackFile: stackPath, frozen: true }, deps)).rejects.toThrow(/failed verification/i);
     expect(out(deps)).toMatch(/provenance for .* regressed/i);
+    // The integrity-gap notice is still shown (parallel to `mcpm verify`), not hidden.
+    expect(out(deps)).toMatch(/no integrity baselines/i);
     // The benign "no integrity baselines" refuse must NOT be the thrown reason.
     expect(deps.getServer).not.toHaveBeenCalled();
   });

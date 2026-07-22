@@ -182,6 +182,48 @@ describe("handleLock — provenance-identity drift (report-only)", () => {
     expect(locked.provenance?.verification?.outcome).toBe("verified"); // preserved, not downgraded
   });
 
+  it("carries a VERIFIED baseline forward + WARNS when crypto RAN and FAILED this re-lock (could-not-verify)", async () => {
+    // The common regression/attack shape: crypto ran and returned could-not-verify (a
+    // PRESENT verification block), not verification===undefined. Must NOT disarm the gate.
+    const verifiedProv: NpmProvenanceSnapshot = {
+      ...attested("1"),
+      verification: { outcome: "verified", signerSan: "https://github.com/a/b/.github/workflows/x.yml@refs/tags/v1", signerIssuer: "https://token.actions.githubusercontent.com" },
+    };
+    const freshFailed: NpmProvenanceSnapshot = {
+      ...attested("1"), // SAME identity as the baseline
+      verification: { outcome: "could-not-verify", reason: "subject-digest-mismatch" },
+    };
+    const deps = makeDeps(entry(), {
+      fetchNpmProvenance: vi.fn().mockResolvedValue(freshFailed),
+      readExistingLock: vi.fn().mockResolvedValue(prevLockWith(verifiedProv)),
+    });
+    await handleLock({ stackFile: await writeTempStack() }, deps);
+    const locked = lockedFromWrite(deps) as { provenance?: NpmProvenanceSnapshot };
+    expect(locked.provenance?.verification?.outcome).toBe("verified"); // baseline preserved, gate stays armed
+    expect(outputText(deps)).toMatch(/verification regressed/i); // and loudly warned
+  });
+
+  it("does NOT carry a could-not-verify with a DIFFERENT identity — surfaces the swap (hard, same-version copy)", async () => {
+    const verifiedProv: NpmProvenanceSnapshot = {
+      ...attested("1"),
+      verification: { outcome: "verified", signerSan: "https://github.com/a/b/.github/workflows/x.yml@refs/tags/v1", signerIssuer: "https://token.actions.githubusercontent.com" },
+    };
+    const freshDifferent: NpmProvenanceSnapshot = {
+      ...attested("2", "9", "https://github.com/evil/pkg"), // DIFFERENT repositoryId
+      verification: { outcome: "could-not-verify", reason: "subject-digest-mismatch" },
+    };
+    const deps = makeDeps(entry(), {
+      fetchNpmProvenance: vi.fn().mockResolvedValue(freshDifferent),
+      readExistingLock: vi.fn().mockResolvedValue(prevLockWith(verifiedProv)),
+    });
+    await handleLock({ stackFile: await writeTempStack() }, deps);
+    const locked = lockedFromWrite(deps) as { provenance?: NpmProvenanceSnapshot };
+    // Not carried → the fresh (different-identity) snapshot overwrites.
+    expect(locked.provenance?.verification?.outcome).not.toBe("verified");
+    // Same immutable version → HARD swap copy, not the org-transfer hedge.
+    expect(outputText(deps)).toMatch(/SAME version|attestation swap/i);
+  });
+
   it("does NOT carry the verified baseline across an identifier swap (different package, same name+version)", async () => {
     const verifiedProv: NpmProvenanceSnapshot = {
       ...attested("1"),

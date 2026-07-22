@@ -230,9 +230,16 @@ function reportProvenanceDrift(
     const next = provenanceOf(locked);
     switch (compareProvenance(prev, next)) {
       case "identity-drift":
+        // On the SAME immutable version the org-transfer hedge does NOT apply — a
+        // pinned coordinate's attestation can't legitimately change publisher, so this
+        // is a swap to investigate, not a rename to wave through.
         output(
-          `  ⚠ provenance identity changed for ${name}: ${repoLabel(prev)} → ${repoLabel(next)} — ` +
-            `expected if the project moved repos/CI; investigate if not.`
+          prev?.npmVersion !== undefined && prev.npmVersion === next?.npmVersion
+            ? `  ⚠ provenance identity changed for ${name} on the SAME version ${next?.npmVersion} ` +
+                `(${repoLabel(prev)} → ${repoLabel(next)}) — an immutable coordinate's attestation should ` +
+                `never change publisher; treat as a possible attestation swap and verify before shipping.`
+            : `  ⚠ provenance identity changed for ${name}: ${repoLabel(prev)} → ${repoLabel(next)} — ` +
+                `expected if the project moved repos/CI; investigate if not.`
         );
         break;
       case "signed-to-unsigned":
@@ -361,29 +368,39 @@ async function resolveServer(
     );
   }
 
-  // F8: keep a known-good baseline STICKY across a transient failure, an unparseable
-  // re-read, OR a re-lock where CRYPTO didn't run (integrity fetch blipped / @sigstore
-  // failed to load) for the SAME immutable coordinate AND identifier. A published
-  // version's provenance does not change, so one bad run must not erase the recorded
-  // baseline — NOR silently DOWNGRADE a crypto-`verified` baseline to
-  // attested-without-verification, which would disarm the F8 verify-time tripwire for
-  // that server. Guarded on identifier equality so a deliberate package swap under the
-  // same name/version is NOT carried. A DEFINITIVE change — a 404→unsigned, or a
-  // different attested identity — is NOT caught here, so it still overwrites and warns.
+  // F8: keep a known-good baseline STICKY across a fresh read that is transient or
+  // worse-than-verified for the SAME immutable coordinate + identifier. One bad run
+  // must not ERASE the recorded baseline — NOR silently DOWNGRADE a crypto-`verified`
+  // one, which would DROP the server from the F8 verify-time checked set (a silent
+  // disarm). Crypto NEVER throws, so a crypto FAILURE surfaces as
+  // verification.outcome === "could-not-verify" (a present block) — the common
+  // regression/attack shape — NOT as verification === undefined (only an @sigstore
+  // import miss); BOTH are caught. Carrying keeps the verified baseline armed so the
+  // NEXT `mcpm verify`/`up --frozen` hard-blocks the regression instead of passing
+  // vacuously. Guarded on identifier equality (no cross-package carry) AND identity
+  // equality (a changed identity is a real pipeline swap to SURFACE, not a blip to hide).
   const prevSnap = prevProvenance?.snapshot;
-  const cryptoDidNotRun =
-    provenanceSnap?.status === "attested" &&
-    provenanceSnap.verification === undefined &&
-    prevSnap?.verification?.outcome === "verified";
-  if (
+  const sameCoordinate =
     isConcreteNpm &&
     prevProvenance?.identifier === pkg?.identifier &&
     prevSnap?.status === "attested" &&
-    prevSnap.npmVersion === pkg?.version &&
-    (provenanceSnap === undefined ||
-      provenanceSnap.status === "unsupported" ||
-      cryptoDidNotRun)
-  ) {
+    prevSnap.npmVersion === pkg?.version;
+  const freshUnreadable = provenanceSnap === undefined || provenanceSnap.status === "unsupported";
+  const prevWasVerified = prevSnap?.verification?.outcome === "verified";
+  const cryptoRegressed =
+    provenanceSnap?.status === "attested" && provenanceSnap.verification?.outcome !== "verified";
+  const identityDrifted =
+    provenanceSnap !== undefined && compareProvenance(prevSnap, provenanceSnap) === "identity-drift";
+
+  if (sameCoordinate && (freshUnreadable || (prevWasVerified && cryptoRegressed && !identityDrifted))) {
+    // Crypto that RAN and FAILED (vs merely didn't run) on an immutable coordinate is
+    // suspicious — warn loudly even though we keep the baseline armed for verify-time.
+    if (prevWasVerified && provenanceSnap?.verification?.outcome === "could-not-verify") {
+      deps.output(
+        `  ⚠ provenance verification regressed for ${name}: was cryptographically verified, now fails to ` +
+          `verify — a poisoned attestation swap can look like this; run \`mcpm verify\` before shipping.`
+      );
+    }
     provenanceSnap = prevSnap;
   }
 

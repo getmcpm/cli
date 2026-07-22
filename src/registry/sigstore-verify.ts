@@ -160,6 +160,13 @@ export function cryptoVerifySlsaBundle(
     if (!subjectBindsToIntegrity(verifiedSubjectHex(rawBundle), ctx.integritySri)) {
       return { verification: couldNotVerify("subject-digest-mismatch", san, issuer) };
     }
+    // A GitHub-Actions OIDC cert always carries a SAN; if one is somehow absent we
+    // CANNOT record an equality-checkable signer identity, so a downstream verify-time
+    // gate would have nothing to compare. Refuse the "verified" verdict (fail closed)
+    // rather than mint a SAN-less one that later reads as an un-checkable baseline.
+    if (san === undefined) {
+      return { verification: couldNotVerify("no-signer-san", san, issuer) };
+    }
     return {
       verification: {
         outcome: "verified",

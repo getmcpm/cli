@@ -136,7 +136,7 @@ describe("classifyProvenance — signer-changed", () => {
     expect(verdict.blocks[0]?.detail).toContain("evil");
   });
 
-  it("blocks when the fresh signer ISSUER differs", async () => {
+  it("blocks when the fresh signer ISSUER differs, and the detail names the ISSUER (not a bogus SAN X→X)", async () => {
     const fresh = verifiedSnapshot({
       verification: { outcome: "verified", signerSan: SAN, signerIssuer: "https://evil.example/oidc" },
     });
@@ -146,6 +146,9 @@ describe("classifyProvenance — signer-changed", () => {
       provenanceReturning(fresh)
     );
     expect(verdict.blocks[0]?.reason).toBe("signer-changed");
+    expect(verdict.blocks[0]?.detail).toContain("issuer");
+    // SAN is identical → must NOT print a "SAN X → X" delta.
+    expect(verdict.blocks[0]?.detail).not.toContain(`SAN ${SAN} → ${SAN}`);
   });
 });
 

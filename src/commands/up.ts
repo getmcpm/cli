@@ -816,11 +816,24 @@ async function runFrozenPass(
 
   const provenanceMessages = provBlocks.map(frozenProvenanceMessage);
 
-  const allMessages = [...integrityMessages, ...provenanceMessages];
+  // When the lock is integrity-noBaselines but a sticky verified provenance baseline
+  // regressed, note the integrity gap (parallel to `mcpm verify`) so the provenance
+  // block isn't mistaken for a full freeze.
+  const noticeMessages = v.noBaselines
+    ? [
+        "⚠ FROZEN: this lock has no integrity baselines (predates them / locked offline) — run" +
+          " `mcpm lock` online to record them.",
+      ]
+    : [];
+
+  const allMessages = [...noticeMessages, ...integrityMessages, ...provenanceMessages];
   deps.output(`\n${allMessages.join("\n")}`);
   deps.output("\nmcpm verifies the registry's published record, not the code your agent runs at launch.");
+  // Count DISTINCT servers — one transient blip can raise BOTH an integrity and a
+  // provenance block for the same server (they share the memoized fetch).
+  const failed = new Set([...v.blocks.map((b) => b.name), ...provBlocks.map((b) => b.name)]);
   throw new Error(
-    `frozen: ${allMessages.length} server(s) failed verification; nothing was installed.`
+    `frozen: ${failed.size} server(s) failed verification; nothing was installed.`
   );
 }
 

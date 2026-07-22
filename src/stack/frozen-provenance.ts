@@ -205,11 +205,16 @@ function classifyOne(
     return { ...coord, reason: "unverifiable", detail: "verified baseline lacks a recorded signer SAN — cannot assert signer equality; re-lock to record it" };
   }
   if (v.signerSan !== baseline.signerSan || v.signerIssuer !== baseline.signerIssuer) {
-    return {
-      ...coord,
-      reason: "signer-changed",
-      detail: `signer identity changed: ${baseline.signerSan ?? "(none)"} → ${v.signerSan ?? "(none)"}`,
-    };
+    // Report whichever field actually changed — a bare SAN delta would print "X → X"
+    // when only the issuer differs.
+    const deltas: string[] = [];
+    if (v.signerSan !== baseline.signerSan) {
+      deltas.push(`SAN ${baseline.signerSan ?? "(none)"} → ${v.signerSan ?? "(none)"}`);
+    }
+    if (v.signerIssuer !== baseline.signerIssuer) {
+      deltas.push(`issuer ${baseline.signerIssuer ?? "(none)"} → ${v.signerIssuer ?? "(none)"}`);
+    }
+    return { ...coord, reason: "signer-changed", detail: `signer identity changed: ${deltas.join("; ")}` };
   }
   return undefined; // still verified, same signer → PASS
 }
