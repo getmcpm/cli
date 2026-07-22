@@ -208,7 +208,7 @@ Without an external scanner installed, the maximum possible score is 80/100. The
 | `mcpm export` | Export installed servers as an mcpm.yaml stack file |
 | `mcpm lock` | Resolve versions and create mcpm-lock.yaml with trust snapshots (+ npm provenance identity, WARNs on drift) |
 | `mcpm up` | Install all servers from mcpm.yaml with trust verification |
-| `mcpm verify` | Repo-only CI gate: verify lockfile integrity vs npm's published record (`--json`) |
+| `mcpm verify` | Repo-only CI gate: verify lockfile integrity + re-verify Sigstore provenance vs npm's published record (`--json`) |
 | `mcpm diff` | Compare installed servers against mcpm.yaml and lock file |
 | `mcpm sync` | Show cross-client config drift across all detected clients (`--check` gates CI with exit 2, `--json`) |
 | `mcpm completions <shell>` | Generate shell completion scripts (bash, zsh, fish) |
@@ -235,6 +235,14 @@ Run `mcpm <command> --help` for options and flags.
 non-zero on integrity drift, an unverifiable record, a format mismatch, or a
 suspicious missing baseline. Because it needs no AI clients installed, it runs on a
 hosted CI runner (where `mcpm up` cannot).
+
+It **also re-verifies Sigstore provenance** for every npm server whose lock recorded
+a cryptographically `verified` baseline: it re-runs the offline crypto verification
+against npm's current record and fails closed if the attestation regressed — the
+signer identity changed, it no longer verifies, or it can't be re-checked. This is
+evidence-gated, so a lock with no `verified` baselines (the common case) is
+unaffected. `mcpm up --frozen` runs the same integrity + provenance freeze before
+installing.
 
 `mcpm lock` also records each npm server's **published provenance identity** (the
 source repo + immutable GitHub repo/owner ids behind the build) and WARNs when it
