@@ -203,6 +203,17 @@ describe("compareProvenance — drift classifier (report-only)", () => {
     expect(compareProvenance(a, same)).toBe("none");
     expect(compareProvenance(a, other)).toBe("identity-drift");
   });
+
+  it("a repositoryId on EXACTLY ONE side is cross-namespace (SAN- vs payload-derived) → NOT drift", () => {
+    // SAN-derived (crypto-verified) identity: sourceRepo = the reusable workflow's repo,
+    // NO repositoryId. Payload-derived (parse-only) identity: caller repo, WITH repositoryId.
+    // For a reusable-workflow publish these sourceRepos differ legitimately — comparing
+    // them must NOT false-positive as drift.
+    const sanDerived = snap({ identity: { sourceRepo: "https://github.com/shared/reusable-wf" } });
+    const payloadDerived = snap({ identity: { repositoryId: "1", repositoryOwnerId: "9", sourceRepo: "https://github.com/caller/pkg" } });
+    expect(compareProvenance(sanDerived, payloadDerived)).toBe("none");
+    expect(compareProvenance(payloadDerived, sanDerived)).toBe("none");
+  });
 });
 
 describe("fetchNpmProvenance — crypto verification wiring (F8 crypto slice)", () => {

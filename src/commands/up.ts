@@ -850,8 +850,9 @@ function frozenProvenanceMessage(b: ProvenanceBlock): string {
       return (
         `✗ FROZEN: provenance for ${b.identifier}@${b.npmVersion} regressed — it cryptographically` +
         ` verified when you locked it and no longer does (${b.detail}). --frozen refuses to install.` +
-        ` If npm's record is unchanged, your mcpm/@sigstore crypto stack may have changed since you` +
-        ` locked (e.g. after an mcpm upgrade) — re-run \`mcpm lock\` to re-baseline.`
+        ` If npm's record is unchanged, your mcpm/@sigstore version may have changed since you locked` +
+        ` (e.g. after an mcpm upgrade); if that regression is expected, remove this server's stale lock` +
+        ` entry and re-lock to re-baseline (a plain \`mcpm lock\` keeps the prior verified baseline).`
       );
     case "unverifiable":
       // NON-deterministic (a transient attestation-endpoint blip) — distinct "re-run"

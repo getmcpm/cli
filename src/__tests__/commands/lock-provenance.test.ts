@@ -203,13 +203,18 @@ describe("handleLock — provenance-identity drift (report-only)", () => {
     expect(outputText(deps)).toMatch(/verification regressed/i); // and loudly warned
   });
 
-  it("does NOT carry a could-not-verify with a DIFFERENT identity — surfaces the swap (hard, same-version copy)", async () => {
+  it("STILL carries the verified baseline when a could-not-verify fresh snapshot has a different (forgeable) payload identity — no attacker-chosen eviction", async () => {
+    // A crypto-regressed fresh snapshot's identity is parse-only (forgeable). If a
+    // differing identity could evict the baseline, an attacker would just forge a
+    // different one to downgrade the gate to warn-only. On the same immutable
+    // coordinate+identifier the baseline is ALWAYS carried (gate stays armed); the
+    // actual signer check happens at verify time (SAN vs SAN).
     const verifiedProv: NpmProvenanceSnapshot = {
       ...attested("1"),
       verification: { outcome: "verified", signerSan: "https://github.com/a/b/.github/workflows/x.yml@refs/tags/v1", signerIssuer: "https://token.actions.githubusercontent.com" },
     };
     const freshDifferent: NpmProvenanceSnapshot = {
-      ...attested("2", "9", "https://github.com/evil/pkg"), // DIFFERENT repositoryId
+      ...attested("2", "9", "https://github.com/evil/pkg"), // DIFFERENT (forged) payload identity
       verification: { outcome: "could-not-verify", reason: "subject-digest-mismatch" },
     };
     const deps = makeDeps(entry(), {
@@ -218,10 +223,8 @@ describe("handleLock — provenance-identity drift (report-only)", () => {
     });
     await handleLock({ stackFile: await writeTempStack() }, deps);
     const locked = lockedFromWrite(deps) as { provenance?: NpmProvenanceSnapshot };
-    // Not carried → the fresh (different-identity) snapshot overwrites.
-    expect(locked.provenance?.verification?.outcome).not.toBe("verified");
-    // Same immutable version → HARD swap copy, not the org-transfer hedge.
-    expect(outputText(deps)).toMatch(/SAME version|attestation swap/i);
+    expect(locked.provenance?.verification?.outcome).toBe("verified"); // carried, gate stays armed
+    expect(outputText(deps)).toMatch(/verification regressed/i); // and warned
   });
 
   it("does NOT carry the verified baseline across an identifier swap (different package, same name+version)", async () => {

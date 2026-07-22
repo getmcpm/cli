@@ -315,6 +315,13 @@ function identityChanged(
   b: ProvenanceIdentity | undefined
 ): boolean {
   if (a === undefined || b === undefined) return false; // can't tell → not a drift
+  // A repositoryId present on EXACTLY ONE side means the two identities were derived
+  // differently and live in different namespaces: a crypto-`verified` identity is
+  // SAN-derived (sourceRepo = the CALLED reusable workflow's repo, no repositoryId),
+  // while a parse-only identity is payload-derived (sourceRepo = the CALLER's repo, WITH
+  // a repositoryId). Their sourceRepos legitimately differ for any reusable-workflow
+  // publish, so a normRepo comparison would false-positive. Incomparable → not a drift.
+  if ((a.repositoryId === undefined) !== (b.repositoryId === undefined)) return false;
   // Prefer immutable numeric ids (survive repo renames / org display changes).
   if (a.repositoryId !== undefined && b.repositoryId !== undefined) {
     // Compare owner ids only when BOTH are present — an asymmetrically-absent
