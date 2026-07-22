@@ -256,6 +256,24 @@ function reportProvenanceDrift(
         );
         break;
     }
+
+    // Verification DOWNGRADE (F8): a coordinate that was crypto-`verified` is now only
+    // attested-but-unverified. On the SAME coordinate the sticky carry keeps `next`
+    // verified, so this fires only across a VERSION BUMP (or a genuine re-baseline) —
+    // where compareProvenance's cross-derivation guard returns "none" and would otherwise
+    // stay silent while the F8 verify-time gate quietly stops covering this server.
+    if (
+      prev?.status === "attested" &&
+      prev.verification?.outcome === "verified" &&
+      next?.status === "attested" &&
+      next.verification?.outcome !== "verified"
+    ) {
+      output(
+        `  ⚠ provenance verification downgraded for ${name}: was cryptographically verified, now only ` +
+          `attested (unverified) — \`mcpm verify\`/\`up --frozen\` no longer crypto-check it. Investigate a ` +
+          `swap; if the new version legitimately dropped provenance, re-baseline knowingly.`
+      );
+    }
   }
 }
 

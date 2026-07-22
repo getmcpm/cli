@@ -227,6 +227,40 @@ describe("compareProvenance — drift classifier (report-only)", () => {
     const b = snap({ identity: { sourceRepo: "https://github.com/evil/pkg" } }); // no repoId, different repo
     expect(compareProvenance(a, b)).toBe("identity-drift");
   });
+
+  const VERIF = {
+    outcome: "verified" as const,
+    signerSan: "https://github.com/shared/wf/.github/workflows/x.yml@refs/tags/v1",
+    signerIssuer: "https://token.actions.githubusercontent.com",
+  };
+
+  it("attested-only → verified-by-a-DIFFERENT-publisher is drift (payload compared cross-namespace — Postmark tripwire restored)", () => {
+    // Victim had attested-only (payload = good repo); attacker serves a valid attestation
+    // from THEIR repo (SAN = shared wf, payloadIdentity = evil caller). Must still warn.
+    const attestedOnly = snap({ identity: { repositoryId: "1", sourceRepo: "https://github.com/good/pkg" } });
+    const verifiedByAttacker = snap({
+      identity: { sourceRepo: "https://github.com/shared/wf" }, // SAN tuple
+      payloadIdentity: { repositoryId: "999", sourceRepo: "https://github.com/evil/pkg" },
+      verification: VERIF,
+    });
+    expect(compareProvenance(attestedOnly, verifiedByAttacker)).toBe("identity-drift");
+  });
+
+  it("benign attested-only → verified upgrade (SAME package payload) is NOT drift (reusable-workflow FP stays suppressed)", () => {
+    const attestedOnly = snap({ identity: { repositoryId: "1", sourceRepo: "https://github.com/good/pkg" } });
+    const verifiedSame = snap({
+      identity: { sourceRepo: "https://github.com/shared/reusable-wf" }, // SAN = shared workflow
+      payloadIdentity: { repositoryId: "1", sourceRepo: "https://github.com/good/pkg" }, // SAME payload
+      verification: VERIF,
+    });
+    expect(compareProvenance(attestedOnly, verifiedSame)).toBe("none");
+  });
+
+  it("cross-namespace with a legacy verified snapshot lacking payloadIdentity → none (can't compare)", () => {
+    const attestedOnly = snap({ identity: { repositoryId: "1", sourceRepo: "https://github.com/good/pkg" } });
+    const legacyVerified = snap({ identity: { sourceRepo: "https://github.com/x/y" }, verification: VERIF }); // no payloadIdentity
+    expect(compareProvenance(attestedOnly, legacyVerified)).toBe("none");
+  });
 });
 
 describe("fetchNpmProvenance — crypto verification wiring (F8 crypto slice)", () => {

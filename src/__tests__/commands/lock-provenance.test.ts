@@ -263,6 +263,26 @@ describe("handleLock — provenance-identity drift (report-only)", () => {
     expect(locked.provenance?.verification).toBeUndefined();
   });
 
+  it("WARNS on a verified→unverified downgrade across a version bump (F8 coverage silently lost otherwise)", async () => {
+    // prev 0.9.0 crypto-verified; fresh resolves 1.0.0 attested-but-NOT-verified. Different
+    // version → no sticky carry → the coordinate drops out of the F8 checked set. The
+    // cross-derivation compareProvenance guard returns "none", so a dedicated downgrade
+    // warn must surface it.
+    const prevVerified: NpmProvenanceSnapshot = {
+      npmVersion: "0.9.0",
+      status: "attested",
+      mode: "registry-record",
+      identity: { sourceRepo: "https://github.com/a/b" },
+      verification: { outcome: "verified", signerSan: "https://github.com/a/b/.github/workflows/x.yml@refs/tags/v1", signerIssuer: "https://token.actions.githubusercontent.com" },
+    };
+    const deps = makeDeps(entry(), {
+      fetchNpmProvenance: vi.fn().mockResolvedValue(attested("1")), // 1.0.0 attested, NOT verified
+      readExistingLock: vi.fn().mockResolvedValue(prevLockWith(prevVerified)),
+    });
+    await handleLock({ stackFile: await writeTempStack() }, deps);
+    expect(outputText(deps)).toMatch(/verification downgraded/i);
+  });
+
   it("sanitizes ANSI/OSC in a drift warning's repo label (warning can't become an injection carrier)", async () => {
     const evil = "https://github.com/a/b\u001b]0;pwn\u0007\u001b[2K";
     const deps = makeDeps(entry(), {
