@@ -117,6 +117,34 @@ function plural(n: number, word: string): string {
   return `${n} ${word}${n === 1 ? "" : "s"}`;
 }
 
+/**
+ * Serialize one verdict as a single output line.
+ *
+ * `JSON.stringify` escapes C0 but leaves two families raw, and BOTH matter here
+ * because the excerpt is attacker-controlled:
+ *
+ *   - **U+2028 / U+2029** are line terminators to Node's `readline` (and to
+ *     ECMAScript), which is exactly how the documented consumer splits this
+ *     stream. One of them inside an excerpt splits a verdict across two "lines"
+ *     and permanently desyncs a consumer doing positional correlation —
+ *     reproduced forging a `pass` on a real attack and a `block` on a benign
+ *     case. That makes one-verdict-per-line a security property, not formatting.
+ *   - **C1 controls (U+0080–U+009F)** drive a terminal with no ESC byte at all
+ *     (8-bit CSI/OSC), so "stringify escapes C0, therefore ESC sequences can't
+ *     survive" was true but did not imply safety. `--json` gets piped into
+ *     terminals while triaging hostile captures.
+ *
+ * Escaping is LOSSLESS — the consumer's `JSON.parse` yields the identical
+ * string — so byte-fidelity of the excerpt is preserved. DEL (U+007F) rides
+ * along in the same class.
+ */
+function jsonLine(value: unknown): string {
+  return JSON.stringify(value).replace(
+    /[\u007F-\u009F\u2028\u2029]/g,
+    (c) => `\\u${c.charCodeAt(0).toString(16).padStart(4, "0")}`,
+  );
+}
+
 export function runInspectCommand(opts: InspectCliOpts): InspectCliResult {
   const parsed = parseFrames(opts.source);
   const json = opts.json === true;
@@ -130,7 +158,7 @@ export function runInspectCommand(opts: InspectCliOpts): InspectCliResult {
     if ("error" in entry) {
       errors += 1;
       if (json) {
-        opts.write(`${JSON.stringify({ action: "error", error: entry.error })}\n`);
+        opts.write(`${jsonLine({ action: "error", error: entry.error })}\n`);
       } else {
         humanLines.push(`frame ${i + 1} — error: ${sanitizeForTerminal(entry.error)}`);
       }
@@ -142,11 +170,10 @@ export function runInspectCommand(opts: InspectCliOpts): InspectCliResult {
     if (ACTION_RANK[result.action] > ACTION_RANK[worst]) worst = result.action;
 
     if (json) {
-      // Raw (unsanitized) excerpts: `--json` is a machine surface and a harness
-      // needs byte-fidelity on what matched. JSON.stringify escapes every C0
-      // control char, so ESC-based terminal sequences cannot survive this path
-      // anyway; the human path below sanitizes in full.
-      opts.write(`${JSON.stringify({ action: result.action, findings: result.findings.map(findingToJson) })}\n`);
+      // Excerpts keep byte-fidelity (a harness needs to see what matched), but
+      // are emitted through jsonLine so no character can break the one-line
+      // framing or reach a terminal as a control sequence. See jsonLine.
+      opts.write(`${jsonLine({ action: result.action, findings: result.findings.map(findingToJson) })}\n`);
       return;
     }
 

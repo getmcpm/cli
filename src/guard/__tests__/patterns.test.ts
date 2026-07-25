@@ -344,7 +344,15 @@ describe("patterns: JSON leaf walk", () => {
 
   test("pathologically deep structure (200k nodes) does not hang or overflow", () => {
     // ~200k nested wrappers. The iterative node-budget walk must complete without a
-    // stack overflow and without hanging; the buried leaf is benign so action=pass.
+    // stack overflow and without hanging.
+    //
+    // This test USED to assert action=pass, which quietly certified a detection
+    // bypass: exhausting the budget returned silently, so everything past it went
+    // uninspected and the frame reported clean. Burying a BENIGN leaf made the
+    // assertion pass for the wrong reason. Budget exhaustion now fails closed with
+    // a `guard-inspection-truncated` finding, so the correct expectation is
+    // "terminated promptly AND told us it could not finish" — never a bare pass.
+    // (security 2026-07-25)
     let inner: unknown = "leaf";
     for (let i = 0; i < 200_000; i++) inner = { wrap: inner };
     const msg = {
@@ -358,7 +366,8 @@ describe("patterns: JSON leaf walk", () => {
     // budget stops it early. Generous, CI-noise-tolerant bound (a true unbounded
     // walk or recursion would overflow/time out, not merely edge over this).
     expect(Date.now() - start).toBeLessThan(3_000);
-    expect(r.action).toBe("pass");
+    expect(r.action).not.toBe("pass");
+    expect(r.findings.some((f) => f.signature_id === "guard-inspection-truncated")).toBe(true);
   });
 });
 
