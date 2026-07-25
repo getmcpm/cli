@@ -40,11 +40,20 @@ const MAX_LEAF_WALK_NODES = 100_000;
  * Children are pushed in reverse so they pop in source order — leaf output for
  * normal inputs is identical to the prior recursive walk.
  */
-function* stringLeaves(node: unknown): Iterable<string> {
+function* stringLeaves(node: unknown, budget?: { exhausted: boolean }): Iterable<string> {
   const stack: unknown[] = [node];
   let visited = 0;
   while (stack.length > 0) {
-    if (++visited > MAX_LEAF_WALK_NODES) return;
+    if (++visited > MAX_LEAF_WALK_NODES) {
+      // SIGNAL, do not just stop. Returning silently here meant every leaf past
+      // the budget went uninspected and the frame reported `pass` — a complete
+      // detection bypass reachable with ~73 KB of cheap padding, not merely a
+      // work bound. The caller turns this into a finding so the guard never
+      // claims "clean" for a frame it did not finish reading.
+      // (security 2026-07-25: budget-exhaustion fail-open)
+      if (budget !== undefined) budget.exhausted = true;
+      return;
+    }
     const current = stack.pop();
     if (typeof current === "string") {
       yield current;
@@ -623,6 +632,33 @@ function inspectDecoded(
  *   - high      → warn (policy can promote to block)
  *   - medium/low → pass with log
  */
+/**
+ * Emitted when `stringLeaves` hit MAX_LEAF_WALK_NODES on a carrier, i.e. the
+ * guard did NOT finish reading it. `critical` deliberately: it rides the normal
+ * carrier policy, so it BLOCKS on block-capable carriers (where an uninspected
+ * payload reaches the model pre-invocation) and `defaultActionForFinding` clamps
+ * it to `warn` on retrieved-data carriers (where blocking would corrupt the
+ * document the user asked for). Failing open here was a full detection bypass.
+ *
+ * Near-zero FP by construction: the budget is 100k nodes and the largest frame
+ * in the whole benign+attack corpus is 40. A legitimate frame that trips this is
+ * pathological enough to be worth a human look.
+ */
+function truncationFinding(target: SignatureTarget): InspectFinding {
+  return {
+    signature_id: "guard-inspection-truncated",
+    category: "MCP-GUARD-INTEGRITY",
+    severity: "critical",
+    target,
+    matched_text_excerpt: `inspection budget exhausted after ${MAX_LEAF_WALK_NODES} nodes in ${target}`,
+    remediation:
+      "The frame was too large to inspect completely, so the guard cannot vouch for it — " +
+      "padding a response with junk nodes is a known way to hide a payload behind the " +
+      "budget. Inspect the server's output by hand. If this server legitimately emits " +
+      "frames this large, mute via `mcpm guard mute guard-inspection-truncated`.",
+  };
+}
+
 export function inspectMessage(
   msg: JSONRPCMessage,
   signatures: readonly Signature[],
@@ -640,7 +676,8 @@ export function inspectMessage(
   for (const target of targets) {
     const subtree = targetSubtree(msg, target);
     if (subtree === null || subtree === undefined) continue;
-    for (const leaf of stringLeaves(subtree)) {
+    const budget = { exhausted: false };
+    for (const leaf of stringLeaves(subtree, budget)) {
       // H2: scan the RAW leaf for hidden/control chars BEFORE the signature
       // pipeline normalizes them away. Metadata carriers only.
       if (HIDDEN_CHAR_TARGETS.has(target)) {
@@ -657,6 +694,7 @@ export function inspectMessage(
         findings.push(...inspectDecoded(leaf, signatures, target));
       }
     }
+    if (budget.exhausted) findings.push(truncationFinding(target));
   }
   if (findings.length === 0) return { action: "pass", findings: [] };
   // Max action across findings AFTER each is clamped by its carrier policy. A
