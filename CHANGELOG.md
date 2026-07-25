@@ -2,6 +2,32 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.26.1] - 2026-07-25
+
+### Fixed
+
+- **`mcpm guard mute guard-inspection-truncated` now works.** v0.26.0's new
+  truncation finding pointed users at that command in its remediation text, but
+  `mute` deliberately refuses signature ids outside the catalog (so a typo can't
+  silently mute nothing) and the id had never been registered — the documented
+  escape hatch failed with `Unknown signature id`. It is now an empty-patterns
+  catalog entry, the same convention `exfil-param-in-schema` and
+  `hidden-chars-in-metadata` use. Detection is unchanged; the id is simply
+  recognized by `guard mute`, `guard list-signatures`, and policy overrides.
+
+### Documentation
+
+- `docs/GUARD.md` documents `mcpm guard inspect` (missing since v0.25.0) and
+  budget truncation under Limits.
+- `docs/SIGNATURES.md` catalog count corrected (it disagreed with what
+  `guard list-signatures` actually prints) and both pattern-less entries
+  documented.
+- The README's GitHub Action snippet was pinned six releases behind, and the
+  ROADMAP headers still declared v0.19.0 current.
+- README now leads with the guard rather than the package manager, and points at
+  [mcp-guardbench](https://github.com/getmcpm/mcp-guardbench) — noting the
+  100%/0% score is by construction, since the corpus is mcpm's own fixtures.
+
 ## [0.26.0] - 2026-07-25
 
 Security. Closes a **detection bypass in the guard engine** and a JSON output
