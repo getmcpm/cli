@@ -223,6 +223,7 @@ Without an external scanner installed, the maximum possible score is 80/100. The
 | `mcpm guard unmute <signature-id>` | Re-enable a muted signature |
 | `mcpm guard pause` | Pause all guard inspection (debugging escape hatch) |
 | `mcpm guard cleanup` | Prune pin entries for uninstalled servers |
+| `mcpm guard inspect [file]` | Run the signature catalog over MCP JSON-RPC frame(s), offline — no relay, no server |
 | `mcpm guard list-signatures` | Show the shipped OWASP MCP Top 10 signature catalog |
 | `mcpm guard reset-integrity` | Regenerate the pins.json or guard-policy.yaml integrity sidecar |
 
@@ -349,9 +350,28 @@ mcpm guard disable [--client <name>] [--server <name>]               # unwrap
 mcpm guard status                                                    # what's wrapped + pin state
 mcpm guard demo                                                      # synthetic attack-block demo
 mcpm guard list-signatures [--json]                                  # show shipped signatures
+mcpm guard inspect frames.ndjson                                     # verdicts for captured traffic, offline
 mcpm guard enable --confine                                          # also OS-sandbox wrapped stdio servers (macOS)
 mcpm guard doctor-confine [--json]                                   # confine backend availability + enrolled servers
 ```
+
+### Inspect frames without a server
+
+`mcpm guard inspect` runs the same signature catalog the relay uses over MCP JSON-RPC frames you already have — a captured response, a suspicious `tools/list`, a payload from a writeup — with no wrapped server, no relay, and no network:
+
+```bash
+# one frame, human-readable
+mcpm guard inspect suspicious-response.json
+
+# a capture, machine-readable — one verdict line per input frame, in input order
+cat frames.ndjson | mcpm guard inspect --json
+```
+
+Exit status makes it a CI gate over recorded traffic: `0` all clear, `1` something warns (or a frame wouldn't parse), `2` something would be blocked.
+
+Verdicts are the signature catalog's default actions, including the warn-only carrier clamp — so an injection in a `resources/read` body reports `warn` here exactly as it would inline. Your local policy overrides (mutes, `log_only`) are deliberately *not* applied: this answers "what do the signatures see", not "what would my config do".
+
+It is also the seam an external benchmark or harness should use to score mcpm's guard — through this published binary, never by importing the engine.
 
 ### When a block fires
 
