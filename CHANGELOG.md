@@ -2,6 +2,47 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.25.0] - 2026-07-25
+
+`mcpm guard inspect` — offline frame verdicts, and the public seam an external
+benchmark needs to score the guard fairly.
+
+### Added
+
+- **`mcpm guard inspect [file]`** — run the shipped signature catalog over MCP
+  JSON-RPC frame(s) with no relay, no wrapped server, and no network. Takes a
+  file argument or stdin (`-`), and accepts either one JSON frame
+  (pretty-printed is fine) or NDJSON with one frame per line.
+
+  ```bash
+  mcpm guard inspect suspicious-response.json     # human-readable
+  cat frames.ndjson | mcpm guard inspect --json   # one verdict line per frame
+  ```
+
+  Exit status makes it usable as a CI gate over captured traffic: `2` if
+  anything would be blocked, `1` if anything warns (or a frame would not parse),
+  `0` if every frame passes.
+
+  Verdicts are the same default actions the relay applies, **including the
+  warn-only carrier clamp** — an injection in a `resources/read` body reports
+  `warn` here exactly as it would inline. Local policy overrides (mutes,
+  `log_only`) are deliberately *not* applied: the command answers "what do the
+  signatures see", not "what would this machine's config do".
+
+  `--json` emits exactly one verdict per input frame **in input order**, and an
+  unparseable or non-object frame yields an explicit `{"action":"error"}` rather
+  than being skipped — so a harness can tell "the guard says this is safe" apart
+  from "the guard fell over", and can correlate verdicts to its own case ids
+  positionally.
+
+  **Why this is a published command.** An external benchmark has to be able to
+  ask what mcpm's guard says about a frame without importing `src/guard/*`.
+  Lacking that seam, a harness must vendor a bundle of the engine — which
+  silently drifts from what ships, and hands mcpm an in-process path no other
+  guard being scored can have. Both quietly invalidate the comparison. With this
+  command, every guard — mcpm included — is measured through its own published
+  CLI.
+
 ## [0.24.0] - 2026-07-23
 
 Verify-time Sigstore provenance enforcement (F8 "B3" — the enforcing gate).
