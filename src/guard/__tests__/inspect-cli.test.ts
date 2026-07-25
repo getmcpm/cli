@@ -140,6 +140,13 @@ describe("guard inspect — exit status", () => {
     expect(result).toEqual({ action: "pass", errors: 1, frames: 2 });
   });
 
+  test("strips a leading BOM instead of failing to parse", () => {
+    // Editor-saved captures commonly carry a UTF-8 BOM, which makes JSON.parse
+    // throw on otherwise-valid input.
+    const vs = verdicts("\uFEFF" + JSON.stringify(BLOCK_FRAME));
+    expect(vs.map((v) => v.action)).toEqual(["block"]);
+  });
+
   test("empty input is a no-op, not an error", () => {
     const { result, lines } = collect("   \n\n", true);
     expect(result).toEqual({ action: "pass", errors: 0, frames: 0 });

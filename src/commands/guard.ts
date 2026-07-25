@@ -256,6 +256,17 @@ export function registerGuardCommand(program: Command): void {
           process.exitCode = 1;
           return;
         }
+      } else if (file === undefined && process.stdin.isTTY === true) {
+        // No file and nothing piped: reading stdin here would just hang with no
+        // output, which reads as a broken command. Say what to do instead.
+        // `-` remains the explicit opt-in for interactive/piped stdin.
+        process.stderr.write(
+          "mcpm guard inspect: no input — pass a file, pipe NDJSON, or use `-` to read stdin interactively.\n" +
+            "  mcpm guard inspect frames.ndjson\n" +
+            "  cat frames.ndjson | mcpm guard inspect --json\n",
+        );
+        process.exitCode = 1;
+        return;
       } else {
         source = await readAllStdin();
       }

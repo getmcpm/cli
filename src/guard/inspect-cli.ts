@@ -60,7 +60,10 @@ type ParsedFrame = { readonly frame: JSONRPCMessage } | { readonly error: string
  * pretty-printed single frame (the common hand-authored / captured case) works;
  * NDJSON falls through to per-line parsing.
  */
-function parseFrames(source: string): readonly ParsedFrame[] {
+function parseFrames(rawSource: string): readonly ParsedFrame[] {
+  // A leading BOM is common in editor-saved captures and makes JSON.parse throw
+  // on otherwise-valid input; stripping it avoids a baffling parse error.
+  const source = rawSource.replace(/^\uFEFF/, "");
   if (source.trim() === "") return [];
 
   try {
