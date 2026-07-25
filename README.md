@@ -2,7 +2,7 @@
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="./assets/banner-dark.svg">
     <source media="(prefers-color-scheme: light)" srcset="./assets/banner-light.svg">
-    <img alt="mcpm - the MCP package manager" src="./assets/banner-light.svg" width="680">
+    <img alt="mcpm - runtime guard for MCP" src="./assets/banner-light.svg" width="680">
   </picture>
 </p>
 
