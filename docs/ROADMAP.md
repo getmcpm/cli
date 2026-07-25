@@ -5,7 +5,7 @@
 > covers the developer- and enterprise-**adoption** track (distribution, org policy,
 > SIEM/SBOM evidence, client reach). This file is the security/DevX **feature** track.
 >
-> Status: in delivery · Baseline: **v0.19.0** · Drafted: 2026-06-09 · Reconciled: 2026-07-05
+> Status: in delivery · Baseline: **v0.26.0** · Drafted: 2026-06-09 · Reconciled: 2026-07-25
 >
 > **Delivery log:**
 > - ✅ **F4 — Release-age cooldown + install-script-shape awareness** — shipped (PR #70,

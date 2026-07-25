@@ -2,7 +2,7 @@
 
 The shipped signature catalog + how to add one. See `docs/GUARD.md` for the runtime model.
 
-## Currently shipped (10 catalog entries)
+## Currently shipped (12 catalog entries)
 
 | id | category | severity | target | description |
 |---|---|---|---|---|
@@ -17,7 +17,19 @@ The shipped signature catalog + how to add one. See `docs/GUARD.md` for the runt
 | `exfil-param-in-schema` | OWASP-MCP-1 | critical | tool_description | **Structural** (no regex): a `tools/list` tool declares an input-schema parameter named with the context-exfil sigil convention (`_system_prompt_`, `_conversation_history_`, `_chain_of_thought_`, `_reasoning_trace_`, `_context_window_`, `_exfil*`) — the model auto-fills it, leaking context. Blocks the server's tool list at advertisement time. Emitted by `detectExfilParams` (a property-KEY walker), not the regex engine — the catalog entry carries empty `patterns` so the id is muteable/listable. |
 | `credential-egress-in-response` | MCP-CREDENTIAL-EXFIL | high (→ warn) | tool_response | **F10 credential DLP.** High-confidence, prefix-anchored credential material in a tool response (PEM private key, GitHub classic + fine-grained PAT, GitLab, OpenAI, Anthropic, Stripe, Google, npm, Slack token, AWS access-key id) — a data-loss / credential-egress signal. WARN-tier (forwarded, not blocked): a secrets-manager/auth tool legitimately returns credentials → promote-to-block per policy. Only STRUCTURAL shapes (no prose FP); AWS's docs `AKIAIOSFODNN7EXAMPLE` excluded; generic Bearer/bare-JWT/40-char-base64 deferred to the suspect tier. `redact: true` keeps the caught secret out of the event log and message. |
 
-Plus the `hidden-chars-in-metadata` presence detector (category OWASP-MCP-1, target tool_description / tool_annotations / initialize_instructions), emitted by the H2 pass rather than a regex signature.
+Plus two entries that carry **no patterns** — they are emitted by dedicated passes
+rather than by a content regex, and exist in the catalog so their ids are
+recognized by `guard mute`, `guard list-signatures`, and policy overrides:
+
+- `hidden-chars-in-metadata` (OWASP-MCP-1; tool_description / tool_annotations /
+  initialize_instructions) — the H2 presence detector.
+- `guard-inspection-truncated` (MCP-GUARD-INTEGRITY; emitted on whichever carrier
+  was truncated) — raised when the leaf-walk budget is exhausted, i.e. the guard
+  did **not** finish reading the frame. `critical`, so it rides the normal carrier
+  policy: blocks on block-capable carriers, clamps to warn on retrieved-data ones.
+  Budget exhaustion used to fail **open** (a silent return), which was a complete
+  detection bypass — ~73 KB of junk padding hid a critical injection. Fixed in
+  v0.26.0; this entry is the visible half of that fix.
 
 > **Note on `exfil-param-in-schema` (F5).** Deny-tier and **zero-FP by design**: only the underscore-*wrapped* sigil form is matched (`_system_prompt_`), because a block on a `tools/list` frame disables the server's **entire** tool surface — so a false positive would brick a legit server. Bare names a real tool may use (`system_prompt`, `messages`, `reasoning`) and agent-framework runtime slots (`_context_`, `_memory_`, `_thinking_`) are **excluded**. It is a tripwire for the documented HiddenLayer/CyberArk convention — a **renamed** parameter (`systemPrompt`, `sys_prompt`, `context_dump`) evades it; the broader description-cross-check and bare-name SUSPECT tier are deferred (FP-laden). Keys are normalized (NFKC + confusable-fold + separator/camelCase canonicalization) before matching, so homoglyph/zero-width/`_systemPrompt_` variants still match.
 
@@ -25,7 +37,7 @@ Plus the `hidden-chars-in-metadata` presence detector (category OWASP-MCP-1, tar
 
 Plus the runtime drift detectors (`schema-drift`, `schema-drift-cosmetic`, `schema-drift-in-session`) — emitted by the relay, not by the signature engine. Drift is classified per changed field (H4): a **description-only** change is `schema-drift-cosmetic` (severity high → warn, forwarded — the parallel `tool_description` pattern scan still blocks any regex-detectable injection on the same frame, since the relay takes the MAX action); a **schema or annotations** change — or any pre-H4 pin with no stored field hashes — is `schema-drift` (critical → block). A server→client `notifications/tools/list_changed` arms a single-shot re-validation so an *announced* upgrade is classified against the pin rather than tripping the same-session guard. Cosmetic warn is bounded by the pattern-engine regex floor (a paraphrased poison the regexes miss degrades to a forwarded warn — the opt-in LLM-judge tier is the V2 answer, not the drift tier).
 
-> **Not signatures: confine + orig-hash spawn events.** The `--confine` OS-sandbox primitive (F1, released in v0.16.0) adds **no OWASP signatures** — the catalog above is unchanged by confine (10 entries over 8 targets). It emits relay/spawn **events** (not detection signatures) to `guard-events.jsonl`: category `CONFINE` — `confine-applied`, `confine-hash-mismatch`, `confine-marker-stripped`, `confine-profile-missing`, `confine-backend-missing`, `confine-marker-malformed`; plus category `RELAY` — `orig-hash-mismatch` (the wrap marker's `--orig-hash` verified at spawn, #108). These reason about spawn-time enrollment/integrity, not JSON-RPC frame content, so they are outside the signature engine.
+> **Not signatures: confine + orig-hash spawn events.** The `--confine` OS-sandbox primitive (F1, released in v0.16.0) adds **no OWASP signatures** — the catalog above is unchanged by confine (12 entries over 8 inspected targets). It emits relay/spawn **events** (not detection signatures) to `guard-events.jsonl`: category `CONFINE` — `confine-applied`, `confine-hash-mismatch`, `confine-marker-stripped`, `confine-profile-missing`, `confine-backend-missing`, `confine-marker-malformed`; plus category `RELAY` — `orig-hash-mismatch` (the wrap marker's `--orig-hash` verified at spawn, #108). These reason about spawn-time enrollment/integrity, not JSON-RPC frame content, so they are outside the signature engine.
 
 ## Action mapping
 

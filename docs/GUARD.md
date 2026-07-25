@@ -165,6 +165,34 @@ Use during debugging when guard is in the way and you want to turn it off withou
 ### `mcpm guard cleanup [--yes]`
 Prunes pin entries for servers no longer installed in any client config. Dry-run by default; pass `--yes` to apply.
 
+### `mcpm guard inspect [file] [--json]`
+
+Runs the signature catalog over MCP JSON-RPC frame(s) **offline** — no relay, no
+wrapped server, no network. Reads a file argument or stdin (`-`), and accepts one
+JSON frame (pretty-printed is fine) or NDJSON with one frame per line.
+
+```bash
+mcpm guard inspect suspicious-response.json     # human-readable
+cat frames.ndjson | mcpm guard inspect --json   # one verdict line per frame
+```
+
+Exit status makes it a CI gate over captured traffic: `2` if anything would be
+blocked, `1` if anything warns (or a frame would not parse), `0` if all pass.
+
+Verdicts are the same default actions the relay applies, **including the
+warn-only carrier clamp**. Local policy overrides (mutes, `log_only`) are
+deliberately **not** applied — this answers "what do the signatures see", not
+"what would this machine's config do". Use `guard status` for the latter.
+
+`--json` emits exactly one verdict per input frame **in input order**, and an
+unparseable frame yields an explicit `{"action":"error"}` rather than being
+skipped. Both are contract guarantees external harnesses depend on: one line per
+verdict is what makes positional correlation safe, and an explicit error is what
+keeps "the guard says this is safe" distinguishable from "the guard fell over".
+Output is escaped so no character in an attacker-controlled excerpt — including
+U+2028/U+2029 and 8-bit C1 controls — can split a line or reach a terminal as a
+control sequence.
+
 ### `mcpm guard list-signatures [--json]`
 Shows the vendored OWASP MCP Top 10 signature catalog with id / category / severity / target / description.
 
@@ -291,6 +319,12 @@ If guard itself crashes (e.g. on PATH disruption — the wrapped command points 
 - Compromised install — the wrap is opt-in via `mcpm guard enable`; if your machine is already compromised, the attacker can disable guard
 - Same-user file tampering — `~/.mcpm/pins.json` and `~/.mcpm/guard-policy.yaml` have integrity sidecars, but a same-user attacker can compute new sidecars; the sidecars are an "accidental tamper / cross-user" defense, not anti-malware
 - Verbatim attack-phrase documentation — the regex engine cannot distinguish "ignore previous instructions" used as documentation from the same phrase used as an instruction. A future opt-in LLM-as-judge tier would close this gap
+- **Very large frames are flagged, not silently half-inspected.** The leaf walk is
+  bounded (100k nodes) to cap work and avoid stack exhaustion. Exhausting that
+  budget raises `guard-inspection-truncated` rather than returning what it managed
+  to scan: the guard will not report "clean" for a frame it did not finish
+  reading. Before v0.26.0 this failed **open**, and ~73 KB of junk padding was
+  enough to hide a critical injection.
 - HTTP-transport servers — v0.5.0 wraps stdio only. HTTP guard is deferred (v0.10.0 made HTTP/SSE fail-closed deny-by-default; a streamable-HTTP MITM relay is still the full fix)
 
 **Performance budget:** spike measured 0.065ms p99 small / 3.1ms p99 large message overhead through the SDK framing helpers (OQ1 closed). With NFKC + 15 regexes per leaf added on top, expected p99 is < 10ms for large messages.
