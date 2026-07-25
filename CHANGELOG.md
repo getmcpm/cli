@@ -2,6 +2,26 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.26.3] - 2026-07-26
+
+### Fixed
+
+- **MCP tool input schemas are now strict on the wire** (security issue #31).
+  The schemas in `server/tools.ts` were already `z.strictObject`, but they were
+  handed to `registerTool` as `.shape` — and a raw shape is rebuilt internally
+  as a plain `z.object(shape)`, which drops the object-level `strict` setting.
+  Per-field bounds and the client enum survived that rebuild; strictness did
+  not. Unknown arguments were therefore silently dropped, and `tools/list`
+  advertised no `additionalProperties: false`.
+
+  Every tool now passes its whole schema, so an unknown argument returns a
+  JSON-RPC `-32602 unrecognized_keys` error and the advertised schema states the
+  contract. `mcpm_audit` and `mcpm_doctor` declared no input schema at all —
+  meaning for tools that accept nothing, *every* argument was ignored — and now
+  use a shared empty strict schema.
+
+  Behaviour for well-formed calls is unchanged.
+
 ## [0.26.2] - 2026-07-25
 
 Dependency and asset maintenance. No behavior change.
