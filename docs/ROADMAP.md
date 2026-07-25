@@ -48,7 +48,7 @@
 >   was built from scratch (#108) and effort was **XL, not L**. Deferred: Linux bwrap, the strict tier,
 >   orig-hash Phase-2 fail-closed, and the per-server `guard confine <server>` command (achievable today
 >   via `enable --confine --server X` + `disable --server X`).
-> - **Next up:** F9 PR2 (login-PATH probe) · the Wave-2 enterprise kit · then F10 block-tier + Detector-C. (F8 verify-time re-check [`mcpm verify` / `up --frozen` fail-closed provenance gate] shipped v0.24.0; F8 CRYPTO slice [offline @sigstore verify — "verified"] shipped v0.23.0; F8 slice 1 provenance-identity drift [parse-only] shipped v0.22.0; F9 PR1 doctor plaintext-secret scan shipped v0.21.0; F10 Detector-A + B shipped v0.20.0.)
+> - **Next up:** F9 PR2 (login-PATH probe) · the Wave-2 enterprise kit · then F10 block-tier + Detector-C. (`mcpm guard inspect` — the offline one-frame/NDJSON verdict command that unblocks external benchmark scoring through the published binary — shipped v0.25.0.) (F8 verify-time re-check [`mcpm verify` / `up --frozen` fail-closed provenance gate] shipped v0.24.0; F8 CRYPTO slice [offline @sigstore verify — "verified"] shipped v0.23.0; F8 slice 1 provenance-identity drift [parse-only] shipped v0.22.0; F9 PR1 doctor plaintext-secret scan shipped v0.21.0; F10 Detector-A + B shipped v0.20.0.)
 >
 > This roadmap was produced by a grounded research-and-planning pass: six parallel
 > web-research lenses (threat landscape, competitors, MCP protocol evolution, DevX,
@@ -403,6 +403,13 @@ The `strict` confinement tier (full default-deny read scope that still lets `nod
 > The H1 trust-flywheel items (public benchmark extraction, registry sweep +
 > disclosures) live in [`VISION.md`](./VISION.md); the sequence below is the
 > detector/feature track that runs alongside them.
+>
+> **Flywheel dependency shipped in v0.25.0:** `mcpm guard inspect` is the public
+> seam a benchmark needs to score mcpm's guard the same way it scores any other —
+> by running the published CLI, not by importing `src/guard/*`. Without it the
+> reference adapter had to vendor a bundle of the engine, which drifts from what
+> ships and hands mcpm an in-process path no competitor can have. That was the
+> last code blocker on publishing the corpus as a standalone benchmark.
 
 1. **F10** A+B — response-side credential DLP + decode pass.
 2. **F8** — `mcpm verify` npm Sigstore provenance + identity-drift.

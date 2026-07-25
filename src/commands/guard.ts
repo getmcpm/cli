@@ -13,6 +13,13 @@ function isClientId(value: string): value is ClientId {
   return (CLIENT_IDS as readonly string[]).includes(value);
 }
 
+/** Drain stdin to a string — `guard inspect` with no file argument. */
+async function readAllStdin(): Promise<string> {
+  const chunks: Buffer[] = [];
+  for await (const chunk of process.stdin) chunks.push(chunk as Buffer);
+  return Buffer.concat(chunks).toString("utf8");
+}
+
 export function registerGuardCommand(program: Command): void {
   const guard = program
     .command("guard")
@@ -226,6 +233,46 @@ export function registerGuardCommand(program: Command): void {
     .action(async (opts: { yes?: boolean }) => {
       const { runCleanupCommand } = await import("../guard/cli.js");
       await runCleanupCommand({ apply: opts.yes === true, write: (s) => process.stdout.write(s) });
+    });
+
+  guard
+    .command("inspect [file]")
+    .description(
+      "Inspect MCP JSON-RPC frame(s) against the signature catalog, offline " +
+        "(reads stdin when no file; accepts one frame or NDJSON)",
+    )
+    .option("--json", "emit NDJSON verdicts — one line per input frame, in input order")
+    .action(async (file: string | undefined, opts: { json?: boolean }) => {
+      const { runInspectCommand } = await import("../guard/inspect-cli.js");
+      let source: string;
+      if (file !== undefined && file !== "-") {
+        try {
+          const { readFile } = await import("node:fs/promises");
+          source = await readFile(file, "utf8");
+        } catch (err) {
+          process.stderr.write(
+            `mcpm guard inspect: cannot read ${file}: ${err instanceof Error ? err.message : String(err)}\n`,
+          );
+          process.exitCode = 1;
+          return;
+        }
+      } else {
+        source = await readAllStdin();
+      }
+      const result = runInspectCommand({
+        source,
+        json: opts.json === true,
+        write: (s) => process.stdout.write(s),
+      });
+      // Exit status, so this is usable as a CI gate over captured traffic:
+      //   2 = something would be blocked
+      //   1 = something would warn, or a frame could not be parsed
+      //   0 = every frame passed
+      // Set exitCode rather than calling process.exit(): stdout is a pipe for
+      // any harness consuming --json, and process.exit() would truncate
+      // unflushed verdict lines (silently losing cases).
+      if (result.action === "block") process.exitCode = 2;
+      else if (result.action === "warn" || result.errors > 0) process.exitCode = 1;
     });
 
   guard

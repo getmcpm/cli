@@ -39,7 +39,7 @@ export const SUBCOMMANDS = [
 ];
 
 export const GUARD_SUBCOMMANDS =
-  "enable disable status demo accept-drift mute unmute pause cleanup list-signatures doctor-confine reset-integrity run";
+  "enable disable status demo accept-drift mute unmute pause cleanup inspect list-signatures doctor-confine reset-integrity run";
 export const SECRETS_SUBCOMMANDS = "set get list rm migrate";
 
 function bashScript(): string {
