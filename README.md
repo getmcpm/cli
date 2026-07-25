@@ -371,7 +371,7 @@ Exit status makes it a CI gate over recorded traffic: `0` all clear, `1` somethi
 
 Verdicts are the signature catalog's default actions, including the warn-only carrier clamp — so an injection in a `resources/read` body reports `warn` here exactly as it would inline. Your local policy overrides (mutes, `log_only`) are deliberately *not* applied: this answers "what do the signatures see", not "what would my config do".
 
-It is also the seam an external benchmark or harness should use to score mcpm's guard — through this published binary, never by importing the engine.
+It is also the seam an external benchmark or harness should use to score mcpm's guard — through this published binary, never by importing the engine. [**mcp-guardbench**](https://github.com/getmcpm/mcp-guardbench) is the reference consumer: a guard-agnostic corpus + runner that scores any MCP guard this way.
 
 ### When a block fires
 

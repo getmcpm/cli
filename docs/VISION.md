@@ -51,11 +51,17 @@ form a flywheel:
 1. **Prove the attacks are real.** Run `mcpm audit` across the public
    registry's popular servers, responsibly disclose real findings, publish the
    results. Each disclosure is a citation; each citation is credibility.
-2. **Give away the measuring stick.** Extract the guard test corpus (attack +
-   benign fixtures) into a standalone public benchmark: cases, schema, a runner
-   that can test *any* guard/relay/client, a scoreboard. mcpm guard is the
-   reference implementation, not the only subject — a benchmark only counts if
-   others can beat you on it.
+2. **Give away the measuring stick.** ✅ **Shipped 2026-07-25 —
+   [getmcpm/mcp-guardbench](https://github.com/getmcpm/mcp-guardbench)** (MIT,
+   own repo). 38 versioned cases, an open schema, a language-agnostic runner,
+   and a scoreboard. mcpm guard is the reference implementation, not the only
+   subject — a benchmark only counts if others can beat you on it, so two rules
+   are structural: every guard is scored through **its own published CLI** (mcpm
+   included — that is what `mcpm guard inspect` exists for; no in-process
+   imports, no vendored engines), and CI fails only on incomplete coverage,
+   never on a low score, so a case mcpm misses is a contribution rather than a
+   broken build. The 100% reference score is stated up front as
+   by-construction — the corpus is mcpm's own test suite.
 3. **Be provably clean.** "Who guards the guard" is every security engineer's
    first question. OSSF Scorecard, signed provenance releases, SBOM,
    reproducible builds, a real `SECURITY.md`. Beyond reproach or nothing.
@@ -77,8 +83,11 @@ maintenance.**
 - **F10 response-side DLP** — deny-tier only, high-precision detectors
   (cloud keys, PATs, private-key blocks); the suspect tier waits until the
   false-positive story is proven. Same zero-FP discipline as F5.
-- **Publish the benchmark** (own repo, permissive license). Highest-leverage
-  single item in this horizon.
+- ~~**Publish the benchmark** (own repo, permissive license). Highest-leverage
+  single item in this horizon.~~ ✅ **done 2026-07-25** —
+  [getmcpm/mcp-guardbench](https://github.com/getmcpm/mcp-guardbench). The next
+  move on it is not more cases: it is **a second guard in the table**, since a
+  one-row scoreboard is a self-assessment.
 - **Registry sweep #1** — audit popular registry servers, disclose responsibly,
   publish findings. This doubles as the demand probe for the whole thesis.
 - **F8 provenance verification** at install — completes the supply-chain story.
