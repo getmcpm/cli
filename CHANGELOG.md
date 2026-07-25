@@ -2,6 +2,51 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.26.0] - 2026-07-25
+
+Security. Closes a **detection bypass in the guard engine** and a JSON output
+framing flaw. Both were found by an adversarial review pass and independently
+reproduced. **Upgrade if you use `mcpm guard`.**
+
+### Fixed
+
+- **Leaf-walk budget exhaustion failed open — a full detection bypass.**
+  `stringLeaves` caps its walk at 100,000 nodes to bound work and avoid stack
+  exhaustion. On reaching that ceiling it returned silently, so every leaf past
+  the budget went **uninspected** and the frame reported `pass`. Padding a
+  `tools/list` with 25,001 junk elements — 73 KB on the wire — hid a critical
+  tool-description injection completely. This applied to the **live relay**, not
+  only to `mcpm guard inspect`, so any malicious or compromised MCP server could
+  pad its responses and be reported clean.
+
+  Exhaustion now produces a `guard-inspection-truncated` finding on the affected
+  carrier, at `critical` severity so it rides the existing carrier policy: it
+  **blocks** on block-capable carriers (where an uninspected payload would reach
+  the model before invocation) and clamps to **warn** on retrieved-data carriers
+  (where blocking would corrupt the document the user asked to read). The guard
+  no longer reports "clean" for a frame it did not finish reading.
+
+  False-positive risk is negligible and was measured, not assumed: the largest
+  frame in the 38-case benign+attack corpus is 40 nodes against a 100,000
+  budget. The corpus scores identically after the change.
+
+  The prior regression test buried a *benign* leaf past the budget and asserted
+  `pass`, so it passed for the wrong reason and certified the blind spot. It now
+  asserts that truncation is reported.
+
+- **`guard inspect --json` could emit one verdict as two lines.** `JSON.stringify`
+  does not escape U+2028/U+2029, but Node's `readline` — how the documented
+  consumer splits this stream — treats them as line terminators. One inside an
+  attacker-controlled excerpt split a verdict across two lines and desynced every
+  following frame for any consumer correlating positionally. Reproduced end to
+  end: it forged a `pass` on a real attack and a `block` on a benign case. C1
+  controls (U+0080–U+009F) were also emitted raw and drive a terminal with no ESC
+  byte at all, reachable even through the parse-error path, which needs no
+  signature to match.
+
+  Both are now escaped at the emit boundary. Escaping is lossless — `JSON.parse`
+  returns the identical string — so excerpts keep byte-fidelity.
+
 ## [0.25.0] - 2026-07-25
 
 `mcpm guard inspect` — offline frame verdicts, and the public seam an external
