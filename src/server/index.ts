@@ -8,6 +8,7 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import {
+  NoArgsInput,
   SearchInput,
   InstallInput,
   InfoInput,
@@ -80,7 +81,7 @@ export function registerTools(
   // Register tools using registerTool API
   server.registerTool("mcpm_search", {
     description: "Search the MCP registry for servers with trust scores",
-    inputSchema: SearchInput.shape,
+    inputSchema: SearchInput,
     annotations: { readOnlyHint: true },
   }, async (args) => {
     const result = await handleSearch(args, deps);
@@ -89,7 +90,7 @@ export function registerTools(
 
   server.registerTool("mcpm_install", {
     description: "Install an MCP server with trust assessment",
-    inputSchema: InstallInput.shape,
+    inputSchema: InstallInput,
     annotations: { destructiveHint: true },
   }, async (args) => {
     const result = await handleInstall(args, deps);
@@ -98,7 +99,7 @@ export function registerTools(
 
   server.registerTool("mcpm_info", {
     description: "Show full details and trust score for an MCP server",
-    inputSchema: InfoInput.shape,
+    inputSchema: InfoInput,
     annotations: { readOnlyHint: true },
   }, async (args) => {
     const result = await handleInfo(args, deps);
@@ -107,7 +108,7 @@ export function registerTools(
 
   server.registerTool("mcpm_list", {
     description: "List installed MCP servers across AI clients",
-    inputSchema: ListInput.shape,
+    inputSchema: ListInput,
     annotations: { readOnlyHint: true },
   }, async (args) => {
     const result = await handleList(args, deps);
@@ -116,7 +117,7 @@ export function registerTools(
 
   server.registerTool("mcpm_remove", {
     description: "Remove an MCP server from client configs",
-    inputSchema: RemoveInput.shape,
+    inputSchema: RemoveInput,
     annotations: { destructiveHint: true },
   }, async (args) => {
     const result = await handleRemove(args, deps);
@@ -124,6 +125,7 @@ export function registerTools(
   });
 
   server.registerTool("mcpm_audit", {
+    inputSchema: NoArgsInput,
     description: "Scan all installed servers and produce trust report",
     annotations: { readOnlyHint: true },
   }, async () => {
@@ -132,6 +134,7 @@ export function registerTools(
   });
 
   server.registerTool("mcpm_doctor", {
+    inputSchema: NoArgsInput,
     description: "Check MCP setup health",
     annotations: { readOnlyHint: true },
   }, async () => {
@@ -141,7 +144,7 @@ export function registerTools(
 
   server.registerTool("mcpm_setup", {
     description: "Install MCP servers from a natural language description",
-    inputSchema: SetupInput.shape,
+    inputSchema: SetupInput,
     annotations: { destructiveHint: true },
   }, async (args) => {
     const result = await handleSetup(args, deps);
@@ -150,7 +153,7 @@ export function registerTools(
 
   server.registerTool("mcpm_up", {
     description: "Install all servers from an mcpm.yaml stack file with trust verification. Equivalent to docker-compose up for MCP servers. Runs trust re-assessment and blocks servers that violate the trust policy. Pass profile to install only servers matching that profile, or dryRun to preview what would be installed without making changes.",
-    inputSchema: UpInput.shape,
+    inputSchema: UpInput,
     annotations: { destructiveHint: true },
   }, async (args) => {
     const result = await handleMcpUp(args, deps);

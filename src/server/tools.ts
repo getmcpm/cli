@@ -120,14 +120,32 @@ export const TOOL_DEFINITIONS = [
 // point. The objects below are `strictObject` so unknown keys are rejected
 // instead of silently dropped.
 //
-// NOTE on `.shape`: these schemas reach the MCP SDK via `.shape` (see
-// server/index.ts), which rebuilds a plain `z.object(shape)`. The bounded fields
-// and client enum DO propagate through that path (they live on the per-field
-// schemas); the object-level `strict` setting does NOT. The runtime guards in
-// handlers.ts stay the enforced backstop; `strictObject` additionally hardens any
-// direct `.parse()` of these exported schemas.
+// These are passed to `registerTool` WHOLE (not via `.shape`) — see
+// server/index.ts. That distinction is load-bearing: the SDK accepts either a
+// raw shape or a full schema, but a raw shape is rebuilt as a plain
+// `z.object(shape)`, which silently DROPS the object-level `strict` setting.
+// Per-field constraints (the length bound, the client enum) survive either way;
+// strictness does not.
+//
+// Passing the whole schema means the SDK rejects unknown keys with a JSON-RPC
+// -32602 `unrecognized_keys` error, AND advertises `additionalProperties: false`
+// in `tools/list` so a caller can see the contract before calling. Verified over
+// a real in-memory MCP transport in server-strict-schema.test.ts.
+//
+// The runtime guards in handlers.ts (`validateMcpServerName`, `CLIENT_IDS`)
+// remain as defence in depth.
 const serverName = z.string().min(1).max(256);
 const clientId = z.enum(CLIENT_IDS);
+
+/**
+ * Zero-argument tools (`mcpm_audit`, `mcpm_doctor`) still declare a CLOSED
+ * schema rather than omitting `inputSchema` entirely. Omitting it advertises no
+ * `additionalProperties: false`, so any argument a caller passes is silently
+ * ignored — for a tool that takes nothing, that means EVERY argument is
+ * silently ignored. An empty strict object makes the contract explicit and
+ * turns a mistaken call into a clear error.
+ */
+export const NoArgsInput = z.strictObject({});
 
 export const SearchInput = z.strictObject({
   query: z.string().min(1).max(200),
