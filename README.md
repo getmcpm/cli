@@ -8,7 +8,7 @@
 
 # mcpm
 
-**The MCP package manager that guards your AI's tools at runtime -- search, install, audit, and inspect every MCP server from your terminal.**
+**A runtime security guard for your AI's tools -- and the package manager to install them.** Blocks prompt injection, tool poisoning, and credential exfiltration in live MCP traffic. Local-first, deterministic, no LLM in the enforcement path.
 
 [![npm version](https://img.shields.io/npm/v/@getmcpm/cli)](https://www.npmjs.com/package/@getmcpm/cli)
 [![license](https://img.shields.io/github/license/getmcpm/cli)](./LICENSE)
@@ -18,6 +18,10 @@
 ---
 
 The risky part of an MCP server doesn't show up at install -- it shows up while your agent is running: prompt injection hidden in a tool's output, a server that quietly rewrites its tools after you approved them, a sampling request that smuggles instructions into your model. mcpm scores every install for hardcoded secrets, prompt injection, and typosquatting ([66% of MCP servers have security findings](https://agentseal.org/blog/mcp-server-security-findings)) -- then runs a live guard between your AI client and each server, pinning tool definitions against rug-pulls and blocking injection before it reaches the model.
+
+**You don't have to take our word for any of that.** Guards are easy to claim and hard to check, so the measuring stick is public: [**mcp-guardbench**](https://github.com/getmcpm/mcp-guardbench) is a guard-agnostic benchmark -- versioned attack and benign cases, an open schema, and a runner that scores *any* MCP guard through its own published CLI. mcpm is scored the same way as everyone else, by shelling out to `mcpm guard inspect`, never by importing its own engine.
+
+mcpm currently scores 100% recall at a 0% false-positive rate on that corpus -- which is **by construction**, since the corpus was extracted from mcpm's own test fixtures. That is a baseline, not a boast. It gets interesting when someone scores a second guard, or contributes a case mcpm misses.
 
 <p align="center">
   <img src="./assets/demo.gif" alt="mcpm demo" width="680">
@@ -267,7 +271,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: getmcpm/cli/.github/actions/mcpm-verify@v0.20.0   # or: run: npx @getmcpm/cli verify
+      - uses: getmcpm/cli/.github/actions/mcpm-verify@v0.26.0   # or: run: npx @getmcpm/cli verify
 ```
 
 The Action writes a job step summary from `--json`; the same verb works as a
@@ -371,7 +375,7 @@ Exit status makes it a CI gate over recorded traffic: `0` all clear, `1` somethi
 
 Verdicts are the signature catalog's default actions, including the warn-only carrier clamp — so an injection in a `resources/read` body reports `warn` here exactly as it would inline. Your local policy overrides (mutes, `log_only`) are deliberately *not* applied: this answers "what do the signatures see", not "what would my config do".
 
-It is also the seam an external benchmark or harness should use to score mcpm's guard — through this published binary, never by importing the engine. [**mcp-guardbench**](https://github.com/getmcpm/mcp-guardbench) is the reference consumer: a guard-agnostic corpus + runner that scores any MCP guard this way.
+It is also the seam [mcp-guardbench](https://github.com/getmcpm/mcp-guardbench) uses to score mcpm's guard — through this published binary, never by importing the engine, so mcpm is measured on exactly the same footing as any other guard. [**mcp-guardbench**](https://github.com/getmcpm/mcp-guardbench) is the reference consumer: a guard-agnostic corpus + runner that scores any MCP guard this way.
 
 ### When a block fires
 

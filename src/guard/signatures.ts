@@ -334,6 +334,34 @@ export const OWASP_MCP_TOP_10: readonly Signature[] = [
       "evades it. If trusted, mute via `mcpm guard mute exfil-param-in-schema`.",
   },
   {
+    // guard-inspection-truncated — emitted by inspectMessage when stringLeaves
+    // hits MAX_LEAF_WALK_NODES on a carrier, i.e. the guard did NOT finish
+    // reading that frame. Synthesized from a walk-budget signal, not a content
+    // regex, so like the two entries above it carries NO patterns. The entry
+    // exists so the id is recognized by `guard mute guard-inspection-truncated`
+    // (which refuses ids outside this catalog — F7), `guard list-signatures`,
+    // and policy signature_overrides.
+    //
+    // `critical` is deliberate: it rides the normal carrier policy, so it BLOCKS
+    // on block-capable carriers (an uninspected payload would otherwise reach
+    // the model pre-invocation) and defaultActionForFinding clamps it to warn on
+    // retrieved-data carriers. Budget exhaustion used to fail OPEN, which was a
+    // complete detection bypass — ~73 KB of junk padding hid a critical
+    // injection. (security 2026-07-25)
+    id: "guard-inspection-truncated",
+    category: "MCP-GUARD-INTEGRITY",
+    severity: "critical",
+    description:
+      "The frame exceeded the inspection walk budget, so part of it was never scanned (padding is a known way to hide a payload)",
+    target: "tool_response",
+    patterns: [],
+    remediation:
+      "The frame was too large to inspect completely, so the guard cannot vouch for it — " +
+      "padding a response with junk nodes is a known way to hide a payload behind the " +
+      "budget. Inspect the server's output by hand. If this server legitimately emits " +
+      "frames this large, mute via `mcpm guard mute guard-inspection-truncated`.",
+  },
+  {
     // hidden-chars-in-metadata — the H2 PRESENCE detector (detectHiddenChars in
     // patterns.ts) emits this finding INLINE from a codepoint scan of raw metadata
     // leaves, NOT a content regex, so like exfil-param-in-schema above it carries NO

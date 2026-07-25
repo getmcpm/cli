@@ -1,6 +1,6 @@
 # mcpm Roadmap — Developer & Enterprise Adoption
 
-> Status: **Active plan of record** · Current: **v0.19.0** · Baseline drafted at v0.16.0 (2026-07-03)
+> Status: **Active plan of record** · Current: **v0.26.0** · Baseline drafted at v0.16.0 (2026-07-03)
 >
 > Companion to [`VISION.md`](./VISION.md) (the strategy layer both roadmaps hang off) and
 > [`ROADMAP.md`](./ROADMAP.md) (the security/DevX feature roadmap, now ~80%
