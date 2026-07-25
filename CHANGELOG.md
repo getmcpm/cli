@@ -2,6 +2,23 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.26.2] - 2026-07-25
+
+Dependency and asset maintenance. No behavior change.
+
+### Changed
+
+- **`@sigstore/verify` 3.1.1 → 4.1.0 and `@sigstore/bundle` 4.0.0 → 5.0.0**
+  (`@sigstore/core` → 4.0.1). These are majors on the F8 crypto verification
+  path, so they were validated against **live npm attestations** rather than on
+  fixture-based CI alone — the suite verifies against fixtures, and a semantic
+  change there could pass every test while silently breaking real attestation
+  checking. Confirmed `outcome=verified` with the correct Fulcio SAN and issuer
+  on two published versions, with real registry `dist.integrity` fetched so the
+  sha512 subject binding is genuinely exercised.
+- `ossf/scorecard-action` 2.4.3 → 2.4.4, `actions/checkout` 7.0.0 → 7.0.1.
+- Banner artwork version string bumped (it had gone six releases stale).
+
 ## [0.26.1] - 2026-07-25
 
 ### Fixed
