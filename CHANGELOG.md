@@ -2,6 +2,49 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.27.0] - 2026-07-27
+
+### Fixed
+
+- **`mcpm guard inspect` and the relay now return the same verdict** — 3 of the
+  12 catalog signatures were unreachable through the public scoring seam.
+  `inspect` shipped in v0.25.0 calling `inspectMessage` alone, while the relay
+  composes three stateless detectors, so `exfil-param-in-schema`,
+  `credential-phishing-wallet-solicitation` and
+  `credential-phishing-financial-solicitation` returned
+  `{"action":"pass","findings":[]}` with exit 0 on frames the relay blocks as
+  critical — while `guard list-signatures` advertised all three as installed.
+
+  The gap was self-concealing: `mcptox.test.ts` evaluated fixtures through the
+  same incomplete pipeline, so a fixture for any of these signatures would have
+  failed the release gate, and `mcp-guardbench` extracts its corpus from that
+  directory — so the guard, its test suite, and the published benchmark were all
+  blind in the same place at once.
+
+  Fixed with one shared composition, `inspectFrame` in the new
+  `src/guard/inspect-frame.ts`, consumed by the relay, `guard inspect`, and the
+  fixture release-gate alike. Schema/handshake drift and policy overrides stay
+  in the relay: they need relay state, so they are not properties of a frame.
+
+  **Relay enforcement is unchanged** — this only affects the offline advisory
+  and scoring surface. No runtime protection was missing.
+
+### Changed
+
+- **BREAKING for verdict consumers (why this is a minor, not a patch):** frames
+  that previously reported `pass` now report `block`, and `guard inspect`'s exit
+  code changes from 0 to 2 for them. Anyone gating CI on `guard inspect` over
+  captured traffic will see new — correct — failures. External adapters depend
+  on this seam, including `mcp-guardbench`.
+
+### Added
+
+- Fixtures for all three previously-unrepresented signatures, and
+  `inspect-relay-parity.test.ts`, which pins two invariants: every attack/warn
+  fixture must be non-`pass` **through the public CLI entry point** (black-box,
+  not a hand-composed mirror of the relay that could drift identically), and
+  every catalog signature must have at least one fixture.
+
 ## [0.26.3] - 2026-07-26
 
 ### Fixed
