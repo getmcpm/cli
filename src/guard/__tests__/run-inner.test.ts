@@ -19,11 +19,10 @@ import {
   inspectHandshakeDriftSync,
   isInitializeResult,
   isToolsListChangedNotification,
-  inspectServerInitiated,
-  mergeInspect,
   applyPolicy,
   type SessionDriftState,
 } from "../run-inner.js";
+import { inspectServerInitiated, mergeInspect } from "../inspect-frame.js";
 import {
   hashToolDefinition,
   fieldHashesOf,

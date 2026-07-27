@@ -14,7 +14,8 @@ import { describe, expect, test } from "vitest";
 import type { JSONRPCMessage } from "@modelcontextprotocol/sdk/types.js";
 import { inspectMessage, defaultActionForFinding } from "../patterns.js";
 import { OWASP_MCP_TOP_10 } from "../signatures.js";
-import { inspectForDriftSync, mergeInspect, applyPolicy, type SessionDriftState } from "../run-inner.js";
+import { inspectForDriftSync, applyPolicy, type SessionDriftState } from "../run-inner.js";
+import { mergeInspect } from "../inspect-frame.js";
 import {
   hashToolDefinition,
   fieldHashesOf,

@@ -20,18 +20,23 @@
  *     never a fabricated "pass" (a harness must be able to tell "my guard said
  *     this is safe" apart from "my guard fell over")
  *
- * The verdict is the same `inspectMessage` default action the relay uses,
- * including the warn-only carrier clamp — so a `resources/read` injection
- * reports `warn` here exactly as it would in-line. Policy overrides
- * (mute/log_only, `guard.policy.json`) are deliberately NOT applied: this
- * command answers "what do the signatures see", not "what would this user's
- * configured policy do".
+ * The verdict comes from `inspectFrame` — the SAME stateless composition the
+ * relay enforces (signature patterns + the F5 exfil-param key walker + the H7
+ * server-initiated content scan), including the warn-only carrier clamp, so a
+ * `resources/read` injection reports `warn` here exactly as it would in-line.
+ * v0.25.0 shipped this command calling `inspectMessage` alone, which silently
+ * reported `pass` on frames the relay blocks for 3 of the 12 catalog
+ * signatures; `inspect-relay-parity.test.ts` now pins the equivalence.
+ *
+ * Excluded by design, because they are not properties of the frame: schema and
+ * handshake drift (needs the pin store and per-session state) and policy
+ * overrides (mute/log_only). This command answers "what do the signatures
+ * see", not "what would this user's configured policy do".
  */
 
 import type { JSONRPCMessage } from "@modelcontextprotocol/sdk/types.js";
-import { inspectMessage } from "./patterns.js";
+import { inspectFrame } from "./inspect-frame.js";
 import { sanitizeForTerminal } from "./sanitize.js";
-import { OWASP_MCP_TOP_10 } from "./signatures.js";
 import type { InspectAction, InspectFinding } from "./types.js";
 
 export interface InspectCliOpts {
@@ -165,7 +170,7 @@ export function runInspectCommand(opts: InspectCliOpts): InspectCliResult {
       return;
     }
 
-    const result = inspectMessage(entry.frame, OWASP_MCP_TOP_10);
+    const result = inspectFrame(entry.frame);
     tally[result.action] += 1;
     if (ACTION_RANK[result.action] > ACTION_RANK[worst]) worst = result.action;
 

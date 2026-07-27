@@ -12,7 +12,13 @@
 
 import type { JSONRPCMessage } from "@modelcontextprotocol/sdk/types.js";
 import { inspectMessage, defaultActionForFinding, ACTION_RANK } from "./patterns.js";
-import { detectExfilParams } from "./exfil-params.js";
+import {
+  inspectFrame,
+  mergeInspect,
+  withReplyToOrigin,
+  hasToolsList,
+  inspectServerInitiated,
+} from "./inspect-frame.js";
 import { OWASP_MCP_TOP_10 } from "./signatures.js";
 import { startRelay, buildSafeEnv, type GuardEvent } from "./relay.js";
 import { inspectForDrift, inspectHandshakeForDrift, classifyDrift, buildDriftFinding } from "./drift.js";
@@ -57,29 +63,6 @@ export interface RunInnerArgs {
 }
 
 const SIGNATURE_LIST_VERSION = "owasp-mcp-top-10@v0.5.0";
-
-export function mergeInspect(a: InspectResult, b: InspectResult): InspectResult {
-  // Most-severe action wins; concat findings. Uses the shared ACTION_RANK scale
-  // (pass < warn < block) instead of a local duplicate map.
-  const action = ACTION_RANK[a.action] >= ACTION_RANK[b.action] ? a.action : b.action;
-  // H7: carry replyToOrigin if EITHER side requested it (a server-initiated
-  // sampling/elicitation block must not be stranded by merging with a benign
-  // pattern/drift result). Only kept on a block action (see withReplyToOrigin).
-  return withReplyToOrigin(
-    { action, findings: [...a.findings, ...b.findings] },
-    a.replyToOrigin === true || b.replyToOrigin === true,
-  );
-}
-
-/**
- * Attach `replyToOrigin: true` to a result ONLY when it requested AND the result
- * is still a block. The flag is meaningless on warn/pass (you don't error-reply a
- * non-blocked request), so it must never survive onto a downgraded action.
- */
-function withReplyToOrigin(result: InspectResult, replyToOrigin: boolean): InspectResult {
-  if (replyToOrigin && result.action === "block") return { ...result, replyToOrigin: true };
-  return result;
-}
 
 /**
  * Apply guard-policy.yaml signature_overrides to an inspection result.
@@ -134,93 +117,6 @@ export function applyPolicy(result: InspectResult, policy: GuardPolicyFile): Ins
   return withReplyToOrigin({ action: highest, findings: kept }, result.replyToOrigin === true);
 }
 
-function hasToolsList(msg: JSONRPCMessage): boolean {
-  if (!("result" in msg)) return false;
-  const result = (msg as { result?: { tools?: unknown } }).result;
-  return Array.isArray(result?.tools);
-}
-
-/** H7: a server-INITIATED sampling/elicitation method frame (id OR no-id — used
- * for content SCANNING; block-to-origin eligibility separately requires an id). */
-function isServerInitiatedMethod(msg: JSONRPCMessage): boolean {
-  if (!("method" in msg)) return false;
-  const m = (msg as { method?: unknown }).method;
-  return m === "sampling/createMessage" || m === "elicitation/create";
-}
-
-/**
- * H7: inspect a server-INITIATED sampling/elicitation request's server-authored
- * content for prompt-injection. Returns block (+ replyToOrigin when the frame can
- * be error-replied) on a detected injection, else null (benign / out of scope) →
- * caller forwards untouched. We gate the injection CONTENT, not the mechanism.
- *
- * The content is wrapped into a synthetic `prompts/get`-shaped frame so the
- * existing `prompt_content` array-content extraction (H1) scans it WITHOUT a new
- * targetSubtree case. But the findings are then RE-TAGGED to `sampling_prompt`:
- *   - `prompt_content` is a WARN_ONLY carrier (retrieved prompts/get data), so
- *     leaving the finding on it makes applyPolicy's defaultActionForFinding clamp
- *     the block back to WARN whenever guard-policy.yaml has ANY signature_override
- *     — silently forwarding the injection (CRITICAL, caught in review).
- *   - `sampling_prompt` is NOT warn-only, so the action derives from the finding's
- *     native severity (critical→block) and survives applyPolicy unclamped.
- * Content scanning covers BOTH id-bearing requests and no-id (notification-shaped)
- * frames; only an id-bearing block carries replyToOrigin (a no-id frame is still
- * dropped — makeBlockResponse returns null for it — but has no reply channel).
- */
-export function inspectServerInitiated(msg: JSONRPCMessage): InspectResult | null {
-  if (!isServerInitiatedMethod(msg)) return null;
-  const contentLeaves = serverInitiatedContent(msg);
-  if (contentLeaves.length === 0) return null;
-
-  const synthetic = {
-    jsonrpc: "2.0",
-    id: 0, // dummy — the scan reads only the result subtree, never the id.
-    result: { messages: contentLeaves.map((c) => ({ role: "user", content: c })) },
-  } as JSONRPCMessage;
-
-  const scan = inspectMessage(synthetic, OWASP_MCP_TOP_10);
-  if (scan.findings.length === 0) return null;
-
-  const findings: InspectFinding[] = scan.findings.map((f) => ({ ...f, target: "sampling_prompt" }));
-  const action = findings.reduce<InspectResult["action"]>((acc, f) => {
-    const a = defaultActionForFinding(f);
-    return ACTION_RANK[a] > ACTION_RANK[acc] ? a : acc;
-  }, "pass");
-
-  const hasId = "id" in msg && (msg as { id?: unknown }).id !== undefined;
-  return action === "block" && hasId
-    ? { action, findings, replyToOrigin: true }
-    : { action, findings };
-}
-
-/**
- * Extract the server-authored content leaves to scan from a sampling/elicitation
- * request: sampling → params.systemPrompt + params.messages[*].content;
- * elicitation → params.message plus the requestedSchema property descriptions.
- * Non-object/missing shapes yield an empty list (nothing to scan).
- */
-function serverInitiatedContent(msg: JSONRPCMessage): unknown[] {
-  const params = (msg as { params?: unknown }).params;
-  if (params === null || typeof params !== "object") return [];
-  const p = params as {
-    messages?: unknown;
-    message?: unknown;
-    requestedSchema?: unknown;
-    systemPrompt?: unknown;
-  };
-  const out: unknown[] = [];
-  // systemPrompt is server-authored model context (MCP CreateMessageRequestParams)
-  // and the highest-leverage sampling injection surface — scan it (review: HIGH).
-  if (typeof p.systemPrompt === "string") out.push(p.systemPrompt);
-  if (Array.isArray(p.messages)) {
-    for (const m of p.messages) {
-      if (m !== null && typeof m === "object" && "content" in m) out.push((m as { content: unknown }).content);
-    }
-  }
-  if (typeof p.message === "string") out.push(p.message);
-  if (p.requestedSchema !== null && typeof p.requestedSchema === "object") out.push(p.requestedSchema);
-  return out;
-}
 
 /**
  * Build a synthetic CONFINE-category GuardEvent for guard-events.jsonl (mirrors
@@ -398,17 +294,15 @@ export async function runInner(parsed: RunInnerArgs): Promise<number> {
     // (replyToOrigin), via applyPolicy so user overrides still apply. A benign
     // request returns null here and falls through to forward untouched (we gate
     // the injection content, not the mechanism).
-    const serverInitiated = inspectServerInitiated(msg);
-    if (serverInitiated !== null) return applyPolicy(serverInitiated, policy);
-
-    const patternResult = inspectMessage(msg, OWASP_MCP_TOP_10);
+    // Every STATELESS verdict (patterns + F5 exfil-param + H7 server-initiated)
+    // comes from the one shared composition, so `mcpm guard inspect` and the
+    // fixture release-gate cannot drift from what the relay actually enforces.
+    // A server-initiated frame short-circuits inside inspectFrame; it carries
+    // `method` not `result`, so neither drift branch below applies to it.
+    const statelessResult = inspectFrame(msg);
     let driftResult: InspectResult = { action: "pass", findings: [] };
-    // F5: structural exfil-param key-name block on tools/list (the content-regex
-    // pipeline can't see a property KEY). Pass on every non-tools/list frame.
-    let exfilResult: InspectResult = { action: "pass", findings: [] };
 
     if (hasToolsList(msg)) {
-      exfilResult = detectExfilParams(msg);
       driftResult = inspectForDriftSync(msg, parsed.serverName, baselineForDrift, sessionState);
 
       // Off-thread: refresh snapshot + apply first-session pin capture.
@@ -437,7 +331,7 @@ export async function runInner(parsed: RunInnerArgs): Promise<number> {
       })();
     }
 
-    return applyPolicy(mergeInspect(mergeInspect(patternResult, driftResult), exfilResult), policy);
+    return applyPolicy(mergeInspect(statelessResult, driftResult), policy);
   };
 
   const inspectParent = (msg: JSONRPCMessage): InspectResult => {
