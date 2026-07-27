@@ -15,8 +15,7 @@ import { readFileSync, readdirSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import type { JSONRPCMessage } from "@modelcontextprotocol/sdk/types.js";
-import { inspectMessage } from "../patterns.js";
-import { OWASP_MCP_TOP_10 } from "../signatures.js";
+import { inspectFrame } from "../inspect-frame.js";
 import { hashToolDefinition } from "../pins.js";
 import type { InspectResult } from "../types.js";
 
@@ -70,7 +69,7 @@ const attacks = loadJsonFixtures<AttackOrBenignFixture>("attacks");
 describe(`MCPTox attacks (${attacks.length} fixtures — release-gate)`, () => {
   for (const { file, fixture } of attacks) {
     test(`${file}: ${fixture.name}`, () => {
-      const result = inspectMessage(fixture.message, OWASP_MCP_TOP_10);
+      const result = inspectFrame(fixture.message);
       expect(result.action, `expected action ${fixture.expected_action} for ${file}`).toBe(
         fixture.expected_action,
       );
@@ -91,7 +90,7 @@ const benigns = loadJsonFixtures<AttackOrBenignFixture>("benign");
 describe(`MCPTox benign corpus (${benigns.length} fixtures — FP-rate seed)`, () => {
   for (const { file, fixture } of benigns) {
     test(`${file}: ${fixture.name}`, () => {
-      const result = inspectMessage(fixture.message, OWASP_MCP_TOP_10);
+      const result = inspectFrame(fixture.message);
       expect(result.action, `expected pass for ${file}, got ${result.action} with findings: ${JSON.stringify(result.findings.map((f) => f.signature_id))}`).toBe(
         "pass",
       );
@@ -110,7 +109,7 @@ const warns = loadJsonFixtures<AttackOrBenignFixture>("warn");
 describe(`MCPTox warn-and-forward fixtures (${warns.length} — retrieved-data clamp)`, () => {
   for (const { file, fixture } of warns) {
     test(`${file}: ${fixture.name}`, () => {
-      const result = inspectMessage(fixture.message, OWASP_MCP_TOP_10);
+      const result = inspectFrame(fixture.message);
       expect(result.action, `expected action warn for ${file}`).toBe("warn");
       expect(result.action, `${file} must NOT block retrieved data`).not.toBe("block");
       if (fixture.expected_signature_id !== undefined) {
