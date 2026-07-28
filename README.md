@@ -241,6 +241,14 @@ non-zero on integrity drift, an unverifiable record, a format mismatch, or a
 suspicious missing baseline. Because it needs no AI clients installed, it runs on a
 hosted CI runner (where `mcpm up` cannot).
 
+It also checks that the lock **covers** what `mcpm.yaml` declares. The other gates
+read only the lock, so they pass over a lock that is missing servers — the coverage
+check is what stops a truncated lock from verifying green while enforcing less than
+you asked for. A lock holding no servers at all never passes unless an `mcpm.yaml`
+beside it confirms nothing was declared. Correspondingly, `mcpm lock` is
+all-or-nothing: if any server fails to resolve it reports every failure and writes
+**nothing**, leaving the previous lock intact.
+
 It **also re-verifies Sigstore provenance** for every npm server whose lock recorded
 a cryptographically `verified` baseline: it re-runs the offline crypto verification
 against npm's current record and fails closed if the attestation regressed — the

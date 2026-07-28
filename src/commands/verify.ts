@@ -15,7 +15,7 @@
  * independently at server launch.
  */
 
-import type { LockFile } from "../stack/schema.js";
+import type { LockFile, StackFile } from "../stack/schema.js";
 import {
   classifyIntegrity,
   frozenVerdict,
@@ -32,6 +32,12 @@ import {
 export interface VerifyDeps {
   /** Returns the parsed lock, or null when the file does not exist. */
   parseLock: (path: string) => Promise<LockFile | null>;
+  /**
+   * Returns the parsed stack, or null when mcpm.yaml does not exist (the lock is
+   * then verified on its own terms). A malformed stack must THROW, not return
+   * null — silently skipping the coverage gate is the failure it exists to catch.
+   */
+  parseStack: (path: string) => Promise<StackFile | null>;
   fetchNpmIntegrity: FetchNpmIntegrity;
   fetchNpmProvenance: FetchNpmProvenance;
   output: (text: string) => void;
@@ -63,6 +69,16 @@ export interface VerifyModel {
   provenanceBlocked: ProvenanceBlock[];
   /** npm servers that carried a crypto-`verified` provenance baseline to re-check. */
   checkedProvenanceCount: number;
+  /**
+   * Servers mcpm.yaml declares that the lock does not contain — the lock enforces
+   * LESS than was asked for. Always empty when there is no mcpm.yaml to compare against.
+   */
+  uncovered: string[];
+  /**
+   * The lock holds no servers at all AND there is no mcpm.yaml to confirm that is
+   * intentional — so this run verified nothing and cannot claim otherwise.
+   */
+  vacuous: boolean;
   /** set only when the lock could not be loaded at all. */
   error?: string;
 }
@@ -91,6 +107,24 @@ export async function verifyHandler(deps: VerifyDeps, opts: VerifyOpts = {}): Pr
       return emitError(deps, opts, `no lock file found at ${lockPath} — run \`mcpm lock\` first.`);
     }
 
+    // Coverage: does the lock account for everything mcpm.yaml declares? A lock that
+    // silently dropped servers (a failed `mcpm lock` in an older release, a hand-edit,
+    // a bad merge) enforces less than the user asked for, and every OTHER gate reads
+    // only the lock — so they all pass while coverage quietly shrinks. No mcpm.yaml
+    // to compare against → nothing to check, not a failure (verify is lock-first).
+    const stackFile = await deps.parseStack(stackPath);
+    const uncovered =
+      stackFile === null
+        ? []
+        : Object.keys(stackFile.servers).filter((name) => !(name in lockFile.servers));
+
+    // A lock with zero servers verifies NOTHING, so it must never exit 0 on the
+    // strength of gates that pass vacuously. Legitimate only when a stack file
+    // positively confirms nothing was declared — with no mcpm.yaml we cannot tell
+    // an empty project from a lock that lost its contents, and fail-closed picks
+    // the second reading.
+    const vacuous = Object.keys(lockFile.servers).length === 0 && stackFile === null;
+
     // Two independent, fail-closed gates run in parallel: integrity drift (H11) and
     // provenance crypto-regression (F8/B3). The run passes only if BOTH pass. Both
     // read npm's integrity per checked coordinate, so memoize the fetcher — one GET
@@ -112,7 +146,10 @@ export async function verifyHandler(deps: VerifyDeps, opts: VerifyOpts = {}): Pr
 
     const model: VerifyModel = {
       schemaVersion: 1,
-      ok: v.ok && pv.ok,
+      // THREE independent fail-closed gates. Coverage is the outermost: the other
+      // two answer "is what's in the lock still good?", which passes VACUOUSLY over
+      // an empty or truncated one. Without it, `servers: {}` verified green.
+      ok: v.ok && pv.ok && uncovered.length === 0 && !vacuous,
       verified: v.checkedNpmCount - failedCheckable,
       checkedNpmCount: v.checkedNpmCount,
       noBaselines: v.noBaselines,
@@ -120,6 +157,8 @@ export async function verifyHandler(deps: VerifyDeps, opts: VerifyOpts = {}): Pr
       unenforceable: v.unenforceable,
       provenanceBlocked: pv.blocks,
       checkedProvenanceCount: pv.checkedVerifiedCount,
+      uncovered,
+      vacuous,
     };
 
     if (opts.json) {
@@ -146,6 +185,8 @@ function emitError(deps: VerifyDeps, opts: VerifyOpts, error: string): number {
     unenforceable: [],
     provenanceBlocked: [],
     checkedProvenanceCount: 0,
+    uncovered: [],
+    vacuous: false,
     error,
   };
   if (opts.json) deps.output(JSON.stringify(model, null, 2));
@@ -177,6 +218,25 @@ function renderVerifyText(model: VerifyModel, output: (text: string) => void): v
   output("mcpm verify");
   output("");
 
+  // Coverage dimension — printed FIRST because it reframes everything below it: on a
+  // truncated lock the integrity line reads "✓ 0 npm servers verified", which is
+  // literally true and thoroughly misleading on its own.
+  if (model.uncovered.length > 0) {
+    const word = model.uncovered.length === 1 ? "server" : "servers";
+    output(
+      `  ✗ ${model.uncovered.length} declared ${word} missing from the lock — it enforces less than mcpm.yaml declares:`
+    );
+    for (const name of model.uncovered) output(`      ${name}`);
+    output("    Run `mcpm lock` to cover them. Until then the checks below cover only what IS locked.");
+  }
+
+  if (model.vacuous) {
+    output("  ✗ this lock contains no servers — this run verified nothing.");
+    output(
+      "    No mcpm.yaml alongside it to confirm that is intentional, so this is not treated as a pass."
+    );
+  }
+
   // Integrity dimension (H11).
   if (model.noBaselines) {
     // Lock-wide integrity gap — benign (predates baselines / offline lock), normally a
@@ -196,8 +256,23 @@ function renderVerifyText(model: VerifyModel, output: (text: string) => void): v
       );
     }
     if (model.blocked.length === 0) {
-      const word = model.verified === 1 ? "server" : "servers";
-      output(`  ✓ ${model.verified} npm ${word} verified against npm's published integrity record.`);
+      // Only claim a ✓ when something was actually checked. "✓ 0 npm servers
+      // verified" is literally true and reads as a pass — it is what made the
+      // empty-lock fail-open look healthy.
+      if (model.verified > 0) {
+        const word = model.verified === 1 ? "server" : "servers";
+        output(
+          `  ✓ ${model.verified} npm ${word} verified against npm's published integrity record.`
+        );
+      } else if (
+        !model.vacuous &&
+        model.unenforceable.length === 0 &&
+        model.uncovered.length === 0
+      ) {
+        // Passing with nothing checked and nothing to warn about (an empty declared
+        // stack). Say so plainly rather than printing an empty report.
+        output("  — nothing to verify: this stack declares no servers.");
+      }
     } else {
       for (const b of model.blocked) {
         const who = b.identifier ? `${b.identifier}@${b.npmVersion}` : b.name;
@@ -227,7 +302,11 @@ function renderVerifyText(model: VerifyModel, output: (text: string) => void): v
     const failed = new Set([
       ...model.blocked.map((b) => b.name),
       ...model.provenanceBlocked.map((b) => b.name),
+      ...model.uncovered,
     ]);
+    // A vacuous lock fails with no server to name — the ✗ above already said why,
+    // and "verification failed: 0 server(s)" would read as a glitch.
+    if (failed.size === 0) return;
     output("");
     output(
       `verification failed: ${failed.size} server(s). mcpm checks the registry's published record, not the code your agent runs.`
@@ -240,7 +319,8 @@ function renderVerifyText(model: VerifyModel, output: (text: string) => void): v
 // ---------------------------------------------------------------------------
 
 import { Command } from "commander";
-import { parseLockFile } from "../stack/schema.js";
+import { access } from "fs/promises";
+import { parseLockFile, parseStackFile } from "../stack/schema.js";
 import { fetchNpmIntegrity as _fetchNpmIntegrity } from "../registry/npm-integrity.js";
 import { fetchNpmProvenance as _fetchNpmProvenance } from "../registry/npm-provenance.js";
 import { coloredOutput } from "../utils/output.js";
@@ -257,6 +337,17 @@ export function registerVerifyCommand(program: Command): void {
       const code = await verifyHandler(
         {
           parseLock: parseLockFile,
+          // Missing mcpm.yaml → null (coverage skipped). A PRESENT but malformed one
+          // propagates out of parseStackFile to verify's fail-closed catch (exit 1) —
+          // an unreadable stack must not silently disable the coverage gate.
+          parseStack: async (p) => {
+            try {
+              await access(p);
+            } catch {
+              return null;
+            }
+            return parseStackFile(p);
+          },
           fetchNpmIntegrity: (id, v) => _fetchNpmIntegrity(id, v),
           fetchNpmProvenance: (id, v, o) => _fetchNpmProvenance(id, v, o),
           output: opts.json ? (t) => console.log(t) : coloredOutput,

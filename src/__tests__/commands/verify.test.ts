@@ -9,7 +9,12 @@
 
 import { describe, it, expect, vi } from "vitest";
 import { verifyHandler, type VerifyDeps, type VerifyModel } from "../../commands/verify.js";
-import type { LockFile, NpmIntegritySnapshot, NpmProvenanceSnapshot } from "../../stack/schema.js";
+import type {
+  LockFile,
+  NpmIntegritySnapshot,
+  NpmProvenanceSnapshot,
+  StackFile,
+} from "../../stack/schema.js";
 
 const SRI_OLD = "sha512-" + "A".repeat(86) + "==";
 const SRI_NEW = "sha512-" + "B".repeat(86) + "==";
@@ -75,6 +80,9 @@ function deps(
   return {
     deps: {
       parseLock: vi.fn().mockResolvedValue(lock),
+      // Default: no mcpm.yaml alongside the lock, so the coverage gate is skipped
+      // and these cases exercise the integrity/provenance matrix alone.
+      parseStack: vi.fn().mockResolvedValue(null),
       fetchNpmIntegrity: fetchMock,
       fetchNpmProvenance: vi.fn(fetchProv),
       output: (t: string) => lines.push(t),
@@ -82,6 +90,14 @@ function deps(
     out: () => lines.join("\n"),
     fetch: fetchMock,
   };
+}
+
+/** A stack file declaring `names`, with the shape verify's coverage gate reads. */
+function stackOf(...names: string[]): StackFile {
+  return {
+    version: "1",
+    servers: Object.fromEntries(names.map((n) => [n, { version: "1.0.0" }])),
+  } as unknown as StackFile;
 }
 
 const snap = (integrity: string): NpmIntegritySnapshot =>
@@ -157,6 +173,7 @@ describe("verifyHandler — block matrix", () => {
     const lines: string[] = [];
     const badDeps: VerifyDeps = {
       parseLock: vi.fn().mockRejectedValue(new Error("Invalid lock file (schema)")),
+      parseStack: vi.fn().mockResolvedValue(null),
       fetchNpmIntegrity: vi.fn(),
       output: (t: string) => lines.push(t),
     };
@@ -305,5 +322,136 @@ describe("verifyHandler — provenance gate (F8/B3)", () => {
     expect(code).toBe(1);
     expect(d.out()).toMatch(/no integrity baselines/i); // benign note still shown
     expect(d.out()).toMatch(/provenance regressed/i); // but the real block is NOT hidden behind it
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Lock coverage — the lock must account for every server the stack declares
+// ---------------------------------------------------------------------------
+
+describe("verifyHandler — lock coverage gate", () => {
+  it("empty lock + declared servers → BLOCK, exit 1", async () => {
+    // The headline fail-open: `mcpm lock` could leave `servers: {}` on disk, and
+    // verify then reported "✓ 0 npm servers verified" with ok:true / exit 0.
+    // Both gates pass VACUOUSLY over an empty server set, so nothing caught it.
+    const d = deps(lockOf({}), async () => snap(SRI_OLD));
+    d.deps.parseStack = vi.fn().mockResolvedValue(stackOf("io.github.test/a", "io.github.test/b"));
+
+    const code = await verifyHandler(d.deps);
+    expect(code).toBe(1);
+    expect(d.out()).toMatch(/missing from the lock/i);
+    expect(d.out()).toMatch(/io\.github\.test\/a/);
+    expect(d.out()).toMatch(/io\.github\.test\/b/);
+  });
+
+  it("lock missing ONE declared server → BLOCK, exit 1", async () => {
+    // Truncation, not emptiness: 2 declared, 1 locked. The locked one verifies
+    // fine, so every existing gate is green — only coverage catches this.
+    const d = deps(lockOf({ "io.github.test/a": npmEntry("@test/a", SRI_OLD) }), async () =>
+      snap(SRI_OLD)
+    );
+    d.deps.parseStack = vi.fn().mockResolvedValue(stackOf("io.github.test/a", "io.github.test/b"));
+
+    const code = await verifyHandler(d.deps);
+    expect(code).toBe(1);
+    expect(d.out()).toMatch(/io\.github\.test\/b/);
+  });
+
+  it("lock covers every declared server → ok, exit 0", async () => {
+    const d = deps(lockOf({ "io.github.test/a": npmEntry("@test/a", SRI_OLD) }), async () =>
+      snap(SRI_OLD)
+    );
+    d.deps.parseStack = vi.fn().mockResolvedValue(stackOf("io.github.test/a"));
+
+    expect(await verifyHandler(d.deps)).toBe(0);
+  });
+
+  it("a stack declaring nothing is covered by an empty lock → ok, exit 0", async () => {
+    // No false positive on a fresh `mcpm init` project: nothing was asked for, so
+    // nothing is missing. Emptiness alone is not the defect — a GAP is.
+    const d = deps(lockOf({}), async () => snap(SRI_OLD));
+    d.deps.parseStack = vi.fn().mockResolvedValue(stackOf());
+
+    expect(await verifyHandler(d.deps)).toBe(0);
+  });
+
+  it("extra servers in the lock are not a coverage failure", async () => {
+    // A stale entry left in the lock is not the direction that matters — it can
+    // only add verification, never remove it.
+    const d = deps(
+      lockOf({
+        "io.github.test/a": npmEntry("@test/a", SRI_OLD),
+        "io.github.test/stale": npmEntry("@test/stale", SRI_OLD),
+      }),
+      async () => snap(SRI_OLD)
+    );
+    d.deps.parseStack = vi.fn().mockResolvedValue(stackOf("io.github.test/a"));
+
+    expect(await verifyHandler(d.deps)).toBe(0);
+  });
+
+  it("no stack file → coverage skipped, lock verified on its own terms", async () => {
+    // verify's contract is lock-first; mcpm.yaml is not required to be present.
+    const d = deps(lockOf({ a: npmEntry("@test/a", SRI_OLD) }), async () => snap(SRI_OLD));
+    d.deps.parseStack = vi.fn().mockResolvedValue(null);
+
+    expect(await verifyHandler(d.deps)).toBe(0);
+  });
+
+  it("reports uncovered servers under --json", async () => {
+    const d = deps(lockOf({}), async () => snap(SRI_OLD));
+    d.deps.parseStack = vi.fn().mockResolvedValue(stackOf("io.github.test/a"));
+
+    const code = await verifyHandler(d.deps, { json: true });
+    expect(code).toBe(1);
+    const model = JSON.parse(d.out()) as VerifyModel;
+    expect(model.ok).toBe(false);
+    expect(model.uncovered).toEqual(["io.github.test/a"]);
+  });
+});
+
+describe("verifyHandler — vacuous lock", () => {
+  it("empty lock + NO stack file → BLOCK, exit 1 (cannot confirm it is intentional)", async () => {
+    const d = deps(lockOf({}), async () => snap(SRI_OLD));
+    d.deps.parseStack = vi.fn().mockResolvedValue(null);
+
+    const code = await verifyHandler(d.deps);
+    expect(code).toBe(1);
+    expect(d.out()).toMatch(/contains no servers/i);
+    // The misleading green line must be gone, not merely outranked.
+    expect(d.out()).not.toMatch(/✓ 0 npm servers verified/);
+  });
+
+  it("empty lock + a stack declaring nothing → ok, exit 0", async () => {
+    const d = deps(lockOf({}), async () => snap(SRI_OLD));
+    d.deps.parseStack = vi.fn().mockResolvedValue(stackOf());
+
+    const code = await verifyHandler(d.deps);
+    expect(code).toBe(0);
+    expect(d.out()).not.toMatch(/contains no servers/i);
+  });
+
+  it("never claims a ✓ for zero verified servers", async () => {
+    // pypi-only: nothing npm to check, but the lock is NOT empty — no vacuous block,
+    // and no "✓ 0 ... verified" either.
+    const d = deps(lockOf({ p: pypiEntry("test-p") }), async () => snap(SRI_OLD));
+    d.deps.parseStack = vi.fn().mockResolvedValue(stackOf("p"));
+
+    expect(await verifyHandler(d.deps)).toBe(0);
+    expect(d.out()).toMatch(/cannot enforce/i);
+    expect(d.out()).not.toMatch(/✓ 0 npm/);
+  });
+});
+
+describe("verifyHandler — report never contradicts itself", () => {
+  it("a vacuous lock does not ALSO claim the stack declares no servers", async () => {
+    // There is no stack file in this case — asserting anything about what it
+    // declares would be a fabrication sitting directly under the ✗.
+    const d = deps(lockOf({}), async () => snap(SRI_OLD));
+    d.deps.parseStack = vi.fn().mockResolvedValue(null);
+
+    await verifyHandler(d.deps);
+    expect(d.out()).toMatch(/contains no servers/i);
+    expect(d.out()).not.toMatch(/this stack declares no servers/i);
   });
 });

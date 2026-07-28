@@ -180,7 +180,7 @@ servers:
     ).rejects.toThrow("Stack file not found");
   });
 
-  it("continues resolving other servers when one fails", async () => {
+  it("keeps resolving past a failure, but refuses to write the truncated lock", async () => {
     const stackPath = await writeTempStackFile(`
 version: "1"
 servers:
@@ -210,20 +210,61 @@ servers:
       }),
     });
 
-    await handleLock({ stackFile: stackPath }, deps);
+    await expect(handleLock({ stackFile: stackPath }, deps)).rejects.toThrow(
+      /1 server\(s\) failed to resolve/
+    );
 
-    // Lock file should contain the good server
-    const [, content] = (deps.writeLockFile as ReturnType<typeof vi.fn>).mock.calls[0];
-    const parsed = parseYaml(content);
-    expect(parsed.servers["io.github.test/good-server"]).toBeDefined();
-    expect(parsed.servers["io.github.test/bad-server"]).toBeUndefined();
+    // Fail-closed. A lock missing a declared server must never reach disk: `verify`
+    // checks only what the lock CONTAINS, so a truncated lock verifies green.
+    expect(deps.writeLockFile).not.toHaveBeenCalled();
 
-    // Error reported in output
+    // ...but resolution still CONTINUED past the failure — both servers were
+    // attempted and both outcomes reported. That half of the old contract stands.
+    expect(callCount).toBe(2);
     const outputCalls = (deps.output as ReturnType<typeof vi.fn>).mock.calls
       .map((c) => c[0])
       .join("\n");
-    expect(outputCalls).toContain("bad-server");
-    expect(outputCalls).toContain("failed");
+    expect(outputCalls).toContain("Failed: io.github.test/bad-server");
+    expect(outputCalls).toContain("Network timeout");
+    // The good server resolved fine — but nothing about it was written or claimed.
+    expect(outputCalls).not.toContain("Locked");
+  });
+
+  it("writes nothing when EVERY server fails to resolve", async () => {
+    // Regression (the empty-lock fail-open): 0.27.0 printed "Locked 0 servers to
+    // mcpm-lock.yaml" and exited 0 here, leaving `servers: {}` on disk — after
+    // which `mcpm verify` printed "✓ 0 npm servers verified" and also exited 0.
+    // A CI gate reported success having verified nothing at all.
+    const stackPath = await writeTempStackFile(`
+version: "1"
+servers:
+  io.github.test/a:
+    version: "^1.0.0"
+  io.github.test/b:
+    version: "^1.0.0"
+`);
+
+    const deps = makeDeps({
+      getServerVersions: vi.fn().mockRejectedValue(new Error("Server not found")),
+      getServer: vi.fn().mockRejectedValue(new Error("Server not found")),
+    });
+
+    await expect(handleLock({ stackFile: stackPath }, deps)).rejects.toThrow(
+      /2 server\(s\) failed to resolve/
+    );
+    expect(deps.writeLockFile).not.toHaveBeenCalled();
+  });
+
+  it("still writes the lock when every server resolves", async () => {
+    const stackPath = await writeTempStackFile(`
+version: "1"
+servers:
+  io.github.test/good-server:
+    version: "^1.0.0"
+`);
+    const deps = makeDeps();
+    await handleLock({ stackFile: stackPath }, deps);
+    expect(deps.writeLockFile).toHaveBeenCalledTimes(1);
   });
 });
 
