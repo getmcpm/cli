@@ -2,6 +2,52 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.28.0] - 2026-07-29
+
+### Fixed
+
+- **`mcpm lock` no longer writes a truncated lock, and `mcpm verify` no longer
+  passes over one.** Two independent fail-opens formed one chain: `lock` wrote
+  the lock file *before* its error branch (which only printed), so a run where
+  every server failed to resolve emitted `Locked 0 servers`, left `servers: {}`
+  on disk, and exited **0**. `verify` then reported
+  `✓ 0 npm servers verified`, `"ok": true`, and also exited **0** — because the
+  integrity and provenance gates both pass *vacuously* over an empty server set.
+  A CI pipeline running `mcpm lock && mcpm verify` got a green tick and a printed
+  checkmark having verified nothing at all.
+
+  This turned the F8 provenance gate off silently: a lock written while a server
+  was unresolvable, or while Sigstore was unloadable, carries no `verification:`
+  block, and `verify` is evidence-gated — no baseline, nothing to re-check, pass.
+
+  Fixing either side alone leaves the hole open, so both are fixed:
+
+  - `lock` is now **all-or-nothing**. It still resolves every server and reports
+    every failure (one bad entry does not mask the others), then writes nothing
+    and exits non-zero, leaving any previous lock intact.
+  - `verify` gained a **coverage** gate: servers `mcpm.yaml` declares but the lock
+    omits are reported and fail the run. This catches a lock truncated by an older
+    release, a hand-edit, or a bad merge — cases where every other gate is green
+    because they read only the lock. With no `mcpm.yaml` present, coverage is
+    skipped (`verify` remains lock-first); a *malformed* one fails closed rather
+    than silently disabling the check.
+  - A lock containing **no servers** never passes unless an `mcpm.yaml` confirms
+    nothing was declared, and `verify` no longer prints `✓ 0 ... verified` — a
+    checkmark over an empty set is what made the fail-open look healthy.
+
+### Changed
+
+- **BREAKING for CI consumers of exit codes.** `mcpm lock` now exits non-zero when
+  any server fails to resolve (previously 0 with a partial lock). `mcpm verify`
+  now exits non-zero on an uncovered or empty lock (previously 0). Both changes
+  turn a silent green into a visible red; a pipeline that was passing because of
+  the bug will start failing, which is the point.
+- `mcpm up`'s first-run auto-lock now aborts instead of installing a subset when
+  a declared server cannot be resolved. Only the no-lock-yet path is affected — an
+  existing lock is used exactly as before.
+- `VerifyModel` gained `uncovered: string[]` and `vacuous: boolean` (`--json`
+  shape remains explicitly UNSTABLE).
+
 ## [0.27.0] - 2026-07-27
 
 ### Fixed

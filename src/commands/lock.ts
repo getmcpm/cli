@@ -103,7 +103,12 @@ interface LockError {
  * Core handler for `mcpm lock`.
  *
  * Resolves all servers in mcpm.yaml, runs trust assessment, writes lock file.
- * Per-server errors are collected — one failure does not block others.
+ *
+ * Per-server errors are collected rather than short-circuiting, so ONE bad entry
+ * still reports every other failure in the same run. But the lock is all-or-
+ * nothing: if any server failed, nothing is written and this THROWS. A partial
+ * lock is worse than no lock — `verify` / `up --frozen` enforce only what the
+ * lock contains, so a silently truncated one is a green gate over less coverage.
  */
 export async function handleLock(
   options: LockOptions,
@@ -158,6 +163,22 @@ export async function handleLock(
     lockedServers[name] = locked;
   }
 
+  // FAIL-CLOSED: a lock missing a declared server must never reach disk. `mcpm
+  // verify` and `up --frozen` check only what the lock CONTAINS, so a truncated
+  // lock passes every gate — silently narrowing what is enforced. Report every
+  // failure (resolution still ran to completion for all of them), then abort
+  // WITHOUT writing, leaving any previous good lock intact.
+  if (errors.length > 0) {
+    deps.output("");
+    for (const { name, error } of errors) {
+      deps.output(`  Failed: ${name} — ${error}`);
+    }
+    throw new Error(
+      `${errors.length} server(s) failed to resolve — lock not written (${lockPath} left unchanged).\n` +
+        `Fix the entries above and re-run \`mcpm lock\`; a partial lock would verify green while enforcing less than you declared.`
+    );
+  }
+
   const lockFile: LockFile = {
     lockfileVersion: 1,
     lockedAt: new Date().toISOString(),
@@ -168,14 +189,6 @@ export async function handleLock(
   deps.output(`Locked ${results.length} servers to ${lockPath}`);
 
   reportProvenanceDrift(prevLock, results, deps.output);
-
-  if (errors.length > 0) {
-    deps.output("");
-    for (const { name, error } of errors) {
-      deps.output(`  Failed: ${name} — ${error}`);
-    }
-    deps.output(`\n${errors.length} server(s) failed to resolve.`);
-  }
 }
 
 // ---------------------------------------------------------------------------
