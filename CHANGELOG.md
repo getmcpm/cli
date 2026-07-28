@@ -6,6 +6,23 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
+- **`mcpm_install` no longer leaves a live server behind a reported failure.** The
+  MCP tool wrote each client's config inside the same loop that validated it, so a
+  failure partway through kept every write already made. `resolveInstallEntry`'s
+  URL rule is **cursor-only**, which made this reachable with no I/O error at all:
+  a server carrying both an npm package and an HTTP remote installed cleanly on
+  Claude Desktop, then hit the H9 unguarded-transport hard-deny on Cursor. The
+  agent was told the install failed while a live execution surface sat in Claude
+  Desktop — and because `addToStore` runs only after the loop, mcpm had **no record
+  of it**: invisible to `mcpm list` and `mcpm audit`, and untouched by `mcpm remove`.
+
+  Install is now a unit. Every client's entry is resolved and validated **before**
+  any config is written, so the H9 deny installs to none. Any later failure — a
+  client write or the store write — rolls back every write already made; the store
+  write is inside the transaction because configs without a store record are exactly
+  the untracked state above. If rollback itself fails, the error names the clients
+  the server is **still installed in** rather than reporting a clean failure.
+
 - **`mcpm lock` no longer writes a truncated lock, and `mcpm verify` no longer
   passes over one.** Two independent fail-opens formed one chain: `lock` wrote
   the lock file *before* its error branch (which only printed), so a run where

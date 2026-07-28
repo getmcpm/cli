@@ -8,7 +8,7 @@
 import path from "node:path";
 import type { ClientId } from "../config/paths.js";
 import { CLIENT_IDS } from "../config/paths.js";
-import type { ConfigAdapter } from "../config/adapters/index.js";
+import type { ConfigAdapter, McpServerEntry } from "../config/adapters/index.js";
 import type { ServerEntry } from "../registry/types.js";
 import type { Finding } from "../scanner/tier1.js";
 import type { TrustScore, TrustScoreInput } from "../scanner/trust-score.js";
@@ -180,10 +180,12 @@ export async function handleInstall(
 
   const clients = await resolveClients(args.client, deps);
 
-  const installedClients: ClientId[] = [];
-  for (const clientId of clients) {
-    const adapter = deps.getAdapter(clientId);
-    const configPath = deps.getConfigPath(clientId);
+  // PRE-FLIGHT: resolve and validate EVERY client's entry before touching a single
+  // config. resolveInstallEntry's URL rule is cursor-ONLY, so a server carrying both
+  // an npm package and an http remote used to install cleanly on claude-desktop and
+  // only THEN hit the H9 deny on cursor — the agent was told the install failed while
+  // a live execution surface sat in Claude Desktop, with no store record of it.
+  const planned = clients.map((clientId) => {
     const mcpEntry = resolveInstallEntry(entry, clientId);
     // H9 (fail-closed): a URL/HTTP-transport entry (url, no command) runs
     // UNGUARDED — the guard relay only wraps a stdio process. The MCP surface is
@@ -197,24 +199,75 @@ export async function handleInstall(
         `via the MCP surface. Use the mcpm CLI with --allow-unguarded after manual review.`
       );
     }
-    await adapter.addServer(configPath, args.name, mcpEntry);
-    installedClients.push(clientId);
-  }
-
-  await deps.addToStore({
-    name: args.name,
-    version: entry.server.version,
-    clients: [...installedClients],
-    installedAt: new Date().toISOString(),
+    return {
+      clientId,
+      adapter: deps.getAdapter(clientId),
+      configPath: deps.getConfigPath(clientId),
+      mcpEntry,
+    };
   });
+
+  // APPLY as a unit. Any failure — a client write or the store write — unwinds every
+  // write already made, so this tool never reports failure over a live install.
+  // The store write is inside the transaction on purpose: configs written without a
+  // store record are invisible to `mcpm list` / `audit` and survive `mcpm remove`.
+  const done: PlannedInstall[] = [];
+  try {
+    for (const p of planned) {
+      await p.adapter.addServer(p.configPath, args.name, p.mcpEntry);
+      done.push(p);
+    }
+    await deps.addToStore({
+      name: args.name,
+      version: entry.server.version,
+      clients: done.map((p) => p.clientId),
+      installedAt: new Date().toISOString(),
+    });
+  } catch (err) {
+    const stranded = await rollbackInstall(done, args.name);
+    if (stranded.length > 0) {
+      // Rollback is best-effort and can fail too. Swallowing that would report a
+      // clean failure over a server that is still installed — name it instead.
+      throw new Error(
+        `${err instanceof Error ? err.message : String(err)}\n\n` +
+        `Rollback incomplete: "${args.name}" is STILL INSTALLED in ${stranded.join(", ")}. ` +
+        `Remove it with \`mcpm remove ${args.name}\` before retrying.`
+      );
+    }
+    throw err;
+  }
 
   return {
     installed: true,
     name: args.name,
     version: entry.server.version,
-    clients: installedClients,
+    clients: done.map((p) => p.clientId),
     trustScore: trust,
   };
+}
+
+/** One client's fully-resolved install, validated and ready to write. */
+type PlannedInstall = {
+  clientId: ClientId;
+  adapter: ConfigAdapter;
+  configPath: string;
+  mcpEntry: McpServerEntry;
+};
+
+/**
+ * Undo the client-config writes already made by a failed install.
+ * @returns the clients that could NOT be rolled back (still installed).
+ */
+async function rollbackInstall(done: PlannedInstall[], name: string): Promise<ClientId[]> {
+  const stranded: ClientId[] = [];
+  for (const p of done) {
+    try {
+      await p.adapter.removeServer(p.configPath, name);
+    } catch {
+      stranded.push(p.clientId);
+    }
+  }
+  return stranded;
 }
 
 export async function handleInfo(

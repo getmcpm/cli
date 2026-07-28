@@ -505,3 +505,162 @@ describe("extractKeywords", () => {
     expect(extractKeywords("postgresql")).toEqual(["postgresql"]);
   });
 });
+
+// ---------------------------------------------------------------------------
+// handleInstall — atomicity across clients
+// ---------------------------------------------------------------------------
+
+/**
+ * A server carrying BOTH an npm package and a streamable-http remote.
+ * resolveInstallEntry's Rule 1 is cursor-ONLY, so this resolves to a runnable
+ * `{ command: npx }` on claude-desktop and to `{ url }` on cursor — which the H9
+ * gate hard-denies. That asymmetry is what makes a partial write reachable.
+ */
+function hybridEntry(name: string): ServerEntry {
+  return {
+    server: {
+      name,
+      version: "1.0.0",
+      description: "npm package plus an http remote",
+      packages: [
+        { registryType: "npm", identifier: "@test/hybrid", environmentVariables: [] },
+      ],
+      remotes: [{ type: "streamable-http", url: "https://api.example.com/mcp", headers: [] }],
+    },
+  } as ServerEntry;
+}
+
+/** Per-client adapter mocks, so a failure can be targeted at ONE client. */
+function perClientAdapters(clients: ClientId[]) {
+  const adapters = new Map<
+    ClientId,
+    { addServer: ReturnType<typeof vi.fn>; removeServer: ReturnType<typeof vi.fn> }
+  >();
+  for (const id of clients) {
+    adapters.set(id, {
+      addServer: vi.fn().mockResolvedValue(undefined),
+      removeServer: vi.fn().mockResolvedValue(undefined),
+    });
+  }
+  const getAdapter = vi.fn((id: ClientId) => ({
+    clientId: id,
+    read: vi.fn().mockResolvedValue({}),
+    addServer: adapters.get(id)!.addServer,
+    removeServer: adapters.get(id)!.removeServer,
+  }));
+  return { adapters, getAdapter };
+}
+
+describe("handleInstall — leaves nothing behind on failure", () => {
+  const CLIENTS: ClientId[] = ["claude-desktop", "cursor"];
+
+  it("hard-denying the URL transport on ONE client installs it on NONE", async () => {
+    // The bug: claude-desktop resolved to a runnable npx command and was written
+    // to disk, THEN cursor hit the H9 deny and threw. The agent was told the
+    // install failed while a live execution surface sat in Claude Desktop — and
+    // addToStore never ran, so mcpm's own store had no record of it (invisible to
+    // `mcpm list` / `audit`, and `mcpm remove` would not clean it up).
+    const { adapters, getAdapter } = perClientAdapters(CLIENTS);
+    const addToStore = vi.fn().mockResolvedValue(undefined);
+    const deps = makeDeps({
+      detectClients: vi.fn().mockResolvedValue(CLIENTS),
+      registryGetServer: vi.fn().mockResolvedValue(hybridEntry("io.github.acme/hybrid")),
+      getAdapter,
+      addToStore,
+    });
+
+    await expect(handleInstall({ name: "io.github.acme/hybrid" }, deps)).rejects.toThrow(
+      /UNGUARDED|not permitted via the MCP surface/i
+    );
+
+    // Validated BEFORE any write: nothing was added, so nothing needs undoing.
+    expect(adapters.get("claude-desktop")!.addServer).not.toHaveBeenCalled();
+    expect(adapters.get("cursor")!.addServer).not.toHaveBeenCalled();
+    expect(addToStore).not.toHaveBeenCalled();
+  });
+
+  it("rolls back the first client when a later client's write fails", async () => {
+    const { adapters, getAdapter } = perClientAdapters(CLIENTS);
+    adapters.get("cursor")!.addServer.mockRejectedValue(new Error("EACCES: config not writable"));
+    const addToStore = vi.fn().mockResolvedValue(undefined);
+    const deps = makeDeps({
+      detectClients: vi.fn().mockResolvedValue(CLIENTS),
+      registryGetServer: vi.fn().mockResolvedValue(makeEntry("io.github.acme/svc")),
+      getAdapter,
+      addToStore,
+    });
+
+    await expect(handleInstall({ name: "io.github.acme/svc" }, deps)).rejects.toThrow(/EACCES/);
+
+    // claude-desktop was written, so it must be un-written.
+    expect(adapters.get("claude-desktop")!.addServer).toHaveBeenCalled();
+    expect(adapters.get("claude-desktop")!.removeServer).toHaveBeenCalledWith(
+      expect.any(String),
+      "io.github.acme/svc"
+    );
+    expect(addToStore).not.toHaveBeenCalled();
+  });
+
+  it("rolls back every client when the store write fails", async () => {
+    // Otherwise the server is live in both clients but untracked by mcpm.
+    const { adapters, getAdapter } = perClientAdapters(CLIENTS);
+    const deps = makeDeps({
+      detectClients: vi.fn().mockResolvedValue(CLIENTS),
+      registryGetServer: vi.fn().mockResolvedValue(makeEntry("io.github.acme/svc")),
+      getAdapter,
+      addToStore: vi.fn().mockRejectedValue(new Error("store write failed")),
+    });
+
+    await expect(handleInstall({ name: "io.github.acme/svc" }, deps)).rejects.toThrow(
+      /store write failed/
+    );
+    for (const id of CLIENTS) {
+      expect(adapters.get(id)!.removeServer).toHaveBeenCalledWith(
+        expect.any(String),
+        "io.github.acme/svc"
+      );
+    }
+  });
+
+  it("reports what is still live when rollback ITSELF fails", async () => {
+    // Best-effort rollback can fail too. Silently swallowing that would report a
+    // clean failure while a server stays installed — the error must name it.
+    const { adapters, getAdapter } = perClientAdapters(CLIENTS);
+    adapters.get("cursor")!.addServer.mockRejectedValue(new Error("EACCES"));
+    adapters
+      .get("claude-desktop")!
+      .removeServer.mockRejectedValue(new Error("config locked"));
+    const deps = makeDeps({
+      detectClients: vi.fn().mockResolvedValue(CLIENTS),
+      registryGetServer: vi.fn().mockResolvedValue(makeEntry("io.github.acme/svc")),
+      getAdapter,
+    });
+
+    await expect(handleInstall({ name: "io.github.acme/svc" }, deps)).rejects.toThrow(
+      /claude-desktop/
+    );
+  });
+
+  it("still installs to every client on the happy path", async () => {
+    const { adapters, getAdapter } = perClientAdapters(CLIENTS);
+    const addToStore = vi.fn().mockResolvedValue(undefined);
+    const deps = makeDeps({
+      detectClients: vi.fn().mockResolvedValue(CLIENTS),
+      registryGetServer: vi.fn().mockResolvedValue(makeEntry("io.github.acme/svc")),
+      getAdapter,
+      addToStore,
+    });
+
+    const result = (await handleInstall({ name: "io.github.acme/svc" }, deps)) as {
+      installed: boolean;
+      clients: ClientId[];
+    };
+    expect(result.installed).toBe(true);
+    expect(result.clients).toEqual(CLIENTS);
+    expect(addToStore).toHaveBeenCalled();
+    for (const id of CLIENTS) {
+      expect(adapters.get(id)!.addServer).toHaveBeenCalled();
+      expect(adapters.get(id)!.removeServer).not.toHaveBeenCalled();
+    }
+  });
+});
