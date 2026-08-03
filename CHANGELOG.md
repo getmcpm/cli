@@ -29,8 +29,9 @@ All notable changes to this project will be documented in this file.
   variable is unset — the default — no subprocess is spawned. Package runners and
   shells (`npx`, `pnpx`, `bunx`, `uvx`, `pipx`, `pip`, `npm`, `pnpm`, `yarn`,
   `bun`, `deno`, `docker`, `podman`, `sh`, `bash`, …) are refused by basename,
-  insensitive to case, path, and `.exe`/`.cmd` suffix, and a value containing
-  whitespace is refused so a runner cannot hide behind arguments. That denylist
+  insensitive to case, path, and executable or script suffix (`.exe`, `.cmd`,
+  `.bat`, `.ps1`, `.js`, `.cjs`, `.mjs`), and including a runner's `-cli`
+  entrypoint or a symlink pointing at one. That denylist
   is a regression guard against a pasted `npx …` recipe or a future mcpm default
   drifting back toward one. Be clear on its worth: it is a **footgun guard, not an
   attacker boundary**, since whoever can set this variable can usually set `PATH`
@@ -48,14 +49,22 @@ All notable changes to this project will be documented in this file.
     and an environment variable is caller-supplied. The bucket is now credited
     only when the scanner returns a result mcpm could actually read, and a
     scanner that fails is treated as **absent** (bucket leaves `maxPossible`)
-    rather than as a failing scan, so a broken scanner never depresses a score.
-  - **A refused value is no longer silent.** Previously a rejected or typo'd
-    command was indistinguishable from having no scanner, so the user was told to
-    "set `MCPM_EXTERNAL_SCANNER`" — the variable they had just set. mcpm now
-    writes the refusal to stderr once per process. Symlinks are resolved before
-    the name check, since `/usr/bin/npx` is itself a symlink to npm's
-    `npx-cli.js`, and paths containing spaces (`C:\Program Files\…`) are
-    accepted rather than mistaken for a command line.
+    rather than as a failing scan. Note the honest comparison: that is "no worse
+    than having no scanner", not "no change" — if you were scoring against a
+    working scanner and it breaks, those points do go away, and a raw
+    `--min-trust` gate will see the drop. The gate stops accidental inflation
+    (`/bin/true`, a typo, a scanner that broke); it cannot stop someone who
+    deliberately points the variable at a script printing `{"findings": []}`,
+    because mcpm cannot verify an arbitrary executable did any work.
+  - **A misconfigured scanner is no longer silent.** Previously a refused,
+    typo'd, or unrunnable command was indistinguishable from having no scanner,
+    so the user was told to "set `MCPM_EXTERNAL_SCANNER`" — the variable they had
+    just set. mcpm now writes to stderr once per process, both when a value is
+    refused and when a configured scanner cannot be run at all. Paths containing
+    spaces (`C:\Program Files\…`, `/opt/npm scanner/bin/…`) are accepted rather
+    than mistaken for a command line; a pasted `npx some-pkg` is looked up as one
+    literal filename, which does not exist, and is reported as unrunnable —
+    `execFile` never splits on whitespace, so it is not an argument vector.
 
   mcpm deliberately does **not** auto-detect a replacement. Invariant Labs'
   mcp-scan is distributed on PyPI (and has been a redirect package for
@@ -143,8 +152,12 @@ All notable changes to this project will be documented in this file.
   erases the phrase entirely. TAG characters used as invisible **separators**
   between words of an injection phrase are stripped, which reassembles the phrase
   and lets the description-injection signature block it. Presence detection runs
-  on tool metadata carriers only; see `TODOS.md` #31 for the data-carrier gap this
-  work surfaced.
+  on tool metadata carriers only. A wholly TAG-encoded payload elsewhere is not
+  detected — including on the server-initiated `sampling_prompt` path, which is
+  block-tier with a reply to the server, so a TAG-encoded credential solicitation
+  passes where the same text in plain form blocks. See `TODOS.md` #31, and note
+  that a separately-tracked false positive already exists on the covered
+  carriers: an emoji subdivision flag in a tool description warns today.
 
 ## [0.27.0] - 2026-07-27
 

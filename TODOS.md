@@ -211,3 +211,20 @@ Recommendation: decode-and-rescan, because it restores the block-tier control ra
 **What:** Tier 2 is now an honest opt-in seam (`MCPM_EXTERNAL_SCANNER`, no fetching), but nothing ships wired to it, so the 20-point external bucket is unreachable for a normal user. The obvious candidate does not drop in: Invariant's mcp-scan is a **PyPI** tool (since 2026-03 a redirect package for `snyk-agent-scan`) whose CLI scans client **config files**, not registry server names, so `<cmd> --json <server-name>` does not match its interface. The unscoped npm `mcp-scan` is an unrelated third-party product and must not be adopted as a substitute.
 **How:** pick a target scanner, adapt the invocation and output mapping to its real CLI contract, and verify against the installed tool rather than a mock — the mock-only coverage is precisely what hid the dead `npx` path for the whole life of the feature. Consider `mcpm doctor` reporting whether an external scanner is configured and runnable.
 **Effort:** ~3 hrs per scanner integration.
+
+### 33. Evaluate HARD_TRUST_FLOOR on mcpm-native evidence only
+**Priority:** P2
+**Found:** 2026-08-03, by adversarial review of the v0.28.0 tier-2 change.
+**What:** `HARD_TRUST_FLOOR = 25` (`src/server/handlers.ts`) is documented as a floor that "no caller-supplied value can lower", protecting the no-human-in-loop MCP path. It is compared against the **raw** trust score, which includes the 20-point external-scanner bucket. Since `MCPM_EXTERNAL_SCANNER` names an arbitrary executable, a two-line script is enough to move that floor:
+
+```sh
+#!/bin/sh
+echo '{"findings":[]}'
+```
+
+Reproduced: a server with two critical tier-1 findings and no health check scores 15 (blocked, 15 < 25); with that script configured it scores 35 and `mcpm_up` installs it. The v0.28.0 change closed the *accidental* version of this (`/bin/true` and other silent binaries no longer earn the bucket) but cannot close the deliberate one — mcpm has no way to verify an arbitrary executable did any work.
+
+**Why this is not simply "the user's own machine":** it is, and a user who fakes their own scanner is only fooling themselves. The defect is narrower and real: the floor's *documented* contract says it cannot be lowered by caller-supplied input, and an environment variable is caller-supplied. Either the contract or the implementation should change.
+
+**Proposed fix:** evaluate the floor against mcpm's own evidence — compare `score - breakdown.externalScan` (equivalently, recompute with `hasExternalScanner: false`) rather than the raw total. Third-party corroboration mcpm cannot verify should be able to *inform* a score without being able to *clear a safety floor*. Note this is a real behaviour change for legitimate scanner users, whose 20 points would stop counting toward the floor, so it wants its own PR and its own review rather than riding along with a scanner fix.
+**Effort:** ~1 hr (one comparison + tests), plus deciding whether `mcpm install --min-trust` should follow the same rule.

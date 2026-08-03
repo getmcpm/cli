@@ -59,11 +59,13 @@ Query the official MCP Registry and see results with trust indicators.
 ```
 $ mcpm search filesystem
 
-  Name                                              Description                    Score
-  io.github.domdomegg/filesystem-mcp                 File system access via MCP     72/80
-  io.github.Digital-Defiance/mcp-filesystem           Read-only filesystem server    54/80
+  Name                                    Description                   Version  Transport  Status
+  io.github.domdomegg/filesystem-mcp       File system access via MCP    1.4.0    stdio      active
+  io.github.Digital-Defiance/mcp-filesystem Read-only filesystem server  0.9.2    stdio      active
   ...
 ```
+
+Search shows registry lifecycle status, not a trust score -- it is a fast discovery list and does not run the scanner per result. Computed trust lives in `mcpm why`, `info`, `install`, and `audit`.
 
 ### Install with trust assessment
 
@@ -72,11 +74,11 @@ Every install runs a metadata-based trust assessment before writing config.
 ```
 $ mcpm install io.github.domdomegg/filesystem-mcp
 
-  Trust Score: 72/80 (safe)
-    Health check:    30/30
-    Static scan:     32/40
-    External scan:    —  (set MCPM_EXTERNAL_SCANNER for full coverage)
-    Registry meta:   10/10
+  ███████████████░░░░░ 57/80 CAUTION
+    ├─ Health check: not yet run
+    ├─ Tool descriptions: score 32/40
+    ├─ Package: publisher verification passed
+    └─ External scan: not available (set MCPM_EXTERNAL_SCANNER for deeper analysis)
 
   Install to Claude Desktop? (Y/n)
 ```
@@ -88,10 +90,10 @@ Scan everything you have installed. Get a trust report.
 ```
 $ mcpm audit
 
-  Server                                   Client          Score  Level
-  servers-filesystem                        Claude Desktop  72/80  safe
-  servers-github                            Cursor          52/80  caution
-  some-sketchy-server                       VS Code         24/80  risky
+  Server                                   Score  Level    Findings
+  servers-filesystem                        72/80  safe     0
+  servers-github                            52/80  caution  2
+  some-sketchy-server                       24/80  risky    5
 ```
 
 ### Cross-IDE support
@@ -432,7 +434,7 @@ Independent 2026 evidence for each thing the guard does, so you can check the pr
 - **[NSA AI Security Center, "MCP: Security Design Considerations"](https://media.defense.gov/2026/Jun/02/2003943289/-1/-1/0/CSI_MCP_SECURITY.PDF)** — recommends filtering outbound proxies, data-loss prevention, sandboxing, and local MCP scanning. That is the guard relay, the credential-egress detectors, `--confine`, and `mcpm audit`, in one government document.
 - **[OX Security, "Mother of All AI Supply Chains"](https://www.ox.security/blog/mcp-supply-chain-advisory-rce-vulnerabilities-across-the-ai-ecosystem/)** (2026-04-15) — 10 assigned critical/high CVEs from the config-to-process-spawn design, and a proof-of-concept poisoned server accepted by 9 of 11 public registries and marketplaces. Registry listing is not a safety signal.
 - **Microsoft's tool-poisoning warning** (2026-06-30, [reported here](https://thehackernews.com/2026/06/microsoft-warns-poisoned-mcp-tool.html)) — poisoned tool descriptions steer an agent about as effectively as rewriting its system prompt; the recommended mitigation is code-review-style diffing of description changes. Schema pinning plus drift detection covers the detection half: mcpm tells you a description changed since you approved it, and blocks on schema or annotation drift. It does not render a before/after diff of the text.
-- **[SmartLoader](https://www.straiker.ai/blog/smartloader-clones-oura-ring-mcp-to-deploy-supply-chain-attack)** (disclosed Feb 2026) — a trojanized Oura Ring MCP server, backed by fake GitHub accounts with manufactured social proof, seeded into legitimate registries to drop an infostealer. Stars and listings are forgeable, which is why mcpm scores build provenance instead. Note the honest limit: provenance attests *who built a package*, not that the code is safe — an attacker publishing their own trojanized package from their own CI gets valid provenance. It raises the cost of impersonating someone else; it would not by itself have stopped SmartLoader.
+- **[SmartLoader](https://www.straiker.ai/blog/smartloader-clones-oura-ring-mcp-to-deploy-supply-chain-attack)** (disclosed Feb 2026) — a trojanized Oura Ring MCP server, backed by fake GitHub accounts with manufactured social proof, seeded into legitimate registries to drop an infostealer. Stars and listings are forgeable, which is why `mcpm lock`, `why` and `verify` check build provenance instead (it is reported and gated there, not folded into the trust score). Note the honest limit: provenance attests *who built a package*, not that the code is safe — an attacker publishing their own trojanized package from their own CI gets valid provenance. It raises the cost of impersonating someone else; it would not by itself have stopped SmartLoader.
 - **[The official registry's own moderation policy](https://modelcontextprotocol.io/registry/moderation-policy)** — consumers "should assume minimal-to-no moderation", with security scanning explicitly delegated to package registries and downstream subregistries. mcpm is one of those downstream layers.
 
 ### Read more

@@ -48,8 +48,8 @@ in their own block.
 
 | Category | Attack class | Fixtures |
 |---|---|---|
-| OWASP-MCP-1 | Tool-description / metadata injection | 11 (system-tag, ANSI, bidi, ZWSP, Unicode TAG block ×2, multi-tool poisoning, `initialize.instructions`, plus the structural `exfil-param-in-schema` key detector) |
-| OWASP-MCP-2 | Response instruction injection | 8 attacks (NFKC, ZWSP, newline, homoglyph, disregard/forget, developer-mode) + 3 warn-tier (resource / prompt content) |
+| OWASP-MCP-1 | Tool-description / metadata injection | 11 (incl. system-tag, ANSI, bidi, ZWSP, Unicode TAG block ×2, multi-tool poisoning, `initialize.instructions`, plus the structural `exfil-param-in-schema` key detector) |
+| OWASP-MCP-2 | Response instruction injection | 8 attacks (incl. NFKC, ZWSP, newline, homoglyph, disregard/forget, developer-mode) + 3 warn-tier (resource / prompt content) |
 | OWASP-MCP-7 | Path exfil in args | 3 (.ssh / .aws / .env) |
 | MCP-CREDENTIAL-EXFIL | Credential egress in responses (F10) | 2 (GitHub PAT, PEM private key) |
 | MCP-CREDENTIAL-PHISHING | Server-initiated credential solicitation (F6) | 2 (wallet seed phrase, card CVV) |

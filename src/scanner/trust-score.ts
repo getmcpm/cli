@@ -131,22 +131,30 @@ function hasCriticalOrHighFindings(findings: Finding[]): boolean {
  * Returns a new TrustScore object — never mutates input.
  */
 export function computeTrustScore(input: TrustScoreInput): TrustScore {
-  // The external bucket is credited only when the scanner actually returned a
-  // result we could READ — not merely because one was configured and exited 0.
+  // The external bucket is credited only when the scanner returned a result we
+  // could READ — not merely because one was configured and exited 0.
   //
-  // This is load-bearing, not defensive coding. `MCPM_EXTERNAL_SCANNER` names an
-  // arbitrary executable, so without this gate any binary that exits 0 (say
-  // `/bin/true`) would earn a silent 20/20 and add 20 RAW points. Two gates
-  // compare raw scores: `mcpm install --min-trust`, and `HARD_TRUST_FLOOR` on the
-  // no-human-in-loop MCP path, which is documented as a floor no caller-supplied
-  // value can lower. An environment variable is caller-supplied — so crediting an
-  // unverified scanner would let one lower that floor by 20 points. Requiring a
-  // parseable result means a binary must genuinely speak the contract
-  // (`{"findings": [...]}` on stdout) before its corroboration counts.
+  // Be precise about what this does and does not buy, because the raw score
+  // feeds `mcpm install --min-trust` and the MCP `HARD_TRUST_FLOOR`. It stops
+  // the ACCIDENTAL inflation: a binary that is not a scanner (`/bin/true` exits
+  // 0 and says nothing), a typo'd path, a scanner that broke after an upgrade.
+  // Those would otherwise bank a silent 20/20 for doing nothing.
   //
-  // A scanner that failed is treated as ABSENT rather than as a failing scan:
-  // the bucket leaves `maxPossible` (80, not 100) instead of scoring 0 out of
-  // 100, so a broken or misconfigured scanner never depresses a server's score.
+  // It does NOT stop deliberate self-deception, and cannot. Anyone who can set
+  // MCPM_EXTERNAL_SCANNER can also write a two-line script that prints
+  // `{"findings": []}`, which is indistinguishable from a real clean scan —
+  // mcpm has no way to verify an arbitrary executable did any work. So the
+  // external bucket is, and should be read as, "a scanner the USER chose to
+  // trust reported this", never as independent corroboration mcpm validated.
+  // Making HARD_TRUST_FLOOR immune to that would mean evaluating the floor on
+  // mcpm-native evidence only, which is a separate behaviour change — TODOS #33.
+  //
+  // A scanner whose result we could not read is treated as ABSENT rather than as
+  // a failing scan: the bucket leaves `maxPossible` (80, not 100) instead of
+  // scoring 0 out of 100. Note the honest comparison — that is "no worse than
+  // having no scanner", NOT "no change": a stack that was scoring against a
+  // working scanner and whose scanner then breaks does lose those points, and a
+  // raw `--min-trust` gate will see the drop.
   const externalCredited =
     input.hasExternalScanner &&
     !input.findings.some((f) => f.source === "external" && f.type === "scanner-error");
@@ -184,7 +192,7 @@ export function computeTrustScore(input: TrustScoreInput): TrustScore {
     : [];
   const staticFindings = externalCredited
     ? input.findings.filter((f) => f.source !== "external")
-    : input.findings.filter((f) => f.type !== "scanner-error");
+    : input.findings.filter((f) => !(f.type === "scanner-error" && f.source === "external"));
 
   const breakdown: TrustScoreBreakdown = {
     healthCheck: scoreHealthCheck(input.healthCheckPassed),

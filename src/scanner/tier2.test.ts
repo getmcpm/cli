@@ -102,21 +102,29 @@ describe("resolveScannerCommand", () => {
     expect(resolveScannerCommand({ [SCANNER_ENV_VAR]: value }).status, value).toBe("rejected");
   });
 
-  it("refuses a command line, so a runner cannot hide behind arguments", () => {
-    const result = resolveScannerCommand({ [SCANNER_ENV_VAR]: "npx @invariantlabs/mcp-scan" });
-    expect(result.status).toBe("rejected");
-    if (result.status === "rejected") expect(result.reason).toContain('"npx"');
-  });
-
-  // Regression: a blanket whitespace rejection closed the seam on Windows,
-  // whose default install locations live under "C:\\Program Files".
+  // Whitespace handling has two failure modes and this pins both. Rejecting any
+  // value with a space closes the seam on Windows; inspecting only the first
+  // token then refuses "/opt/npm scanner/bin/mcp-scan" as "npm". Real install
+  // paths must resolve, including ones whose leading component names a runner.
   it.each([
     "C:\\Program Files\\Snyk\\snyk-agent-scan.exe",
     "/Applications/My Scanner.app/Contents/MacOS/scan",
+    "/opt/npm scanner/bin/mcp-scan",
+    "/usr/local/uv tools/scan",
   ])("accepts a legitimate path containing spaces: %s", (value) => {
     expect(resolveScannerCommand({ [SCANNER_ENV_VAR]: value })).toEqual({
       status: "ready",
       command: value,
+    });
+  });
+
+  // A pasted "npx <pkg>" is allowed through as a literal filename rather than
+  // refused. That is safe — execFile does not split on whitespace, so it names
+  // one nonexistent file — and checkScannerAvailable reports it as unrunnable.
+  it("treats a command line as a filename, not an argument vector", () => {
+    expect(resolveScannerCommand({ [SCANNER_ENV_VAR]: "npx @invariantlabs/mcp-scan" })).toEqual({
+      status: "ready",
+      command: "npx @invariantlabs/mcp-scan",
     });
   });
 });
@@ -188,6 +196,29 @@ describe("checkScannerAvailable", () => {
     expect(onWarn).not.toHaveBeenCalled();
   });
 
+  // A configured-but-unrunnable scanner (typo, moved binary, or a pasted
+  // command line) must say so. Otherwise the user is told to set the variable
+  // they already set.
+  it.each([
+    ["a typo'd path", "/usr/local/bin/mcp-scam"],
+    ["a pasted command line", "npx @invariantlabs/mcp-scan"],
+  ])("warns when the configured scanner cannot be run (%s)", async (_label, value) => {
+    const execImpl = vi.fn().mockRejectedValue(new Error("ENOENT"));
+    const onWarn = vi.fn();
+    expect(
+      await checkScannerAvailable({ execImpl, onWarn, env: { [SCANNER_ENV_VAR]: value } }),
+    ).toBe(false);
+    expect(onWarn).toHaveBeenCalledOnce();
+    expect(onWarn.mock.calls[0][0]).toContain("could not be run");
+  });
+
+  it("stays silent when the scanner runs fine", async () => {
+    const execImpl = vi.fn().mockResolvedValue({ stdout: "1.0.0", exitCode: 0 });
+    const onWarn = vi.fn();
+    expect(await checkScannerAvailable({ execImpl, onWarn })).toBe(true);
+    expect(onWarn).not.toHaveBeenCalled();
+  });
+
   // Follows symlinks: /usr/bin/npx is itself a symlink to npm's npx-cli.js, so a
   // link named innocuously would pass a purely lexical check. Built entirely
   // inside a temp dir — pointing at a real npm install would make the test
@@ -212,7 +243,8 @@ describe("checkScannerAvailable", () => {
   });
 
   // The other half of that behaviour: an unresolvable path must not be treated
-  // as refused. It falls through to the spawn, which produces the real error.
+  // as REFUSED. It falls through to the spawn, and the failure is reported as
+  // "could not be run" rather than as a package-runner accusation.
   it("does not refuse a command whose path cannot be resolved", async () => {
     const execImpl = vi.fn().mockResolvedValue({ stdout: "", exitCode: 127 });
     const onWarn = vi.fn();
@@ -224,7 +256,9 @@ describe("checkScannerAvailable", () => {
       }),
     ).toBe(false);
     expect(execImpl).toHaveBeenCalledOnce();
-    expect(onWarn).not.toHaveBeenCalled();
+    expect(onWarn).toHaveBeenCalledOnce();
+    expect(onWarn.mock.calls[0][0]).toContain("could not be run");
+    expect(onWarn.mock.calls[0][0]).not.toContain("package runner");
   });
 });
 

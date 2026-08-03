@@ -27,7 +27,6 @@
  */
 
 import type { Finding } from "./tier1.js";
-import { sanitizeForTerminal } from "../guard/sanitize.js";
 
 // ---------------------------------------------------------------------------
 // Scanner command resolution
@@ -74,8 +73,9 @@ export type ScannerResolution =
  * The denylisted runner name a path refers to, or undefined if it names none.
  *
  * Compares the basename with directories, case, and an executable/script suffix
- * removed. A path ending in a separator yields an empty basename, which is
- * malformed rather than permitted.
+ * removed. A path ending in a separator yields an empty basename and matches
+ * nothing; such a value is left to fail at spawn time (ENOTDIR/ENOENT) rather
+ * than being reported as a package runner it does not name.
  */
 export function refusedRunnerName(commandPath: string): string | undefined {
   const basename = (commandPath.split(/[/\\]/).pop() ?? "")
@@ -135,15 +135,18 @@ export function resolveScannerCommand(
 
   const command = raw.trim();
 
-  // Deliberately NOT a blanket whitespace rejection: real install locations
-  // contain spaces (`C:\Program Files\…`, `/Applications/My Scanner/…`), and
-  // refusing those would close the seam on Windows. execFile never splits on
-  // whitespace, so a value with spaces is just an odd filename, not an
-  // argument vector. The risk being closed is narrower — a user pasting
-  // `npx some-scanner` — so check the first token too, which catches that
-  // without penalising a legitimate path.
-  const firstToken = command.split(/\s+/)[0] ?? command;
-  const refused = refusedRunnerName(command) ?? refusedRunnerName(firstToken);
+  // Whitespace is NOT rejected, and the first token is NOT inspected. Both were
+  // tried and both were wrong. A blanket whitespace rejection closes the seam on
+  // Windows, whose install paths live under `C:\Program Files\…`; inspecting the
+  // first token then refuses `/opt/npm scanner/bin/mcp-scan` as "npm", which is
+  // the same false rejection wearing a smaller hat. There is no way to tell a
+  // path-containing-a-space from a command line without touching the disk.
+  //
+  // Nothing is lost by allowing it: execFile never splits on whitespace, so
+  // `MCPM_EXTERNAL_SCANNER="npx some-pkg"` is looked up as one literal filename,
+  // does not exist, and fails to spawn — which checkScannerAvailable reports as a
+  // could-not-run warning, so the user is told rather than left guessing.
+  const refused = refusedRunnerName(command);
   if (refused !== undefined) return { status: "rejected", reason: refusalReason(refused) };
 
   return { status: "ready", command };
@@ -314,12 +317,24 @@ export async function checkScannerAvailable(options?: Tier2Options): Promise<boo
   }
 
   const exec = options?.execImpl ?? defaultExec;
+  let ok = false;
   try {
     const result = await exec(resolved.command, ["--version"]);
-    return result.exitCode === 0;
+    ok = result.exitCode === 0;
   } catch {
-    return false;
+    ok = false;
   }
+  if (!ok) {
+    // Configured but unrunnable — a typo, a moved binary, or a command line such
+    // as "my-scanner --flag" that names no real file. Without this the user is
+    // told to set the variable they already set.
+    warnOnce(
+      `${SCANNER_ENV_VAR} is set to "${resolved.command}" but it could not be run — ` +
+        "external scanning is disabled. Check the path, or unset the variable.",
+      options,
+    );
+  }
+  return ok;
 }
 
 /**
@@ -407,19 +422,20 @@ export async function scanTier2(serverName: string, options?: Tier2Options): Pro
 
   // Step 6: map to Finding[] immutably.
   //
-  // Scanner stdout is untrusted: it is an arbitrary user-named executable whose
-  // text lands in `mcpm why`'s human renderer. Before this seam was opt-in the
-  // sink was dead (availability was always false), so a scanner emitting
-  // `clean[2J` could not repaint the terminal. It can now, hence the
-  // sanitize on the way in — the same treatment registry free-text already gets.
+  // Scanner stdout is untrusted — an arbitrary user-named executable whose text
+  // reaches `mcpm why`'s human renderer, a sink that was dead only because
+  // availability was always false. It is sanitized at the RENDER site, not here:
+  // sanitizeForTerminal also truncates to 256 chars, and `audit --json` /
+  // `--sarif` feed machine consumers that must stay byte-faithful (the v0.20.0
+  // decision — sanitize on human-render branches, JSON verbatim).
   return parsed.findings.map((f): Finding => ({
     severity: normaliseSeverity(f.severity),
     // NOTE: every finding is typed prompt-injection regardless of what the
     // scanner actually reported, which mis-files e.g. a CVE under the
     // prompt-injection SARIF rule. Pre-existing, newly reachable — TODOS #32.
     type: "prompt-injection",
-    message: sanitizeForTerminal(f.description ?? "External scanner finding"),
-    location: sanitizeForTerminal(f.location ?? "external scan"),
+    message: f.description ?? "External scanner finding",
+    location: f.location ?? "external scan",
     source: "external",
   }));
 }

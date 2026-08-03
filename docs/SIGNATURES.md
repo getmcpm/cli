@@ -24,12 +24,14 @@ recognized by `guard mute`, `guard list-signatures`, and policy overrides:
 - `hidden-chars-in-metadata` (OWASP-MCP-1; tool_description / tool_annotations /
   initialize_instructions) — the H2 presence detector. Covers the Unicode TAG
   block (U+E0000–U+E007F) alongside the zero-width / bidi / C0 / C1 classes, so
-  the ["ASCII smuggling" techniques](https://arxiv.org/abs/2607.05744) that
-  defeat string-matching sanitizers are caught. Two fixtures assert both
-  directions of that coverage: a fully TAG-encoded payload is caught by presence
-  (the phrase itself is stripped before matching, so only presence can see it),
-  and TAG characters used as invisible word separators are stripped so the
-  underlying description-injection signature still blocks.
+  the ["ASCII smuggling" techniques](https://arxiv.org/abs/2607.05744) are
+  covered on these carriers. Two fixtures assert both directions, which have
+  DIFFERENT reach: TAG characters used as invisible word separators are stripped
+  on every carrier, so the underlying description-injection signature still
+  blocks; a FULLY TAG-encoded payload is stripped to nothing by normalization and
+  can only be seen by presence detection, which runs on the three targets above
+  and nowhere else. A wholly TAG-encoded payload in a tool response, resource,
+  or server-initiated prompt is therefore NOT detected — see `TODOS.md` #31.
 - `guard-inspection-truncated` (MCP-GUARD-INTEGRITY; emitted on whichever carrier
   was truncated) — raised when the leaf-walk budget is exhausted, i.e. the guard
   did **not** finish reading the frame. `critical`, so it rides the normal carrier
