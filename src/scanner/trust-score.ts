@@ -60,6 +60,17 @@ const MS_PER_DAY = 24 * 60 * 60 * 1000;
 const PUBLISHED_AGE_DAYS = 30;
 const DOWNLOAD_THRESHOLD = 100;
 
+/**
+ * The score reachable from mcpm's OWN evidence — health check, tier-1 static
+ * scan, registry metadata. Also the `maxPossible` reported when no external
+ * scanner was credited, and the denominator `nativeTrustScore` reports.
+ *
+ * Derived rather than written as `80` so the three buckets stay the single
+ * source of truth if any of them is ever re-weighted.
+ */
+const NATIVE_MAX_POSSIBLE = HEALTH_CHECK_PASS + STATIC_SCAN_MAX + REGISTRY_META_MAX;
+const FULL_MAX_POSSIBLE = NATIVE_MAX_POSSIBLE + EXTERNAL_SCAN_MAX;
+
 // ---------------------------------------------------------------------------
 // Component scorers
 // ---------------------------------------------------------------------------
@@ -146,8 +157,11 @@ export function computeTrustScore(input: TrustScoreInput): TrustScore {
   // mcpm has no way to verify an arbitrary executable did any work. So the
   // external bucket is, and should be read as, "a scanner the USER chose to
   // trust reported this", never as independent corroboration mcpm validated.
-  // Making HARD_TRUST_FLOOR immune to that would mean evaluating the floor on
-  // mcpm-native evidence only, which is a separate behaviour change — TODOS #33.
+  //
+  // Because it cannot be verified, that bucket is excluded from the safety
+  // floors the no-human-in-loop MCP surface enforces — see `nativeTrustScore`
+  // below (TODOS #33). It still informs the score every human-facing surface
+  // displays and compares; it just cannot CLEAR a floor on its own.
   //
   // A scanner whose result we could not read is treated as ABSENT rather than as
   // a failing scan: the bucket leaves `maxPossible` (80, not 100) instead of
@@ -159,7 +173,7 @@ export function computeTrustScore(input: TrustScoreInput): TrustScore {
     input.hasExternalScanner &&
     !input.findings.some((f) => f.source === "external" && f.type === "scanner-error");
 
-  const maxPossible = externalCredited ? 100 : 80;
+  const maxPossible = externalCredited ? FULL_MAX_POSSIBLE : NATIVE_MAX_POSSIBLE;
 
   // Cap registryMeta to 0 when critical/high findings are present.
   // Attacker-controlled metadata (publishedAt, downloads) must not inflate
@@ -210,4 +224,51 @@ export function computeTrustScore(input: TrustScoreInput): TrustScore {
   const level = computeLevel(score, maxPossible);
 
   return { score, maxPossible, level, breakdown: { ...breakdown } };
+}
+
+/** A trust score with third-party credit mcpm cannot verify removed. */
+export interface NativeTrustScore {
+  /** The score, less the external-scanner bucket's credit. */
+  score: number;
+  /** Denominator for `score` — always the three mcpm-native buckets. */
+  maxPossible: number;
+  /** Points excluded — 0 when no external scanner was credited. */
+  excludedExternalCredit: number;
+}
+
+/**
+ * The part of a trust score mcpm produced itself, for evaluating SAFETY FLOORS
+ * (TODOS #33).
+ *
+ * `HARD_TRUST_FLOOR` is documented as a gate no caller-supplied value can
+ * lower. `MCPM_EXTERNAL_SCANNER` is caller-supplied — it names an arbitrary
+ * executable — and a two-line script that prints `{"findings": []}` is
+ * indistinguishable from a real clean scan, so before this the bucket's 20
+ * points could lift a server over the floor. Reproduced: two critical tier-1
+ * findings and no health check score 15 (blocked); with such a script
+ * configured they score 35, and `mcpm_up` installed the server.
+ *
+ * The rule: third-party corroboration mcpm cannot verify may INFORM a score,
+ * but must not be able to CLEAR a safety floor. So the floor is compared
+ * against `score - breakdown.externalScan`.
+ *
+ * Note the asymmetry is deliberate and one-directional. Removing only the
+ * bucket's CREDIT leaves every penalty an external finding carries outside that
+ * bucket — most importantly the critical/high cap on `registryMeta` — intact.
+ * An external scanner can therefore still push a server DOWN through the floor,
+ * which is the fail-closed direction, but can never push one UP through it.
+ *
+ * This is deliberately NOT applied to `mcpm install --min-trust` or to a stack
+ * file's `policy.minTrustScore`. Those are thresholds a human chose on their own
+ * machine, where the same person configures both the threshold and the scanner;
+ * subtracting their scanner's points there would surprise legitimate users for
+ * no security gain. The floors this guards are the ones an AI agent, not a
+ * human, is on the other side of.
+ */
+export function nativeTrustScore(trust: TrustScore): NativeTrustScore {
+  return {
+    score: trust.score - trust.breakdown.externalScan,
+    maxPossible: NATIVE_MAX_POSSIBLE,
+    excludedExternalCredit: trust.breakdown.externalScan,
+  };
 }

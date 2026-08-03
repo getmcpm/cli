@@ -12,6 +12,7 @@ import type { ConfigAdapter, McpServerEntry } from "../config/adapters/index.js"
 import type { ServerEntry } from "../registry/types.js";
 import type { Finding } from "../scanner/tier1.js";
 import type { TrustScore, TrustScoreInput } from "../scanner/trust-score.js";
+import { nativeTrustScore } from "../scanner/trust-score.js";
 import { extractRegistryMeta } from "../utils/format-trust.js";
 import { formatMcpEntryCommand } from "../utils/format-entry.js";
 import { resolveInstallEntry } from "../commands/install.js";
@@ -146,6 +147,11 @@ const DEFAULT_MIN_TRUST_SCORE = 50;
  * `Math.max(userValue, HARD_TRUST_FLOOR)` so no caller-supplied value can lower
  * the gate below this floor. This protects the no-human-in-loop path; the CLI
  * (with a human confirmation prompt) is the only place to install below it.
+ *
+ * Lowering the gate is only half of it. A score can also be pushed UP to meet
+ * the gate, and `MCPM_EXTERNAL_SCANNER` is caller-supplied too — so the floor is
+ * evaluated against `nativeTrustScore`, which excludes the external bucket's
+ * unverifiable credit (TODOS #33).
  */
 const HARD_TRUST_FLOOR = 25;
 
@@ -169,11 +175,20 @@ export async function handleInstall(
   // could trick an agent into installing a dangerous server, so we enforce a
   // hard trust floor here. Issue #24: minTrustScore:0 must NOT disable the gate —
   // the effective threshold is clamped to HARD_TRUST_FLOOR.
+  //
+  // TODOS #33: compared against mcpm's OWN evidence. `computeTrust` above already
+  // passes `hasExternalScanner: false`, so today this subtracts nothing — it is
+  // here so that wiring a scanner into this path later cannot silently reopen the
+  // floor, which is the failure mode #33 found on the sibling `mcpm_up` path.
   const minScore = effectiveMinTrustScore(args.minTrustScore);
-  if (trust.score < minScore) {
+  const nativeTrust = nativeTrustScore(trust);
+  if (nativeTrust.score < minScore) {
     throw new Error(
-      `Server "${args.name}" has trust score ${trust.score}/${trust.maxPossible} ` +
+      `Server "${args.name}" has trust score ${nativeTrust.score}/${nativeTrust.maxPossible} ` +
       `(level: ${trust.level}), which is below the minimum threshold of ${minScore}. ` +
+      (nativeTrust.excludedExternalCredit > 0
+        ? `An external scanner's ${nativeTrust.excludedExternalCredit} points are excluded from this floor because mcpm cannot verify them. `
+        : "") +
       `Install rejected for safety. Use mcpm CLI with --yes to override after manual review.`
     );
   }

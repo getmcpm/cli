@@ -272,7 +272,7 @@ the same match is not already in plain sight.
 **How:** pick a target scanner, adapt the invocation and output mapping to its real CLI contract, and verify against the installed tool rather than a mock — the mock-only coverage is precisely what hid the dead `npx` path for the whole life of the feature. Consider `mcpm doctor` reporting whether an external scanner is configured and runnable.
 **Effort:** ~3 hrs per scanner integration.
 
-### 33. Evaluate HARD_TRUST_FLOOR on mcpm-native evidence only
+### 33. ~~Evaluate HARD_TRUST_FLOOR on mcpm-native evidence only~~ DONE (v0.28.0)
 **Priority:** P2
 **Found:** 2026-08-03, by adversarial review of the v0.28.0 tier-2 change.
 **What:** `HARD_TRUST_FLOOR = 25` (`src/server/handlers.ts`) is documented as a floor that "no caller-supplied value can lower", protecting the no-human-in-loop MCP path. It is compared against the **raw** trust score, which includes the 20-point external-scanner bucket. Since `MCPM_EXTERNAL_SCANNER` names an arbitrary executable, a two-line script is enough to move that floor:
@@ -288,3 +288,38 @@ Reproduced: a server with two critical tier-1 findings and no health check score
 
 **Proposed fix:** evaluate the floor against mcpm's own evidence — compare `score - breakdown.externalScan` (equivalently, recompute with `hasExternalScanner: false`) rather than the raw total. Third-party corroboration mcpm cannot verify should be able to *inform* a score without being able to *clear a safety floor*. Note this is a real behaviour change for legitimate scanner users, whose 20 points would stop counting toward the floor, so it wants its own PR and its own review rather than riding along with a scanner fix.
 **Effort:** ~1 hr (one comparison + tests), plus deciding whether `mcpm install --min-trust` should follow the same rule.
+
+**Shipped:** `nativeTrustScore(trust)` in `src/scanner/trust-score.ts` returns
+`score - breakdown.externalScan` over a fixed native denominator (80, derived
+from the three native buckets rather than written as a literal). Both floor
+gates consume it — `handleInstall` (`src/server/handlers.ts`) and the
+`minTrustFloor` gate in `src/commands/up.ts` — and both messages report the
+figure actually compared plus why it differs from the displayed score, since
+"35/100 is below 25" reads as a bug to whoever hits it.
+
+Two design points that were open in the proposal and are now settled:
+
+- **Subtract the CREDIT, not the bucket.** `score - breakdown.externalScan`,
+  not `score - 20` and not a recompute with `hasExternalScanner: false`. The
+  recompute is *not* equivalent, as the proposal assumed: it reroutes external
+  findings into the static bucket via the orphan fallback, double-penalising a
+  finding that already emptied its own bucket. The invariant now pinned is that
+  a finding confined to the external bucket leaves the floor figure exactly
+  where having no scanner would leave it. A mutation subtracting the bucket's
+  20-point capacity survived the first round of tests and drove this test.
+- **The exclusion is one-directional, and that asymmetry is the design.** Only
+  the bucket's credit is removed; every penalty an external finding carries
+  *outside* that bucket — chiefly the critical/high cap on `registryMeta` —
+  still lands. An external scanner can therefore push a server *down* through
+  the floor but never *up* through it. Blocking is the fail-closed direction and
+  is left alone.
+- **`--min-trust` and `policy.minTrustScore` deliberately unchanged.** Those are
+  thresholds a human chose on their own machine, where the same person
+  configures both the threshold and the scanner. Subtracting their scanner's
+  points there would surprise legitimate users for no security gain. The floors
+  this guards are the ones an AI agent, not a human, is on the other side of.
+
+The `handleInstall` half changes nothing today — `computeTrust` there pins
+`hasExternalScanner: false`, so the subtraction is zero — and is wired anyway so
+that a future scanner wiring cannot silently reopen the floor. That is exactly
+how the sibling `mcpm_up` path came to be exposed.

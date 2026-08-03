@@ -12,7 +12,7 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { computeTrustScore } from "./trust-score.js";
+import { computeTrustScore, nativeTrustScore } from "./trust-score.js";
 import type { Finding } from "./tier1.js";
 import type { TrustScoreInput } from "./trust-score.js";
 
@@ -619,3 +619,155 @@ function computeLevelFor(score: number, maxPossible: number): string {
   if (ratio >= 0.5) return "caution";
   return "risky";
 }
+
+// ---------------------------------------------------------------------------
+// nativeTrustScore — TODOS #33
+// ---------------------------------------------------------------------------
+
+describe("nativeTrustScore — unverifiable credit cannot clear a safety floor", () => {
+  // Mirrors HARD_TRUST_FLOOR in src/server/handlers.ts. Not imported: that
+  // module pulls in the whole MCP server surface, and the coupling this test
+  // cares about is the NUMBER, which a drift here would surface as a failure.
+  const HARD_TRUST_FLOOR = 25;
+
+  /** A scanner that claims a clean result without doing any work. */
+  const fakeCleanScan = { hasExternalScanner: true, findings: [] as Finding[] };
+
+  const twoCriticals = makeFindings([
+    { severity: "critical", source: "static" },
+    { severity: "critical", source: "static" },
+  ]);
+
+  // The exact reproduction recorded in TODOS #33. `MCPM_EXTERNAL_SCANNER` names
+  // an arbitrary executable, so `#!/bin/sh` + `echo '{"findings":[]}'` is enough
+  // to bank the full bucket — indistinguishable from a real clean scan.
+  it("closes the reproduction: a two-line fake scanner lifted a blocked server over the floor", () => {
+    const honest = computeTrustScore(
+      makeInput({ healthCheckPassed: null, findings: twoCriticals }),
+    );
+    const gamed = computeTrustScore(
+      makeInput({ ...fakeCleanScan, healthCheckPassed: null, findings: twoCriticals }),
+    );
+
+    // Before: the raw score cleared the floor purely on the fake bucket.
+    expect(honest.score).toBe(15);
+    expect(gamed.score).toBe(35);
+    expect(gamed.score).toBeGreaterThanOrEqual(HARD_TRUST_FLOOR);
+
+    // After: the floor sees mcpm's own evidence, which did not move.
+    expect(nativeTrustScore(gamed).score).toBe(15);
+    expect(nativeTrustScore(gamed).score).toBeLessThan(HARD_TRUST_FLOOR);
+    expect(nativeTrustScore(gamed).score).toBe(nativeTrustScore(honest).score);
+  });
+
+  // The asymmetry is the whole design. Both halves are asserted against the SAME
+  // baseline server so the direction is unambiguous.
+  describe("external findings may lower the floor figure, never raise it", () => {
+    const wellRegarded = {
+      healthCheckPassed: null,
+      registryMeta: {
+        isVerifiedPublisher: true,
+        publishedAt: new Date(Date.now() - 400 * 24 * 60 * 60 * 1000).toISOString(),
+        downloadCount: 5000,
+      },
+    };
+    const baseline = computeTrustScore(makeInput(wellRegarded));
+
+    it("a clean scanner raises the displayed score but not the floor figure", () => {
+      const scanned = computeTrustScore(makeInput({ ...wellRegarded, ...fakeCleanScan }));
+      expect(scanned.score).toBe(baseline.score + 20);
+      expect(nativeTrustScore(scanned).score).toBe(nativeTrustScore(baseline).score);
+    });
+
+    it("a scanner reporting a critical still drags the floor figure down", () => {
+      const scanned = computeTrustScore(
+        makeInput({
+          ...wellRegarded,
+          hasExternalScanner: true,
+          findings: makeFindings([{ severity: "critical", source: "external" }]),
+        }),
+      );
+      // The external critical caps registryMeta — a penalty that lives OUTSIDE
+      // the excluded bucket, so it survives into the floor figure. Asserted as
+      // an EXACT delta, not `<`: the amount lost must be the capped metadata and
+      // nothing else, or the penalty is being counted twice.
+      expect(nativeTrustScore(scanned).score).toBe(
+        nativeTrustScore(baseline).score - baseline.breakdown.registryMeta,
+      );
+      expect(baseline.breakdown.registryMeta).toBeGreaterThan(0);
+    });
+
+    // The sharpest statement of "subtract the CREDIT, not the bucket": a finding
+    // that only dents the external bucket must leave the floor figure exactly
+    // where having no scanner at all would leave it. Subtracting the bucket's
+    // 20-point CAPACITY instead passes every `<`-style assertion above while
+    // quietly over-penalising anyone whose scanner reports a minor finding.
+    it("a finding confined to the external bucket leaves the floor figure untouched", () => {
+      const withMinorFinding = computeTrustScore(
+        makeInput({
+          healthCheckPassed: null,
+          hasExternalScanner: true,
+          findings: makeFindings([{ severity: "low", source: "external" }]),
+        }),
+      );
+      const noScanner = computeTrustScore(makeInput({ healthCheckPassed: null }));
+
+      expect(withMinorFinding.breakdown.externalScan).toBe(18); // 20 - 2, a partial bucket
+      expect(nativeTrustScore(withMinorFinding).score).toBe(noScanner.score);
+    });
+  });
+
+  // The honest cost of the change, pinned so it reads as a decision rather than
+  // an accident: a legitimate scanner user's 20 points stop counting toward the
+  // floor too. mcpm cannot tell their scanner from the two-line script.
+  it("also withholds the points from a scanner that really did the work", () => {
+    const real = computeTrustScore(
+      makeInput({
+        hasExternalScanner: true,
+        healthCheckPassed: null,
+        findings: makeFindings([{ severity: "high", source: "static" }]),
+      }),
+    );
+    expect(real.breakdown.externalScan).toBe(20);
+    expect(nativeTrustScore(real).score).toBe(real.score - 20);
+  });
+
+  it("reports the excluded points, and zero when no scanner was credited", () => {
+    const withScanner = computeTrustScore(makeInput(fakeCleanScan));
+    const without = computeTrustScore(makeInput());
+    expect(nativeTrustScore(withScanner).excludedExternalCredit).toBe(20);
+    expect(nativeTrustScore(without).excludedExternalCredit).toBe(0);
+    expect(nativeTrustScore(without).score).toBe(without.score);
+  });
+
+  // The denominator must be the native buckets in BOTH cases, or the message a
+  // blocked user reads ("15/100") understates how close they were.
+  it("reports the native denominator whether or not a scanner ran", () => {
+    expect(nativeTrustScore(computeTrustScore(makeInput(fakeCleanScan))).maxPossible).toBe(80);
+    expect(nativeTrustScore(computeTrustScore(makeInput())).maxPossible).toBe(80);
+  });
+
+  // A guard against re-implementing this as a clamp (`Math.min(score, 80)`),
+  // which passes the headline case by accident on low scores and silently fails
+  // to exclude anything on high ones.
+  it("never exceeds the raw score, and never goes negative, across the input space", () => {
+    for (const hasExternalScanner of [true, false]) {
+      for (const healthCheckPassed of [true, false, null]) {
+        for (const severity of ["critical", "high", "medium", "low"] as const) {
+          for (const count of [0, 1, 2, 3]) {
+            const findings = makeFindings(
+              Array.from({ length: count }, () => ({ severity, source: "external" as const })),
+            );
+            const trust = computeTrustScore(
+              makeInput({ hasExternalScanner, healthCheckPassed, findings }),
+            );
+            const native = nativeTrustScore(trust);
+            expect(native.score).toBeLessThanOrEqual(trust.score);
+            expect(native.score).toBeGreaterThanOrEqual(0);
+            expect(native.score).toBeLessThanOrEqual(native.maxPossible);
+          }
+        }
+      }
+    }
+  });
+});

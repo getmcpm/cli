@@ -232,6 +232,11 @@ Build the **open-source, community-owned npm+npm_audit** for MCP:
   package runners and shells are refused (see the 2026-08-03 decision row)
 - **Trust score**: 0-100 (health check 30pts, static scan 40pts, external scanner 20pts,
   registry metadata 10pts, capped to 0 on critical/high findings). Green ≥80, Yellow 50-79, Red <50
+- **Safety floors use mcpm-native evidence only** (`nativeTrustScore`, TODOS #33):
+  the MCP surface's `HARD_TRUST_FLOOR` excludes the external-scanner bucket,
+  because `MCPM_EXTERNAL_SCANNER` is caller-supplied and unverifiable. One-directional
+  — external findings can still push a server below the floor, never above it.
+  `--min-trust` and `policy.minTrustScore` are unaffected (human-chosen, own machine)
 
 ### Backend / Registry API (V1+ / deferred)
 

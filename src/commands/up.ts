@@ -24,6 +24,7 @@ import type { ConfigAdapter, McpServerEntry } from "../config/adapters/index.js"
 import type { ServerEntry } from "../registry/types.js";
 import type { Finding } from "../scanner/tier1.js";
 import type { TrustScore, TrustScoreInput } from "../scanner/trust-score.js";
+import { nativeTrustScore } from "../scanner/trust-score.js";
 import type {
   StackFile,
   LockFile,
@@ -568,14 +569,24 @@ async function processServer(input: ProcessInput): Promise<ServerResult> {
   // Note: this is an ABSOLUTE score floor (matching the sibling handleInstall #24),
   // whereas checkTrustPolicy below compares normalized percentages — intentional
   // and consistent; revisit only if the hard floor is ever made percentage-based.
+  //
+  // TODOS #33: the floor is compared against mcpm's OWN evidence, not the raw
+  // score. `MCPM_EXTERNAL_SCANNER` names an arbitrary executable, so its 20
+  // points are caller-supplied — exactly what this floor is documented to be
+  // immune to. See `nativeTrustScore`.
+  const nativeTrust = nativeTrustScore(trustScore);
   if (
     options.minTrustFloor !== undefined &&
-    trustScore.score < options.minTrustFloor
+    nativeTrust.score < options.minTrustFloor
   ) {
     return {
       name,
       status: "blocked",
-      message: `trust score ${trustScore.score}/${trustScore.maxPossible} is below the required floor of ${options.minTrustFloor}`,
+      message:
+        `trust score ${nativeTrust.score}/${nativeTrust.maxPossible} is below the required floor of ${options.minTrustFloor}` +
+        (nativeTrust.excludedExternalCredit > 0
+          ? ` (the external scanner's ${nativeTrust.excludedExternalCredit} points do not count toward the floor)`
+          : ""),
     };
   }
 

@@ -73,6 +73,36 @@ All notable changes to this project will be documented in this file.
   seam. The unscoped npm `mcp-scan` is an unrelated third-party product. Wiring a
   real scanner is tracked as follow-up work rather than assumed.
 
+- **An unverifiable external scanner can no longer clear the MCP trust floor.**
+  Follow-on from the bullet above. The MCP server surface enforces a hard trust
+  floor of 25 that no caller-supplied value may lower, protecting the path where
+  an AI agent installs with no human in the loop. It compared the **raw** trust
+  score — which includes the 20-point external-scanner bucket. Since
+  `MCPM_EXTERNAL_SCANNER` names an arbitrary executable, those points are
+  caller-supplied too, and the previous release's fix cannot reach the deliberate
+  case: mcpm has no way to tell a real clean scan from a two-line script that
+  prints `{"findings": []}`. Reproduced end to end — a server with two critical
+  static findings and no health check scores 15 and is blocked; with such a
+  script configured it scores 35 and `mcpm_up` installed it.
+
+  Both floor gates (`mcpm_install` and `mcpm_up`) now compare mcpm's own
+  evidence: health check + static scan + registry metadata, out of 80. The
+  exclusion is **one-directional by design** — only the bucket's credit is
+  removed, so every penalty an external finding carries outside that bucket
+  (chiefly the critical/high cap on registry metadata) still lands. A scanner
+  reporting a critical can still push a server *down* through the floor; it can
+  no longer push one *up* through it.
+
+  **This is a real behaviour change if you run a genuine external scanner:** its
+  20 points stop counting toward that floor, so a server sitting just above 25 on
+  scanner credit alone will now be refused on the MCP path. That is the intended
+  trade — mcpm cannot distinguish your scanner from the fake one. Your own
+  `mcpm install --min-trust` threshold and a stack file's `policy.minTrustScore`
+  are deliberately **unchanged**: there the same person picks both the threshold
+  and the scanner, so there is no untrusted caller to defend against. Blocked
+  installs now report the figure actually compared and why it differs from the
+  score shown elsewhere.
+
 - **Unicode TAG-block payloads are now decoded and re-scanned on every carrier.**
   "ASCII smuggling" (arXiv 2607.05744) writes a payload in U+E0000–U+E007F, a
   shadow copy of printable ASCII that renders as nothing but is readable by a
