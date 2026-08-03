@@ -780,9 +780,28 @@ export function inspectTagEncoded(
     // Nothing was concealed in this segment, so its decoded view is identical to
     // the one inspectAgainstSignatures already scanned — rescanning double-reports.
     if (!recovered) continue;
+    // The relaxation is licensed by CONCEALMENT, and `recovered` only proves that
+    // SOMETHING in this segment was concealed — not that this match was. Applied
+    // to the whole decoded segment it fires on plainly visible text: an article
+    // about prompt injection that quotes 'ignore all previous instructions' does
+    // not satisfy the anchor (a quote mark is not in [\s.,;:!?]) and correctly
+    // passes, until an unrelated subdivision flag 300 characters away flips the
+    // segment to "concealed" and the relaxed pass blocks it — dropping a whole
+    // tools/list, or failing the connection on initialize_instructions, and
+    // labelling text the reviewer can read as "invisible to a human reviewer".
+    //
+    // So a relaxed match is kept only when the same match is NOT already there in
+    // plain sight. Scanning the raw segment gives exactly that view for free:
+    // normalizeForMatch strips tag characters, so it IS the visible-only text.
+    // This also repairs the dedupe — the relaxed excerpt omits the anchor
+    // character the plain pattern consumes, so keying on the excerpt alone let a
+    // genuine re-report slip through. (review 2026-08-03, round 5)
+    const inPlainSight = new Set(
+      inspectAgainstSignatures(segment, signatures, target, true).map(findingKey),
+    );
     for (const f of inspectAgainstSignatures(decoded, signatures, target, true)) {
       const key = findingKey(f);
-      if (seen.has(key)) continue;
+      if (seen.has(key) || inPlainSight.has(key)) continue;
       seen.add(key);
       findings.push(f);
     }

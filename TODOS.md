@@ -242,6 +242,16 @@ zero attacker cost. Now an O(1) mask. The bounds test that should have caught it
 used tag characters with NO flags, so the skip structure was empty and the term
 that blows up was never exercised — the v0.26.0 shape again.
 
+Rounds 3, 4 and 5 each found a HIGH in the round before. The recurring shape,
+worth naming because it caught me four times: **a fix reasoned about a narrower
+property than the one it changed.** Decoding in place was "the view the model
+reads" but silently deleted the anchor. The seam was "not whitespace" but was
+destroyed by a second windowing pass. Relaxing the anchor was licensed by
+concealment, then applied to a whole segment where only one character was
+concealed — blocking an article that merely QUOTES an attack phrase, which on
+tool metadata drops the entire tools/list. A relaxed match is now kept only when
+the same match is not already in plain sight.
+
 **Known limits, pinned as tests rather than left to be discovered:**
 - A payload buried in the discarded MIDDLE of a >64 KB leaf is not seen. The
   pre-existing #27 window bound, identical for plaintext, but the padding is
