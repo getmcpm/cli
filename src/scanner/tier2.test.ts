@@ -188,15 +188,19 @@ describe("checkScannerAvailable", () => {
     expect(onWarn).not.toHaveBeenCalled();
   });
 
-  // Follows symlinks: /usr/bin/npx is a symlink to npm's npx-cli.js, so a link
-  // named innocuously would pass a purely lexical check.
+  // Follows symlinks: /usr/bin/npx is itself a symlink to npm's npx-cli.js, so a
+  // link named innocuously would pass a purely lexical check. Built entirely
+  // inside a temp dir — pointing at a real npm install would make the test
+  // depend on where node happens to live on the runner.
   it("refuses a symlink whose target is a package runner", async () => {
-    const { mkdtemp, symlink } = await import("node:fs/promises");
+    const { mkdtemp, symlink, writeFile } = await import("node:fs/promises");
     const { tmpdir } = await import("node:os");
     const path = await import("node:path");
     const dir = await mkdtemp(path.join(tmpdir(), "mcpm-scanner-"));
+    const target = path.join(dir, "npx-cli.js");
+    await writeFile(target, "#!/usr/bin/env node\n", { mode: 0o755 });
     const link = path.join(dir, "mcp-scan");
-    await symlink("/opt/node22/lib/node_modules/npm/bin/npx-cli.js", link);
+    await symlink(target, link);
 
     const execImpl = vi.fn();
     const onWarn = vi.fn();
@@ -205,6 +209,22 @@ describe("checkScannerAvailable", () => {
     ).toBe(false);
     expect(execImpl).not.toHaveBeenCalled();
     expect(onWarn).toHaveBeenCalledOnce();
+  });
+
+  // The other half of that behaviour: an unresolvable path must not be treated
+  // as refused. It falls through to the spawn, which produces the real error.
+  it("does not refuse a command whose path cannot be resolved", async () => {
+    const execImpl = vi.fn().mockResolvedValue({ stdout: "", exitCode: 127 });
+    const onWarn = vi.fn();
+    expect(
+      await checkScannerAvailable({
+        execImpl,
+        onWarn,
+        env: { [SCANNER_ENV_VAR]: "/nonexistent/dir/my-scanner" },
+      }),
+    ).toBe(false);
+    expect(execImpl).toHaveBeenCalledOnce();
+    expect(onWarn).not.toHaveBeenCalled();
   });
 });
 
