@@ -53,7 +53,7 @@ mcpm/
 │   ├── scanner/
 │   │   ├── trust-score.ts          — 0-100 composite trust score
 │   │   ├── tier1.ts                — metadata-based checks (registry meta)
-│   │   ├── tier2.ts                — static pattern scanning
+│   │   ├── tier2.ts                — opt-in external scanner (MCPM_EXTERNAL_SCANNER)
 │   │   └── patterns.ts             — regex patterns for secrets, injection, typosquatting
 │   ├── store/
 │   │   ├── index.ts                — local state manager (~/.mcpm/)
@@ -170,7 +170,7 @@ Start --> GetServer["Fetch from Registry<br/>(registry/client.ts)"]
 GetServer --> Tier1["Tier-1 Scanner<br/>(scanner/tier1.ts)<br/>Pattern detection:<br/>secrets, injection,<br/>typosquatting,<br/>exfil-args"]
 Tier1 --> CheckExt{"External scanner<br/>available?"}
 CheckExt -->|No| Trust["Compute Trust Score<br/>(scanner/trust-score.ts)<br/>health + static +<br/>registry meta"]
-CheckExt -->|Yes| Tier2["Tier-2 Scanner<br/>(scanner/tier2.ts)<br/>Run mcp-scan<br/>if available"]
+CheckExt -->|Yes| Tier2["Tier-2 Scanner<br/>(scanner/tier2.ts)<br/>Run the installed<br/>MCPM_EXTERNAL_SCANNER"]
 Tier2 --> Trust
 Trust --> CheckMinTrust{"Score ≥<br/>minTrust?"}
 CheckMinTrust -->|No| Fail["Throw Error<br/>min_trust gate"]

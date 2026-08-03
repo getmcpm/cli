@@ -252,7 +252,7 @@ export async function handleWhy(
       "External scan",
       breakdown.externalScan,
       20,
-      scannerAvailable ? undefined : "install mcp-scan for deeper analysis"
+      scannerAvailable ? undefined : "set MCPM_EXTERNAL_SCANNER for deeper analysis"
     )
   );
   lines.push(

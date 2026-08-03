@@ -17,7 +17,7 @@
 
 ---
 
-The risky part of an MCP server doesn't show up at install -- it shows up while your agent is running: prompt injection hidden in a tool's output, a server that quietly rewrites its tools after you approved them, a sampling request that smuggles instructions into your model. mcpm scores every install for hardcoded secrets, prompt injection, and typosquatting ([66% of MCP servers have security findings](https://agentseal.org/blog/mcp-server-security-findings)) -- then runs a live guard between your AI client and each server, pinning tool definitions against rug-pulls and blocking injection before it reaches the model.
+The risky part of an MCP server doesn't show up at install -- it shows up while your agent is running: prompt injection hidden in a tool's output, a server that quietly rewrites its tools after you approved them, a sampling request that smuggles instructions into your model. mcpm scores every install for hardcoded secrets, prompt injection, and typosquatting ([9 of 11 public MCP registries accepted a proof-of-concept poisoned server in 2026](https://www.ox.security/blog/mcp-supply-chain-advisory-rce-vulnerabilities-across-the-ai-ecosystem/)) -- then runs a live guard between your AI client and each server, pinning tool definitions against rug-pulls and blocking injection before it reaches the model.
 
 **You don't have to take our word for any of that.** Guards are easy to claim and hard to check, so the measuring stick is public: [**mcp-guardbench**](https://github.com/getmcpm/mcp-guardbench) is a guard-agnostic benchmark -- versioned attack and benign cases, an open schema, and a runner that scores *any* MCP guard through its own published CLI. mcpm is scored the same way as everyone else, by shelling out to `mcpm guard inspect`, never by importing its own engine.
 
@@ -75,7 +75,7 @@ $ mcpm install io.github.domdomegg/filesystem-mcp
   Trust Score: 82/100 (safe)
     Health check:    30/30
     Static scan:     32/40
-    External scan:    —  (install mcp-scan for full coverage)
+    External scan:    —  (set MCPM_EXTERNAL_SCANNER for full coverage)
     Registry meta:   10/10
 
   Install to Claude Desktop? (Y/n)
@@ -180,12 +180,14 @@ What it checks:
 |---|---|---|
 | Health check | 0-30 | Can the server start and respond to `list_tools`? |
 | Static scan | 0-40 | Regex-based detection of hardcoded secrets, prompt injection patterns in tool descriptions, typosquatting in package names, suspicious argument schemas |
-| External scanner | 0-20 | Results from [MCP-Scan](https://github.com/invariantlabs-ai/mcp-scan) if installed (optional) |
+| External scanner | 0-20 | Results from a third-party scanner you have installed, opt-in via `MCPM_EXTERNAL_SCANNER` (off by default) |
 | Registry metadata | 0-10 | Verified publisher, publish date, download count (capped to 0 when critical findings present) |
 
 Levels: **safe** (80+), **caution** (50-79), **risky** (below 50).
 
-Without an external scanner installed, the maximum possible score is 80/100. The static scan catches common patterns but cannot detect all vulnerabilities. Treat the score as a signal, not a guarantee.
+Without an external scanner, the maximum possible score is 80/100 and the bucket is dropped from the total rather than counted as a failure. The static scan catches common patterns but cannot detect all vulnerabilities. Treat the score as a signal, not a guarantee.
+
+**External scanning is opt-in and mcpm never downloads a scanner.** Set `MCPM_EXTERNAL_SCANNER` to the path or name of a scanner you have already installed, which mcpm invokes as `<scanner> --json <server-name>`. Package runners (`npx`, `uvx`, `pipx`, `docker`, shells, …) are refused: fetching and executing a package at audit time is the supply-chain shape mcpm exists to flag, so it will not do it to you.
 
 ## Commands
 
@@ -345,10 +347,10 @@ The `demo` command boots an in-process synthetic malicious server that returns a
 | OWASP-MCP-1 | Exfil-named parameter in a tool's input schema (`_system_prompt_`, …) | block (list-time) |
 | Credential phishing | Server solicits a wallet seed phrase / private key / card CVV / SSN / PIN | block (to the server) |
 | Credential egress | High-confidence secret returned in a tool response | warn (secret redacted in the log) |
-| Hidden chars | Zero-width / bidi / non-printable in tool metadata | high (warn) |
+| Hidden chars | Zero-width / bidi / non-printable / Unicode TAG block in tool metadata | high (warn) |
 | Sampling | Injection in a server-initiated `sampling` prompt | block (to the server) |
 
-Detection is regex + structural; NFKC + zero-width-char stripping defeats the common Unicode evasions, and a separate hidden-character *presence* check flags evasion carriers before they're normalized away. Base64 / base64url payloads inside server responses are also decoded and re-scanned, so an injection or credential hidden behind an encoding can't slip past the regex floor (decoded hits warn, never hard-block). See `mcpm guard list-signatures` for the current shipped set.
+Detection is regex + structural; NFKC + zero-width-char stripping defeats the common Unicode evasions, and a separate hidden-character *presence* check flags evasion carriers before they're normalized away. That stripping covers the Unicode TAG block (U+E0000–U+E007F) as well as the zero-width plane, so the ["ASCII smuggling" concealment techniques](https://arxiv.org/abs/2607.05744) that defeat string-matching sanitizers are caught both ways -- fixtures assert each direction: a fully TAG-encoded payload is flagged by presence, and TAG characters used as invisible word separators are stripped so the underlying injection signature still blocks. Base64 / base64url payloads inside server responses are also decoded and re-scanned, so an injection or credential hidden behind an encoding can't slip past the regex floor (decoded hits warn, never hard-block). See `mcpm guard list-signatures` for the current shipped set.
 
 ### Confinement (opt-in enforcement)
 
@@ -421,6 +423,16 @@ mcpm guard pause --for 10m     # disables all inspection for 10 minutes
 mcpm guard pause --off         # cancel an active pause
 ```
 
+### Why this exists
+
+Independent 2026 evidence for each thing the guard does, so you can check the premise rather than trust the pitch:
+
+- **[NSA AI Security Center, "MCP: Security Design Considerations"](https://media.defense.gov/2026/Jun/02/2003943289/-1/-1/0/CSI_MCP_SECURITY.PDF)** — recommends filtering outbound proxies, data-loss prevention, sandboxing, and local MCP scanning. That is the guard relay, the credential-egress detectors, `--confine`, and `mcpm audit`, in one government document.
+- **[OX Security, "Mother of All AI Supply Chains"](https://www.ox.security/blog/mcp-supply-chain-advisory-rce-vulnerabilities-across-the-ai-ecosystem/)** (2026-04-15) — 10 assigned critical/high CVEs from the config-to-process-spawn design, and a proof-of-concept poisoned server accepted by 9 of 11 public registries and marketplaces. Registry listing is not a safety signal.
+- **[Microsoft's tool-poisoning advisory](https://thehackernews.com/2026/06/microsoft-warns-poisoned-mcp-tool.html)** (2026-06-30) — poisoned tool descriptions steer an agent about as effectively as rewriting its system prompt; the recommended mitigation is code-review-style diffing of description changes, which is exactly what schema pinning plus drift detection does.
+- **[SmartLoader](https://www.straiker.ai/blog/smartloader-clones-oura-ring-mcp-to-deploy-supply-chain-attack)** (disclosed Feb 2026) — a trojanized Oura Ring MCP server, backed by fake GitHub accounts with manufactured social proof, seeded into legitimate registries to drop an infostealer. Stars and listings are forgeable; provenance is not.
+- **[The official registry's own moderation policy](https://modelcontextprotocol.io/registry/moderation-policy)** — consumers "should assume minimal-to-no moderation", with security scanning explicitly delegated to downstream subregistries. mcpm is that downstream layer.
+
 ### Read more
 
 - `docs/GUARD.md` — full command reference
@@ -488,7 +500,7 @@ end
 subgraph scanning["Local Scanning & Trust<br/>(src/scanner/)"]
     HEALTH["Health Check<br/>(0-30): spawn +<br/>verify response"]
     TIER1["Tier 1: Static Patterns<br/>(0-40): secrets, injection,<br/>typosquatting, exfil"]
-    TIER2["Tier 2: External Scan<br/>(0-20): optional<br/>MCP-Scan"]
+    TIER2["Tier 2: External Scan<br/>(0-20): opt-in via<br/>MCPM_EXTERNAL_SCANNER"]
     META["Registry Metadata<br/>(0-10): publisher,<br/>age, downloads"]
     SCORE["Trust Score<br/>(max 80; 100 with<br/>external scan)"]
 end
@@ -551,7 +563,7 @@ commands -->|cache| CACHE
 ```
 
 1. **Search and install** query the [official MCP Registry API](https://registry.modelcontextprotocol.io) (v0.1) maintained by the Model Context Protocol project.
-2. **Trust assessment** runs locally using built-in scanners (regex-based pattern detection) and optionally wraps [MCP-Scan](https://github.com/invariantlabs-ai/mcp-scan) for deeper analysis.
+2. **Trust assessment** runs locally using built-in scanners (regex-based pattern detection), and can additionally shell out to a third-party scanner you have installed and named via `MCPM_EXTERNAL_SCANNER`.
 3. **Config management** reads and writes the native config file for each AI client. All writes use atomic file operations with restricted permissions (0o600 files, 0o700 directories).
 4. **Local state** lives in `~/.mcpm/` (installed server registry, scan results, response cache).
 

@@ -35,15 +35,29 @@ artifacts are copied. License-clean.
 }
 ```
 
-## Coverage matrix (v0.5.0)
+## Layout note — `warn/`
 
-| OWASP-MCP-N | Attack class                 | Fixtures |
-|-------------|------------------------------|----------|
-| 1           | Tool-description injection   | 4 (incl. rug-pull + system-tag) |
-| 2           | Response instruction injection | 7 (incl. NFKC + ZWSP + newline + soft-hyphen + bidi + disregard/forget) |
-| 7           | Path exfil in args           | 3 (.ssh / .aws / .env) |
-| —           | Benign corpus                | 8 |
-| —           | Schema drift                 | 3 (incl. MCPoison-equivalent) |
+`warn/` holds retrieved-data carriers (resource / prompt content) where a
+signature match is annotated and **forwarded**, never dropped. They are neither
+clean attacks nor clean benigns, so they assert the warn-only carrier clamp (H1)
+in their own block.
+
+## Coverage matrix (v0.27.x)
+
+| Category | Attack class | Fixtures |
+|---|---|---|
+| OWASP-MCP-1 | Tool-description / metadata injection | 11 (incl. rug-pull, system-tag, ANSI, bidi, ZWSP, Unicode TAG block ×2) |
+| OWASP-MCP-2 | Response instruction injection | 8 attacks + 3 warn-tier (NFKC, ZWSP, newline, homoglyph, disregard/forget, developer-mode) |
+| OWASP-MCP-7 | Path exfil in args | 3 (.ssh / .aws / .env) |
+| MCP-CREDENTIAL-EXFIL | Credential egress in responses (F10) | 2 (GitHub PAT, PEM private key) |
+| MCP-CREDENTIAL-PHISHING | Server-initiated credential solicitation (F6) | 2 (wallet seed phrase, card CVV) |
+| — | Benign corpus (FP-rate seed) | 14 |
+| — | Schema drift | 3 (incl. MCPoison-equivalent) |
+
+Every signature in the shipped catalog must have at least one fixture here, and
+every attack/warn fixture must be caught through the public `mcpm guard inspect`
+seam — `inspect-relay-parity.test.ts` fails the build otherwise, with a justified
+allowlist for signatures that need a frame no fixture can reasonably carry.
 
 Refresh policy: when a new OWASP MCP Top 10 category is added or a public
 CVE discloses a new attack class, add a fixture here in the same PR that

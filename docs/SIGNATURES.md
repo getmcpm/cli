@@ -22,7 +22,14 @@ rather than by a content regex, and exist in the catalog so their ids are
 recognized by `guard mute`, `guard list-signatures`, and policy overrides:
 
 - `hidden-chars-in-metadata` (OWASP-MCP-1; tool_description / tool_annotations /
-  initialize_instructions) — the H2 presence detector.
+  initialize_instructions) — the H2 presence detector. Covers the Unicode TAG
+  block (U+E0000–U+E007F) alongside the zero-width / bidi / C0 / C1 classes, so
+  the ["ASCII smuggling" techniques](https://arxiv.org/abs/2607.05744) that
+  defeat string-matching sanitizers are caught. Two fixtures assert both
+  directions of that coverage: a fully TAG-encoded payload is caught by presence
+  (the phrase itself is stripped before matching, so only presence can see it),
+  and TAG characters used as invisible word separators are stripped so the
+  underlying description-injection signature still blocks.
 - `guard-inspection-truncated` (MCP-GUARD-INTEGRITY; emitted on whichever carrier
   was truncated) — raised when the leaf-walk budget is exhausted, i.e. the guard
   did **not** finish reading the frame. `critical`, so it rides the normal carrier

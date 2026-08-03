@@ -4,6 +4,42 @@ All notable changes to this project will be documented in this file.
 
 ## [0.28.0] - 2026-07-29
 
+### Security
+
+- **The tier-2 external scanner was both dead and an unclaimed-name
+  fetch-and-execute vector.** Every version of mcpm up to this one probed for the
+  optional external scanner by running `npx @invariantlabs/mcp-scan --version`.
+  That package does not exist on npm — it returns 404, and the entire
+  `@invariantlabs` scope is unregistered. Two consequences, one embarrassing and
+  one serious:
+
+  - `checkScannerAvailable()` has always returned false, so tier 2 could never
+    run. The README, architecture docs, and project notes all claimed mcpm
+    "wraps MCP-Scan"; it never did, in any released version. Trust scores were
+    **not** inflated by this — an absent external scanner already drops the
+    bucket from `maxPossible` (80 instead of 100) rather than scoring it as a
+    failure — so scores you have seen remain valid.
+  - Anyone who registered that unclaimed scope would have had mcpm download and
+    execute their code on every `mcpm audit`. Fetching and running an unowned
+    package name at audit time is the supply-chain shape mcpm exists to flag.
+
+  **mcpm no longer fetches a scanner, at all.** Tier 2 is now opt-in: set
+  `MCPM_EXTERNAL_SCANNER` to the path or name of a scanner already installed on
+  the machine, which mcpm invokes as `<scanner> --json <server-name>`. When the
+  variable is unset — the default — no subprocess is spawned. Package runners and
+  shells (`npx`, `pnpx`, `bunx`, `uvx`, `pipx`, `pip`, `npm`, `pnpm`, `yarn`,
+  `bun`, `deno`, `docker`, `podman`, `sh`, `bash`, …) are refused by basename,
+  insensitive to case, path, and `.exe`/`.cmd` suffix, and a value containing
+  whitespace is refused so a runner cannot hide behind arguments. That denylist
+  is the regression guard: configuration cannot reopen the vector.
+
+  mcpm deliberately does **not** auto-detect a replacement. Invariant Labs'
+  mcp-scan is distributed on PyPI (and has been a redirect package for
+  `snyk-agent-scan` since 2026-03), never on npm, and its CLI scans client config
+  files rather than registry server names — so it is not a drop-in for this
+  seam. The unscoped npm `mcp-scan` is an unrelated third-party product. Wiring a
+  real scanner is tracked as follow-up work rather than assumed.
+
 ### Fixed
 
 - **`mcpm_install` no longer leaves a live server behind a reported failure.** The
@@ -64,6 +100,27 @@ All notable changes to this project will be documented in this file.
   existing lock is used exactly as before.
 - `VerifyModel` gained `uncovered: string[]` and `vacuous: boolean` (`--json`
   shape remains explicitly UNSTABLE).
+- Trust-score output now points at `MCPM_EXTERNAL_SCANNER` where it previously
+  said "install mcp-scan", in `mcpm install` and `mcpm why`.
+- Documentation refreshed against 2026 evidence: the NSA AI Security Center's MCP
+  guidance, OX Security's finding that a proof-of-concept poisoned server was
+  accepted by 9 of 11 public registries, Microsoft's tool-poisoning advisory, and
+  the SmartLoader trojanized-server campaign now back the claims the README makes
+  about why a guard exists.
+
+### Added
+
+- **Unicode TAG-block fixtures** covering the "ASCII smuggling" concealment class
+  (arXiv 2607.05744), where a payload is encoded in U+E0000–U+E007F so it renders
+  as nothing in an approval UI. The engine already handled this; the fixtures pin
+  both halves of *how*, which differ in an easy-to-break way. A fully TAG-encoded
+  payload is caught by the hidden-character **presence** detector — the injection
+  signatures cannot see it, because normalization strips TAG characters and so
+  erases the phrase entirely. TAG characters used as invisible **separators**
+  between words of an injection phrase are stripped, which reassembles the phrase
+  and lets the description-injection signature block it. Presence detection runs
+  on tool metadata carriers only; see `TODOS.md` #31 for the data-carrier gap this
+  work surfaced.
 
 ## [0.27.0] - 2026-07-27
 

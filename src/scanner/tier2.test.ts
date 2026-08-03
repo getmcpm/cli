@@ -9,8 +9,83 @@
  *   scanTier2() no longer calls checkScannerAvailable() internally.
  */
 
-import { describe, it, expect, vi } from "vitest";
-import { checkScannerAvailable, scanTier2, validateServerName } from "./tier2.js";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import {
+  SCANNER_ENV_VAR,
+  checkScannerAvailable,
+  resolveScannerCommand,
+  scanTier2,
+  validateServerName,
+} from "./tier2.js";
+
+// Tier 2 is off unless the user names an installed scanner. Most tests below
+// exercise the wrapper logic, so they opt in to a configured scanner; the
+// unconfigured path has its own dedicated blocks.
+beforeEach(() => {
+  vi.stubEnv(SCANNER_ENV_VAR, "mcp-scan");
+});
+afterEach(() => {
+  vi.unstubAllEnvs();
+});
+
+// ---------------------------------------------------------------------------
+// resolveScannerCommand — the security boundary
+// ---------------------------------------------------------------------------
+
+describe("resolveScannerCommand", () => {
+  it("is disabled when the variable is unset", () => {
+    expect(resolveScannerCommand({})).toEqual({ status: "disabled" });
+  });
+
+  it("is disabled when the variable is empty or whitespace", () => {
+    expect(resolveScannerCommand({ [SCANNER_ENV_VAR]: "" })).toEqual({ status: "disabled" });
+    expect(resolveScannerCommand({ [SCANNER_ENV_VAR]: "   " })).toEqual({ status: "disabled" });
+  });
+
+  it("accepts a bare executable name and an absolute path", () => {
+    expect(resolveScannerCommand({ [SCANNER_ENV_VAR]: "snyk-agent-scan" })).toEqual({
+      status: "ready",
+      command: "snyk-agent-scan",
+    });
+    expect(resolveScannerCommand({ [SCANNER_ENV_VAR]: "/opt/tools/my-scanner" })).toEqual({
+      status: "ready",
+      command: "/opt/tools/my-scanner",
+    });
+  });
+
+  it("trims surrounding whitespace", () => {
+    expect(resolveScannerCommand({ [SCANNER_ENV_VAR]: "  mcp-scan  " })).toEqual({
+      status: "ready",
+      command: "mcp-scan",
+    });
+  });
+
+  // The regression this module was fixed for: mcpm must never fetch-and-execute
+  // a scanner package at audit time. `npx @invariantlabs/mcp-scan` 404s and the
+  // scope is unregistered, so squatting it would have been arbitrary code
+  // execution on every `mcpm audit`. Configuration must not reopen that door.
+  it.each([
+    "npx", "pnpx", "bunx", "dlx", "npm", "pnpm", "yarn", "bun", "deno",
+    "uvx", "uv", "pipx", "pip", "pip3",
+    "docker", "podman",
+    "sh", "bash", "zsh", "fish", "dash", "cmd", "powershell", "pwsh",
+  ])("refuses the package runner / shell %s", (runner) => {
+    const result = resolveScannerCommand({ [SCANNER_ENV_VAR]: runner });
+    expect(result.status).toBe("rejected");
+  });
+
+  it("refuses a fetching runner given by path, case, or Windows suffix", () => {
+    for (const value of ["/usr/local/bin/npx", "NPX", "C:\\Program Files\\nodejs\\npx.cmd", "Npx.EXE"]) {
+      expect(resolveScannerCommand({ [SCANNER_ENV_VAR]: value }).status, value).toBe("rejected");
+    }
+  });
+
+  it("refuses a command line, so a runner cannot hide behind arguments", () => {
+    const result = resolveScannerCommand({ [SCANNER_ENV_VAR]: "npx @invariantlabs/mcp-scan" });
+    expect(result.status).toBe("rejected");
+    if (result.status === "rejected") expect(result.reason).toMatch(/single executable/i);
+  });
+});
 
 // ---------------------------------------------------------------------------
 // checkScannerAvailable
@@ -35,14 +110,27 @@ describe("checkScannerAvailable", () => {
     expect(result).toBe(false);
   });
 
-  it("calls exec with the correct command and args", async () => {
+  it("calls the configured executable with --version", async () => {
     const execImpl = vi.fn().mockResolvedValue({ stdout: "0.1.0", exitCode: 0 });
-    await checkScannerAvailable({ execImpl });
+    await checkScannerAvailable({ execImpl, env: { [SCANNER_ENV_VAR]: "snyk-agent-scan" } });
     expect(execImpl).toHaveBeenCalledOnce();
     const [cmd, args] = execImpl.mock.calls[0] as [string, string[]];
-    expect(cmd).toBe("npx");
-    expect(args).toContain("@invariantlabs/mcp-scan");
-    expect(args).toContain("--version");
+    expect(cmd).toBe("snyk-agent-scan");
+    expect(args).toEqual(["--version"]);
+  });
+
+  it("returns false WITHOUT spawning anything when unconfigured (the default)", async () => {
+    const execImpl = vi.fn();
+    expect(await checkScannerAvailable({ execImpl, env: {} })).toBe(false);
+    expect(execImpl).not.toHaveBeenCalled();
+  });
+
+  it("returns false WITHOUT spawning anything when the command is refused", async () => {
+    const execImpl = vi.fn();
+    expect(
+      await checkScannerAvailable({ execImpl, env: { [SCANNER_ENV_VAR]: "npx" } }),
+    ).toBe(false);
+    expect(execImpl).not.toHaveBeenCalled();
   });
 });
 
@@ -97,14 +185,43 @@ describe("scanTier2 — scanner available, clean server", () => {
     expect(findings).toEqual([]);
   });
 
-  it("calls mcp-scan with the server name", async () => {
+  it("calls the configured scanner with the server name", async () => {
     const execImpl = vi
       .fn()
       .mockResolvedValueOnce({ stdout: JSON.stringify({ findings: [] }), exitCode: 0 });
     await scanTier2("io.github.acme/my-server", { execImpl });
     expect(execImpl).toHaveBeenCalledTimes(1);
-    const [, args] = execImpl.mock.calls[0] as [string, string[]];
-    expect(args.join(" ")).toContain("io.github.acme/my-server");
+    const [cmd, args] = execImpl.mock.calls[0] as [string, string[]];
+    expect(cmd).toBe("mcp-scan");
+    expect(args).toEqual(["--json", "io.github.acme/my-server"]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// scanTier2 — unconfigured / refused scanner never spawns
+// ---------------------------------------------------------------------------
+
+describe("scanTier2 — scanner not configured or refused", () => {
+  it("returns a diagnostic without spawning when unconfigured", async () => {
+    const execImpl = vi.fn();
+    const findings = await scanTier2("io.github.acme/server", { execImpl, env: {} });
+    expect(execImpl).not.toHaveBeenCalled();
+    expect(findings).toHaveLength(1);
+    expect(findings[0].type).toBe("scanner-error");
+    expect(findings[0].severity).toBe("low");
+    expect(findings[0].message).toContain(SCANNER_ENV_VAR);
+  });
+
+  it("returns a diagnostic without spawning when a package runner is configured", async () => {
+    const execImpl = vi.fn();
+    const findings = await scanTier2("io.github.acme/server", {
+      execImpl,
+      env: { [SCANNER_ENV_VAR]: "npx" },
+    });
+    expect(execImpl).not.toHaveBeenCalled();
+    expect(findings).toHaveLength(1);
+    expect(findings[0].type).toBe("scanner-error");
+    expect(findings[0].message).toMatch(/package runner or shell/i);
   });
 });
 

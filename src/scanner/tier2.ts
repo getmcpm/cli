@@ -1,12 +1,107 @@
 /**
- * Tier-2 scanner — optional external MCP-Scan wrapper.
+ * Tier-2 scanner — optional external-scanner seam.
  *
- * Checks if @invariantlabs/mcp-scan is available via npx, then runs it.
- * Gracefully degrades to empty findings if scanner is unavailable or output
- * cannot be parsed. All I/O is injectable via execImpl for testing.
+ * Runs a scanner the USER has already installed, named explicitly via the
+ * MCPM_EXTERNAL_SCANNER environment variable. Off by default. Gracefully
+ * degrades to empty findings if the scanner is unconfigured, unavailable, or
+ * emits output we cannot parse. All I/O is injectable via execImpl for testing.
+ *
+ * SECURITY — why this is an opt-in command and not an auto-fetched package:
+ * this module used to invoke `npx @invariantlabs/mcp-scan`. That package does
+ * not exist on npm (404) and the whole `@invariantlabs` scope is unregistered,
+ * so tier-2 could never actually run — and worse, anyone who claimed the scope
+ * would have had mcpm download and execute their code on every `mcpm audit`.
+ * A scanner that fetches unowned names at audit time is the very supply-chain
+ * shape mcpm exists to flag. So: mcpm never fetches a scanner. It runs a
+ * command that is already on the machine, and refuses package-fetching runners
+ * outright (see FETCHING_RUNNERS) so the vector cannot be reintroduced through
+ * configuration.
+ *
+ * Invariant Labs' mcp-scan itself is distributed on PyPI (and since 2026-03 is
+ * a redirect package for `snyk-agent-scan`), never on npm. Wiring that tool's
+ * real CLI — it scans client config files, not registry server names — is
+ * tracked as follow-up work, not silently assumed here.
  */
 
 import type { Finding } from "./tier1.js";
+
+// ---------------------------------------------------------------------------
+// Scanner command resolution
+// ---------------------------------------------------------------------------
+
+/** Environment variable naming the external scanner executable. */
+export const SCANNER_ENV_VAR = "MCPM_EXTERNAL_SCANNER";
+
+/**
+ * Runners that resolve a package from a remote registry and execute it in one
+ * step. Permitting any of these would mean mcpm executes code it never
+ * resolved, under a name it does not own — the exact failure this module was
+ * fixed for. Matched on the basename, case-insensitively, minus a Windows
+ * executable suffix. Shells are included because with mcpm's fixed argument
+ * vector they can only be a wrapper hiding such a fetch.
+ */
+const FETCHING_RUNNERS: ReadonlySet<string> = new Set([
+  // JS/TS
+  "npx", "pnpx", "bunx", "dlx", "npm", "pnpm", "yarn", "bun", "deno",
+  // Python
+  "uvx", "uv", "pipx", "pip", "pip3",
+  // Containers
+  "docker", "podman",
+  // Shells
+  "sh", "bash", "zsh", "fish", "dash", "cmd", "powershell", "pwsh",
+]);
+
+const WINDOWS_EXEC_SUFFIX = /\.(exe|cmd|bat|ps1)$/i;
+
+/** Outcome of resolving the configured external scanner. */
+export type ScannerResolution =
+  /** Not configured — tier 2 is off. This is the default. */
+  | { status: "disabled" }
+  /** Configured and structurally acceptable. Existence is checked separately. */
+  | { status: "ready"; command: string }
+  /** Configured but refused; `reason` is safe to show the user. */
+  | { status: "rejected"; reason: string };
+
+/**
+ * Resolve the external scanner command from the environment.
+ *
+ * Pure: performs no I/O and never spawns anything. Structural validation only
+ * — whether the command exists on PATH is answered by checkScannerAvailable().
+ */
+export function resolveScannerCommand(
+  env: NodeJS.ProcessEnv = process.env,
+): ScannerResolution {
+  const raw = env[SCANNER_ENV_VAR];
+  if (raw === undefined || raw.trim() === "") return { status: "disabled" };
+
+  const command = raw.trim();
+
+  // A command line, not an executable. Rejected rather than treated as a
+  // (nonexistent) filename, so `MCPM_EXTERNAL_SCANNER="npx some-pkg"` cannot
+  // slip a fetching runner past the basename check below.
+  if (/\s/.test(command)) {
+    return {
+      status: "rejected",
+      reason: `${SCANNER_ENV_VAR} must name a single executable, not a command line with arguments`,
+    };
+  }
+
+  const basename = (command.split(/[/\\]/).pop() ?? command)
+    .toLowerCase()
+    .replace(WINDOWS_EXEC_SUFFIX, "");
+
+  if (FETCHING_RUNNERS.has(basename)) {
+    return {
+      status: "rejected",
+      reason:
+        `${SCANNER_ENV_VAR} must not be a package runner or shell ("${basename}"). ` +
+        "mcpm will not fetch and execute a scanner at audit time — install the " +
+        "scanner first, then point this variable at the installed executable.",
+    };
+  }
+
+  return { status: "ready", command };
+}
 
 // ---------------------------------------------------------------------------
 // Server name validation
@@ -44,6 +139,8 @@ export type ExecImpl = (cmd: string, args: string[]) => Promise<ExecResult>;
 
 export interface Tier2Options {
   execImpl?: ExecImpl;
+  /** Environment to resolve the scanner command from. Defaults to process.env. */
+  env?: NodeJS.ProcessEnv;
 }
 
 /** Shape of a single finding as returned by mcp-scan JSON output. */
@@ -130,14 +227,20 @@ function scannerErrorFinding(message: string): Finding {
 // ---------------------------------------------------------------------------
 
 /**
- * Check whether the mcp-scan CLI is available.
- * Returns true if `npx @invariantlabs/mcp-scan --version` exits 0.
- * Gracefully returns false on any error.
+ * Check whether an external scanner is configured AND runnable.
+ *
+ * Returns false — without spawning anything — when MCPM_EXTERNAL_SCANNER is
+ * unset or refused, so the default install performs no subprocess work here.
+ * Otherwise returns true if `<command> --version` exits 0. Gracefully returns
+ * false on any error.
  */
 export async function checkScannerAvailable(options?: Tier2Options): Promise<boolean> {
+  const resolved = resolveScannerCommand(options?.env);
+  if (resolved.status !== "ready") return false;
+
   const exec = options?.execImpl ?? defaultExec;
   try {
-    const result = await exec("npx", ["@invariantlabs/mcp-scan", "--version"]);
+    const result = await exec(resolved.command, ["--version"]);
     return result.exitCode === 0;
   } catch {
     return false;
@@ -168,21 +271,33 @@ export async function scanTier2(serverName: string, options?: Tier2Options): Pro
   // Step 1: validate server name to prevent injection
   validateServerName(serverName);
 
-  // NOTE: Callers are responsible for checking availability via checkScannerAvailable()
-  // before calling this function. The internal availability check was removed to avoid
-  // redundant npx --version calls on every scan.
+  // Step 2: resolve the configured scanner. Callers are responsible for
+  // checking availability via checkScannerAvailable() first; re-resolving here
+  // means a misconfiguration surfaces as a diagnostic rather than an
+  // accidental spawn of whatever the environment happens to name.
+  const resolved = resolveScannerCommand(options?.env);
+  if (resolved.status === "disabled") {
+    return [
+      scannerErrorFinding(
+        `external scanner is not configured (set ${SCANNER_ENV_VAR} to an installed scanner executable)`,
+      ),
+    ];
+  }
+  if (resolved.status === "rejected") {
+    return [scannerErrorFinding(resolved.reason)];
+  }
 
-  // Step 2: run the scan
+  // Step 3: run the scan
   let result: ExecResult;
   try {
-    result = await exec("npx", ["@invariantlabs/mcp-scan", "--json", serverName]);
+    result = await exec(resolved.command, ["--json", serverName]);
   } catch (err: unknown) {
     return [scannerErrorFinding(`external scanner did not run: ${errorMessage(err)}`)];
   }
 
   const stdout = result.stdout;
 
-  // Step 3: a non-zero exit with no output is a real failure. With output we
+  // Step 4: a non-zero exit with no output is a real failure. With output we
   // still attempt to parse — a scanner may exit non-zero precisely because it
   // found issues, while emitting valid findings JSON.
   if (!stdout || !stdout.trim()) {
@@ -192,7 +307,7 @@ export async function scanTier2(serverName: string, options?: Tier2Options): Pro
     return [];
   }
 
-  // Step 4: parse output
+  // Step 5: parse output
   let parsed: McpScanOutput;
   try {
     parsed = JSON.parse(stdout) as McpScanOutput;
@@ -204,7 +319,7 @@ export async function scanTier2(serverName: string, options?: Tier2Options): Pro
     return [scannerErrorFinding("external scanner output had no findings array")];
   }
 
-  // Step 5: map to Finding[] immutably
+  // Step 6: map to Finding[] immutably
   return parsed.findings.map((f): Finding => ({
     severity: normaliseSeverity(f.severity),
     type: "prompt-injection", // mcp-scan focuses on prompt injection / tool poisoning
