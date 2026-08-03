@@ -465,10 +465,20 @@ export async function handleSetup(
       continue;
     }
 
-    if (bestTrust.score < minScore) {
+    // TODOS #33: the same native-evidence rule as the sibling gates. handleInstall
+    // below re-checks and is the enforcing gate, so this pre-filter exists to
+    // produce an accurate "skipped" reason rather than an "Install failed" one —
+    // but it must agree with it, or a server rejected downstream gets reported
+    // under the wrong heading with a score that was never compared.
+    const bestNative = nativeTrustScore(bestTrust);
+    if (bestNative.score < minScore) {
       skipped.push({
         name: bestEntry.server.name,
-        reason: `Trust score ${bestTrust.score}/${bestTrust.maxPossible} is below minimum ${minScore}`,
+        reason:
+          `Trust score ${bestNative.score}/${bestNative.maxPossible} is below minimum ${minScore}` +
+          (bestNative.excludedExternalCredit > 0
+            ? ` (an external scanner's ${bestNative.excludedExternalCredit} points are excluded — mcpm cannot verify them)`
+            : ""),
       });
       continue;
     }

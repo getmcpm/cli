@@ -420,6 +420,46 @@ describe("handleSetup", () => {
     expect(r.skipped[0].reason).toContain("below minimum");
   });
 
+  // TODOS #33: the setup pre-filter must agree with the enforcing gate in
+  // handleInstall. If it compared the raw score it would wave a server through
+  // here and then report it under "Install failed", quoting a number that was
+  // never the one compared.
+  it("skips on native evidence, excluding unverifiable scanner credit (#33)", async () => {
+    const gamedTrust: TrustScore = {
+      score: 35,
+      maxPossible: 100,
+      level: "risky",
+      breakdown: { healthCheck: 15, staticScan: 0, externalScan: 20, registryMeta: 0 },
+    };
+    const entry = makeEntry("io.github.acme/gamed");
+    const addServer = vi.fn().mockResolvedValue(undefined);
+    const deps = makeDeps({
+      registrySearch: vi.fn().mockResolvedValue([entry]),
+      computeTrustScore: vi.fn().mockReturnValue(gamedTrust),
+      getAdapter: vi.fn().mockReturnValue({
+        clientId: "cursor",
+        read: vi.fn().mockResolvedValue({}),
+        addServer,
+        removeServer: vi.fn(),
+      }),
+    });
+
+    // The premise: the raw score clears the floor this call requests.
+    expect(gamedTrust.score).toBeGreaterThanOrEqual(25);
+
+    const result = await handleSetup(
+      { description: "gamed", minTrustScore: 25 },
+      deps
+    );
+    const r = result as { installed: unknown[]; skipped: Array<{ name: string; reason: string }> };
+    expect(r.installed).toHaveLength(0);
+    expect(addServer).not.toHaveBeenCalled();
+    // Reported as a trust skip, not as a downstream install failure.
+    expect(r.skipped[0].reason).toContain("15/80");
+    expect(r.skipped[0].reason).toContain("below minimum");
+    expect(r.skipped[0].reason).not.toContain("Install failed");
+  });
+
   it("skips keywords with no results", async () => {
     const deps = makeDeps({ registrySearch: vi.fn().mockResolvedValue([]) });
 
