@@ -94,18 +94,31 @@ All notable changes to this project will be documented in this file.
   encoded payload is invisible to the victim too and phishes nobody, unless the
   client normalizes tag characters when rendering.)
 
-  The guard now decodes TAG runs back to ASCII and re-runs the carrier's own
+  The guard now decodes TAG characters back to ASCII **in place** — keeping the
+  surrounding visible text exactly where it is — and re-runs the carrier's own
   signatures, so a concealed payload is judged by what it says: the seed-phrase
   case blocks via `credential-phishing-wallet-solicitation` with the error routed
-  back to the server. All tag characters in a leaf decode as one payload, because
-  decoding each run separately would let an attacker interleave a visible
-  character so no run spelled a matchable phrase. Unlike base64-decoded findings,
+  back to the server. In place is the load-bearing part. The engine already scans
+  a visible-only view (normalization strips tag characters, which catches them
+  used as invisible word separators); adding a tag-only view would have created
+  two disjoint projections with a gap between them, and
+  `"Report done. ig" + TAG("nore all previous instru") + "ctions…"` sits in that
+  gap — a complete instruction to any model that decodes tag codepoints, invisible
+  to both projections. Decoding in place is the view the model actually reads, so
+  an interleaved payload matches while two unrelated tag runs stay unrelated.
+  Unlike base64-decoded findings,
   TAG-decoded ones are **not** clamped to warn — base64 is everywhere in benign
   data, which makes a decoded match weak evidence, whereas a tag run decoding to a
   signature-matching phrase is *stronger* evidence than the same phrase in
-  plaintext. The two passes also compose: base64 wrapping a TAG-encoded payload is
-  caught (at the base64 layer's warn tier). Base64-of-base64 still evades,
-  unchanged.
+  plaintext — defensible only because in-place decoding cannot fabricate
+  adjacency, so the phrase has to genuinely be there. The two passes also
+  compose: base64 wrapping a TAG-encoded payload is caught (at the base64 layer's
+  warn tier). Base64-of-base64 still evades, unchanged.
+
+  Two limits are pinned as tests rather than left to be found: a payload buried
+  in the discarded middle of a leaf larger than the 64 KB match window is not
+  seen (the pre-existing bound, identical for plaintext), and a well-formed
+  subdivision flag outside the three RGI sequences warns on a data carrier.
 
   A new `unicode-tag-concealment` signature (`high` → warn) is the floor beneath
   that, for a payload concealed but matching nothing. It is scoped to the carriers
@@ -121,14 +134,18 @@ All notable changes to this project will be documented in this file.
   properties are load-bearing: a per-character flank test — the shape of the
   existing zero-width-joiner carve-out — would let an attacker write 🏴 followed
   by a tag-encoded payload and suppress detection wholesale, and a shape-based
-  whole-sequence rule is barely better, since "ignore" is six lowercase letters,
-  so such sequences chain to spell anything. Nothing legitimate is lost: a
-  non-RGI sequence renders as a bare black banner.
+  whole-sequence rule is barely better, since a chained payload is spelled in
+  exactly the shape a real subdivision code has. Nothing legitimate is lost: a
+  non-RGI sequence renders as a bare black banner. The emoji presentation
+  selector (U+FE0F) is accepted between the base and the body, since writing the
+  same flag that way is legitimate and previously warned.
 
   Benign emoji-tag-sequence fixtures were **added first**. Without them the
-  zero-FP claim would have been vacuous — no other fixture in the corpus contains
-  a codepoint in U+E0000–U+E007F, so a tag-block detector would have scored zero
-  false positives against it by construction rather than by merit.
+  zero-FP claim would have been vacuous — no other fixture in the BENIGN corpus
+  contains a codepoint in U+E0000–U+E007F, so a tag-block detector would have
+  scored zero false positives against it by construction rather than by merit.
+  That corpus is still thin: it covers the carve-out's happy path, not the
+  detector's full false-positive surface.
 
 ### Fixed
 

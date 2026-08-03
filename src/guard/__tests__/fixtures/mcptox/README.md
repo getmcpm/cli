@@ -62,7 +62,8 @@ Three of those scored **zero findings** before v0.28.0, so a corpus covering onl
 metadata certified coverage the engine did not have — the v0.27.0 lesson one
 layer down. The two benign emoji-subdivision-flag fixtures belong to the same
 set: without them the detector's zero-FP claim would be vacuous, since no other
-fixture contains a codepoint in U+E0000–U+E007F.
+BENIGN fixture contains a codepoint in U+E0000–U+E007F. They cover the
+carve-out's happy path — not the detector's full false-positive surface.
 
 Every signature in the shipped catalog must have at least one fixture here, and
 every attack/warn fixture must be caught through the public `mcpm guard inspect`

@@ -195,10 +195,40 @@ something was concealed.
   now runs on the base64 synthetic leaf too, keeping the base64 layer's warn
   clamp. Base64-of-base64 still evades, unchanged.
 
-**Not done (deliberately):** a TAG-encoded payload wrapped in base64 *and* padded
-below the texty gate is dropped before any signature runs — same bound as
-Detector-B has always had. `tool_call_args` is client-authored, so its presence
-floor is defensive rather than load-bearing.
+**Review changed the design, twice — recorded because the first version looked right.**
+Decoding originally built a TAG-ONLY view (every tag character in the leaf
+concatenated, visible text discarded). That is two disjoint projections — the
+existing visible-only view and the tag-only one — and an attacker picks the gap
+between them: `"Report done. ig" + TAG("nore all previous instru") + "ctions…"`
+reads as a complete instruction to a model, while neither projection carries the
+phrase. One visible character inside one word downgraded a block to a warn,
+including on `sampling_prompt`. It was also unsafe in the other direction:
+discarding the visible text let two INDEPENDENT benign runs 900 characters apart
+fuse into a phrase the content never contained and hard-BLOCK on it. Decoding
+**in place** is the view the model actually reads and fixes both at once; a
+test now pins that a concealed payload is judged exactly as plaintext would be.
+The un-clamped severity is only defensible because of this — the phrase has to
+genuinely be there.
+
+Also caught in review: the RGI carve-out's membership test was a linear scan per
+tag character, so a leaf packed with valid flag emoji was quadratic — a 4 MB
+frame stalled the synchronous relay for 24 SECONDS against a 3.1 ms budget, at
+zero attacker cost. Now an O(1) mask. The bounds test that should have caught it
+used tag characters with NO flags, so the skip structure was empty and the term
+that blows up was never exercised — the v0.26.0 shape again.
+
+**Known limits, pinned as tests rather than left to be discovered:**
+- A payload buried in the discarded MIDDLE of a >64 KB leaf is not seen. The
+  pre-existing #27 window bound, identical for plaintext, but the padding is
+  invisible as well as free here.
+- A well-formed subdivision flag that is not one of the three RGI sequences
+  warns on a data carrier. Unicode closed RGI subdivision flags to new proposals
+  in 2021, so the carve-out can never grow to cover the ~5000 valid ISO 3166-2
+  codes. Warn-only, forwarded, muteable — but permanent.
+- A TAG-encoded payload wrapped in base64 *and* padded below the texty gate is
+  dropped before any signature runs — same bound Detector-B has always had.
+- `tool_call_args` is client-authored, so its presence floor is defensive rather
+  than load-bearing.
 
 ### 32. Wire a real external scanner to the tier-2 seam
 **Priority:** P3
