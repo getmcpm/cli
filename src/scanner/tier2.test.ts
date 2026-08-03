@@ -13,6 +13,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import {
   SCANNER_ENV_VAR,
   checkScannerAvailable,
+  resetScannerWarnings,
   resolveScannerCommand,
   scanTier2,
   validateServerName,
@@ -23,6 +24,7 @@ import {
 // unconfigured path has its own dedicated blocks.
 beforeEach(() => {
   vi.stubEnv(SCANNER_ENV_VAR, "mcp-scan");
+  resetScannerWarnings();
 });
 afterEach(() => {
   vi.unstubAllEnvs();
@@ -74,16 +76,48 @@ describe("resolveScannerCommand", () => {
     expect(result.status).toBe("rejected");
   });
 
-  it("refuses a fetching runner given by path, case, or Windows suffix", () => {
-    for (const value of ["/usr/local/bin/npx", "NPX", "C:\\Program Files\\nodejs\\npx.cmd", "Npx.EXE"]) {
-      expect(resolveScannerCommand({ [SCANNER_ENV_VAR]: value }).status, value).toBe("rejected");
-    }
+  // Each case asserts the REASON, not just the status: a case that is rejected
+  // for an unrelated reason would otherwise "pass" without ever exercising the
+  // path/case/suffix logic it is named for.
+  it.each([
+    ["/usr/local/bin/npx", "npx"],
+    ["NPX", "npx"],
+    ["Npx.EXE", "npx"],
+    ["C:\\Program Files\\nodejs\\npx.cmd", "npx"],
+    ["/opt/homebrew/bin/pnpm", "pnpm"],
+  ])("refuses %s by path, case, and executable suffix", (value, expected) => {
+    const result = resolveScannerCommand({ [SCANNER_ENV_VAR]: value });
+    expect(result.status, value).toBe("rejected");
+    if (result.status === "rejected") expect(result.reason).toContain(`"${expected}"`);
+  });
+
+  // The real npx on this machine is a symlink to npm's npx-cli.js. Naming that
+  // script directly sails past a shim-name-only denylist, so the -cli
+  // entrypoints are denied by name too.
+  it.each([
+    "/opt/node22/lib/node_modules/npm/bin/npx-cli.js",
+    "/usr/lib/node_modules/npm/bin/npm-cli.js",
+    "/usr/local/lib/node_modules/pnpm/bin/pnpm.cjs",
+  ])("refuses the runner entrypoint script %s", (value) => {
+    expect(resolveScannerCommand({ [SCANNER_ENV_VAR]: value }).status, value).toBe("rejected");
   });
 
   it("refuses a command line, so a runner cannot hide behind arguments", () => {
     const result = resolveScannerCommand({ [SCANNER_ENV_VAR]: "npx @invariantlabs/mcp-scan" });
     expect(result.status).toBe("rejected");
-    if (result.status === "rejected") expect(result.reason).toMatch(/single executable/i);
+    if (result.status === "rejected") expect(result.reason).toContain('"npx"');
+  });
+
+  // Regression: a blanket whitespace rejection closed the seam on Windows,
+  // whose default install locations live under "C:\\Program Files".
+  it.each([
+    "C:\\Program Files\\Snyk\\snyk-agent-scan.exe",
+    "/Applications/My Scanner.app/Contents/MacOS/scan",
+  ])("accepts a legitimate path containing spaces: %s", (value) => {
+    expect(resolveScannerCommand({ [SCANNER_ENV_VAR]: value })).toEqual({
+      status: "ready",
+      command: value,
+    });
   });
 });
 
@@ -127,10 +161,50 @@ describe("checkScannerAvailable", () => {
 
   it("returns false WITHOUT spawning anything when the command is refused", async () => {
     const execImpl = vi.fn();
+    const onWarn = vi.fn();
     expect(
-      await checkScannerAvailable({ execImpl, env: { [SCANNER_ENV_VAR]: "npx" } }),
+      await checkScannerAvailable({ execImpl, onWarn, env: { [SCANNER_ENV_VAR]: "npx" } }),
     ).toBe(false);
     expect(execImpl).not.toHaveBeenCalled();
+  });
+
+  // A refused value must not look identical to "no scanner installed" — the
+  // user would be told to set the variable they just set, with no hint mcpm
+  // rejected it.
+  it("warns when a configured scanner is refused, and only once", async () => {
+    const execImpl = vi.fn();
+    const onWarn = vi.fn();
+    const opts = { execImpl, onWarn, env: { [SCANNER_ENV_VAR]: "npx" } };
+    await checkScannerAvailable(opts);
+    await checkScannerAvailable(opts);
+    expect(onWarn).toHaveBeenCalledTimes(1);
+    expect(onWarn.mock.calls[0][0]).toContain(SCANNER_ENV_VAR);
+    expect(onWarn.mock.calls[0][0]).toContain('"npx"');
+  });
+
+  it("stays silent when simply unconfigured — that is not a misconfiguration", async () => {
+    const onWarn = vi.fn();
+    await checkScannerAvailable({ execImpl: vi.fn(), onWarn, env: {} });
+    expect(onWarn).not.toHaveBeenCalled();
+  });
+
+  // Follows symlinks: /usr/bin/npx is a symlink to npm's npx-cli.js, so a link
+  // named innocuously would pass a purely lexical check.
+  it("refuses a symlink whose target is a package runner", async () => {
+    const { mkdtemp, symlink } = await import("node:fs/promises");
+    const { tmpdir } = await import("node:os");
+    const path = await import("node:path");
+    const dir = await mkdtemp(path.join(tmpdir(), "mcpm-scanner-"));
+    const link = path.join(dir, "mcp-scan");
+    await symlink("/opt/node22/lib/node_modules/npm/bin/npx-cli.js", link);
+
+    const execImpl = vi.fn();
+    const onWarn = vi.fn();
+    expect(
+      await checkScannerAvailable({ execImpl, onWarn, env: { [SCANNER_ENV_VAR]: link } }),
+    ).toBe(false);
+    expect(execImpl).not.toHaveBeenCalled();
+    expect(onWarn).toHaveBeenCalledOnce();
   });
 });
 
@@ -328,14 +402,17 @@ describe("scanTier2 — unparseable / non-clean output surfaces a diagnostic", (
     expect(findings[0].message).toMatch(/could not be parsed/i);
   });
 
-  it("returns empty findings when output is empty string and exit code is 0 (ran clean)", async () => {
-    // Exit 0 + empty output is the one ambiguous case we treat as "clean" so a
-    // scanner that prints nothing on success doesn't generate a false diagnostic.
+  it("treats exit 0 with no output as a FAILED scan, not a clean one", async () => {
+    // Silence used to be read as "ran clean", which silently earned the full
+    // 20-point external bucket. With an arbitrary user-named executable,
+    // silence is the signature of a binary that is not a scanner (`/bin/true`).
     const execImpl = vi
       .fn()
       .mockResolvedValueOnce({ stdout: "", exitCode: 0 });
     const findings = await scanTier2("io.github.acme/server", { execImpl });
-    expect(findings).toEqual([]);
+    expect(findings).toHaveLength(1);
+    expect(findings[0].type).toBe("scanner-error");
+    expect(findings[0].message).toMatch(/no output/i);
   });
 
   it("surfaces a scanner-error finding when JSON has no findings array", async () => {

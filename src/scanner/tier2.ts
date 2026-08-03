@@ -14,8 +14,11 @@
  * A scanner that fetches unowned names at audit time is the very supply-chain
  * shape mcpm exists to flag. So: mcpm never fetches a scanner. It runs a
  * command that is already on the machine, and refuses package-fetching runners
- * outright (see FETCHING_RUNNERS) so the vector cannot be reintroduced through
- * configuration.
+ * (see FETCHING_RUNNERS) so a pasted `npx …` recipe — or a future mcpm default
+ * drifting back toward one — cannot quietly re-create the vector. That refusal
+ * is a footgun guard, NOT an attacker boundary: whoever sets this variable can
+ * usually set PATH or drop a file too. The load-bearing changes are that the
+ * unowned package name is gone and that an unset variable spawns nothing.
  *
  * Invariant Labs' mcp-scan itself is distributed on PyPI (and since 2026-03 is
  * a redirect package for `snyk-agent-scan`), never on npm. Wiring that tool's
@@ -24,6 +27,7 @@
  */
 
 import type { Finding } from "./tier1.js";
+import { sanitizeForTerminal } from "../guard/sanitize.js";
 
 // ---------------------------------------------------------------------------
 // Scanner command resolution
@@ -41,8 +45,11 @@ export const SCANNER_ENV_VAR = "MCPM_EXTERNAL_SCANNER";
  * vector they can only be a wrapper hiding such a fetch.
  */
 const FETCHING_RUNNERS: ReadonlySet<string> = new Set([
-  // JS/TS
-  "npx", "pnpx", "bunx", "dlx", "npm", "pnpm", "yarn", "bun", "deno",
+  // JS/TS — including the -cli entrypoints these shims resolve to, since
+  // /usr/bin/npx is a symlink to npm's npx-cli.js and naming that file
+  // directly would otherwise sail past a shim-name-only check.
+  "npx", "npx-cli", "pnpx", "bunx", "dlx",
+  "npm", "npm-cli", "pnpm", "yarn", "bun", "deno", "corepack",
   // Python
   "uvx", "uv", "pipx", "pip", "pip3",
   // Containers
@@ -51,7 +58,8 @@ const FETCHING_RUNNERS: ReadonlySet<string> = new Set([
   "sh", "bash", "zsh", "fish", "dash", "cmd", "powershell", "pwsh",
 ]);
 
-const WINDOWS_EXEC_SUFFIX = /\.(exe|cmd|bat|ps1)$/i;
+/** Executable and script suffixes stripped before the denylist comparison. */
+const EXEC_SUFFIX = /\.(exe|cmd|bat|ps1|js|cjs|mjs)$/i;
 
 /** Outcome of resolving the configured external scanner. */
 export type ScannerResolution =
@@ -63,10 +71,61 @@ export type ScannerResolution =
   | { status: "rejected"; reason: string };
 
 /**
+ * The denylisted runner name a path refers to, or undefined if it names none.
+ *
+ * Compares the basename with directories, case, and an executable/script suffix
+ * removed. A path ending in a separator yields an empty basename, which is
+ * malformed rather than permitted.
+ */
+export function refusedRunnerName(commandPath: string): string | undefined {
+  const basename = (commandPath.split(/[/\\]/).pop() ?? "")
+    .toLowerCase()
+    .replace(EXEC_SUFFIX, "");
+  if (basename === "") return undefined;
+  return FETCHING_RUNNERS.has(basename) ? basename : undefined;
+}
+
+function refusalReason(name: string): string {
+  return (
+    `${SCANNER_ENV_VAR} must not be a package runner or shell ("${name}"). ` +
+    "mcpm will not fetch and execute a scanner at audit time — install the " +
+    "scanner first, then point this variable at the installed executable."
+  );
+}
+
+/**
+ * Report a refused configuration once per process.
+ *
+ * Deduplicated because checkScannerAvailable runs per command and, in `mcpm
+ * up`, per server — repeating the same misconfiguration line for every entry
+ * would bury it. Injectable so tests never write to the real stderr.
+ */
+const warnedReasons = new Set<string>();
+function warnOnce(reason: string, options?: Tier2Options): void {
+  const emit = options?.onWarn ?? ((m: string) => process.stderr.write(`${m}\n`));
+  if (warnedReasons.has(reason)) return;
+  warnedReasons.add(reason);
+  emit(reason);
+}
+
+/** Test seam: clear the once-per-process warning memo. */
+export function resetScannerWarnings(): void {
+  warnedReasons.clear();
+}
+
+/**
  * Resolve the external scanner command from the environment.
  *
- * Pure: performs no I/O and never spawns anything. Structural validation only
- * — whether the command exists on PATH is answered by checkScannerAvailable().
+ * Pure: performs no I/O and never spawns anything. Structural checks only.
+ * Whether the command exists, and whether it is a SYMLINK to a denylisted
+ * runner, is settled by checkScannerAvailable(), which can touch the disk.
+ *
+ * Scope, stated honestly: this denylist is a footgun guard, not an attacker
+ * boundary. Anyone who can set this variable can usually also set PATH or drop
+ * a file, in which case naming any binary at all is equivalent. What it does
+ * buy is that a user pasting an `npx …` recipe, or a future mcpm default
+ * drifting back toward one, is refused instead of quietly re-creating the
+ * fetch-and-execute vector this seam was rebuilt to remove.
  */
 export function resolveScannerCommand(
   env: NodeJS.ProcessEnv = process.env,
@@ -76,29 +135,16 @@ export function resolveScannerCommand(
 
   const command = raw.trim();
 
-  // A command line, not an executable. Rejected rather than treated as a
-  // (nonexistent) filename, so `MCPM_EXTERNAL_SCANNER="npx some-pkg"` cannot
-  // slip a fetching runner past the basename check below.
-  if (/\s/.test(command)) {
-    return {
-      status: "rejected",
-      reason: `${SCANNER_ENV_VAR} must name a single executable, not a command line with arguments`,
-    };
-  }
-
-  const basename = (command.split(/[/\\]/).pop() ?? command)
-    .toLowerCase()
-    .replace(WINDOWS_EXEC_SUFFIX, "");
-
-  if (FETCHING_RUNNERS.has(basename)) {
-    return {
-      status: "rejected",
-      reason:
-        `${SCANNER_ENV_VAR} must not be a package runner or shell ("${basename}"). ` +
-        "mcpm will not fetch and execute a scanner at audit time — install the " +
-        "scanner first, then point this variable at the installed executable.",
-    };
-  }
+  // Deliberately NOT a blanket whitespace rejection: real install locations
+  // contain spaces (`C:\Program Files\…`, `/Applications/My Scanner/…`), and
+  // refusing those would close the seam on Windows. execFile never splits on
+  // whitespace, so a value with spaces is just an odd filename, not an
+  // argument vector. The risk being closed is narrower — a user pasting
+  // `npx some-scanner` — so check the first token too, which catches that
+  // without penalising a legitimate path.
+  const firstToken = command.split(/\s+/)[0] ?? command;
+  const refused = refusedRunnerName(command) ?? refusedRunnerName(firstToken);
+  if (refused !== undefined) return { status: "rejected", reason: refusalReason(refused) };
 
   return { status: "ready", command };
 }
@@ -108,7 +154,7 @@ export function resolveScannerCommand(
 // ---------------------------------------------------------------------------
 
 /**
- * Allowlist pattern for MCP server names passed to mcp-scan.
+ * Allowlist pattern for MCP server names passed to the external scanner.
  * Matches patterns like "io.github.owner/repo-name".
  */
 const SERVER_NAME_RE =
@@ -141,18 +187,20 @@ export interface Tier2Options {
   execImpl?: ExecImpl;
   /** Environment to resolve the scanner command from. Defaults to process.env. */
   env?: NodeJS.ProcessEnv;
+  /** Sink for misconfiguration warnings. Defaults to stderr. */
+  onWarn?: (message: string) => void;
 }
 
-/** Shape of a single finding as returned by mcp-scan JSON output. */
-interface McpScanFinding {
+/** Shape of a single finding in the external scanner's JSON output. */
+interface ExternalScanFinding {
   severity?: string;
   description?: string;
   location?: string;
 }
 
-/** Shape of the mcp-scan JSON output we expect. */
-interface McpScanOutput {
-  findings?: McpScanFinding[];
+/** Shape of the external scanner JSON output we expect. */
+interface ExternalScanOutput {
+  findings?: ExternalScanFinding[];
 }
 
 // ---------------------------------------------------------------------------
@@ -236,7 +284,34 @@ function scannerErrorFinding(message: string): Finding {
  */
 export async function checkScannerAvailable(options?: Tier2Options): Promise<boolean> {
   const resolved = resolveScannerCommand(options?.env);
-  if (resolved.status !== "ready") return false;
+  if (resolved.status === "disabled") return false;
+  if (resolved.status === "rejected") {
+    // A refused value is a misconfiguration, not an absent scanner. Say so once
+    // rather than falling back silently — otherwise the user is told "set
+    // MCPM_EXTERNAL_SCANNER for deeper analysis" about the variable they just
+    // set, with no hint that mcpm rejected it. stderr, so the MCP stdio
+    // protocol channel on stdout is untouched.
+    warnOnce(resolved.reason, options);
+    return false;
+  }
+
+  // Follow symlinks before trusting the name. `/usr/bin/npx` is a symlink to
+  // npm's `npx-cli.js`, so a link named `mcp-scan` pointing at a package runner
+  // would pass a purely lexical check. Only meaningful for a value carrying a
+  // path separator — a bare name is left to PATH, which this does not search.
+  if (/[/\\]/.test(resolved.command)) {
+    try {
+      const { realpath } = await import("node:fs/promises");
+      const target = await realpath(resolved.command);
+      const refused = refusedRunnerName(target);
+      if (refused !== undefined) {
+        warnOnce(refusalReason(refused), options);
+        return false;
+      }
+    } catch {
+      // Unresolvable path — let the spawn below produce the real error.
+    }
+  }
 
   const exec = options?.execImpl ?? defaultExec;
   try {
@@ -304,13 +379,24 @@ export async function scanTier2(serverName: string, options?: Tier2Options): Pro
     if (result.exitCode !== 0) {
       return [scannerErrorFinding(`external scanner failed (exit code ${result.exitCode})`)];
     }
-    return [];
+    // Exit 0 with no output used to be read as "ran clean" and silently earned
+    // the full external bucket. That was safe when the scanner was one known
+    // tool; it is not now that MCPM_EXTERNAL_SCANNER names an arbitrary
+    // executable, because silence is the signature of a binary that is not a
+    // scanner at all (`/bin/true` exits 0 and says nothing). Treated as a
+    // failed scan, which computeTrustScore reads as "no corroboration" and
+    // drops the bucket rather than crediting 20/20.
+    return [
+      scannerErrorFinding(
+        "external scanner exited 0 but produced no output — cannot confirm a scan ran",
+      ),
+    ];
   }
 
   // Step 5: parse output
-  let parsed: McpScanOutput;
+  let parsed: ExternalScanOutput;
   try {
-    parsed = JSON.parse(stdout) as McpScanOutput;
+    parsed = JSON.parse(stdout) as ExternalScanOutput;
   } catch {
     return [scannerErrorFinding("external scanner output could not be parsed as JSON")];
   }
@@ -319,12 +405,21 @@ export async function scanTier2(serverName: string, options?: Tier2Options): Pro
     return [scannerErrorFinding("external scanner output had no findings array")];
   }
 
-  // Step 6: map to Finding[] immutably
+  // Step 6: map to Finding[] immutably.
+  //
+  // Scanner stdout is untrusted: it is an arbitrary user-named executable whose
+  // text lands in `mcpm why`'s human renderer. Before this seam was opt-in the
+  // sink was dead (availability was always false), so a scanner emitting
+  // `clean[2J` could not repaint the terminal. It can now, hence the
+  // sanitize on the way in — the same treatment registry free-text already gets.
   return parsed.findings.map((f): Finding => ({
     severity: normaliseSeverity(f.severity),
-    type: "prompt-injection", // mcp-scan focuses on prompt injection / tool poisoning
-    message: f.description ?? "External scanner finding",
-    location: f.location ?? "external scan",
+    // NOTE: every finding is typed prompt-injection regardless of what the
+    // scanner actually reported, which mis-files e.g. a CVE under the
+    // prompt-injection SARIF rule. Pre-existing, newly reachable — TODOS #32.
+    type: "prompt-injection",
+    message: sanitizeForTerminal(f.description ?? "External scanner finding"),
+    location: sanitizeForTerminal(f.location ?? "external scan"),
     source: "external",
   }));
 }

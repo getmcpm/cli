@@ -159,7 +159,7 @@ Most of this plan is *extension of existing seams*, not new architecture.
   `OPENAI/AWS/GITHUB` tokens **not** forwarded; OS-keychain master key exists.
 - **Scanner (`scanner/`):** install-time, metadata-only — `detectSecrets`,
   `detectPromptInjection`, `detectTyposquatting`, `detectExfilArgs`,
-  `detectInstallScriptShape`; optional Tier-2 `mcp-scan`; release-age cooldown (split
+  `detectInstallScriptShape`; the optional Tier-2 external-scanner seam (opt-in, ships wired to nothing — TODOS #32); release-age cooldown (split
   semantics: fail-open scoring, fail-closed armed gates).
 
 ### Confirmed gaps (from the code map)

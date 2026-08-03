@@ -22,7 +22,7 @@ export {
   type PackageShapeInput,
 } from "./patterns.js";
 
-export { checkScannerAvailable, scanTier2 } from "./tier2.js";
+export { checkScannerAvailable, scanTier2, resolveScannerCommand, refusedRunnerName, SCANNER_ENV_VAR } from "./tier2.js";
 export type { Tier2Options, ExecResult, ExecImpl } from "./tier2.js";
 
 export { computeTrustScore } from "./trust-score.js";

@@ -13,9 +13,9 @@ All notable changes to this project will be documented in this file.
   `@invariantlabs` scope is unregistered. Two consequences, one embarrassing and
   one serious:
 
-  - `checkScannerAvailable()` has always returned false, so tier 2 could never
-    run. The README, architecture docs, and project notes all claimed mcpm
-    "wraps MCP-Scan"; it never did, in any released version. Trust scores were
+  - `checkScannerAvailable()` could never resolve that name from the public npm
+    registry, so tier 2 in practice never ran. The README, architecture docs, and
+    project notes all claimed mcpm "wraps MCP-Scan"; it did not. Trust scores were
     **not** inflated by this — an absent external scanner already drops the
     bucket from `maxPossible` (80 instead of 100) rather than scoring it as a
     failure — so scores you have seen remain valid.
@@ -31,7 +31,31 @@ All notable changes to this project will be documented in this file.
   `bun`, `deno`, `docker`, `podman`, `sh`, `bash`, …) are refused by basename,
   insensitive to case, path, and `.exe`/`.cmd` suffix, and a value containing
   whitespace is refused so a runner cannot hide behind arguments. That denylist
-  is the regression guard: configuration cannot reopen the vector.
+  is a regression guard against a pasted `npx …` recipe or a future mcpm default
+  drifting back toward one. Be clear on its worth: it is a **footgun guard, not an
+  attacker boundary**, since whoever can set this variable can usually set `PATH`
+  or drop a file too. The load-bearing changes are that the unowned package name
+  is gone and that an unset variable spawns nothing at all.
+
+  Two further hardening steps came out of reviewing the above:
+
+  - **An unverified scanner no longer earns trust points.** Because the variable
+    names an arbitrary executable, any binary that merely exits 0 (`/bin/true`)
+    would have made the scanner "available", returned no findings, and silently
+    banked the full 20-point external bucket — adding 20 to the **raw** score
+    that `mcpm install --min-trust` and the MCP `HARD_TRUST_FLOOR` compare
+    against. That floor is documented as one no caller-supplied value can lower,
+    and an environment variable is caller-supplied. The bucket is now credited
+    only when the scanner returns a result mcpm could actually read, and a
+    scanner that fails is treated as **absent** (bucket leaves `maxPossible`)
+    rather than as a failing scan, so a broken scanner never depresses a score.
+  - **A refused value is no longer silent.** Previously a rejected or typo'd
+    command was indistinguishable from having no scanner, so the user was told to
+    "set `MCPM_EXTERNAL_SCANNER`" — the variable they had just set. mcpm now
+    writes the refusal to stderr once per process. Symlinks are resolved before
+    the name check, since `/usr/bin/npx` is itself a symlink to npm's
+    `npx-cli.js`, and paths containing spaces (`C:\Program Files\…`) are
+    accepted rather than mistaken for a command line.
 
   mcpm deliberately does **not** auto-detect a replacement. Invariant Labs'
   mcp-scan is distributed on PyPI (and has been a redirect package for

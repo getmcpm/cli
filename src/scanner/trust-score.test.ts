@@ -508,3 +508,78 @@ describe("computeTrustScore — output shape", () => {
     expect(a.breakdown).not.toBe(b.breakdown);
   });
 });
+
+// ---------------------------------------------------------------------------
+// External bucket is credited only on a READABLE scan result
+// ---------------------------------------------------------------------------
+
+describe("computeTrustScore — an unverified external scanner earns nothing", () => {
+  const scannerError: Finding = {
+    severity: "low",
+    type: "scanner-error",
+    message: "external scanner exited 0 but produced no output — cannot confirm a scan ran",
+    location: "external scan",
+    source: "external",
+  };
+
+  // Regression: MCPM_EXTERNAL_SCANNER names an arbitrary executable, so before
+  // this gate any binary that exits 0 (`/bin/true`) made checkScannerAvailable
+  // true and returned no findings — silently earning 20/20 and +20 RAW points.
+  // `mcpm install --min-trust` and the MCP HARD_TRUST_FLOOR both compare raw
+  // scores, and that floor is documented as unlowerable by caller-supplied
+  // values. An environment variable is caller-supplied.
+  it("does not credit the bucket when the scan could not be read", () => {
+    const result = computeTrustScore(
+      makeInput({ hasExternalScanner: true, findings: [scannerError] }),
+    );
+    expect(result.breakdown.externalScan).toBe(0);
+    expect(result.maxPossible).toBe(80);
+  });
+
+  it("scores identically to having no scanner at all", () => {
+    const withBrokenScanner = computeTrustScore(
+      makeInput({ hasExternalScanner: true, findings: [scannerError] }),
+    );
+    const withNoScanner = computeTrustScore(makeInput({ hasExternalScanner: false }));
+    expect(withBrokenScanner.score).toBe(withNoScanner.score);
+    expect(withBrokenScanner.maxPossible).toBe(withNoScanner.maxPossible);
+    expect(withBrokenScanner.level).toBe(withNoScanner.level);
+  });
+
+  it("cannot lift a server past the MCP hard trust floor of 25", () => {
+    const criticals = makeFindings([
+      { severity: "critical", source: "static" },
+      { severity: "critical", source: "static" },
+    ]);
+    // healthCheckPassed: null is the pre-install reality — the server has not
+    // been spawned yet, so the health bucket contributes its neutral 15.
+    const honest = computeTrustScore(
+      makeInput({ hasExternalScanner: false, healthCheckPassed: null, findings: criticals }),
+    );
+    const gamed = computeTrustScore(
+      makeInput({
+        hasExternalScanner: true,
+        healthCheckPassed: null,
+        findings: [...criticals, scannerError],
+      }),
+    );
+    expect(gamed.score).toBe(honest.score);
+    expect(gamed.score).toBeLessThan(25);
+  });
+
+  // The corollary: a scanner that genuinely reported IS still credited.
+  it("still credits a scanner that returned a readable clean result", () => {
+    const result = computeTrustScore(makeInput({ hasExternalScanner: true, findings: [] }));
+    expect(result.breakdown.externalScan).toBe(20);
+    expect(result.maxPossible).toBe(100);
+  });
+
+  // A broken scanner must never DEPRESS a score — the bucket leaves the
+  // denominator rather than scoring 0 out of 100.
+  it("treats a failed scanner as absent, not as a failing scan", () => {
+    const result = computeTrustScore(
+      makeInput({ hasExternalScanner: true, findings: [scannerError] }),
+    );
+    expect(result.level).toBe(computeTrustScore(makeInput()).level);
+  });
+});

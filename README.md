@@ -17,7 +17,7 @@
 
 ---
 
-The risky part of an MCP server doesn't show up at install -- it shows up while your agent is running: prompt injection hidden in a tool's output, a server that quietly rewrites its tools after you approved them, a sampling request that smuggles instructions into your model. mcpm scores every install for hardcoded secrets, prompt injection, and typosquatting ([9 of 11 public MCP registries accepted a proof-of-concept poisoned server in 2026](https://www.ox.security/blog/mcp-supply-chain-advisory-rce-vulnerabilities-across-the-ai-ecosystem/)) -- then runs a live guard between your AI client and each server, pinning tool definitions against rug-pulls and blocking injection before it reaches the model.
+The risky part of an MCP server doesn't show up at install -- it shows up while your agent is running: prompt injection hidden in a tool's output, a server that quietly rewrites its tools after you approved them, a sampling request that smuggles instructions into your model. Being listed in a registry is not a safety signal -- in 2026 a proof-of-concept poisoned server was [accepted by 9 of 11 public registries and marketplaces](https://www.ox.security/blog/mcp-supply-chain-advisory-rce-vulnerabilities-across-the-ai-ecosystem/). So mcpm scores every install for hardcoded secrets, prompt injection, and typosquatting -- then runs a live guard between your AI client and each server, pinning tool definitions against rug-pulls and blocking injection before it reaches the model.
 
 **You don't have to take our word for any of that.** Guards are easy to claim and hard to check, so the measuring stick is public: [**mcp-guardbench**](https://github.com/getmcpm/mcp-guardbench) is a guard-agnostic benchmark -- versioned attack and benign cases, an open schema, and a runner that scores *any* MCP guard through its own published CLI. mcpm is scored the same way as everyone else, by shelling out to `mcpm guard inspect`, never by importing its own engine.
 
@@ -60,8 +60,8 @@ Query the official MCP Registry and see results with trust indicators.
 $ mcpm search filesystem
 
   Name                                              Description                    Score
-  io.github.domdomegg/filesystem-mcp                 File system access via MCP     82/100
-  io.github.Digital-Defiance/mcp-filesystem           Read-only filesystem server    67/100
+  io.github.domdomegg/filesystem-mcp                 File system access via MCP     72/80
+  io.github.Digital-Defiance/mcp-filesystem           Read-only filesystem server    54/80
   ...
 ```
 
@@ -72,7 +72,7 @@ Every install runs a metadata-based trust assessment before writing config.
 ```
 $ mcpm install io.github.domdomegg/filesystem-mcp
 
-  Trust Score: 82/100 (safe)
+  Trust Score: 72/80 (safe)
     Health check:    30/30
     Static scan:     32/40
     External scan:    —  (set MCPM_EXTERNAL_SCANNER for full coverage)
@@ -88,10 +88,10 @@ Scan everything you have installed. Get a trust report.
 ```
 $ mcpm audit
 
-  Server                                   Client          Score   Level
-  servers-filesystem                        Claude Desktop  82/100  safe
-  servers-github                            Cursor          74/100  caution
-  some-sketchy-server                       VS Code         31/100  risky
+  Server                                   Client          Score  Level
+  servers-filesystem                        Claude Desktop  72/80  safe
+  servers-github                            Cursor          52/80  caution
+  some-sketchy-server                       VS Code         24/80  risky
 ```
 
 ### Cross-IDE support
@@ -183,11 +183,13 @@ What it checks:
 | External scanner | 0-20 | Results from a third-party scanner you have installed, opt-in via `MCPM_EXTERNAL_SCANNER` (off by default) |
 | Registry metadata | 0-10 | Verified publisher, publish date, download count (capped to 0 when critical findings present) |
 
-Levels: **safe** (80+), **caution** (50-79), **risky** (below 50).
+Levels are a **ratio** of the points available, not absolute: **safe** at 80% of `maxPossible` or better, **caution** at 50-79%, **risky** below 50%. With no external scanner (`maxPossible` 80) that puts safe at 64 points, not 80.
 
 Without an external scanner, the maximum possible score is 80/100 and the bucket is dropped from the total rather than counted as a failure. The static scan catches common patterns but cannot detect all vulnerabilities. Treat the score as a signal, not a guarantee.
 
-**External scanning is opt-in and mcpm never downloads a scanner.** Set `MCPM_EXTERNAL_SCANNER` to the path or name of a scanner you have already installed, which mcpm invokes as `<scanner> --json <server-name>`. Package runners (`npx`, `uvx`, `pipx`, `docker`, shells, …) are refused: fetching and executing a package at audit time is the supply-chain shape mcpm exists to flag, so it will not do it to you.
+**External scanning is opt-in and mcpm never downloads a scanner.** Set `MCPM_EXTERNAL_SCANNER` to the path or name of a scanner you have already installed. mcpm probes it with `<scanner> --version` and, if that exits 0, scans each server with `<scanner> --json <server-name>`, expecting `{"findings": [...]}` on stdout. A scanner whose output cannot be read is treated as **absent** rather than as a clean pass, so the bucket leaves the total instead of silently earning 20/20 — otherwise any binary that exits 0 would raise trust scores.
+
+Package runners (`npx`, `uvx`, `pipx`, `docker`, shells, …) are refused, including via symlink or a runner's `-cli.js` entrypoint. Be clear about what that is worth: it is a **footgun guard**, not a security boundary. Anyone who can set this variable can usually set `PATH` or drop a file too. What it buys is that a pasted `npx …` recipe — or a future mcpm default drifting back toward one — cannot quietly re-create the fetch-and-execute vector this seam was rebuilt to remove.
 
 ## Commands
 
@@ -350,7 +352,7 @@ The `demo` command boots an in-process synthetic malicious server that returns a
 | Hidden chars | Zero-width / bidi / non-printable / Unicode TAG block in tool metadata | high (warn) |
 | Sampling | Injection in a server-initiated `sampling` prompt | block (to the server) |
 
-Detection is regex + structural; NFKC + zero-width-char stripping defeats the common Unicode evasions, and a separate hidden-character *presence* check flags evasion carriers before they're normalized away. That stripping covers the Unicode TAG block (U+E0000–U+E007F) as well as the zero-width plane, so the ["ASCII smuggling" concealment techniques](https://arxiv.org/abs/2607.05744) that defeat string-matching sanitizers are caught both ways -- fixtures assert each direction: a fully TAG-encoded payload is flagged by presence, and TAG characters used as invisible word separators are stripped so the underlying injection signature still blocks. Base64 / base64url payloads inside server responses are also decoded and re-scanned, so an injection or credential hidden behind an encoding can't slip past the regex floor (decoded hits warn, never hard-block). See `mcpm guard list-signatures` for the current shipped set.
+Detection is regex + structural; NFKC + zero-width-char stripping defeats the common Unicode evasions, and a separate hidden-character *presence* check flags evasion carriers before they're normalized away. That stripping covers the Unicode TAG block (U+E0000–U+E007F) as well as the zero-width plane, which matters because ["ASCII smuggling"](https://arxiv.org/abs/2607.05744) hides payloads on a plane most sanitizers do not enumerate (it beat them in 4 of 8 techniques tested). Fixtures assert both directions, with different reach. TAG characters used as invisible word **separators** are stripped on **every** carrier, so the underlying injection signature still blocks. A **fully** TAG-encoded payload can only be caught by the hidden-character presence check -- stripping erases it rather than revealing it -- and presence runs on **tool metadata only** (`tool_description`, `tool_annotations`, `initialize.instructions`). So a wholly TAG-encoded payload in a tool *response* or a server-initiated prompt is **not** detected today; that gap is tracked in `TODOS.md` #31. Base64 / base64url payloads inside server responses are also decoded and re-scanned, so an injection or credential hidden behind an encoding can't slip past the regex floor (decoded hits warn, never hard-block). See `mcpm guard list-signatures` for the current shipped set.
 
 ### Confinement (opt-in enforcement)
 
@@ -429,9 +431,9 @@ Independent 2026 evidence for each thing the guard does, so you can check the pr
 
 - **[NSA AI Security Center, "MCP: Security Design Considerations"](https://media.defense.gov/2026/Jun/02/2003943289/-1/-1/0/CSI_MCP_SECURITY.PDF)** — recommends filtering outbound proxies, data-loss prevention, sandboxing, and local MCP scanning. That is the guard relay, the credential-egress detectors, `--confine`, and `mcpm audit`, in one government document.
 - **[OX Security, "Mother of All AI Supply Chains"](https://www.ox.security/blog/mcp-supply-chain-advisory-rce-vulnerabilities-across-the-ai-ecosystem/)** (2026-04-15) — 10 assigned critical/high CVEs from the config-to-process-spawn design, and a proof-of-concept poisoned server accepted by 9 of 11 public registries and marketplaces. Registry listing is not a safety signal.
-- **[Microsoft's tool-poisoning advisory](https://thehackernews.com/2026/06/microsoft-warns-poisoned-mcp-tool.html)** (2026-06-30) — poisoned tool descriptions steer an agent about as effectively as rewriting its system prompt; the recommended mitigation is code-review-style diffing of description changes, which is exactly what schema pinning plus drift detection does.
-- **[SmartLoader](https://www.straiker.ai/blog/smartloader-clones-oura-ring-mcp-to-deploy-supply-chain-attack)** (disclosed Feb 2026) — a trojanized Oura Ring MCP server, backed by fake GitHub accounts with manufactured social proof, seeded into legitimate registries to drop an infostealer. Stars and listings are forgeable; provenance is not.
-- **[The official registry's own moderation policy](https://modelcontextprotocol.io/registry/moderation-policy)** — consumers "should assume minimal-to-no moderation", with security scanning explicitly delegated to downstream subregistries. mcpm is that downstream layer.
+- **Microsoft's tool-poisoning warning** (2026-06-30, [reported here](https://thehackernews.com/2026/06/microsoft-warns-poisoned-mcp-tool.html)) — poisoned tool descriptions steer an agent about as effectively as rewriting its system prompt; the recommended mitigation is code-review-style diffing of description changes. Schema pinning plus drift detection covers the detection half: mcpm tells you a description changed since you approved it, and blocks on schema or annotation drift. It does not render a before/after diff of the text.
+- **[SmartLoader](https://www.straiker.ai/blog/smartloader-clones-oura-ring-mcp-to-deploy-supply-chain-attack)** (disclosed Feb 2026) — a trojanized Oura Ring MCP server, backed by fake GitHub accounts with manufactured social proof, seeded into legitimate registries to drop an infostealer. Stars and listings are forgeable, which is why mcpm scores build provenance instead. Note the honest limit: provenance attests *who built a package*, not that the code is safe — an attacker publishing their own trojanized package from their own CI gets valid provenance. It raises the cost of impersonating someone else; it would not by itself have stopped SmartLoader.
+- **[The official registry's own moderation policy](https://modelcontextprotocol.io/registry/moderation-policy)** — consumers "should assume minimal-to-no moderation", with security scanning explicitly delegated to package registries and downstream subregistries. mcpm is one of those downstream layers.
 
 ### Read more
 

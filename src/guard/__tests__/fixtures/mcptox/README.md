@@ -19,6 +19,8 @@ artifacts are copied. License-clean.
 
 - `attacks/` — JSON fixtures that MUST trigger a `block` or `warn` action.
 - `benign/`  — JSON fixtures that MUST trigger a `pass` (no findings).
+- `warn/`    — retrieved-data carriers that MUST `warn` and be forwarded, never
+  dropped (see the note below).
 - `drift/`   — Schema-drift fixtures; require pre-pinning, run via a
   separate test that captures a pin then replays a mutated tools/list.
 
@@ -42,17 +44,17 @@ signature match is annotated and **forwarded**, never dropped. They are neither
 clean attacks nor clean benigns, so they assert the warn-only carrier clamp (H1)
 in their own block.
 
-## Coverage matrix (v0.27.x)
+## Coverage matrix (v0.28.x)
 
 | Category | Attack class | Fixtures |
 |---|---|---|
-| OWASP-MCP-1 | Tool-description / metadata injection | 11 (incl. rug-pull, system-tag, ANSI, bidi, ZWSP, Unicode TAG block ×2) |
-| OWASP-MCP-2 | Response instruction injection | 8 attacks + 3 warn-tier (NFKC, ZWSP, newline, homoglyph, disregard/forget, developer-mode) |
+| OWASP-MCP-1 | Tool-description / metadata injection | 11 (system-tag, ANSI, bidi, ZWSP, Unicode TAG block ×2, multi-tool poisoning, `initialize.instructions`, plus the structural `exfil-param-in-schema` key detector) |
+| OWASP-MCP-2 | Response instruction injection | 8 attacks (NFKC, ZWSP, newline, homoglyph, disregard/forget, developer-mode) + 3 warn-tier (resource / prompt content) |
 | OWASP-MCP-7 | Path exfil in args | 3 (.ssh / .aws / .env) |
 | MCP-CREDENTIAL-EXFIL | Credential egress in responses (F10) | 2 (GitHub PAT, PEM private key) |
 | MCP-CREDENTIAL-PHISHING | Server-initiated credential solicitation (F6) | 2 (wallet seed phrase, card CVV) |
 | — | Benign corpus (FP-rate seed) | 14 |
-| — | Schema drift | 3 (incl. MCPoison-equivalent) |
+| — | Schema drift | 3 (incl. the MCPoison-equivalent rug-pull) |
 
 Every signature in the shipped catalog must have at least one fixture here, and
 every attack/warn fixture must be caught through the public `mcpm guard inspect`

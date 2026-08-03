@@ -2,7 +2,7 @@
  * Trust policy enforcement — checks trust scores against stack file policy.
  *
  * All comparisons use normalized percentages (score / maxPossible) to avoid
- * false positives when MCP-Scan availability differs between machines.
+ * false positives when external-scanner availability differs between machines.
  *
  * Pure functions, no I/O.
  */

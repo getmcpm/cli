@@ -131,7 +131,27 @@ function hasCriticalOrHighFindings(findings: Finding[]): boolean {
  * Returns a new TrustScore object — never mutates input.
  */
 export function computeTrustScore(input: TrustScoreInput): TrustScore {
-  const maxPossible = input.hasExternalScanner ? 100 : 80;
+  // The external bucket is credited only when the scanner actually returned a
+  // result we could READ — not merely because one was configured and exited 0.
+  //
+  // This is load-bearing, not defensive coding. `MCPM_EXTERNAL_SCANNER` names an
+  // arbitrary executable, so without this gate any binary that exits 0 (say
+  // `/bin/true`) would earn a silent 20/20 and add 20 RAW points. Two gates
+  // compare raw scores: `mcpm install --min-trust`, and `HARD_TRUST_FLOOR` on the
+  // no-human-in-loop MCP path, which is documented as a floor no caller-supplied
+  // value can lower. An environment variable is caller-supplied — so crediting an
+  // unverified scanner would let one lower that floor by 20 points. Requiring a
+  // parseable result means a binary must genuinely speak the contract
+  // (`{"findings": [...]}` on stdout) before its corroboration counts.
+  //
+  // A scanner that failed is treated as ABSENT rather than as a failing scan:
+  // the bucket leaves `maxPossible` (80, not 100) instead of scoring 0 out of
+  // 100, so a broken or misconfigured scanner never depresses a server's score.
+  const externalCredited =
+    input.hasExternalScanner &&
+    !input.findings.some((f) => f.source === "external" && f.type === "scanner-error");
+
+  const maxPossible = externalCredited ? 100 : 80;
 
   // Cap registryMeta to 0 when critical/high findings are present.
   // Attacker-controlled metadata (publishedAt, downloads) must not inflate
@@ -153,17 +173,23 @@ export function computeTrustScore(input: TrustScoreInput): TrustScore {
   // deduct nothing. That should not happen in normal flow, but we route such
   // orphans into the static bucket as a safe fallback so they still deduct
   // rather than vanish.
-  const externalFindings = input.hasExternalScanner
+  //
+  // The one thing that must NOT fall through to the static bucket is a
+  // scanner-error diagnostic from an uncredited scanner. It says the user's
+  // scanner failed, not that the server is worse — deducting for it would make
+  // a broken scanner quietly depress every server's score, which is the exact
+  // opposite of treating a failed scanner as absent.
+  const externalFindings = externalCredited
     ? input.findings.filter((f) => f.source === "external")
     : [];
-  const staticFindings = input.hasExternalScanner
+  const staticFindings = externalCredited
     ? input.findings.filter((f) => f.source !== "external")
-    : input.findings;
+    : input.findings.filter((f) => f.type !== "scanner-error");
 
   const breakdown: TrustScoreBreakdown = {
     healthCheck: scoreHealthCheck(input.healthCheckPassed),
     staticScan: scoreStaticScan(staticFindings),
-    externalScan: scoreExternalScan(input.hasExternalScanner, externalFindings),
+    externalScan: scoreExternalScan(externalCredited, externalFindings),
     registryMeta: registryMetaScore,
   };
 

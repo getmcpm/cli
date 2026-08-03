@@ -264,7 +264,7 @@ Sequenced to keep momentum and the Dependabot surface clean (the v0.9–v0.15 se
 - **Detector C (trimmed):** add `outputSchema` to the object hashed by `hashToolDefinition` in `pins.ts` (+ migration). Drop the bundled validator + `structuredContent` validation to a later item.
 - **Files:** NEW `src/guard/dlp.ts` + tests; EDIT `patterns.ts` (decode pass), `pins.ts` (+outputSchema in hash + migration), `run-inner.ts` (fold via `mergeInspect`), `guard.ts` (list-signatures category names only, no regexes). No hard new deps (ajv documented fallback only).
 
-**Differentiation (honest framing).** Inline-vs-static is **false** vs mcp-scan/Snyk (already inline response DLP, already wrapped by mcpm as Tier 2). The real wedge is **bundled / zero-dep / default-on / deterministic** = distribution, plus per-server policy + keychain-backed secrets in one tool with no hosted gateway.
+**Differentiation (honest framing).** Inline-vs-static is **false** vs mcp-scan/Snyk (already inline response DLP). Note mcpm does NOT wrap them: the tier-2 seam is opt-in via `MCPM_EXTERNAL_SCANNER` and ships wired to nothing — the old `npx @invariantlabs/mcp-scan` path never resolved (TODOS #32). The real wedge is **bundled / zero-dep / default-on / deterministic** = distribution, plus per-server policy + keychain-backed secrets in one tool with no hosted gateway.
 
 ---
 

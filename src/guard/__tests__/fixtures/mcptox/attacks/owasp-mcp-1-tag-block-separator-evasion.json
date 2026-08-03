@@ -3,7 +3,7 @@
   "category": "OWASP-MCP-1",
   "expected_action": "block",
   "expected_signature_id": "owasp-mcp-1-tool-description-injection",
-  "notes": "Evasion variant of the ZWSP split (see owasp-mcp-1-zwsp-in-description): TAG SPACE (U+E0020) is inserted between the words of an injection phrase to break naive regex matching, on a different Unicode plane than the zero-width characters most sanitizers enumerate (arXiv 2607.05744). PATTERN_BREAKERS strips the TAG block pre-match, so the phrase reassembles and the critical description-injection signature still fires and BLOCKS. Asserting block (not warn) pins that the strip-then-match order defeats the evasion rather than merely noticing the odd characters.",
+  "notes": "Evasion variant of the ZWSP keyword split (the response-carrier analogue is owasp-mcp-2-zwsp-evasion): TAG SPACE (U+E0020) is inserted between the words of an injection phrase to break naive regex matching, on a different Unicode plane than the zero-width characters most sanitizers enumerate (arXiv 2607.05744). PATTERN_BREAKERS strips the TAG block pre-match, so the phrase reassembles and the critical description-injection signature fires and BLOCKS. Asserting block (not warn) pins that the strip-then-match ORDER defeats the evasion rather than the engine merely noticing odd characters: remove the [\\u{E0000}-\\u{E007F}] clause from PATTERN_BREAKERS and all four injection patterns go false, leaving only the warn-tier presence finding.",
   "message": {
     "jsonrpc": "2.0",
     "id": 321,
