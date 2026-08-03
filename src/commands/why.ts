@@ -252,7 +252,7 @@ export async function handleWhy(
       "External scan",
       breakdown.externalScan,
       20,
-      scannerAvailable ? undefined : "install mcp-scan for deeper analysis"
+      scannerAvailable ? undefined : "set MCPM_EXTERNAL_SCANNER for deeper analysis"
     )
   );
   lines.push(
@@ -266,7 +266,13 @@ export async function handleWhy(
     lines.push(chalk.cyan(`Findings (${findings.length}):`));
     for (const f of findings) {
       const sev = SEVERITY_COLOR[f.severity](`[${f.severity}]`);
-      lines.push(`  ${sev} ${chalk.dim(f.type)} — ${f.message} ${chalk.dim(`(${f.location})`)}`);
+      // A tier-2 finding's text comes from whatever executable the user named in
+      // MCPM_EXTERNAL_SCANNER, so it is untrusted the same way registry free text
+      // is. Sanitized here at the render site rather than at ingest, so the
+      // `--json` and SARIF paths keep the scanner's bytes intact.
+      const message = sanitizeForTerminal(f.message);
+      const location = sanitizeForTerminal(f.location);
+      lines.push(`  ${sev} ${chalk.dim(f.type)} — ${message} ${chalk.dim(`(${location})`)}`);
     }
   }
 

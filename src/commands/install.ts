@@ -343,7 +343,7 @@ export function formatTrustScore(trustScore: TrustScore): string {
     `  \u251C\u2500 Health check: ${breakdown.healthCheck > 0 ? "not yet run" : "failed or skipped"}`,
     `  \u251C\u2500 Tool descriptions: ${breakdown.staticScan === 40 ? "CLEAN (no injection patterns)" : `score ${breakdown.staticScan}/40`}`,
     `  \u251C\u2500 Package: publisher verification ${breakdown.registryMeta > 0 ? "passed" : "unverified"}`,
-    `  \u2514\u2500 External scan: ${breakdown.externalScan > 0 ? `passed (${breakdown.externalScan}/20)` : "not available (install mcp-scan for deeper analysis)"}`,
+    `  \u2514\u2500 External scan: ${breakdown.externalScan > 0 ? `passed (${breakdown.externalScan}/20)` : "not available (set MCPM_EXTERNAL_SCANNER for deeper analysis)"}`,
   ];
 
   return lines.join("\n");

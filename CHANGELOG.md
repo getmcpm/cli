@@ -4,6 +4,75 @@ All notable changes to this project will be documented in this file.
 
 ## [0.28.0] - 2026-07-29
 
+### Security
+
+- **The tier-2 external scanner was both dead and an unclaimed-name
+  fetch-and-execute vector.** Every version of mcpm up to this one probed for the
+  optional external scanner by running `npx @invariantlabs/mcp-scan --version`.
+  That package does not exist on npm — it returns 404, and the entire
+  `@invariantlabs` scope is unregistered. Two consequences, one embarrassing and
+  one serious:
+
+  - `checkScannerAvailable()` could never resolve that name from the public npm
+    registry, so tier 2 in practice never ran. The README, architecture docs, and
+    project notes all claimed mcpm "wraps MCP-Scan"; it did not. Trust scores were
+    **not** inflated by this — an absent external scanner already drops the
+    bucket from `maxPossible` (80 instead of 100) rather than scoring it as a
+    failure — so scores you have seen remain valid.
+  - Anyone who registered that unclaimed scope would have had mcpm download and
+    execute their code on every `mcpm audit`. Fetching and running an unowned
+    package name at audit time is the supply-chain shape mcpm exists to flag.
+
+  **mcpm no longer fetches a scanner, at all.** Tier 2 is now opt-in: set
+  `MCPM_EXTERNAL_SCANNER` to the path or name of a scanner already installed on
+  the machine, which mcpm invokes as `<scanner> --json <server-name>`. When the
+  variable is unset — the default — no subprocess is spawned. Package runners and
+  shells (`npx`, `pnpx`, `bunx`, `uvx`, `pipx`, `pip`, `npm`, `pnpm`, `yarn`,
+  `bun`, `deno`, `docker`, `podman`, `sh`, `bash`, …) are refused by basename,
+  insensitive to case, path, and executable or script suffix (`.exe`, `.cmd`,
+  `.bat`, `.ps1`, `.js`, `.cjs`, `.mjs`), and including a runner's `-cli`
+  entrypoint or a symlink pointing at one. That denylist
+  is a regression guard against a pasted `npx …` recipe or a future mcpm default
+  drifting back toward one. Be clear on its worth: it is a **footgun guard, not an
+  attacker boundary**, since whoever can set this variable can usually set `PATH`
+  or drop a file too. The load-bearing changes are that the unowned package name
+  is gone and that an unset variable spawns nothing at all.
+
+  Two further hardening steps came out of reviewing the above:
+
+  - **An unverified scanner no longer earns trust points.** Because the variable
+    names an arbitrary executable, any binary that merely exits 0 (`/bin/true`)
+    would have made the scanner "available", returned no findings, and silently
+    banked the full 20-point external bucket — adding 20 to the **raw** score
+    that `mcpm install --min-trust` and the MCP `HARD_TRUST_FLOOR` compare
+    against. That floor is documented as one no caller-supplied value can lower,
+    and an environment variable is caller-supplied. The bucket is now credited
+    only when the scanner returns a result mcpm could actually read, and a
+    scanner that fails is treated as **absent** (bucket leaves `maxPossible`)
+    rather than as a failing scan. Note the honest comparison: that is "no worse
+    than having no scanner", not "no change" — if you were scoring against a
+    working scanner and it breaks, those points do go away, and a raw
+    `--min-trust` gate will see the drop. The gate stops accidental inflation
+    (`/bin/true`, a typo, a scanner that broke); it cannot stop someone who
+    deliberately points the variable at a script printing `{"findings": []}`,
+    because mcpm cannot verify an arbitrary executable did any work.
+  - **A misconfigured scanner is no longer silent.** Previously a refused,
+    typo'd, or unrunnable command was indistinguishable from having no scanner,
+    so the user was told to "set `MCPM_EXTERNAL_SCANNER`" — the variable they had
+    just set. mcpm now writes to stderr once per process, both when a value is
+    refused and when a configured scanner cannot be run at all. Paths containing
+    spaces (`C:\Program Files\…`, `/opt/npm scanner/bin/…`) are accepted rather
+    than mistaken for a command line; a pasted `npx some-pkg` is looked up as one
+    literal filename, which does not exist, and is reported as unrunnable —
+    `execFile` never splits on whitespace, so it is not an argument vector.
+
+  mcpm deliberately does **not** auto-detect a replacement. Invariant Labs'
+  mcp-scan is distributed on PyPI (and has been a redirect package for
+  `snyk-agent-scan` since 2026-03), never on npm, and its CLI scans client config
+  files rather than registry server names — so it is not a drop-in for this
+  seam. The unscoped npm `mcp-scan` is an unrelated third-party product. Wiring a
+  real scanner is tracked as follow-up work rather than assumed.
+
 ### Fixed
 
 - **`mcpm_install` no longer leaves a live server behind a reported failure.** The
@@ -64,6 +133,31 @@ All notable changes to this project will be documented in this file.
   existing lock is used exactly as before.
 - `VerifyModel` gained `uncovered: string[]` and `vacuous: boolean` (`--json`
   shape remains explicitly UNSTABLE).
+- Trust-score output now points at `MCPM_EXTERNAL_SCANNER` where it previously
+  said "install mcp-scan", in `mcpm install` and `mcpm why`.
+- Documentation refreshed against 2026 evidence: the NSA AI Security Center's MCP
+  guidance, OX Security's finding that a proof-of-concept poisoned server was
+  accepted by 9 of 11 public registries, Microsoft's tool-poisoning advisory, and
+  the SmartLoader trojanized-server campaign now back the claims the README makes
+  about why a guard exists.
+
+### Added
+
+- **Unicode TAG-block fixtures** covering the "ASCII smuggling" concealment class
+  (arXiv 2607.05744), where a payload is encoded in U+E0000–U+E007F so it renders
+  as nothing in an approval UI. The engine already handled this; the fixtures pin
+  both halves of *how*, which differ in an easy-to-break way. A fully TAG-encoded
+  payload is caught by the hidden-character **presence** detector — the injection
+  signatures cannot see it, because normalization strips TAG characters and so
+  erases the phrase entirely. TAG characters used as invisible **separators**
+  between words of an injection phrase are stripped, which reassembles the phrase
+  and lets the description-injection signature block it. Presence detection runs
+  on tool metadata carriers only. A wholly TAG-encoded payload elsewhere is not
+  detected — including on the server-initiated `sampling_prompt` path, which is
+  block-tier with a reply to the server, so a TAG-encoded credential solicitation
+  passes where the same text in plain form blocks. See `TODOS.md` #31, and note
+  that a separately-tracked false positive already exists on the covered
+  carriers: an emoji subdivision flag in a tool description warns today.
 
 ## [0.27.0] - 2026-07-27
 
