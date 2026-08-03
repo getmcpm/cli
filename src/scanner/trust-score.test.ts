@@ -747,6 +747,23 @@ describe("nativeTrustScore — unverifiable credit cannot clear a safety floor",
     expect(nativeTrustScore(computeTrustScore(makeInput())).maxPossible).toBe(80);
   });
 
+  // Both gates are `native.score < floor`, and NaN < 25 is FALSE -- so a
+  // TrustScore with a partial breakdown would fail OPEN and install. No
+  // production caller can produce one today, but the lock file's TrustSnapshot
+  // is a breakdown-less TrustScore-shaped object that a sibling gate already
+  // reads, so the trajectory is short. Refusing is fail-closed; a `?? 0`
+  // fallback would credit the missing bucket as zero and pass.
+  it("refuses a trust score with no usable breakdown rather than failing open", () => {
+    const partial = { score: 35, maxPossible: 100, level: "risky", breakdown: {} } as never;
+    const absent = { score: 35, maxPossible: 100, level: "risky" } as never;
+
+    // Pin the hazard itself, so the reason for the guard is visible.
+    expect(NaN < HARD_TRUST_FLOOR).toBe(false);
+
+    expect(() => nativeTrustScore(partial)).toThrow(/no usable breakdown/);
+    expect(() => nativeTrustScore(absent)).toThrow();
+  });
+
   // A guard against re-implementing this as a clamp (`Math.min(score, 80)`),
   // which passes the headline case by accident on low scores and silently fails
   // to exclude anything on high ones.

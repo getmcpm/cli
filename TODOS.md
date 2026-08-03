@@ -388,3 +388,43 @@ TAG-decoded findings from `block` to `warn` — i.e. it collapses the shipped
 un-clamped design into the clamped one for anyone who knows the trick. That is
 an argument about which posture is *honest*, not a reason to clamp; fix the
 bypass first, then decide the clamp on its merits.
+
+### 35. A fake external scanner masks `policy.blockOnScoreDrop`
+**Priority:** P1 — pre-existing; sibling of #33, deliberately NOT fixed with it.
+**Found:** 2026-08-03, by the security review of the #33 change. Reproduced.
+
+**What:** `checkTrustPolicy` (`src/stack/policy.ts`) compares **normalized
+percentages** of RAW scores, including `lockedSnapshot.score` from
+`mcpm-lock.yaml`. Crediting the external bucket does not merely add 20 points —
+it moves the denominator 80 → 100. That raises the percentage **unconditionally**
+for every native score below 80 (verified: no counterexample in `[0, 80)`).
+
+So the same two-line `{"findings": []}` scanner that motivated #33 also disarms
+the drift tripwire. Executed: a server whose mcpm-native evidence genuinely fell
+**75% → 69%** is blocked without a scanner and **passes** with a fake one.
+
+```
+honest: {"pass":false,"reason":"\"s\" trust score dropped from 75% to 69% ..."}
+gamed : {"pass":true}
+```
+
+**Why #33's carve-out does not cover it.** #33 deliberately left
+`policy.minTrustScore` and `--min-trust` alone because a human picks both the
+threshold and the scanner there, so there is no untrusted caller. That reasoning
+does not extend to `blockOnScoreDrop`: it is a **rug-pull tripwire against a
+locked baseline**, not a threshold anyone tunes. The non-malicious variant is
+just as real — a stub or half-broken scanner silently disarms the user's own
+drift detector.
+
+**Why it is not fixed here:** the honest fix compares native-to-native, and the
+lock file's `TrustSnapshot` (`src/stack/schema.ts`) records `score` and
+`maxPossible` but **no `breakdown`**, so the locked side's native figure cannot
+be recovered. That needs a schema addition plus a back-compat path for locks
+written before it, which is its own PR and its own review — not a rider on a
+gate change.
+
+**Same class, also unfixed:** `audit --fix` (`src/commands/audit.ts`) and the
+`outdated` trust-regression check (`src/commands/outdated.ts`) compare raw
+scores too. An inflated score means a bad server is not proposed for removal and
+a regression is not reported. Both are human/CLI surfaces, so they are lower
+priority than the tripwire, but they share the premise.

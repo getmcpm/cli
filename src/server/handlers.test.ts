@@ -460,6 +460,41 @@ describe("handleSetup", () => {
     expect(r.skipped[0].reason).not.toContain("Install failed");
   });
 
+  // TODOS #33 follow-on. This pre-filter delegates to handleInstall WITHOUT
+  // forwarding minTrustScore, so the enforcing gate always applies the default
+  // of 50. With a requested 25-49 the two disagreed: the pre-filter waved the
+  // server through and handleInstall then refused it, so a trust rejection was
+  // reported as "Install failed" quoting a threshold the caller never asked for.
+  it("reports a trust rejection as a trust skip, not an install failure (#33)", async () => {
+    const midTrust: TrustScore = {
+      score: 35,
+      maxPossible: 80,
+      level: "risky",
+      breakdown: { healthCheck: 15, staticScan: 20, externalScan: 0, registryMeta: 0 },
+    };
+    const entry = makeEntry("io.github.acme/mid");
+    const addServer = vi.fn().mockResolvedValue(undefined);
+    const deps = makeDeps({
+      registrySearch: vi.fn().mockResolvedValue([entry]),
+      computeTrustScore: vi.fn().mockReturnValue(midTrust),
+      getAdapter: vi.fn().mockReturnValue({
+        clientId: "cursor",
+        read: vi.fn().mockResolvedValue({}),
+        addServer,
+        removeServer: vi.fn(),
+      }),
+    });
+
+    // The premise: 35 clears the requested 30 but not the 50 handleInstall applies.
+    const result = await handleSetup({ description: "mid", minTrustScore: 30 }, deps);
+
+    const r = result as { installed: unknown[]; skipped: Array<{ name: string; reason: string }> };
+    expect(r.installed).toHaveLength(0);
+    expect(addServer).not.toHaveBeenCalled();
+    expect(r.skipped[0].reason).toContain("below minimum 50");
+    expect(r.skipped[0].reason).not.toContain("Install failed");
+  });
+
   it("skips keywords with no results", async () => {
     const deps = makeDeps({ registrySearch: vi.fn().mockResolvedValue([]) });
 

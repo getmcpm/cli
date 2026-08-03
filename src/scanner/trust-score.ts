@@ -252,11 +252,22 @@ export interface NativeTrustScore {
  * but must not be able to CLEAR a safety floor. So the floor is compared
  * against `score - breakdown.externalScan`.
  *
- * Note the asymmetry is deliberate and one-directional. Removing only the
- * bucket's CREDIT leaves every penalty an external finding carries outside that
- * bucket — most importantly the critical/high cap on `registryMeta` — intact.
- * An external scanner can therefore still push a server DOWN through the floor,
- * which is the fail-closed direction, but can never push one UP through it.
+ * Note the asymmetry is deliberate and one-directional WITH RESPECT TO THE
+ * EXTERNAL SCANNER. Removing only the bucket's CREDIT leaves every penalty an
+ * external finding carries outside that bucket — most importantly the
+ * critical/high cap on `registryMeta` — intact. An external scanner can
+ * therefore still push a server DOWN through the floor, which is the
+ * fail-closed direction, but can never push one UP through it.
+ *
+ * That is a claim about THIS bucket, not about the native figure in general.
+ * The native buckets are not attacker-proof by construction: on the MCP surface
+ * the caller also supplies the stack file, and a stack `policy` knob that
+ * suppresses a native-bucket finding raises the figure this returns. The
+ * release-age cooldown was exactly that (`minReleaseAgeHours: 0`, native
+ * 20 → 25 against a floor of 25) and is now ignored whenever a floor is in
+ * effect — see `processServer` in `src/commands/up.ts`. Any FUTURE policy knob
+ * that can suppress a healthCheck / staticScan / registryMeta finding needs the
+ * same treatment; this function cannot enforce that on its own.
  *
  * This is deliberately NOT applied to `mcpm install --min-trust` or to a stack
  * file's `policy.minTrustScore`. Those are thresholds a human chose on their own
@@ -266,8 +277,24 @@ export interface NativeTrustScore {
  * human, is on the other side of.
  */
 export function nativeTrustScore(trust: TrustScore): NativeTrustScore {
+  const score = trust.score - trust.breakdown?.externalScan;
+
+  // Both gate expressions are `native.score < floor`, and `NaN < 25` is FALSE —
+  // so a TrustScore carrying a partial `breakdown` would fail OPEN and install.
+  // No production caller can produce one today (every wiring binds the real
+  // `computeTrustScore`), but the lock file's `TrustSnapshot` is a
+  // breakdown-less, TrustScore-shaped object that already exists and is already
+  // read by a sibling gate, so the trajectory is short. Refuse rather than
+  // coerce: a `?? 0` fallback would CREDIT the missing bucket as zero and pass.
+  if (!Number.isFinite(score)) {
+    throw new Error(
+      "Cannot evaluate a trust floor: the trust score has no usable breakdown. " +
+      "This is a bug — report it rather than working around it.",
+    );
+  }
+
   return {
-    score: trust.score - trust.breakdown.externalScan,
+    score,
     maxPossible: NATIVE_MAX_POSSIBLE,
     excludedExternalCredit: trust.breakdown.externalScan,
   };

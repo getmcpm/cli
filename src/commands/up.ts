@@ -127,6 +127,29 @@ export interface UpOptions {
   frozen?: boolean;
 }
 
+/**
+ * The trust figure to SHOW alongside an admitted server.
+ *
+ * When a hard floor is in effect and unverifiable external credit was excluded
+ * from it, the raw score is the wrong number to print: a reader who sees
+ * `45/100` next to a floor of 25 will believe 45 is what cleared it, when the
+ * gate actually compared 25/80. Rejections already report the native figure;
+ * this keeps admissions consistent with them.
+ */
+function trustFigure(
+  trust: TrustScore,
+  options: Pick<UpOptions, "minTrustFloor">,
+): string {
+  if (options.minTrustFloor === undefined) {
+    return `${trust.score}/${trust.maxPossible}`;
+  }
+  const native = nativeTrustScore(trust);
+  if (native.excludedExternalCredit === 0) {
+    return `${trust.score}/${trust.maxPossible}`;
+  }
+  return `${native.score}/${native.maxPossible} against the floor, ${trust.score}/${trust.maxPossible} with the external scanner`;
+}
+
 export interface UpDeps {
   detectClients: () => Promise<ClientId[]>;
   getAdapter: (clientId: ClientId) => ConfigAdapter;
@@ -544,11 +567,25 @@ async function processServer(input: ProcessInput): Promise<ServerResult> {
   // Release-age assessment (F4): one assessment per server, with the policy
   // threshold when set, so the soft-penalty finding and the policy gate below
   // can never disagree.
+  //
+  // The policy threshold is IGNORED when a hard floor is in effect. On the MCP
+  // surface the caller supplies the stack file's path AND its content, and the
+  // release-age finding is `medium` with no `source`, so it deducts from
+  // staticScan -- a bucket the floor counts. `minReleaseAgeHours: 0` is
+  // schema-valid, so relaxing the cooldown RAISES the score the floor compares
+  // and can lift a server over it (reproduced: native 20 -> 25 against a floor
+  // of 25, on a fresh republish carrying a critical and a high). That is the
+  // F4 poisoned-republish penalty being disarmed by the party it exists to
+  // catch, so this joins allowProcessEnv / allowUrlServers / allowEnvFile as a
+  // knob the untrusted surface does not get.
   const registryMeta = extractRegistryMeta(serverEntry);
   const releaseAge = assessReleaseAge({
     publishedAt: registryMeta.publishedAt,
     now: (deps.now ?? Date.now)(),
-    minAgeHours: policy?.minReleaseAgeHours ?? DEFAULT_MIN_RELEASE_AGE_HOURS,
+    minAgeHours:
+      options.minTrustFloor !== undefined
+        ? DEFAULT_MIN_RELEASE_AGE_HOURS
+        : policy?.minReleaseAgeHours ?? DEFAULT_MIN_RELEASE_AGE_HOURS,
   });
   if (releaseAge.finding) {
     findings = [...findings, releaseAge.finding];
@@ -613,7 +650,7 @@ async function processServer(input: ProcessInput): Promise<ServerResult> {
     return {
       name,
       status: "skipped",
-      message: `would install v${locked.version} (trust: ${trustScore.score}/${trustScore.maxPossible})`,
+      message: `would install v${locked.version} (trust: ${trustFigure(trustScore, options)})`,
     };
   }
 
@@ -658,7 +695,7 @@ async function processServer(input: ProcessInput): Promise<ServerResult> {
   return {
     name,
     status: "installed",
-    message: `v${locked.version} (trust: ${trustScore.score}/${trustScore.maxPossible})${partialNote}`,
+    message: `v${locked.version} (trust: ${trustFigure(trustScore, options)})${partialNote}`,
     storedSecrets: storedCount,
   };
 }

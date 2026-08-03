@@ -406,7 +406,20 @@ export async function handleSetup(
 
   // Issue #24: clamp to the hard floor so minTrustScore:0 can't disable the gate
   // on the no-human-in-loop setup path either.
-  const minScore = effectiveMinTrustScore(args.minTrustScore);
+  //
+  // Also clamp UP to handleInstall's own default. This pre-filter delegates to
+  // handleInstall without forwarding minTrustScore, so the enforcing gate always
+  // applies DEFAULT_MIN_TRUST_SCORE. With a requested 25-49 the two disagreed:
+  // the pre-filter waved the server through and handleInstall then refused it,
+  // reporting a trust rejection as "Install failed" and quoting a threshold the
+  // caller never asked for. Taking the stricter of the two makes the pre-filter
+  // report exactly what the enforcing gate will do. Deliberately NOT fixed by
+  // forwarding minTrustScore instead -- that would let a caller-supplied 30
+  // LOWER the gate this path enforces today.
+  const minScore = Math.max(
+    effectiveMinTrustScore(args.minTrustScore),
+    DEFAULT_MIN_TRUST_SCORE,
+  );
 
   const installed: Array<{ name: string; trustScore: TrustScore }> = [];
   const skipped: Array<{ name: string; reason: string }> = [];
