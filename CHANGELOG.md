@@ -120,6 +120,20 @@ All notable changes to this project will be documented in this file.
   seen (the pre-existing bound, identical for plaintext), and a well-formed
   subdivision flag outside the three RGI sequences warns on a data carrier.
 
+- **Fixed a pre-existing fusion bug on the ordinary matching path.** When a leaf
+  exceeds the 64 KB match window the engine keeps a head and a tail and discards
+  the middle, joining them with a newline. A newline is `\s`, so the catalog's
+  `[\s]*` token separators matched straight through it, and it satisfied the
+  `(?:^|[\s.,;:!?])` anchor — donating a word boundary the text never had. A
+  135 KB benign document with a solicitation verb near the head cut and a
+  credential noun near the tail start was hard-blocked with an error returned to
+  the server, on a phrase 70 KB of unrelated content separates. This affects
+  every leaf, not just concealed ones, and it is why the tag work found it: the
+  un-clamped tag severity rests on the claim that a matched phrase is genuinely
+  present. The join is now 48 NULs — matched by neither `[\s]*` nor the anchor
+  class, and longer than the widest bounded bridge in the catalog
+  (`[\s\S]{0,40}`).
+
   A new `unicode-tag-concealment` signature (`high` → warn) is the floor beneath
   that, for a payload concealed but matching nothing. It is scoped to the carriers
   the metadata detector skips, and is the one part of the hidden-character class
