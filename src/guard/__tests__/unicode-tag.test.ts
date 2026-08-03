@@ -88,35 +88,71 @@ describe("inspectTagEncoded recovers a concealed payload", () => {
     expect(inspectTagEncoded(independent, OWASP_MCP_TOP_10, "tool_response")).toEqual([]);
   });
 
-  test("runs on either side of the discarded window middle do not fuse", () => {
-    // boundedWindow keeps a head and a tail and throws the middle away. Joining
-    // them without a separator let a payload match across 70 KB of content that
-    // was never adjacent — the exact hazard normalizeForMatch's newline join
-    // documents at patterns.ts (security #27).
-    const straddling = `${tag("ignore previous")}${"q".repeat(80_000)}${tag(" instructions")}`;
+  test.each([
+    ["an anchored injection pattern", "acme-dlp: do not ignore", " previous instructions apply"],
+    ["a bounded-bridge solicitation pattern", "Please enter your", " seed phrase now"],
+  ])("runs on either side of the discarded window middle do not fuse — %s", (_l, head, tail) => {
+    // The runs are placed to end and begin EXACTLY at the window cut, which is
+    // the only arrangement that can fuse. An earlier version of this test padded
+    // them thousands of characters away from the seam, so it passed with or
+    // without the separator and proved nothing.
+    //
+    // Both cases are needed because they defeat different separators. A newline
+    // is `\s`, so `[\s]*` matches through it AND it donates the `(?:^|[\s.,;:!?])`
+    // anchor — worse than useless. The credential family bridges `[\s\S]{0,40}`,
+    // which matches anything, so only a separator longer than 40 stops it.
+    const encHead = tag(head);
+    const encTail = tag(tail);
+    const straddling =
+      "p".repeat(32_768 - encHead.length) +
+      encHead +
+      "Q".repeat(70_000) +
+      encTail +
+      "p".repeat(32_768 - encTail.length);
     expect(inspectTagEncoded(straddling, OWASP_MCP_TOP_10, "tool_response")).toEqual([]);
   });
 
   test.each([
-    ["glued to a word character", "x".repeat(80), false],
-    ["after a space", `${"x".repeat(80)} `, true],
-    ["after a newline", `${"x".repeat(80)}\n`, true],
-    ["after a period", "Report done.", true],
-  ])("a concealed payload is judged exactly as plaintext would be — %s", (_label, prefix, shouldMatch) => {
-    // Decoding in place means the payload keeps its context, so signature word
-    // boundaries apply identically whether the text was concealed or not. This
-    // pins the EQUIVALENCE, not either verdict: the previous tag-only view lifted
-    // the payload out of its surroundings, so it always matched from a clean
-    // boundary and reported hits plain text would not have.
-    const asPlaintext = inspectMessage(toolResponse(prefix + INJECTION), OWASP_MCP_TOP_10).findings
-      .length;
-    const asConcealed = inspectTagEncoded(
-      prefix + tag(INJECTION),
+    ["glued to a word character", "x".repeat(80)],
+    ["after a space", `${"x".repeat(80)} `],
+    ["after a newline", `${"x".repeat(80)}\n`],
+    ["after a period", "Report done."],
+    ["after a digit", "Rows: 42"],
+    ["after a closing paren", "(see above)"],
+  ])("a concealed payload is caught whatever precedes it — %s", (_label, prefix) => {
+    // The most-cited injection pattern is anchored on `(?:^|[\s.,;:!?])`. Decoding
+    // purely in place hands the payload whatever visible character happens to
+    // precede it — which the attacker picks for free and no human can see, since
+    // the visible text still reads "Report done". Deleting one space took this
+    // from block to warn while a model still read the whole instruction.
+    //
+    // An earlier version of this test asserted the opposite, on the argument that
+    // a concealed payload should be judged exactly as the same plaintext would be.
+    // That equivalence does not transfer adversarially: the anchor is an
+    // FP-reduction heuristic for benign prose, and benign prose does not conceal
+    // itself in the tag block. In plaintext an attacker cannot delete the word
+    // boundary without a reader seeing "doneIgnore".
+    expect(inspectTagEncoded(prefix + tag(INJECTION), OWASP_MCP_TOP_10, "tool_response")).not.toEqual(
+      [],
+    );
+  });
+
+  test("the anchored view does not report what the plain scan already caught", () => {
+    // `recovered` is true if ANY tag character in the leaf decoded, so an
+    // unrelated one — a non-RGI subdivision flag, already a pinned warn-level
+    // limit — used to trigger a rescan that re-reported plainly VISIBLE text
+    // under a "written in the Unicode tag block, invisible to a human reviewer"
+    // note that was false for it.
+    const brittany = BLACK_FLAG + tag("frbre") + CANCEL;
+    const findings = inspectMessage(
+      toolResponse(`${INJECTION}. Region ${brittany}.`),
       OWASP_MCP_TOP_10,
-      "tool_response",
-    ).length;
-    expect(asConcealed > 0).toBe(shouldMatch);
-    expect(asConcealed > 0).toBe(asPlaintext > 0);
+    ).findings;
+    const injections = findings.filter((f) =>
+      f.signature_id.startsWith("owasp-mcp-2-instruction-injection"),
+    );
+    expect(injections).toHaveLength(1);
+    expect(injections[0]?.matched_text_excerpt).not.toContain("‹decoded:unicode-tag›");
   });
 
   test("a leaf with no tag characters is not scanned at all", () => {

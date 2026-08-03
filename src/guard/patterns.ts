@@ -478,19 +478,45 @@ function hasTagChar(s: string): boolean {
 }
 
 /**
- * The head + tail window every per-leaf detector scans, so a pathological giant
+ * Marks where the discarded middle of an oversized leaf was, in the windows fed
+ * to the regex engine.
+ *
+ * NUL rather than a newline, and 48 of them rather than one — both properties
+ * are load-bearing, and a newline join fails on both counts while LOOKING
+ * correct. A newline IS `\s`, so the catalog's `[\s]*` token separators match
+ * straight through it: a phrase still fuses across content that was 70 KB apart.
+ * Worse, a newline satisfies the `(?:^|[\s.,;:!?])` anchor, so it DONATES a word
+ * boundary the raw text never had. NUL is matched by neither.
+ *
+ * The length is sized against the widest bridge any catalog pattern can span:
+ * the credential-phishing family is `VERB[\s\S]{0,40}NOUN`, and `[\s\S]` does
+ * match NUL. 48 > 40, so no shipped signature reaches across. A future signature
+ * with an UNBOUNDED `.*` / `[\s\S]*` between tokens would — keep catalog bridges
+ * bounded. (review 2026-08-03)
+ */
+const WINDOW_SEAM = "\u0000".repeat(48);
+
+/**
+ * The head + tail window for CHARACTER-PRESENCE scans, so a pathological giant
  * leaf can't stall the relay. Identical bound to normalizeForMatch's. Returns the
  * leaf itself (no copy) when it already fits. (security #27)
  *
- * The newline join mirrors normalizeForMatch and carries the same reason: it
- * stops a payload matching ACROSS the discarded middle, which would be a phrase
- * the content never actually contained. Omitting it here let two tag runs 70 KB
- * apart fuse into a fabricated block. (review 2026-08-03)
+ * Deliberately NOT seam-marked: detectHiddenChars reports NUL as a control
+ * character, so injecting the seam here would make every leaf over 64 KB
+ * self-report a hidden character.
  */
-function boundedWindow(leaf: string): string {
+function scanWindow(leaf: string): string {
   return leaf.length <= MATCH_SEGMENT_CAP * 2
     ? leaf
-    : `${leaf.slice(0, MATCH_SEGMENT_CAP)}\n${leaf.slice(-MATCH_SEGMENT_CAP)}`;
+    : leaf.slice(0, MATCH_SEGMENT_CAP) + leaf.slice(-MATCH_SEGMENT_CAP);
+}
+
+/** The same window for anything fed to the regex engine, with the discarded
+ *  middle marked so no pattern can match across it. */
+function matchWindow(leaf: string): string {
+  return leaf.length <= MATCH_SEGMENT_CAP * 2
+    ? leaf
+    : `${leaf.slice(0, MATCH_SEGMENT_CAP)}${WINDOW_SEAM}${leaf.slice(-MATCH_SEGMENT_CAP)}`;
 }
 
 /**
@@ -518,7 +544,7 @@ export function detectHiddenChars(leaf: string, target: SignatureTarget): Inspec
   // Bound the scan to the same head+tail window as signature matching so a
   // pathological giant metadata leaf can't stall the relay. Metadata is small
   // in practice; this is symmetry with normalizeForMatch's cap. (security #27)
-  const scanned = boundedWindow(leaf);
+  const scanned = scanWindow(leaf);
 
   // Computed on first tag-block hit only — the regex walk is wasted work on the
   // overwhelming majority of leaves, which carry no tag characters at all.
@@ -591,7 +617,7 @@ function codePointBefore(s: string, index: number): number | undefined {
  * forwards. Exported for direct unit testing.
  */
 export function detectTagConcealment(leaf: string, target: SignatureTarget): InspectFinding[] {
-  const scanned = boundedWindow(leaf);
+  const scanned = scanWindow(leaf);
   if (!hasTagChar(scanned)) return [];
   const skip = rgiTagSequenceMask(scanned);
 
@@ -668,12 +694,31 @@ export function inspectTagEncoded(
   signatures: readonly Signature[],
   target: SignatureTarget,
 ): InspectFinding[] {
-  const scanned = boundedWindow(leaf);
+  const scanned = matchWindow(leaf);
   if (!hasTagChar(scanned)) return [];
   const skip = rgiTagSequenceMask(scanned);
 
-  let decoded = "";
+  // TWO views, built in one walk, because neither alone is sound.
+  //
+  // `inPlace` keeps the visible text exactly where it is. That is what a model
+  // reads, so it catches a payload spliced through the middle of a word and it
+  // cannot fuse unrelated runs.
+  //
+  // `anchored` additionally breaks the line at every visible↔concealed
+  // transition. Needed because the most-cited injection pattern is anchored on
+  // `(?:^|[\s.,;:!?])`, and in-place decoding hands the payload whatever visible
+  // character happens to precede it — which the attacker chooses for free and no
+  // human can see. Deleting ONE space took "Report done. " + TAG(injection) from
+  // block to warn on tool_response, tool_description and initialize_instructions,
+  // while a model still read the complete instruction. The anchor is an
+  // FP-reduction heuristic for benign prose, and benign prose does not conceal
+  // itself in the tag block, so restoring the boundary at a concealment edge is
+  // right. Transitions are NOT a fusion risk: two runs separated by visible text
+  // keep that text between them here exactly as in `inPlace`.
+  let inPlace = "";
+  let anchored = "";
   let recovered = false;
+  let prevWasTag = false;
   for (let i = 0; i < scanned.length; ) {
     const cp = scanned.codePointAt(i) ?? 0;
     const width = cp > 0xffff ? 2 : 1;
@@ -682,11 +727,19 @@ export function inspectTagEncoded(
       // Structural tag codepoints (U+E0000, U+E0001 LANGUAGE TAG, U+E007F
       // CANCEL TAG) carry no character and simply drop out.
       if (ascii !== "") {
-        decoded += ascii;
+        if (!prevWasTag) anchored += "\n";
+        inPlace += ascii;
+        anchored += ascii;
         recovered = true;
+        prevWasTag = true;
       }
     } else {
-      decoded += scanned.slice(i, i + width);
+      if (prevWasTag) {
+        anchored += "\n";
+        prevWasTag = false;
+      }
+      inPlace += scanned.slice(i, i + width);
+      anchored += scanned.slice(i, i + width);
     }
     i += width;
   }
@@ -694,7 +747,13 @@ export function inspectTagEncoded(
   // inspectAgainstSignatures already scanned — rescanning would double-report.
   if (!recovered) return [];
 
-  return inspectAgainstSignatures(decoded, signatures, target).map((f) => ({
+  const findings = inspectAgainstSignatures(inPlace, signatures, target);
+  const seen = new Set(findings.map((f) => f.signature_id));
+  for (const f of inspectAgainstSignatures(anchored, signatures, target)) {
+    if (!seen.has(f.signature_id)) findings.push(f);
+  }
+
+  return findings.map((f) => ({
     ...f,
     matched_text_excerpt: `‹decoded:unicode-tag› ${f.matched_text_excerpt}`,
     remediation: `${f.remediation} NOTE: the payload was written in the Unicode tag block (invisible to a human reviewer) and decoded by mcpm-guard before matching (concealment attempt).`,
@@ -826,7 +885,7 @@ function inspectDecoded(
   target: SignatureTarget,
 ): InspectFinding[] {
   // Bound the candidate scan to the same head+tail window the matcher uses.
-  const scan = boundedWindow(leaf);
+  const scan = matchWindow(leaf);
 
   const out: InspectFinding[] = [];
   // Two bounds: `attempts` caps Buffer.from calls (DoS), and `synthBudget` caps the
@@ -854,9 +913,13 @@ function inspectDecoded(
     // round, so base64-of-base64 still evades as documented. These findings keep
     // `decoded: true` (and so the warn clamp): the base64 layer is the weak
     // evidence, and the weaker of the two origins should govern. (TODOS #31)
+    const syntheticPlain = inspectAgainstSignatures(decoded, signatures, target);
+    const syntheticIds = new Set(syntheticPlain.map((f) => f.signature_id));
     const fromSynthetic = [
-      ...inspectAgainstSignatures(decoded, signatures, target),
-      ...inspectTagEncoded(decoded, signatures, target),
+      ...syntheticPlain,
+      ...inspectTagEncoded(decoded, signatures, target).filter(
+        (f) => !syntheticIds.has(f.signature_id),
+      ),
     ];
     for (const f of fromSynthetic) {
       out.push({
@@ -932,12 +995,24 @@ export function inspectMessage(
         // detectHiddenChars so a tag character is never reported twice. (#31)
         findings.push(...detectTagConcealment(leaf, target));
       }
-      findings.push(...inspectAgainstSignatures(leaf, signatures, target));
+      const plain = inspectAgainstSignatures(leaf, signatures, target);
+      findings.push(...plain);
       // Tag-block decode-and-rescan, on EVERY carrier: PATTERN_BREAKERS strips
       // tag characters before matching, which erases a fully TAG-encoded payload
       // rather than revealing it. Decoding recovers it so the real signature
       // fires — including on the block-tier sampling_prompt path. (TODOS #31)
-      findings.push(...inspectTagEncoded(leaf, signatures, target));
+      //
+      // Suppressed where the plain scan already caught the same signature: an
+      // unrelated tag character elsewhere in the leaf (a non-RGI subdivision
+      // flag, say) would otherwise re-report plainly VISIBLE text a second time,
+      // carrying a "written in the Unicode tag block, invisible to a human
+      // reviewer" note that is simply false for it. (review 2026-08-03)
+      const plainIds = new Set(plain.map((f) => f.signature_id));
+      findings.push(
+        ...inspectTagEncoded(leaf, signatures, target).filter(
+          (f) => !plainIds.has(f.signature_id),
+        ),
+      );
       // F10 Detector-B: decode bounded base64/base64url runs inside server-returned
       // data and re-run the SAME target's signatures on the decoded text, so an
       // encoded injection/credential can't evade the regex floor. Same target ⇒

@@ -205,10 +205,35 @@ phrase. One visible character inside one word downgraded a block to a warn,
 including on `sampling_prompt`. It was also unsafe in the other direction:
 discarding the visible text let two INDEPENDENT benign runs 900 characters apart
 fuse into a phrase the content never contained and hard-BLOCK on it. Decoding
-**in place** is the view the model actually reads and fixes both at once; a
-test now pins that a concealed payload is judged exactly as plaintext would be.
-The un-clamped severity is only defensible because of this — the phrase has to
+**in place** is the view the model actually reads and fixes both at once. The
+un-clamped severity is only defensible because of this — the phrase has to
 genuinely be there.
+
+Re-reviewing THAT fix found a HIGH in it, which is why the fix got its own
+review round rather than riding on the first one. Decoding purely in place hands
+the payload whatever visible character precedes it, and the most-cited injection
+pattern is anchored on `(?:^|[\s.,;:!?])`. Deleting ONE space —
+`"Report done" + TAG(injection)` instead of `"Report done. "` — took
+`tool_response`, `tool_description` and `initialize_instructions` from block back
+to warn, while a model still read the complete instruction and a human still saw
+only "Report done". A test had even pinned that as INTENDED, on the argument that
+concealed text should be judged exactly as the same plaintext. The equivalence
+does not transfer adversarially: the anchor is an FP-reduction heuristic for
+benign prose, benign prose does not conceal itself in the tag block, and in
+plaintext an attacker cannot delete the boundary without a reader seeing
+"doneIgnore". So the decoder now builds TWO views in one walk — in place, and one
+that breaks the line at each visible/concealed transition — and reports the union.
+
+Two smaller ones from the same round. The window seam was joined with a newline,
+which is `\s`: the catalog's `[\s]*` separators match straight through it, so it
+never stopped cross-seam fusion, and it DONATED the anchor. It is now 48 NULs —
+NUL is matched by neither `[\s]*` nor the anchor class, and 48 > the widest
+bounded bridge in the catalog (`[\s\S]{0,40}`, credential phishing). The test for
+that had padded its runs thousands of characters from the seam, so it passed with
+or without any separator. And a decoded finding is now suppressed when the plain
+scan already caught the same signature, so an unrelated flag elsewhere in a leaf
+no longer re-reports plainly visible text with a false "invisible to a human
+reviewer" note.
 
 Also caught in review: the RGI carve-out's membership test was a linear scan per
 tag character, so a leaf packed with valid flag emoji was quadratic — a 4 MB
