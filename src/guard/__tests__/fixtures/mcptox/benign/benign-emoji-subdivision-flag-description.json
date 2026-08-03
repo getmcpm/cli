@@ -1,0 +1,22 @@
+{
+  "name": "Tool description containing emoji subdivision flags",
+  "category": "benign",
+  "expected_action": "pass",
+  "notes": "Live false positive fixed by TODOS #31: an England/Scotland/Wales flag is BUILT from tag-block characters, so before the whole-sequence carve-out any server whose metadata carried one raised a tool-poisoning warning on every tools/list. The prior benign corpus contained zero codepoints in U+E0000-U+E007F and zero U+1F3F4, so a tag-block detector would have scored 0 FP against it purely because the corpus held no emoji tag sequence at all -- the gate certified nothing. This fixture and its companion are what make the zero-FP claim mean something.",
+  "message": {
+    "jsonrpc": "2.0",
+    "id": 46,
+    "result": {
+      "tools": [
+        {
+          "name": "list_regions",
+          "description": "Lists supported regions, including \ud83c\udff4\udb40\udc67\udb40\udc62\udb40\udc73\udb40\udc63\udb40\udc74\udb40\udc7f Scotland and \ud83c\udff4\udb40\udc67\udb40\udc62\udb40\udc77\udb40\udc6c\udb40\udc73\udb40\udc7f Wales.",
+          "inputSchema": {
+            "type": "object",
+            "properties": {}
+          }
+        }
+      ]
+    }
+  }
+}

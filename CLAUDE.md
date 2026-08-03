@@ -93,12 +93,20 @@ research note (Obsidian, `mcpm/` — deliberately not in this repo).
   adapter scope.
 - **Unicode TAG-block concealment** (arXiv 2607.05744, 2026-07-07): U+E0000–
   U+E007F hides payloads from approval UIs and beat string-matching sanitizers in
-  4 of 8 techniques. **Partially covered by shipped code** — verified by execution
-  2026-08-03 and pinned by two fixtures (`owasp-mcp-1-tag-block-*`). Precisely:
-  TAG-as-separator is stripped on EVERY carrier so the injection signature still
-  blocks; a FULLY TAG-encoded payload is only caught by hidden-char presence,
-  which runs on tool metadata only and **warns** (high), never blocks. Uncovered
-  today, including the block-tier `sampling_prompt` path — TODOS #31.
+  4 of 8 techniques. **Covered as of v0.28.0** (TODOS #31 closed) within the 64 KB
+  per-leaf match window — a payload buried in the discarded middle of a larger
+  leaf is still unseen, the pre-existing #27 bound that applies to plaintext
+  equally. The guard
+  DECODES tag runs back to ASCII and re-runs the carrier's own signatures, on
+  every carrier, so a concealed payload is judged by what it says — a TAG-encoded
+  seed-phrase solicitation blocks via `credential-phishing-*` on the block-tier
+  `sampling_prompt` path instead of passing with zero findings. A `high`
+  presence floor (`unicode-tag-concealment`) sits beneath it for payloads that
+  are concealed but match no signature. TAG-decoded findings are deliberately NOT
+  warn-clamped the way base64-decoded ones are, which is only defensible because
+  decoding happens IN PLACE and so cannot fabricate adjacency. Eight fixtures
+  across four carriers plus three benign emoji-flag fixtures. Before v0.28.0 only tool metadata was
+  covered, and only at warn.
 
 ⚠ **Do NOT cite Morphisec's `drp-compliance-sdk` (June 2026) as an incident** —
 it was a red-team lab construction, not in-the-wild; first-pass reporting

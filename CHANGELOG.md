@@ -73,6 +73,94 @@ All notable changes to this project will be documented in this file.
   seam. The unscoped npm `mcp-scan` is an unrelated third-party product. Wiring a
   real scanner is tracked as follow-up work rather than assumed.
 
+- **Unicode TAG-block payloads are now decoded and re-scanned on every carrier.**
+  "ASCII smuggling" (arXiv 2607.05744) writes a payload in U+E0000–U+E007F, a
+  shadow copy of printable ASCII that renders as nothing but is readable by a
+  model. Adding fixtures for it exposed a detection **hole**, not merely a
+  false-positive risk: normalization strips TAG characters *before* matching, so
+  a fully encoded phrase was **erased** rather than revealed, and hidden-character
+  presence detection runs on tool metadata only. On every other carrier such a
+  payload scored zero findings — `tool_response`, `tool_call_args`,
+  `resource_content`, `prompt_content`, `structuredContent`, and
+  `sampling_prompt`.
+
+  The last one is the serious case. `sampling_prompt` is the guard's only
+  block-tier path that replies to the server, and it was bypassable: a wallet
+  seed-phrase solicitation blocked in plain text and **passed** when TAG-encoded
+  behind an innocuous sentence. The exploitable direction is
+  `sampling/createMessage`, where the concealed text goes to the *model* — a
+  model that decodes tag codepoints reads an instruction no human reviewer can
+  see. (For `elicitation/create` the message renders to the user, so a fully
+  encoded payload is invisible to the victim too and phishes nobody, unless the
+  client normalizes tag characters when rendering.)
+
+  The guard now decodes TAG characters back to ASCII **in place** — keeping the
+  surrounding visible text exactly where it is — and re-runs the carrier's own
+  signatures, so a concealed payload is judged by what it says: the seed-phrase
+  case blocks via `credential-phishing-wallet-solicitation` with the error routed
+  back to the server. In place is the load-bearing part. The engine already scans
+  a visible-only view (normalization strips tag characters, which catches them
+  used as invisible word separators); adding a tag-only view would have created
+  two disjoint projections with a gap between them, and
+  `"Report done. ig" + TAG("nore all previous instru") + "ctions…"` sits in that
+  gap — a complete instruction to any model that decodes tag codepoints, invisible
+  to both projections. Decoding in place is the view the model actually reads, so
+  an interleaved payload matches while two unrelated tag runs stay unrelated.
+  Unlike base64-decoded findings,
+  TAG-decoded ones are **not** clamped to warn — base64 is everywhere in benign
+  data, which makes a decoded match weak evidence, whereas a tag run decoding to a
+  signature-matching phrase is *stronger* evidence than the same phrase in
+  plaintext — defensible only because in-place decoding cannot fabricate
+  adjacency, so the phrase has to genuinely be there. The two passes also
+  compose: base64 wrapping a TAG-encoded payload is caught (at the base64 layer's
+  warn tier). Base64-of-base64 still evades, unchanged.
+
+  Two limits are pinned as tests rather than left to be found: a payload buried
+  in the discarded middle of a leaf larger than the 64 KB match window is not
+  seen (the pre-existing bound, identical for plaintext), and a well-formed
+  subdivision flag outside the three RGI sequences warns on a data carrier.
+
+- **Fixed a pre-existing fusion bug on the ordinary matching path.** When a leaf
+  exceeds the 64 KB match window the engine keeps a head and a tail and discards
+  the middle, joining them with a newline. A newline is `\s`, so the catalog's
+  `[\s]*` token separators matched straight through it, and it satisfied the
+  `(?:^|[\s.,;:!?])` anchor — donating a word boundary the text never had. A
+  135 KB benign document with a solicitation verb near the head cut and a
+  credential noun near the tail start was hard-blocked with an error returned to
+  the server, on a phrase 70 KB of unrelated content separates. This affects
+  every leaf, not just concealed ones, and it is why the tag work found it: the
+  un-clamped tag severity rests on the claim that a matched phrase is genuinely
+  present. The join is now 48 NULs — matched by neither `[\s]*` nor the anchor
+  class, and longer than the widest bounded bridge in the catalog
+  (`[\s\S]{0,40}`).
+
+  A new `unicode-tag-concealment` signature (`high` → warn) is the floor beneath
+  that, for a payload concealed but matching nothing. It is scoped to the carriers
+  the metadata detector skips, and is the one part of the hidden-character class
+  safe to scan in retrieved data: outside an emoji subdivision flag, tag
+  characters do not occur in real text. Catalog is 13 entries.
+
+- **Fixed a live false positive: emoji subdivision flags in tool metadata.** 🏴󠁧󠁢󠁳󠁣󠁴󠁿
+  is built from tag characters, so any server whose description carried an
+  England, Scotland, or Wales flag raised a tool-poisoning warning on every
+  `tools/list`. The carve-out validates the **whole sequence** and accepts only
+  the three sequences a client actually renders (`gbeng`, `gbsct`, `gbwls`). Both
+  properties are load-bearing: a per-character flank test — the shape of the
+  existing zero-width-joiner carve-out — would let an attacker write 🏴 followed
+  by a tag-encoded payload and suppress detection wholesale, and a shape-based
+  whole-sequence rule is barely better, since a chained payload is spelled in
+  exactly the shape a real subdivision code has. Nothing legitimate is lost: a
+  non-RGI sequence renders as a bare black banner. The emoji presentation
+  selector (U+FE0F) is accepted between the base and the body, since writing the
+  same flag that way is legitimate and previously warned.
+
+  Benign emoji-tag-sequence fixtures were **added first**. Without them the
+  zero-FP claim would have been vacuous — no other fixture in the BENIGN corpus
+  contains a codepoint in U+E0000–U+E007F, so a tag-block detector would have
+  scored zero false positives against it by construction rather than by merit.
+  That corpus is still thin: it covers the carve-out's happy path, not the
+  detector's full false-positive surface.
+
 ### Fixed
 
 - **`mcpm_install` no longer leaves a live server behind a reported failure.** The
@@ -140,24 +228,6 @@ All notable changes to this project will be documented in this file.
   accepted by 9 of 11 public registries, Microsoft's tool-poisoning advisory, and
   the SmartLoader trojanized-server campaign now back the claims the README makes
   about why a guard exists.
-
-### Added
-
-- **Unicode TAG-block fixtures** covering the "ASCII smuggling" concealment class
-  (arXiv 2607.05744), where a payload is encoded in U+E0000–U+E007F so it renders
-  as nothing in an approval UI. The engine already handled this; the fixtures pin
-  both halves of *how*, which differ in an easy-to-break way. A fully TAG-encoded
-  payload is caught by the hidden-character **presence** detector — the injection
-  signatures cannot see it, because normalization strips TAG characters and so
-  erases the phrase entirely. TAG characters used as invisible **separators**
-  between words of an injection phrase are stripped, which reassembles the phrase
-  and lets the description-injection signature block it. Presence detection runs
-  on tool metadata carriers only. A wholly TAG-encoded payload elsewhere is not
-  detected — including on the server-initiated `sampling_prompt` path, which is
-  block-tier with a reply to the server, so a TAG-encoded credential solicitation
-  passes where the same text in plain form blocks. See `TODOS.md` #31, and note
-  that a separately-tracked false positive already exists on the covered
-  carriers: an emoji subdivision flag in a tool description warns today.
 
 ## [0.27.0] - 2026-07-27
 

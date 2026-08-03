@@ -48,13 +48,22 @@ in their own block.
 
 | Category | Attack class | Fixtures |
 |---|---|---|
-| OWASP-MCP-1 | Tool-description / metadata injection | 11 (incl. system-tag, ANSI, bidi, ZWSP, Unicode TAG block ×2, multi-tool poisoning, `initialize.instructions`, plus the structural `exfil-param-in-schema` key detector) |
-| OWASP-MCP-2 | Response instruction injection | 8 attacks (incl. NFKC, ZWSP, newline, homoglyph, disregard/forget, developer-mode) + 3 warn-tier (resource / prompt content) |
+| OWASP-MCP-1 | Tool-description / metadata injection | 13 (incl. system-tag, ANSI, bidi, ZWSP, Unicode TAG block ×4, multi-tool poisoning, `initialize.instructions`, plus the structural `exfil-param-in-schema` key detector) |
+| OWASP-MCP-2 | Response instruction injection | 9 attacks (incl. NFKC, ZWSP, newline, homoglyph, disregard/forget, developer-mode, TAG-block) + 4 warn-tier (resource / prompt content) |
 | OWASP-MCP-7 | Path exfil in args | 3 (.ssh / .aws / .env) |
 | MCP-CREDENTIAL-EXFIL | Credential egress in responses (F10) | 2 (GitHub PAT, PEM private key) |
-| MCP-CREDENTIAL-PHISHING | Server-initiated credential solicitation (F6) | 2 (wallet seed phrase, card CVV) |
-| — | Benign corpus (FP-rate seed) | 14 |
+| MCP-CREDENTIAL-PHISHING | Server-initiated credential solicitation (F6) | 3 (wallet seed phrase, card CVV, TAG-encoded seed phrase via sampling) |
+| — | Benign corpus (FP-rate seed) | 16 |
 | — | Schema drift | 3 (incl. the MCPoison-equivalent rug-pull) |
+
+The Unicode tag-block fixtures span four carriers on purpose: metadata, tool
+response, retrieved resource content, and the block-tier `sampling_prompt` path.
+Three of those scored **zero findings** before v0.28.0, so a corpus covering only
+metadata certified coverage the engine did not have — the v0.27.0 lesson one
+layer down. The two benign emoji-subdivision-flag fixtures belong to the same
+set: without them the detector's zero-FP claim would be vacuous, since no other
+BENIGN fixture contains a codepoint in U+E0000–U+E007F. They cover the
+carve-out's happy path — not the detector's full false-positive surface.
 
 Every signature in the shipped catalog must have at least one fixture here, and
 every attack/warn fixture must be caught through the public `mcpm guard inspect`
