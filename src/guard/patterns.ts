@@ -392,6 +392,90 @@ function classifyHiddenChar(ch: string): string {
   return `${kind} (${hex})`;
 }
 
+// ---------------------------------------------------------------------------
+// Unicode TAG block (U+E0000–U+E007F) — "ASCII smuggling"
+// ---------------------------------------------------------------------------
+//
+// U+E0020–U+E007E are a shadow copy of printable ASCII: subtract 0xE0000 and you
+// get the character back. They render as nothing, so a payload written entirely
+// in them is invisible in an approval UI while a model that decodes tag
+// codepoints reads it plainly (arXiv 2607.05744).
+//
+// Before this pass the block was a DETECTION HOLE, not merely an FP risk:
+// PATTERN_BREAKERS strips tag characters before matching, so a fully TAG-encoded
+// phrase was ERASED rather than revealed, and hidden-char PRESENCE detection runs
+// on metadata carriers only. On every other carrier — including `sampling_prompt`,
+// the guard's one block-tier reply-to-origin path — a TAG-encoded payload scored
+// zero findings. A TAG-encoded wallet-seed solicitation passed where the same
+// sentence in plain text blocks. (TODOS #31)
+
+/** Every codepoint in the tag block, including the structural ones. */
+const TAG_CHAR_CLASS = /[\u{E0000}-\u{E007F}]/gu;
+
+/**
+ * The one legitimate modern use of the tag block: an emoji tag sequence (UTS #51)
+ * — U+1F3F4, a body of tag letters/digits, terminated by U+E007F CANCEL TAG.
+ * Exactly three are RGI (recommended for general interchange), and those are the
+ * only ones a client renders as a flag rather than a bare black banner.
+ *
+ * The carve-out is RGI-EXACT, not shape-based, and that is load-bearing. A
+ * shape-based rule ("U+1F3F4 + up to six tag letters + terminator") is itself a
+ * bypass lever: "ignore" is six lowercase letters, so 🏴+TAG("ignore")+CANCEL is
+ * well-formed, and an attacker could chain such sequences to spell an arbitrary
+ * payload with every one of them waved through. Nothing legitimate is lost, since
+ * a non-RGI sequence renders as nothing anyway. If Unicode promotes further
+ * subdivision flags to RGI, add them here.
+ *
+ * NOTE the frequency argument, not a deprecation one: U+E0020–U+E007F were
+ * UN-deprecated in Unicode 9.0 precisely to carry these sequences. Only U+E0001
+ * LANGUAGE TAG remains deprecated. Tag characters are flagged because they
+ * essentially never appear in real text outside an emoji tag sequence.
+ */
+const RGI_TAG_SEQUENCE_BODIES: ReadonlySet<string> = new Set(["gbeng", "gbsct", "gbwls"]);
+const EMOJI_TAG_SEQUENCE = /\u{1F3F4}[\u{E0020}-\u{E007E}]{1,32}\u{E007F}/gu;
+
+/** The ASCII a tag codepoint stands for; "" for the structural ones (U+E0000,
+ * U+E0001 LANGUAGE TAG, U+E007F CANCEL TAG) which carry no character. */
+function tagToAscii(cp: number): string {
+  return cp >= 0xe0020 && cp <= 0xe007e ? String.fromCharCode(cp - 0xe0000) : "";
+}
+
+/**
+ * Half-open [start, end) index ranges of well-formed RGI emoji tag sequences.
+ * Tag characters inside these are benign and are skipped by both the presence
+ * detector and the decoder; every other tag character stays in scope.
+ */
+function rgiTagSequenceRanges(s: string): Array<readonly [number, number]> {
+  const ranges: Array<readonly [number, number]> = [];
+  EMOJI_TAG_SEQUENCE.lastIndex = 0;
+  for (let m = EMOJI_TAG_SEQUENCE.exec(s); m !== null; m = EMOJI_TAG_SEQUENCE.exec(s)) {
+    let body = "";
+    for (const ch of m[0]) body += tagToAscii(ch.codePointAt(0) ?? 0);
+    if (RGI_TAG_SEQUENCE_BODIES.has(body)) ranges.push([m.index, m.index + m[0].length]);
+  }
+  return ranges;
+}
+
+function inRanges(ranges: ReadonlyArray<readonly [number, number]>, index: number): boolean {
+  return ranges.some(([start, end]) => index >= start && index < end);
+}
+
+function hasTagChar(s: string): boolean {
+  TAG_CHAR_CLASS.lastIndex = 0; // reset stateful global regex
+  return TAG_CHAR_CLASS.test(s);
+}
+
+/**
+ * The head + tail window every per-leaf detector scans, so a pathological giant
+ * leaf can't stall the relay. Identical bound to normalizeForMatch's. Returns the
+ * leaf itself (no copy) when it already fits. (security #27)
+ */
+function boundedWindow(leaf: string): string {
+  return leaf.length <= MATCH_SEGMENT_CAP * 2
+    ? leaf
+    : leaf.slice(0, MATCH_SEGMENT_CAP) + leaf.slice(-MATCH_SEGMENT_CAP);
+}
+
 /**
  * True if the codepoint is an emoji/pictograph component that a ZWJ legitimately
  * joins: Extended_Pictographic, an emoji modifier (skin tone), or VS16. A ZWJ
@@ -417,10 +501,11 @@ export function detectHiddenChars(leaf: string, target: SignatureTarget): Inspec
   // Bound the scan to the same head+tail window as signature matching so a
   // pathological giant metadata leaf can't stall the relay. Metadata is small
   // in practice; this is symmetry with normalizeForMatch's cap. (security #27)
-  const scanned =
-    leaf.length <= MATCH_SEGMENT_CAP * 2
-      ? leaf
-      : leaf.slice(0, MATCH_SEGMENT_CAP) + leaf.slice(-MATCH_SEGMENT_CAP);
+  const scanned = boundedWindow(leaf);
+
+  // Computed on first tag-block hit only — the regex walk is wasted work on the
+  // overwhelming majority of leaves, which carry no tag characters at all.
+  let tagSkip: Array<readonly [number, number]> | undefined;
 
   // Iterate matches (the class is a global regex) so a benign composite-emoji
   // ZWJ can be skipped while still reporting a later genuine hidden char in the
@@ -436,6 +521,16 @@ export function detectHiddenChars(leaf: string, target: SignatureTarget): Inspec
       // starts at m.index + 1 (no surrogate-pair offset needed here).
       const after = scanned.codePointAt(m.index + 1);
       if (isEmojiJoinComponent(before) && isEmojiJoinComponent(after)) continue;
+    }
+    // A subdivision flag (🏴󠁧󠁢󠁳󠁣󠁴󠁿) is built from tag characters, so without this
+    // an England/Scotland/Wales flag anywhere in a tool description raised a
+    // poisoning warning on every tools/list — a live false positive in a
+    // zero-FP detector. Unlike the ZWJ carve-out above this validates the WHOLE
+    // sequence, because a per-character flank test is a bypass lever. (TODOS #31)
+    const cp = m[0].codePointAt(0) ?? 0;
+    if (cp >= 0xe0000 && cp <= 0xe007f) {
+      tagSkip ??= rgiTagSequenceRanges(scanned);
+      if (inRanges(tagSkip, m.index)) continue;
     }
     return [
       {
@@ -463,6 +558,97 @@ function codePointBefore(s: string, index: number): number | undefined {
     return s.codePointAt(index - 2);
   }
   return prev;
+}
+
+/**
+ * PRESENCE floor for the tag block on the carriers H2 deliberately skips
+ * (tool_response / tool_call_args / resource_content / prompt_content, and via
+ * re-tagging sampling_prompt). Excluding zero-width and bidi controls from
+ * retrieved data is correct — they turn up routinely in fetched files and email
+ * — but the tag block is different by FREQUENCY: outside an emoji tag sequence
+ * it does not occur in real text, so scanning for it there costs no FP budget.
+ *
+ * This is the floor, not the verdict. It fires when a payload is concealed but
+ * matches no signature; `inspectTagEncoded` below recovers the payload itself
+ * when it does match. `high` → warn, so on retrieved data it annotates and
+ * forwards. Exported for direct unit testing.
+ */
+export function detectTagConcealment(leaf: string, target: SignatureTarget): InspectFinding[] {
+  const scanned = boundedWindow(leaf);
+  if (!hasTagChar(scanned)) return [];
+  const skip = rgiTagSequenceRanges(scanned);
+
+  TAG_CHAR_CLASS.lastIndex = 0; // reset stateful global regex
+  for (let m = TAG_CHAR_CLASS.exec(scanned); m !== null; m = TAG_CHAR_CLASS.exec(scanned)) {
+    if (inRanges(skip, m.index)) continue;
+    return [
+      {
+        signature_id: "unicode-tag-concealment",
+        category: "OWASP-MCP-1",
+        severity: "high",
+        target,
+        // Deliberately does NOT name the carrier: inspectServerInitiated
+        // RE-TAGS findings from prompt_content to sampling_prompt, so an
+        // embedded carrier name would contradict the finding's own `target`
+        // field on the one path that matters most.
+        matched_text_excerpt: `${classifyHiddenChar(m[0])} outside an emoji tag sequence`,
+        remediation:
+          "Content contains Unicode tag-block characters (U+E0000–U+E007F), which render as " +
+          "nothing but are readable by a model — the documented 'ASCII smuggling' concealment " +
+          "technique. Outside an emoji subdivision flag these do not occur in real text. " +
+          "Inspect the server's output; if legitimate (rare), mute via " +
+          "`mcpm guard mute unicode-tag-concealment`.",
+      },
+    ];
+  }
+  return [];
+}
+
+/**
+ * Decode the tag-block characters in a leaf back to ASCII and re-run the SAME
+ * target's signatures on the result, so a concealed payload is judged by what it
+ * SAYS rather than merely noticed. This is what restores block-tier enforcement:
+ * a TAG-encoded wallet-seed solicitation reaches `credential-phishing-*` again
+ * instead of passing outright.
+ *
+ * Every non-RGI tag character in the leaf is concatenated into ONE synthetic
+ * leaf. Decoding each run separately would be a bypass lever — an attacker would
+ * simply interleave a visible character between runs so no single run spelled a
+ * matchable phrase.
+ *
+ * UNLIKE the base64 pass below, these findings are NOT tagged `decoded` and so
+ * are NOT clamped to warn. The clamp exists because base64 is everywhere in
+ * benign data, which makes a decoded match weak evidence. The tag block is the
+ * opposite: a run that decodes to a signature-matching phrase is STRONGER
+ * evidence than the same phrase in plain text, because concealment is not
+ * something benign content does. Emoji tag sequences — the one legitimate use —
+ * are excluded before decoding, and they decode to a subdivision code that
+ * matches no signature regardless.
+ *
+ * Exported for direct unit testing.
+ */
+export function inspectTagEncoded(
+  leaf: string,
+  signatures: readonly Signature[],
+  target: SignatureTarget,
+): InspectFinding[] {
+  const scanned = boundedWindow(leaf);
+  if (!hasTagChar(scanned)) return [];
+  const skip = rgiTagSequenceRanges(scanned);
+
+  let decoded = "";
+  for (let i = 0; i < scanned.length && decoded.length < MATCH_SEGMENT_CAP; ) {
+    const cp = scanned.codePointAt(i) ?? 0;
+    if (cp >= 0xe0000 && cp <= 0xe007f && !inRanges(skip, i)) decoded += tagToAscii(cp);
+    i += cp > 0xffff ? 2 : 1;
+  }
+  if (decoded === "") return [];
+
+  return inspectAgainstSignatures(decoded, signatures, target).map((f) => ({
+    ...f,
+    matched_text_excerpt: `‹decoded:unicode-tag› ${f.matched_text_excerpt}`,
+    remediation: `${f.remediation} NOTE: the payload was written in the Unicode tag block (invisible to a human reviewer) and decoded by mcpm-guard before matching (concealment attempt).`,
+  }));
 }
 
 /**
@@ -590,10 +776,7 @@ function inspectDecoded(
   target: SignatureTarget,
 ): InspectFinding[] {
   // Bound the candidate scan to the same head+tail window the matcher uses.
-  const scan =
-    leaf.length <= MATCH_SEGMENT_CAP * 2
-      ? leaf
-      : leaf.slice(0, MATCH_SEGMENT_CAP) + leaf.slice(-MATCH_SEGMENT_CAP);
+  const scan = boundedWindow(leaf);
 
   const out: InspectFinding[] = [];
   // Two bounds: `attempts` caps Buffer.from calls (DoS), and `synthBudget` caps the
@@ -613,7 +796,19 @@ function inspectDecoded(
     const decoded = decodeBase64Run(m[0]);
     if (decoded === null || printableRatio(decoded) < TEXTY_MIN_RATIO) continue;
     synthBudget--;
-    for (const f of inspectAgainstSignatures(decoded, signatures, target)) {
+    // Tag-block decoding also runs on the synthetic leaf. Without it the two
+    // passes compose into a hole: base64(prefix + TAG(payload)) decodes to text
+    // that clears the texty gate, and then PATTERN_BREAKERS strips the tag
+    // characters so the signature scan sees the payload ERASED. This is one
+    // extra pass of a different, non-recursive decoder — NOT a second base64
+    // round, so base64-of-base64 still evades as documented. These findings keep
+    // `decoded: true` (and so the warn clamp): the base64 layer is the weak
+    // evidence, and the weaker of the two origins should govern. (TODOS #31)
+    const fromSynthetic = [
+      ...inspectAgainstSignatures(decoded, signatures, target),
+      ...inspectTagEncoded(decoded, signatures, target),
+    ];
+    for (const f of fromSynthetic) {
       out.push({
         ...f,
         decoded: true,
@@ -682,8 +877,17 @@ export function inspectMessage(
       // pipeline normalizes them away. Metadata carriers only.
       if (HIDDEN_CHAR_TARGETS.has(target)) {
         findings.push(...detectHiddenChars(leaf, target));
+      } else {
+        // The tag block alone, on the carriers H2 skips. Disjoint from
+        // detectHiddenChars so a tag character is never reported twice. (#31)
+        findings.push(...detectTagConcealment(leaf, target));
       }
       findings.push(...inspectAgainstSignatures(leaf, signatures, target));
+      // Tag-block decode-and-rescan, on EVERY carrier: PATTERN_BREAKERS strips
+      // tag characters before matching, which erases a fully TAG-encoded payload
+      // rather than revealing it. Decoding recovers it so the real signature
+      // fires — including on the block-tier sampling_prompt path. (TODOS #31)
+      findings.push(...inspectTagEncoded(leaf, signatures, target));
       // F10 Detector-B: decode bounded base64/base64url runs inside server-returned
       // data and re-run the SAME target's signatures on the decoded text, so an
       // encoded injection/credential can't evade the regex floor. Same target ⇒

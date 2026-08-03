@@ -383,4 +383,29 @@ export const OWASP_MCP_TOP_10: readonly Signature[] = [
       "human review (tool-poisoning indicator). Inspect the server's source; if " +
       "legitimate (rare), mute via `mcpm guard mute hidden-chars-in-metadata`.",
   },
+  {
+    // unicode-tag-concealment — the tag-block PRESENCE floor on the carriers H2
+    // deliberately skips (tool_response / tool_call_args / retrieved data, and
+    // sampling_prompt by re-tagging). Emitted inline by detectTagConcealment from
+    // a codepoint scan, so like the entries above it carries NO patterns.
+    //
+    // Disjoint from hidden-chars-in-metadata by carrier, so a tag character is
+    // reported once, under whichever id matches where it was found. `high` → warn:
+    // this is the floor that fires when a payload is concealed but matches no
+    // signature. When it DOES match, inspectTagEncoded recovers the payload and the
+    // real signature decides the action at its own severity. (TODOS #31)
+    id: "unicode-tag-concealment",
+    category: "OWASP-MCP-1",
+    severity: "high",
+    description:
+      "Unicode tag-block characters (U+E0000–U+E007F) outside an emoji subdivision flag — invisible text a model can still read ('ASCII smuggling')",
+    target: "tool_response",
+    patterns: [],
+    remediation:
+      "Content contains Unicode tag-block characters (U+E0000–U+E007F), which render as " +
+      "nothing but are readable by a model — the documented 'ASCII smuggling' concealment " +
+      "technique. Outside an emoji subdivision flag these do not occur in real text. " +
+      "Inspect the server's output; if legitimate (rare), mute via " +
+      "`mcpm guard mute unicode-tag-concealment`.",
+  },
 ];
