@@ -171,6 +171,65 @@ describe("handleInstall", () => {
     expect(addServer).not.toHaveBeenCalled();
   });
 
+  // TODOS #33: the floor is documented as unlowerable by caller-supplied values,
+  // and `MCPM_EXTERNAL_SCANNER` — an arbitrary executable — is caller-supplied.
+  // `computeTrust` currently pins `hasExternalScanner: false`, so this cannot be
+  // reached through the real path today; the injected score proves the GATE
+  // excludes the bucket, so wiring a scanner in later cannot silently reopen the
+  // floor. That is precisely how the sibling `mcpm_up` path came to be exposed.
+  it("does not let an unverifiable external scanner lift a server over the floor (#33)", async () => {
+    const gamedTrust: TrustScore = {
+      score: 35,
+      maxPossible: 100,
+      level: "risky",
+      breakdown: { healthCheck: 15, staticScan: 0, externalScan: 20, registryMeta: 0 },
+    };
+    const entry = makeEntry("io.github.acme/sketchy");
+    const addServer = vi.fn().mockResolvedValue(undefined);
+    const deps = makeDeps({
+      registryGetServer: vi.fn().mockResolvedValue(entry),
+      computeTrustScore: vi.fn().mockReturnValue(gamedTrust),
+      getAdapter: vi.fn().mockReturnValue({
+        clientId: "cursor",
+        read: vi.fn().mockResolvedValue({}),
+        addServer,
+        removeServer: vi.fn(),
+      }),
+    });
+
+    // The premise: the RAW score clears the floor of 25 on its own.
+    expect(gamedTrust.score).toBeGreaterThanOrEqual(25);
+
+    await expect(
+      handleInstall({ name: "io.github.acme/sketchy", minTrustScore: 0 }, deps)
+    ).rejects.toThrow(/15\/80/);
+    await expect(
+      handleInstall({ name: "io.github.acme/sketchy", minTrustScore: 0 }, deps)
+    ).rejects.toThrow(/cannot verify/i);
+    expect(addServer).not.toHaveBeenCalled();
+  });
+
+  // The other half: a server whose own evidence clears the floor still installs,
+  // and its message path is never exercised. GOOD_TRUST carries no external
+  // credit, so the native figure and the raw score coincide.
+  it("still installs a server that clears the floor on native evidence alone (#33)", async () => {
+    const entry = makeEntry("io.github.acme/fine");
+    const addServer = vi.fn().mockResolvedValue(undefined);
+    const deps = makeDeps({
+      registryGetServer: vi.fn().mockResolvedValue(entry),
+      computeTrustScore: vi.fn().mockReturnValue(GOOD_TRUST),
+      getAdapter: vi.fn().mockReturnValue({
+        clientId: "cursor",
+        read: vi.fn().mockResolvedValue({}),
+        addServer,
+        removeServer: vi.fn(),
+      }),
+    });
+
+    await handleInstall({ name: "io.github.acme/fine" }, deps);
+    expect(addServer).toHaveBeenCalledTimes(1);
+  });
+
   // H9: the MCP surface has no human + no --allow-unguarded opt-in, so a
   // URL/HTTP-transport server (which runs UNGUARDED) must be hard-denied here —
   // never written to a client config via the untrusted agent path.
@@ -359,6 +418,81 @@ describe("handleSetup", () => {
     expect(r.installed).toHaveLength(0);
     expect(r.skipped).toHaveLength(1);
     expect(r.skipped[0].reason).toContain("below minimum");
+  });
+
+  // TODOS #33: the setup pre-filter must agree with the enforcing gate in
+  // handleInstall. If it compared the raw score it would wave a server through
+  // here and then report it under "Install failed", quoting a number that was
+  // never the one compared.
+  it("skips on native evidence, excluding unverifiable scanner credit (#33)", async () => {
+    const gamedTrust: TrustScore = {
+      score: 35,
+      maxPossible: 100,
+      level: "risky",
+      breakdown: { healthCheck: 15, staticScan: 0, externalScan: 20, registryMeta: 0 },
+    };
+    const entry = makeEntry("io.github.acme/gamed");
+    const addServer = vi.fn().mockResolvedValue(undefined);
+    const deps = makeDeps({
+      registrySearch: vi.fn().mockResolvedValue([entry]),
+      computeTrustScore: vi.fn().mockReturnValue(gamedTrust),
+      getAdapter: vi.fn().mockReturnValue({
+        clientId: "cursor",
+        read: vi.fn().mockResolvedValue({}),
+        addServer,
+        removeServer: vi.fn(),
+      }),
+    });
+
+    // The premise: the raw score clears the floor this call requests.
+    expect(gamedTrust.score).toBeGreaterThanOrEqual(25);
+
+    const result = await handleSetup(
+      { description: "gamed", minTrustScore: 25 },
+      deps
+    );
+    const r = result as { installed: unknown[]; skipped: Array<{ name: string; reason: string }> };
+    expect(r.installed).toHaveLength(0);
+    expect(addServer).not.toHaveBeenCalled();
+    // Reported as a trust skip, not as a downstream install failure.
+    expect(r.skipped[0].reason).toContain("15/80");
+    expect(r.skipped[0].reason).toContain("below minimum");
+    expect(r.skipped[0].reason).not.toContain("Install failed");
+  });
+
+  // TODOS #33 follow-on. This pre-filter delegates to handleInstall WITHOUT
+  // forwarding minTrustScore, so the enforcing gate always applies the default
+  // of 50. With a requested 25-49 the two disagreed: the pre-filter waved the
+  // server through and handleInstall then refused it, so a trust rejection was
+  // reported as "Install failed" quoting a threshold the caller never asked for.
+  it("reports a trust rejection as a trust skip, not an install failure (#33)", async () => {
+    const midTrust: TrustScore = {
+      score: 35,
+      maxPossible: 80,
+      level: "risky",
+      breakdown: { healthCheck: 15, staticScan: 20, externalScan: 0, registryMeta: 0 },
+    };
+    const entry = makeEntry("io.github.acme/mid");
+    const addServer = vi.fn().mockResolvedValue(undefined);
+    const deps = makeDeps({
+      registrySearch: vi.fn().mockResolvedValue([entry]),
+      computeTrustScore: vi.fn().mockReturnValue(midTrust),
+      getAdapter: vi.fn().mockReturnValue({
+        clientId: "cursor",
+        read: vi.fn().mockResolvedValue({}),
+        addServer,
+        removeServer: vi.fn(),
+      }),
+    });
+
+    // The premise: 35 clears the requested 30 but not the 50 handleInstall applies.
+    const result = await handleSetup({ description: "mid", minTrustScore: 30 }, deps);
+
+    const r = result as { installed: unknown[]; skipped: Array<{ name: string; reason: string }> };
+    expect(r.installed).toHaveLength(0);
+    expect(addServer).not.toHaveBeenCalled();
+    expect(r.skipped[0].reason).toContain("below minimum 50");
+    expect(r.skipped[0].reason).not.toContain("Install failed");
   });
 
   it("skips keywords with no results", async () => {

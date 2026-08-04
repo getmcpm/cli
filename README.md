@@ -193,6 +193,8 @@ Without an external scanner, the maximum possible score is 80/100 and the bucket
 
 Package runners (`npx`, `uvx`, `pipx`, `docker`, shells, …) are refused, including via symlink or a runner's `-cli.js` entrypoint. Be clear about what that is worth: it is a **footgun guard**, not a security boundary. Anyone who can set this variable can usually set `PATH` or drop a file too. What it buys is that a pasted `npx …` recipe — or a future mcpm default drifting back toward one — cannot quietly re-create the fetch-and-execute vector this seam was rebuilt to remove.
 
+Those 20 points **inform the score but cannot clear a safety floor.** The MCP server surface (`mcpm_install`, `mcpm_up`) enforces a hard trust floor of 25 that no caller-supplied value may lower — and since `MCPM_EXTERNAL_SCANNER` names an arbitrary executable, a two-line script printing `{"findings": []}` is caller-supplied input too. So the floor is compared against mcpm's own evidence only: health check + static scan + registry metadata, out of 80. The exclusion is one-directional — a scanner reporting a critical finding still drags a server *down* through the floor (via the registry-metadata cap), it just can't push one up through it. Your own `--min-trust` threshold and a stack file's `policy.minTrustScore` are unaffected: there the same person picks both the threshold and the scanner.
+
 ## Commands
 
 | Command | Description |

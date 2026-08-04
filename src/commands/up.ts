@@ -24,6 +24,7 @@ import type { ConfigAdapter, McpServerEntry } from "../config/adapters/index.js"
 import type { ServerEntry } from "../registry/types.js";
 import type { Finding } from "../scanner/tier1.js";
 import type { TrustScore, TrustScoreInput } from "../scanner/trust-score.js";
+import { nativeTrustScore } from "../scanner/trust-score.js";
 import type {
   StackFile,
   LockFile,
@@ -124,6 +125,29 @@ export interface UpOptions {
    * Also armable via `policy.frozen`. The CI supply-chain freeze gate (`npm ci`-like).
    */
   frozen?: boolean;
+}
+
+/**
+ * The trust figure to SHOW alongside an admitted server.
+ *
+ * When a hard floor is in effect and unverifiable external credit was excluded
+ * from it, the raw score is the wrong number to print: a reader who sees
+ * `45/100` next to a floor of 25 will believe 45 is what cleared it, when the
+ * gate actually compared 25/80. Rejections already report the native figure;
+ * this keeps admissions consistent with them.
+ */
+function trustFigure(
+  trust: TrustScore,
+  options: Pick<UpOptions, "minTrustFloor">,
+): string {
+  if (options.minTrustFloor === undefined) {
+    return `${trust.score}/${trust.maxPossible}`;
+  }
+  const native = nativeTrustScore(trust);
+  if (native.excludedExternalCredit === 0) {
+    return `${trust.score}/${trust.maxPossible}`;
+  }
+  return `${native.score}/${native.maxPossible} against the floor, ${trust.score}/${trust.maxPossible} with the external scanner`;
 }
 
 export interface UpDeps {
@@ -543,11 +567,25 @@ async function processServer(input: ProcessInput): Promise<ServerResult> {
   // Release-age assessment (F4): one assessment per server, with the policy
   // threshold when set, so the soft-penalty finding and the policy gate below
   // can never disagree.
+  //
+  // The policy threshold is IGNORED when a hard floor is in effect. On the MCP
+  // surface the caller supplies the stack file's path AND its content, and the
+  // release-age finding is `medium` with no `source`, so it deducts from
+  // staticScan -- a bucket the floor counts. `minReleaseAgeHours: 0` is
+  // schema-valid, so relaxing the cooldown RAISES the score the floor compares
+  // and can lift a server over it (reproduced: native 20 -> 25 against a floor
+  // of 25, on a fresh republish carrying a critical and a high). That is the
+  // F4 poisoned-republish penalty being disarmed by the party it exists to
+  // catch, so this joins allowProcessEnv / allowUrlServers / allowEnvFile as a
+  // knob the untrusted surface does not get.
   const registryMeta = extractRegistryMeta(serverEntry);
   const releaseAge = assessReleaseAge({
     publishedAt: registryMeta.publishedAt,
     now: (deps.now ?? Date.now)(),
-    minAgeHours: policy?.minReleaseAgeHours ?? DEFAULT_MIN_RELEASE_AGE_HOURS,
+    minAgeHours:
+      options.minTrustFloor !== undefined
+        ? DEFAULT_MIN_RELEASE_AGE_HOURS
+        : policy?.minReleaseAgeHours ?? DEFAULT_MIN_RELEASE_AGE_HOURS,
   });
   if (releaseAge.finding) {
     findings = [...findings, releaseAge.finding];
@@ -568,14 +606,24 @@ async function processServer(input: ProcessInput): Promise<ServerResult> {
   // Note: this is an ABSOLUTE score floor (matching the sibling handleInstall #24),
   // whereas checkTrustPolicy below compares normalized percentages — intentional
   // and consistent; revisit only if the hard floor is ever made percentage-based.
+  //
+  // TODOS #33: the floor is compared against mcpm's OWN evidence, not the raw
+  // score. `MCPM_EXTERNAL_SCANNER` names an arbitrary executable, so its 20
+  // points are caller-supplied — exactly what this floor is documented to be
+  // immune to. See `nativeTrustScore`.
+  const nativeTrust = nativeTrustScore(trustScore);
   if (
     options.minTrustFloor !== undefined &&
-    trustScore.score < options.minTrustFloor
+    nativeTrust.score < options.minTrustFloor
   ) {
     return {
       name,
       status: "blocked",
-      message: `trust score ${trustScore.score}/${trustScore.maxPossible} is below the required floor of ${options.minTrustFloor}`,
+      message:
+        `trust score ${nativeTrust.score}/${nativeTrust.maxPossible} is below the required floor of ${options.minTrustFloor}` +
+        (nativeTrust.excludedExternalCredit > 0
+          ? ` (the external scanner's ${nativeTrust.excludedExternalCredit} points do not count toward the floor)`
+          : ""),
     };
   }
 
@@ -602,7 +650,7 @@ async function processServer(input: ProcessInput): Promise<ServerResult> {
     return {
       name,
       status: "skipped",
-      message: `would install v${locked.version} (trust: ${trustScore.score}/${trustScore.maxPossible})`,
+      message: `would install v${locked.version} (trust: ${trustFigure(trustScore, options)})`,
     };
   }
 
@@ -647,7 +695,7 @@ async function processServer(input: ProcessInput): Promise<ServerResult> {
   return {
     name,
     status: "installed",
-    message: `v${locked.version} (trust: ${trustScore.score}/${trustScore.maxPossible})${partialNote}`,
+    message: `v${locked.version} (trust: ${trustFigure(trustScore, options)})${partialNote}`,
     storedSecrets: storedCount,
   };
 }

@@ -147,6 +147,61 @@ describe("handleUp", () => {
     expect(adapter.addServer).not.toHaveBeenCalled();
   });
 
+  // TODOS #33: the floor is documented as immune to caller-supplied values.
+  // `MCPM_EXTERNAL_SCANNER` names an arbitrary executable, so its 20 points ARE
+  // caller-supplied — a two-line script printing `{"findings":[]}` used to lift a
+  // blocked server over the floor. This trust score is the reproduction: two
+  // critical tier-1 findings zero the static bucket, the fake scanner banks the
+  // full external bucket, and the RAW total clears a floor of 25.
+  it("blocks on mcpm-native evidence, ignoring an unverifiable scanner's credit (#33)", async () => {
+    const gamedTrust: TrustScore = {
+      score: 35,
+      maxPossible: 100,
+      level: "risky",
+      breakdown: { healthCheck: 15, staticScan: 0, externalScan: 20, registryMeta: 0 },
+    };
+    const stackPath = await writeStackAndLock(basicStack, basicLock);
+    const deps = makeDeps({ computeTrustScore: vi.fn().mockReturnValue(gamedTrust) });
+
+    // Guard the premise: without the fix this score passes the gate outright.
+    expect(gamedTrust.score).toBeGreaterThanOrEqual(25);
+
+    await expect(
+      handleUp({ stackFile: stackPath, minTrustFloor: 25 }, deps)
+    ).rejects.toThrow(/could not be installed/);
+
+    const adapter = (deps.getAdapter as ReturnType<typeof vi.fn>).mock.results[0].value;
+    expect(adapter.addServer).not.toHaveBeenCalled();
+
+    // The message must report the figure actually compared, and say why it
+    // differs from the score shown everywhere else — otherwise "35/100 is below
+    // 25" reads as a bug to whoever hits it.
+    const out = (deps.output as ReturnType<typeof vi.fn>).mock.calls
+      .map((c) => c[0])
+      .join("\n");
+    expect(out).toContain("15/80");
+    expect(out).toContain("do not count toward the floor");
+    expect(out).not.toContain("35/100");
+  });
+
+  // The floor still passes a server whose OWN evidence clears it, and says
+  // nothing about scanners when none was credited.
+  it("admits a server that clears the floor without any external credit (#33)", async () => {
+    const honestTrust: TrustScore = {
+      score: 55,
+      maxPossible: 80,
+      level: "caution",
+      breakdown: { healthCheck: 15, staticScan: 40, externalScan: 0, registryMeta: 0 },
+    };
+    const stackPath = await writeStackAndLock(basicStack, basicLock);
+    const deps = makeDeps({ computeTrustScore: vi.fn().mockReturnValue(honestTrust) });
+
+    await handleUp({ stackFile: stackPath, minTrustFloor: 25 }, deps);
+
+    const adapter = (deps.getAdapter as ReturnType<typeof vi.fn>).mock.results[0].value;
+    expect(adapter.addServer).toHaveBeenCalledTimes(1);
+  });
+
   // E9a: the registry itself pulled this listing → fail closed, install nothing.
   it("blocks a server the registry marks DELETED (E9a)", async () => {
     const stackPath = await writeStackAndLock(basicStack, basicLock);
@@ -697,6 +752,55 @@ servers:
   io.github.test/server-a:
     version: "^1.0.0"
 `;
+
+  // TODOS #33 follow-on. The release-age finding is `medium` with no `source`, so
+  // it deducts from staticScan -- a bucket the hard floor counts. On the MCP
+  // surface the caller supplies the stack file, `minReleaseAgeHours: 0` is
+  // schema-valid, and suppressing that finding RAISES the score the floor
+  // compares. Reproduced before the fix: native 20 -> 25 against a floor of 25,
+  // i.e. the F4 poisoned-republish penalty disarmed by the party it catches.
+  it("ignores policy.minReleaseAgeHours whenever a hard trust floor is in effect", async () => {
+    const fresh = new Date(NOW - 2 * HOUR_MS).toISOString();
+    const withFloor = makeAgeDeps(fresh);
+    await expect(
+      handleUp(
+        { stackFile: await writeStackAndLock(agePolicyStack(0), basicLock), minTrustFloor: 25 },
+        withFloor,
+      )
+    ).rejects.toThrow(/could not be installed/);
+
+    // The finding the attacker's policy tried to suppress is present anyway.
+    expect(findingsPassedToScore(withFloor).some((f) => f.type === "release-cooldown")).toBe(true);
+
+    // And the CLI (no floor) still honours the knob -- this is an
+    // untrusted-surface lockdown, not a removal of the feature.
+    const noFloor = makeAgeDeps(fresh);
+    await handleUp(
+      { stackFile: await writeStackAndLock(agePolicyStack(0), basicLock) },
+      noFloor,
+    );
+    expect(findingsPassedToScore(noFloor).some((f) => f.type === "release-cooldown")).toBe(false);
+  });
+
+  // TODOS #33 follow-on: an admitted server must not advertise a figure that did
+  // not clear the floor. Before this, a floor of 25 admitted on 25/80 while the
+  // line read `trust: 45/100`.
+  it("reports the native figure on admission when a floor excluded scanner credit", async () => {
+    const withCredit: TrustScore = {
+      score: 45,
+      maxPossible: 100,
+      level: "caution",
+      breakdown: { healthCheck: 15, staticScan: 10, externalScan: 20, registryMeta: 0 },
+    };
+    const stackPath = await writeStackAndLock(basicStack, basicLock);
+    const deps = makeDeps({ computeTrustScore: vi.fn().mockReturnValue(withCredit) });
+
+    await handleUp({ stackFile: stackPath, minTrustFloor: 25 }, deps);
+
+    const out = joinedOutput(deps);
+    expect(out).toContain("25/80 against the floor");
+    expect(out).toContain("45/100 with the external scanner");
+  });
 
   it("blocks a fresh release when policy.minReleaseAgeHours is set", async () => {
     const stackPath = await writeStackAndLock(agePolicyStack(24), basicLock);

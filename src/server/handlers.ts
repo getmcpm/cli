@@ -12,6 +12,7 @@ import type { ConfigAdapter, McpServerEntry } from "../config/adapters/index.js"
 import type { ServerEntry } from "../registry/types.js";
 import type { Finding } from "../scanner/tier1.js";
 import type { TrustScore, TrustScoreInput } from "../scanner/trust-score.js";
+import { nativeTrustScore } from "../scanner/trust-score.js";
 import { extractRegistryMeta } from "../utils/format-trust.js";
 import { formatMcpEntryCommand } from "../utils/format-entry.js";
 import { resolveInstallEntry } from "../commands/install.js";
@@ -146,6 +147,11 @@ const DEFAULT_MIN_TRUST_SCORE = 50;
  * `Math.max(userValue, HARD_TRUST_FLOOR)` so no caller-supplied value can lower
  * the gate below this floor. This protects the no-human-in-loop path; the CLI
  * (with a human confirmation prompt) is the only place to install below it.
+ *
+ * Lowering the gate is only half of it. A score can also be pushed UP to meet
+ * the gate, and `MCPM_EXTERNAL_SCANNER` is caller-supplied too — so the floor is
+ * evaluated against `nativeTrustScore`, which excludes the external bucket's
+ * unverifiable credit (TODOS #33).
  */
 const HARD_TRUST_FLOOR = 25;
 
@@ -169,11 +175,20 @@ export async function handleInstall(
   // could trick an agent into installing a dangerous server, so we enforce a
   // hard trust floor here. Issue #24: minTrustScore:0 must NOT disable the gate —
   // the effective threshold is clamped to HARD_TRUST_FLOOR.
+  //
+  // TODOS #33: compared against mcpm's OWN evidence. `computeTrust` above already
+  // passes `hasExternalScanner: false`, so today this subtracts nothing — it is
+  // here so that wiring a scanner into this path later cannot silently reopen the
+  // floor, which is the failure mode #33 found on the sibling `mcpm_up` path.
   const minScore = effectiveMinTrustScore(args.minTrustScore);
-  if (trust.score < minScore) {
+  const nativeTrust = nativeTrustScore(trust);
+  if (nativeTrust.score < minScore) {
     throw new Error(
-      `Server "${args.name}" has trust score ${trust.score}/${trust.maxPossible} ` +
+      `Server "${args.name}" has trust score ${nativeTrust.score}/${nativeTrust.maxPossible} ` +
       `(level: ${trust.level}), which is below the minimum threshold of ${minScore}. ` +
+      (nativeTrust.excludedExternalCredit > 0
+        ? `An external scanner's ${nativeTrust.excludedExternalCredit} points are excluded from this floor because mcpm cannot verify them. `
+        : "") +
       `Install rejected for safety. Use mcpm CLI with --yes to override after manual review.`
     );
   }
@@ -391,7 +406,20 @@ export async function handleSetup(
 
   // Issue #24: clamp to the hard floor so minTrustScore:0 can't disable the gate
   // on the no-human-in-loop setup path either.
-  const minScore = effectiveMinTrustScore(args.minTrustScore);
+  //
+  // Also clamp UP to handleInstall's own default. This pre-filter delegates to
+  // handleInstall without forwarding minTrustScore, so the enforcing gate always
+  // applies DEFAULT_MIN_TRUST_SCORE. With a requested 25-49 the two disagreed:
+  // the pre-filter waved the server through and handleInstall then refused it,
+  // reporting a trust rejection as "Install failed" and quoting a threshold the
+  // caller never asked for. Taking the stricter of the two makes the pre-filter
+  // report exactly what the enforcing gate will do. Deliberately NOT fixed by
+  // forwarding minTrustScore instead -- that would let a caller-supplied 30
+  // LOWER the gate this path enforces today.
+  const minScore = Math.max(
+    effectiveMinTrustScore(args.minTrustScore),
+    DEFAULT_MIN_TRUST_SCORE,
+  );
 
   const installed: Array<{ name: string; trustScore: TrustScore }> = [];
   const skipped: Array<{ name: string; reason: string }> = [];
@@ -450,10 +478,20 @@ export async function handleSetup(
       continue;
     }
 
-    if (bestTrust.score < minScore) {
+    // TODOS #33: the same native-evidence rule as the sibling gates. handleInstall
+    // below re-checks and is the enforcing gate, so this pre-filter exists to
+    // produce an accurate "skipped" reason rather than an "Install failed" one —
+    // but it must agree with it, or a server rejected downstream gets reported
+    // under the wrong heading with a score that was never compared.
+    const bestNative = nativeTrustScore(bestTrust);
+    if (bestNative.score < minScore) {
       skipped.push({
         name: bestEntry.server.name,
-        reason: `Trust score ${bestTrust.score}/${bestTrust.maxPossible} is below minimum ${minScore}`,
+        reason:
+          `Trust score ${bestNative.score}/${bestNative.maxPossible} is below minimum ${minScore}` +
+          (bestNative.excludedExternalCredit > 0
+            ? ` (an external scanner's ${bestNative.excludedExternalCredit} points are excluded — mcpm cannot verify them)`
+            : ""),
       });
       continue;
     }
