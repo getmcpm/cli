@@ -71,9 +71,18 @@ adding one visible decoy sentence to any of them flipped `block` to `warn` on th
 injection family — with nothing here noticing. That is the v0.27.0 lesson
 recurring one layer in: a corpus written alongside a design inherits that
 design's blind spot, so "all fixtures pass" is evidence about the cases someone
-thought of, never about the ones they didn't. Three fixtures now pin the shape:
-two attacks (response and tool description) and the benign article that must
-still pass.
+thought of, never about the ones they didn't. Three fixtures now pin the shape: two
+attacks (response and tool description) and, in `warn/`, the security article
+that must annotate-and-forward rather than block.
+
+That third one started in `benign/` and asserted nothing at all. Its tag
+characters were an RGI Scotland flag, which `rgiTagSequenceMask` skips
+wholesale, so `recovered` stayed false and `inspectTagEncoded` returned before
+the counting code ran — the fixture passed identically with the fix reverted.
+Reaching the code needs a NON-RGI subdivision flag, which necessarily raises the
+`unicode-tag-concealment` presence floor, so the honest home is `warn/`: the
+assertion is that the article warns on concealment and does NOT block on the
+quoted phrase.
 
 Every signature in the shipped catalog must have at least one fixture here, and
 every attack/warn fixture must be caught through the public `mcpm guard inspect`

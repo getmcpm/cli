@@ -367,24 +367,28 @@ function findingKey(f: InspectFinding): string {
 }
 
 /**
- * Runaway backstop on matches counted per pattern. NOT a policy knob — every
- * occurrence below it is counted exactly, and the comparison in
- * `concealmentSurplus` is only sound because of that.
+ * Runaway guard on matches counted per pattern. NOT a policy knob, and
+ * deliberately carrying no interpretation: every occurrence below it is counted
+ * exactly, and `concealmentSurplus` is only sound because of that.
  *
- * An earlier version capped this at 256 and stopped the scan, which forced a
- * decision no answer fits. Treating the cap as "concealed" fabricated a `block`
- * on a benign prompt-injection dataset — 300 quoted rows plus one subdivision
- * flag — and told the operator that plainly readable text was "invisible to a
- * human reviewer". Treating it as "not concealed" let 256 visible decoys
- * suppress a real payload, which is the bypass this whole pass exists to close.
+ * An earlier version capped this at 256 and had to decide what hitting the cap
+ * MEANT — a decision with no answer that is right in both directions. Treating
+ * it as concealed fabricated a `block` on a benign prompt-injection dataset (300
+ * quoted rows plus one subdivision flag) and told the operator that plainly
+ * readable text was "invisible to a human reviewer". Treating it as visible let
+ * 256 decoys suppress a real payload, which is the bypass this pass exists to
+ * close. A later version kept a branch for the tie-break; it was unreachable for
+ * the shipped catalog and therefore unverifiable, so it is gone — an untested
+ * branch in a security decision is how every one of these bugs started.
  *
- * There was never a cost to justify it: counting is one Map operation per match
- * and `normalizeForMatch` already bounds the scanned string to the 64 KB
- * head+tail window, so total matches are bounded by that window divided by the
+ * There was never a cost to justify a tight bound: counting is one map operation
+ * per match, and `normalizeForMatch` already limits the scanned string to the
+ * 64 KB head+tail window, so total matches are bounded by that window over the
  * shortest pattern — a few thousand for the shortest catalog entry (`.env`).
- * The bound below sits far above that and is unreachable for any catalog
- * pattern; it exists so a future short or pathological signature cannot spin.
- * A test pins that it stays unreached. (review round 6)
+ * This sits far above that. If a future signature is short enough to reach it,
+ * counts silently become floors and suppression becomes possible again; the
+ * decoy-flood tests fail loudly in that case, which is verified by a mutation
+ * that lowers this bound. (review rounds 6 and 7)
  */
 const MAX_COUNTED_MATCHES = 100_000;
 
@@ -426,26 +430,16 @@ interface Occurrence {
   text: string;
 }
 
-interface OccurrenceView {
-  counts: Map<string, Occurrence>;
-  /**
-   * Signatures whose counts are a FLOOR rather than a total, because a pattern
-   * of theirs hit the runaway backstop. Unreachable for the shipped catalog;
-   * kept so a future pathological signature degrades predictably rather than
-   * silently miscounting.
-   */
-  saturated: Set<string>;
-}
+
 
 /** Every relaxed match in `leaf`, counted by signature + rendered text. */
 function countOccurrences(
   leaf: string,
   signatures: readonly Signature[],
   target: SignatureTarget,
-): OccurrenceView {
+): Map<string, Occurrence> {
   const normalized = normalizeForMatch(leaf);
   const counts = new Map<string, Occurrence>();
-  const saturated = new Set<string>();
   for (const sig of signatures) {
     if (sig.target !== target) continue;
     for (const rawPattern of sig.patterns) {
@@ -463,14 +457,11 @@ function countOccurrences(
         }
         // A zero-width match would spin forever otherwise.
         if (match.index === pattern.lastIndex) pattern.lastIndex++;
-        if (++seen >= MAX_COUNTED_MATCHES) {
-          saturated.add(sig.id);
-          break;
-        }
+        if (++seen >= MAX_COUNTED_MATCHES) break;
       }
     }
   }
-  return { counts, saturated };
+  return counts;
 }
 
 /**
@@ -505,11 +496,11 @@ function countOccurrences(
  * other — which is attacker-constructible. Counts never index.
  */
 function concealmentSurplus(
-  decoded: OccurrenceView,
-  masked: OccurrenceView,
+  decoded: Map<string, Occurrence>,
+  masked: Map<string, Occurrence>,
 ): Occurrence[] {
   const surplus: Occurrence[] = [];
-  for (const [key, entry] of decoded.counts) {
+  for (const [key, entry] of decoded) {
     // Per KEY, never per pattern. The two views differ only where concealed
     // characters were, so a phrase visible in the text appears the same number
     // of times in both and cancels — however often it repeats — while a phrase
@@ -517,20 +508,7 @@ function concealmentSurplus(
     // entirely. Comparing per pattern instead conflated distinct phrases: 256
     // copies of a decoy and one concealed payload are different keys, and
     // collapsing them let the decoy speak for the payload.
-    if (entry.count > (masked.counts.get(key)?.count ?? 0)) {
-      surplus.push(entry);
-      continue;
-    }
-    // Counts equal or lower. Normally that means "visible, already readable".
-    // The one exception is the runaway backstop: if this signature hit it while
-    // decoding and did NOT hit it on the visible side, the decoded total is a
-    // floor and the tie is an artefact, so report rather than suppress.
-    if (
-      decoded.saturated.has(entry.sig.id) &&
-      !masked.saturated.has(entry.sig.id)
-    ) {
-      surplus.push(entry);
-    }
+    if (entry.count > (masked.get(key)?.count ?? 0)) surplus.push(entry);
   }
   return surplus;
 }
@@ -539,14 +517,13 @@ function inspectAgainstSignatures(
   leaf: string,
   signatures: readonly Signature[],
   target: SignatureTarget,
-  relaxAnchors = false,
 ): InspectFinding[] {
   const normalized = normalizeForMatch(leaf);
   const findings: InspectFinding[] = [];
   for (const sig of signatures) {
     if (sig.target !== target) continue;
     for (const rawPattern of sig.patterns) {
-      const pattern = relaxAnchors ? relaxLeadingAnchor(rawPattern) : rawPattern;
+      const pattern = rawPattern;
       pattern.lastIndex = 0; // reset stateful global regex
       const match = pattern.exec(normalized);
       if (match) {
@@ -979,7 +956,7 @@ export function inspectTagEncoded(
       // via its per-signature break), while still letting the head and the tail
       // each contribute a distinct payload — they are scanned as separate
       // segments precisely so two far-apart runs cannot fuse.
-      const key = `${entry.sig.id} ${entry.text}`;
+      const key = `${entry.sig.id}\u0000${entry.text}`;
       if (seen.has(key) || emittedHere.has(entry.sig.id)) continue;
       seen.add(key);
       emittedHere.add(entry.sig.id);

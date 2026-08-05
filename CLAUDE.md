@@ -108,8 +108,8 @@ research note (Obsidian, `mcpm/` — deliberately not in this repo).
   presence floor (`unicode-tag-concealment`) sits beneath it for payloads that
   are concealed but match no signature. TAG-decoded findings are deliberately NOT
   warn-clamped the way base64-decoded ones are, which is only defensible because
-  decoding happens IN PLACE and so cannot fabricate adjacency. Eight fixtures
-  across four carriers plus three benign emoji-flag fixtures. Before v0.28.0 only tool metadata was
+  decoding happens IN PLACE and so cannot fabricate adjacency. Ten tag-bearing
+  fixtures across four carriers plus four benign emoji-flag fixtures. Before v0.28.0 only tool metadata was
   covered, and only at warn.
 
 ⚠ **Do NOT cite Morphisec's `drp-compliance-sdk` (June 2026) as an incident** —
