@@ -381,11 +381,14 @@ function findingKey(f: InspectFinding): string {
  * the shipped catalog and therefore unverifiable, so it is gone — an untested
  * branch in a security decision is how every one of these bugs started.
  *
- * There was never a cost to justify a tight bound: counting is one map operation
- * per match, and `normalizeForMatch` already limits the scanned string to the
- * 64 KB head+tail window, so total matches are bounded by that window over the
- * shortest pattern — a few thousand for the shortest catalog entry (`.env`).
- * This sits far above that. If a future signature is short enough to reach it,
+ * There was never a cost to justify a tight bound. The reachable maximum was
+ * MEASURED, not argued: 13,106 matches on a `.env`-dense leaf, against this
+ * bound — a 7.6x margin, not the "far above" an earlier version of this comment
+ * claimed. Note the argument that comment gave was unsound: the head+tail window
+ * is applied BEFORE NFKC, which can expand it (32 KB of U+FDFA normalises to
+ * 589,824 chars), so "bounded by the window over the shortest pattern" does not
+ * follow. It happens to hold because no codepoint's NFKC expansion contains a
+ * catalog match, which is a fact about the catalog rather than about the window. If a future signature is short enough to reach it,
  * counts silently become floors and suppression becomes possible again; the
  * decoy-flood tests fail loudly in that case, which is verified by a mutation
  * that lowers this bound. (review rounds 6 and 7)
@@ -455,8 +458,12 @@ function countOccurrences(
         } else {
           prev.count++;
         }
-        // A zero-width match would spin forever otherwise.
-        if (match.index === pattern.lastIndex) pattern.lastIndex++;
+        // Resume one character past the match START, not its end: a greedy
+        // /g loop skips any match that begins inside the one it just took, and
+        // a concealed payload placed there is then never counted at all — so
+        // concealmentSurplus never gets to compare it. Also subsumes the
+        // zero-width guard.
+        pattern.lastIndex = match.index + 1;
         if (++seen >= MAX_COUNTED_MATCHES) break;
       }
     }
@@ -523,9 +530,8 @@ function inspectAgainstSignatures(
   for (const sig of signatures) {
     if (sig.target !== target) continue;
     for (const rawPattern of sig.patterns) {
-      const pattern = rawPattern;
-      pattern.lastIndex = 0; // reset stateful global regex
-      const match = pattern.exec(normalized);
+      rawPattern.lastIndex = 0; // reset stateful global regex
+      const match = rawPattern.exec(normalized);
       if (match) {
         findings.push({
           signature_id: sig.id,
