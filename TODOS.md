@@ -329,6 +329,27 @@ how the sibling `mcpm_up` path came to be exposed.
 **Found:** 2026-08-03, by the fifth adversarial review round on #160, after that PR merged.
 **Status:** FIXED. Reproduced independently on `main` (`e60f0cb`), then closed by replacing the text-identity suppression with an occurrence count against a masked copy of the segment (`concealmentSurplus` in `src/guard/patterns.ts`).
 
+**Round 6 found a HIGH inside that fix** — the sixth consecutive round to do so, and
+the same shape every time: the fix reasoned about a narrower property than the one
+it changed. The counter stopped at 256 matches **per pattern** and had to decide
+what the cap meant, with no answer that is right in both directions. Treating it
+as concealed fabricated a `block` on a benign prompt-injection dataset (300 quoted
+rows plus one subdivision flag), attaching a remediation note calling plainly
+readable text "invisible to a human reviewer" — precisely the harm the pass exists
+to avoid, and it would have led an operator to mute the signature that catches the
+real attack. Treating it as visible let 256 decoys suppress a payload, reopening
+#34 itself.
+
+The bound was the flaw. Counting is one Map operation per match and the scanned
+string is already capped at the 64 KB head+tail window, so the early break bought
+nothing. Counts are now exact and compared **per key**; the remaining backstop sits
+at 100k, unreachable for the shipped catalog, with a test pinning that it stays
+unreached and a mutation confirming a reachable version would be caught.
+
+**My own regression test for this asserted the property at n=3, ~100x below the
+bound it was guarding.** Seventh instance of the recorded lesson: a test written
+alongside a design inherits that design's blind spot.
+
 **What:** `inspectTagEncoded` suppresses a decoded finding when the same
 `findingKey` (signature id + rendered excerpt) appears in `inPlainSight` — the
 findings a **relaxed-anchor** scan produces on the segment *before* decoding.
