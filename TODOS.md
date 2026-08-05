@@ -481,3 +481,66 @@ common tag-bearing-but-clean case single-pass.
 
 **Do not** treat this as a regression gate until the budget is restated — the
 current number is not a measurement of the current code.
+
+### 37. A wildcard bridge spanning a legitimate flag reports visible text as concealed
+**Priority:** P2 — report-quality. No action changes; verified across ~332k benign evaluations.
+**Found:** 2026-08-05, round-7 false-positive sweep of the #34 fix.
+
+**What:** `concealmentSurplus` keys an occurrence on `signature id + matched
+text`. That is sound only while a *visible* phrase produces the same match text
+in both views. It does not, when the match spans concealed characters through a
+**wildcard bridge**. The credential-phishing family is `VERB[\s\S]{0,40}NOUN`,
+and `[\s\S]` matches both decoded letters and the NUL mask, so:
+
+```
+If a site asks you to provide🏴󠁵󠁳󠁣󠁡󠁿 a recovery phrase, close the tab.
+
+decoded key: "provide🏴usca a recovery phrase"
+masked  key: "provide🏴\0\0\0\0 a recovery phrase"
+```
+
+Different keys, so `1 > 0`, so surplus — on a sentence anyone can read, whose
+only concealed characters are a legitimate California subdivision flag. The
+operator sees `NOTE: the payload was written in the Unicode tag block (invisible
+to a human reviewer) … (concealment attempt)`, a garbled excerpt with a region
+code spliced into it, and a remediation recommending they mute
+`credential-phishing-*` — the signature that catches real wallet-drainer
+phishing.
+
+**Bounded, which is why it is P2 and not P0:** the same signature already fired
+from the plain pass, so the frame's action is identical with and without it.
+7,009 occurrences in a 253,968-evaluation sweep, at ordinary space-delimited flag
+placement. The injection family cannot produce it — `[\s]*` separators match
+neither NUL nor a letter, so those patterns cannot span a tag run.
+
+**Do NOT fix by keying on match position.** That is the obvious repair and it is
+unsound: `normalizeForMatch` runs NFKC on each view independently, and a
+combining mark following a decoded character composes in the decoded view but
+not against the NUL mask, so the views desynchronise. Measured — `caf<TAG(e)>´`
+normalises to 10 chars decoded vs 11 masked, and `x<TAG(y)>´z` to 3 vs 4. Index
+keys would trade a common false positive for a rare constructed one, in the same
+direction, while adding a coordinate-space assumption that round 5 already had to
+abandon.
+
+**Likelier shape of a real fix:** decide concealment from whether concealed
+characters contributed to a match's *literal tokens* rather than to a wildcard
+bridge — i.e. per-signature knowledge of which parts of a pattern are wildcards.
+That is a bigger change than it sounds and wants its own round; this function has
+produced a HIGH in six consecutive review rounds, and shipping an unreviewed key
+redesign as the eighth change to it in two days is the exact pattern those rounds
+punished.
+
+### 38. A mid-word subdivision flag can complete a signature token
+**Priority:** P3 — pre-existing, predates the tag pass; not introduced by #34.
+**Found:** 2026-08-05, same sweep.
+
+**What:** the decoded letters of a subdivision flag can finish a word that the
+signature needs. `enter the ca🏴󠁵󠁳󠁣󠁡󠁿rd security code` decodes `usca` and, with the
+following `rd`, spells `card`, completing `card[\s-]*security[\s-]*code` →
+`block` with reply-to-origin, where the same text with tag characters removed
+passes. Identical on `main`.
+
+Requires the flag **inside a word**: across 253,968 evaluations at realistic
+placements (space-delimited, JSON field, CSV cell, markdown emphasis) with 222
+real ISO 3166-2 codes, zero escalations. The RGI control is correctly carved out.
+Related to #37 and probably closed by the same work.
