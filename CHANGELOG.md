@@ -2,10 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## [0.28.0] - Unreleased
-
-> Ready to tag. The date goes in when the tag does — it is left as `Unreleased`
-> rather than guessed, because a date here reads as "this shipped".
+## [0.28.0] - 2026-08-05
 
 ### Security
 
