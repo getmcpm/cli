@@ -96,11 +96,11 @@ research note (Obsidian, `mcpm/` — deliberately not in this repo).
   4 of 8 techniques. **Covered as of v0.28.0** (TODOS #31 closed) within the 64 KB
   per-leaf match window — a payload buried in the discarded middle of a larger
   leaf is still unseen, the pre-existing #27 bound that applies to plaintext
-  equally. ⚠ **Coverage is currently BYPASSABLE on the injection family and
-  v0.28.0 must not be tagged until it is not** — a visible decoy phrase cancels
-  the concealed finding (`block`→`warn`); the credential-phishing family is
-  unaffected. See TODOS #34; do not describe this class as closed while that is
-  open. The guard
+  equally. A decoy-suppression bypass on the
+  injection family (TODOS #34) was found after #160 merged and is now CLOSED:
+  the decoded pass compares OCCURRENCE COUNTS against a masked copy of the
+  segment, not the rendered text of matches, so a visible phrase cannot cancel a
+  concealed one. The guard
   DECODES tag runs back to ASCII and re-runs the carrier's own signatures, on
   every carrier, so a concealed payload is judged by what it says — a TAG-encoded
   seed-phrase solicitation blocks via `credential-phishing-*` on the block-tier

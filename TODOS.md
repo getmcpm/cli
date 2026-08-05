@@ -324,10 +324,10 @@ The `handleInstall` half changes nothing today — `computeTrust` there pins
 that a future scanner wiring cannot silently reopen the floor. That is exactly
 how the sibling `mcpm_up` path came to be exposed.
 
-### 34. TAG decode pass is nullified by an attacker-supplied decoy phrase
-**Priority:** P0 — must be fixed before v0.28.0 is tagged.
+### 34. ~~TAG decode pass is nullified by an attacker-supplied decoy phrase~~ DONE (v0.28.0)
+**Priority:** was P0 — blocked tagging v0.28.0.
 **Found:** 2026-08-03, by the fifth adversarial review round on #160, after that PR merged.
-**Status:** OPEN. Reproduced independently on `main` (`e60f0cb`).
+**Status:** FIXED. Reproduced independently on `main` (`e60f0cb`), then closed by replacing the text-identity suppression with an occurrence count against a masked copy of the segment (`concealmentSurplus` in `src/guard/patterns.ts`).
 
 **What:** `inspectTagEncoded` suppresses a decoded finding when the same
 `findingKey` (signature id + rendered excerpt) appears in `inPlainSight` — the
@@ -428,3 +428,35 @@ gate change.
 scores too. An inflated score means a bad server is not proposed for removal and
 a regression is not reported. Both are human/CLI surfaces, so they are lower
 priority than the tripwire, but they share the premise.
+
+### 36. Tag-bearing large frames cost ~16 ms, 5x the documented relay budget
+**Priority:** P2
+**Found:** 2026-08-04, while measuring the #34 fix. Pre-existing — introduced by
+the tag pass in #160, not by #34.
+
+**What:** `CLAUDE.md` and the v0.5.0 design notes quote the relay's measured
+budget as **p99 0.065 ms small / 3.1 ms large**. Measured on this build, a 64 KB
+`tool_response` carrying a concealed payload costs **~16 ms** — and it cost
+~15.9 ms before the #34 fix too, so counting occurrences is not the cause (it
+adds 8–12% on tag-bearing frames and nothing measurable elsewhere).
+
+| frame | pre-#34 | post-#34 |
+|---|---|---|
+| small benign, no tag chars | 0.016 ms | 0.020 ms |
+| small, concealed payload | 0.040 ms | 0.045 ms |
+| large benign 64 KB, no tags | 5.44 ms | 5.10 ms |
+| large 64 KB + concealed payload | 15.85 ms | 17.15 ms |
+| tag-dense 64 KB | 6.55 ms | 7.37 ms |
+
+Note the 64 KB benign frame is already ~5 ms with no tag characters at all, so
+the 3.1 ms figure does not describe today's engine even on the plain path — it
+predates the H1 carrier expansion, decode-and-rescan, and the tag pass.
+
+**What to do:** re-measure the relay end to end and either restate the budget
+with its date and frame shape, or optimise. The likely win is that the tag pass
+runs the full signature set twice (decoded + masked) over segments up to 32 KB;
+skipping the masked scan when the decoded scan found nothing would make the
+common tag-bearing-but-clean case single-pass.
+
+**Do not** treat this as a regression gate until the budget is restated — the
+current number is not a measurement of the current code.
