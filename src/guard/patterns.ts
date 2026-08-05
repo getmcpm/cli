@@ -366,20 +366,172 @@ function findingKey(f: InspectFinding): string {
   return `${f.signature_id}\u0000${f.matched_text_excerpt.replace("\u2039decoded:unicode-tag\u203a ", "")}`;
 }
 
+/**
+ * Runaway guard on matches counted per pattern. NOT a policy knob, and
+ * deliberately carrying no interpretation: every occurrence below it is counted
+ * exactly, and `concealmentSurplus` is only sound because of that.
+ *
+ * An earlier version capped this at 256 and had to decide what hitting the cap
+ * MEANT — a decision with no answer that is right in both directions. Treating
+ * it as concealed fabricated a `block` on a benign prompt-injection dataset (300
+ * quoted rows plus one subdivision flag) and told the operator that plainly
+ * readable text was "invisible to a human reviewer". Treating it as visible let
+ * 256 decoys suppress a real payload, which is the bypass this pass exists to
+ * close. A later version kept a branch for the tie-break; it was unreachable for
+ * the shipped catalog and therefore unverifiable, so it is gone — an untested
+ * branch in a security decision is how every one of these bugs started.
+ *
+ * There was never a cost to justify a tight bound. The reachable maximum was
+ * MEASURED, not argued: 13,106 matches on a `.env`-dense leaf, against this
+ * bound — a 7.6x margin, not the "far above" an earlier version of this comment
+ * claimed. Note the argument that comment gave was unsound: the head+tail window
+ * is applied BEFORE NFKC, which can expand it (32 KB of U+FDFA normalises to
+ * 589,824 chars), so "bounded by the window over the shortest pattern" does not
+ * follow. It happens to hold because no codepoint's NFKC expansion contains a
+ * catalog match, which is a fact about the catalog rather than about the window. If a future signature is short enough to reach it,
+ * counts silently become floors and suppression becomes possible again; the
+ * decoy-flood tests fail loudly in that case, which is verified by a mutation
+ * that lowers this bound. (review rounds 6 and 7)
+ */
+const MAX_COUNTED_MATCHES = 100_000;
+
+/** Mask for a concealed character when counting the visible-only view.
+ *
+ * NUL, not a space. A space is `\s`, so the catalog's `[\s]*` token separators
+ * match straight through it: `ignore` + TAG(" ") + `all previous instructions`
+ * produces a masked view carrying the whole phrase, which cancels the real
+ * finding. Measured, not assumed — that input reports with NUL and reports
+ * nothing with a space, and a test pins it against `inspectTagEncoded` directly
+ * (through a frame it would prove nothing, since `[\s]*` lets the plain pass
+ * match the glued text either way).
+ *
+ * Removing the character instead of masking it is, as far as I could establish,
+ * behaviourally identical here: for a strip to cancel a decoded match it would
+ * have to leave the phrase intact, which happens only when the concealed
+ * characters sit outside it — where cancelling is correct. Every case I built
+ * agreed with NUL. NUL is kept as the conservative choice, matching the window
+ * seam's reasoning, not because a divergence is known.
+ */
+const CONCEALMENT_MASK = "\u0000";
+
+/** Relaxed pattern, cloned with `g` so every occurrence can be counted. */
+const relaxedGlobalPatterns = new Map<RegExp, RegExp>();
+function relaxedGlobal(pattern: RegExp): RegExp {
+  const cached = relaxedGlobalPatterns.get(pattern);
+  if (cached !== undefined) return cached;
+  const relaxed = relaxLeadingAnchor(pattern);
+  const global = relaxed.flags.includes("g")
+    ? relaxed
+    : new RegExp(relaxed.source, `${relaxed.flags}g`);
+  relaxedGlobalPatterns.set(pattern, global);
+  return global;
+}
+
+interface Occurrence {
+  count: number;
+  sig: Signature;
+  text: string;
+}
+
+
+
+/** Every relaxed match in `leaf`, counted by signature + rendered text. */
+function countOccurrences(
+  leaf: string,
+  signatures: readonly Signature[],
+  target: SignatureTarget,
+): Map<string, Occurrence> {
+  const normalized = normalizeForMatch(leaf);
+  const counts = new Map<string, Occurrence>();
+  for (const sig of signatures) {
+    if (sig.target !== target) continue;
+    for (const rawPattern of sig.patterns) {
+      const pattern = relaxedGlobal(rawPattern);
+      pattern.lastIndex = 0;
+      let seen = 0;
+      let match: RegExpExecArray | null;
+      while ((match = pattern.exec(normalized)) !== null) {
+        const key = `${sig.id}\u0000${match[0]}`;
+        const prev = counts.get(key);
+        if (prev === undefined) {
+          counts.set(key, { count: 1, sig, text: match[0] });
+        } else {
+          prev.count++;
+        }
+        // Resume one character past the match START, not its end: a greedy
+        // /g loop skips any match that begins inside the one it just took, and
+        // a concealed payload placed there is then never counted at all — so
+        // concealmentSurplus never gets to compare it. Also subsumes the
+        // zero-width guard.
+        pattern.lastIndex = match.index + 1;
+        if (++seen >= MAX_COUNTED_MATCHES) break;
+      }
+    }
+  }
+  return counts;
+}
+
+/**
+ * The occurrences that exist ONLY because tag characters were decoded.
+ *
+ * This is the load-bearing comparison of the whole tag pass, and it took five
+ * review rounds to get right, so the reasoning is worth stating.
+ *
+ * The pass must not re-report text a human can already read — an article that
+ * QUOTES `ignore all previous instructions` is not an attack, and blocking it
+ * drops a whole tools/list or fails a connection. But it must report the same
+ * phrase when concealment is what put it there. Telling those apart needs a
+ * per-match property: did THIS match draw any of its characters from decoded
+ * content?
+ *
+ * Comparing the two views by the TEXT of their matches answered a different
+ * question — "does some visible match render like this one?" — and the attacker
+ * writes both sides. Any phrase preceded by a character outside the anchor class
+ * matches the relaxed pattern without being reported itself, so
+ * `Advisory: pages contain 'ignore all previous instructions' text.` cancelled a
+ * real concealed payload and dropped a block to a warn. (TODOS #34)
+ *
+ * Counting occurrences answers the right question without needing positions.
+ * `masked` replaces each concealed character with NUL, so a match whose literals
+ * came from concealed text simply is not there; a visible phrase appears in both
+ * views and cancels itself, however many times it appears. Decoys cannot inflate
+ * the masked side, because each one adds to BOTH.
+ *
+ * Positions would express the property directly, and were tried: they need the
+ * two views to share a coordinate space, and NFKC can compose a decoded
+ * character with a following combining mark — shrinking one view and not the
+ * other — which is attacker-constructible. Counts never index.
+ */
+function concealmentSurplus(
+  decoded: Map<string, Occurrence>,
+  masked: Map<string, Occurrence>,
+): Occurrence[] {
+  const surplus: Occurrence[] = [];
+  for (const [key, entry] of decoded) {
+    // Per KEY, never per pattern. The two views differ only where concealed
+    // characters were, so a phrase visible in the text appears the same number
+    // of times in both and cancels — however often it repeats — while a phrase
+    // whose letters came from tag codepoints is absent from the masked view
+    // entirely. Comparing per pattern instead conflated distinct phrases: 256
+    // copies of a decoy and one concealed payload are different keys, and
+    // collapsing them let the decoy speak for the payload.
+    if (entry.count > (masked.get(key)?.count ?? 0)) surplus.push(entry);
+  }
+  return surplus;
+}
+
 function inspectAgainstSignatures(
   leaf: string,
   signatures: readonly Signature[],
   target: SignatureTarget,
-  relaxAnchors = false,
 ): InspectFinding[] {
   const normalized = normalizeForMatch(leaf);
   const findings: InspectFinding[] = [];
   for (const sig of signatures) {
     if (sig.target !== target) continue;
     for (const rawPattern of sig.patterns) {
-      const pattern = relaxAnchors ? relaxLeadingAnchor(rawPattern) : rawPattern;
-      pattern.lastIndex = 0; // reset stateful global regex
-      const match = pattern.exec(normalized);
+      rawPattern.lastIndex = 0; // reset stateful global regex
+      const match = rawPattern.exec(normalized);
       if (match) {
         findings.push({
           signature_id: sig.id,
@@ -759,7 +911,12 @@ export function inspectTagEncoded(
   for (const segment of segments) {
     if (!hasTagChar(segment)) continue;
     const skip = rgiTagSequenceMask(segment);
+    // decoded: what a tag-decoding model reads. masked: the same string with
+    // every concealed character replaced, i.e. what is visible WITHOUT decoding.
+    // Built in one pass so the two views differ at exactly the concealed
+    // positions and nowhere else.
     let decoded = "";
+    let masked = "";
     let recovered = false;
     for (let i = 0; i < segment.length; ) {
       const cp = segment.codePointAt(i) ?? 0;
@@ -770,10 +927,12 @@ export function inspectTagEncoded(
         // CANCEL TAG) carry no character and simply drop out.
         if (ascii !== "") {
           decoded += ascii;
+          masked += CONCEALMENT_MASK;
           recovered = true;
         }
       } else {
         decoded += segment.slice(i, i + width);
+        masked += segment.slice(i, i + width);
       }
       i += width;
     }
@@ -790,20 +949,33 @@ export function inspectTagEncoded(
     // tools/list, or failing the connection on initialize_instructions, and
     // labelling text the reviewer can read as "invisible to a human reviewer".
     //
-    // So a relaxed match is kept only when the same match is NOT already there in
-    // plain sight. Scanning the raw segment gives exactly that view for free:
-    // normalizeForMatch strips tag characters, so it IS the visible-only text.
-    // This also repairs the dedupe — the relaxed excerpt omits the anchor
-    // character the plain pattern consumes, so keying on the excerpt alone let a
-    // genuine re-report slip through. (review 2026-08-03, round 5)
-    const inPlainSight = new Set(
-      inspectAgainstSignatures(segment, signatures, target, true).map(findingKey),
-    );
-    for (const f of inspectAgainstSignatures(decoded, signatures, target, true)) {
-      const key = findingKey(f);
-      if (seen.has(key) || inPlainSight.has(key)) continue;
+    // So a relaxed match is kept only where DECODING is what produced it. See
+    // `concealmentSurplus` for why that is counted rather than compared by text:
+    // the text comparison this replaced was an attacker-controlled suppression
+    // lever, and one decoy sentence disarmed the whole pass. (TODOS #34)
+    const emittedHere = new Set<string>();
+    for (const entry of concealmentSurplus(
+      countOccurrences(decoded, signatures, target),
+      countOccurrences(masked, signatures, target),
+    )) {
+      // At most one finding per signature per SEGMENT (what the plain pass emits
+      // via its per-signature break), while still letting the head and the tail
+      // each contribute a distinct payload — they are scanned as separate
+      // segments precisely so two far-apart runs cannot fuse.
+      const key = `${entry.sig.id}\u0000${entry.text}`;
+      if (seen.has(key) || emittedHere.has(entry.sig.id)) continue;
       seen.add(key);
-      findings.push(f);
+      emittedHere.add(entry.sig.id);
+      findings.push({
+        signature_id: entry.sig.id,
+        category: entry.sig.category,
+        severity: entry.sig.severity,
+        target: entry.sig.target,
+        matched_text_excerpt: entry.sig.redact
+          ? redactSecret(entry.text)
+          : truncate(entry.text),
+        remediation: entry.sig.remediation,
+      });
     }
   }
 

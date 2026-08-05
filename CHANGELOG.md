@@ -2,7 +2,10 @@
 
 All notable changes to this project will be documented in this file.
 
-## [0.28.0] - 2026-07-29
+## [0.28.0] - Unreleased
+
+> Ready to tag. The date goes in when the tag does — it is left as `Unreleased`
+> rather than guessed, because a date here reads as "this shipped".
 
 ### Security
 
@@ -149,6 +152,19 @@ All notable changes to this project will be documented in this file.
   in the discarded middle of a leaf larger than the 64 KB match window is not
   seen (the pre-existing bound, identical for plaintext), and a well-formed
   subdivision flag outside the three RGI sequences warns on a data carrier.
+
+  A third limit was a live bypass, found by the fifth adversarial review round
+  on the pull request that added this — after it merged — and closed before
+  release. So the decoded pass does not re-report an article that merely *quotes*
+  an attack phrase, a decoded finding is dropped when the same finding is visible
+  without decoding. That comparison was keyed on the match's **rendered text**,
+  and an attacker writes both sides of it: a visible phrase preceded by any
+  character outside `[\s.,;:!?]` matched the relaxed pattern without being
+  reported itself, and cancelled the concealed payload — `block` became `warn`,
+  leaving only the presence floor. It is now an **occurrence count** against a
+  masked copy of the segment, so a match whose literals came from concealed text
+  always survives, while a visible phrase cancels itself however often it is
+  repeated. The bypass never appeared in a published release.
 
 - **Fixed a pre-existing fusion bug on the ordinary matching path.** When a leaf
   exceeds the 64 KB match window the engine keeps a head and a tail and discards
