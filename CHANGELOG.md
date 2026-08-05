@@ -2,7 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
-## [0.28.0] - 2026-07-29
+## [0.28.0] - Unreleased
+
+> Not tagged yet, and deliberately not: the Unicode TAG decode pass below has a
+> known bypass on the instruction-injection signatures (TODOS #34). Every other
+> entry in this section is complete. The date goes in when the tag does — it is
+> left as `Unreleased` rather than guessed, because a date here reads as "this
+> shipped".
 
 ### Security
 
@@ -104,6 +110,8 @@ All notable changes to this project will be documented in this file.
   score shown elsewhere.
 
 - **Unicode TAG-block payloads are now decoded and re-scanned on every carrier.**
+  ⚠ *Incomplete as written — see the bypass note at the end of this entry. It is
+  the reason this version is not tagged yet.*
   "ASCII smuggling" (arXiv 2607.05744) writes a payload in U+E0000–U+E007F, a
   shadow copy of printable ASCII that renders as nothing but is readable by a
   model. Adding fixtures for it exposed a detection **hole**, not merely a
@@ -149,6 +157,22 @@ All notable changes to this project will be documented in this file.
   in the discarded middle of a leaf larger than the 64 KB match window is not
   seen (the pre-existing bound, identical for plaintext), and a well-formed
   subdivision flag outside the three RGI sequences warns on a data carrier.
+
+  ⚠ **A third limit is a live bypass, not a pinned bound — and this version will
+  not be tagged until it is closed (TODOS #34).** So the decoded pass does not
+  re-report an article that merely *quotes* an attack phrase, a decoded finding
+  is dropped when the same finding is already visible in plain sight. That
+  comparison is keyed on the match's **rendered text**, and an attacker writes
+  both sides of it: a visible phrase preceded by any character outside
+  `[\s.,;:!?]` — `'ignore all previous instructions'` in quotes — matches the
+  relaxed pattern without being reported itself, and cancels the real concealed
+  payload. `block` drops to `warn`, leaving only the presence floor. It hits the
+  five signatures carrying that leading anchor (the `owasp-mcp-{1,2}` injection
+  family, on every carrier); `credential-phishing-*` is unaffected because its
+  patterns have no leading anchor, so the `sampling_prompt` seed-phrase case
+  described above does still block. Found by the fifth adversarial review round
+  on the PR that added this, *after* it merged; reproduced independently. The
+  class has never appeared in a published release.
 
 - **Fixed a pre-existing fusion bug on the ordinary matching path.** When a leaf
   exceeds the 64 KB match window the engine keeps a head and a tail and discards

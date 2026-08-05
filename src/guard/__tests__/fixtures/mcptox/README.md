@@ -65,6 +65,14 @@ set: without them the detector's zero-FP claim would be vacuous, since no other
 BENIGN fixture contains a codepoint in U+E0000–U+E007F. They cover the
 carve-out's happy path — not the detector's full false-positive surface.
 
+⚠ **The tag-block fixtures do not cover the decoy bypass (TODOS #34).** Every one
+of them presents a concealed payload *alone*. Adding one visible decoy sentence
+to any of them flips the verdict from `block` to `warn` on the injection family,
+and no fixture here would notice. This is the v0.27.0 lesson recurring one layer
+in: a corpus written alongside a design inherits that design's blind spot, so
+"all fixtures pass" is evidence about the cases someone thought of, never about
+the ones they didn't. Decoy variants land with the fix.
+
 Every signature in the shipped catalog must have at least one fixture here, and
 every attack/warn fixture must be caught through the public `mcpm guard inspect`
 seam — `inspect-relay-parity.test.ts` fails the build otherwise, with a justified
