@@ -2,6 +2,25 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased]
+
+### Security
+
+- **`policy.blockOnScoreDrop` no longer trusts an unverifiable external scanner
+  (TODOS #35).** The rug-pull tripwire compared raw trust-score percentages, and
+  crediting the external-scanner bucket moves the denominator 80 → 100 — inflating
+  the percentage for any native score below 80. A caller-supplied
+  `MCPM_EXTERNAL_SCANNER` printing `{"findings":[]}` could therefore mask a genuine
+  native score drop (reproduced: native evidence falling 75% → 69% passed with a
+  fake scanner). The check now compares mcpm-**native** evidence on both sides — the
+  same rule the hard trust floor already applied (#33). Lock snapshots record an
+  `externalScanCredit` field so the locked native baseline is recoverable; pre-#35
+  locks written with a scanner credited fall back safely (and fail closed rather
+  than raw-compare when a current-side scanner could be the lever). `minTrustScore`
+  and `--min-trust` are unchanged — a human threshold on the user's own machine.
+  The sibling `audit --fix` and `outdated` raw-score comparisons are tracked
+  separately (TODOS #35).
+
 ## [0.28.0] - 2026-08-05
 
 ### Security

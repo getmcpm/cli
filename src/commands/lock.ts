@@ -377,6 +377,10 @@ async function resolveServer(
     maxPossible: trustScore.maxPossible,
     level: trustScore.level,
     assessedAt: new Date().toISOString(),
+    // TODOS #35: record the external-scanner credit so the drop tripwire can
+    // recover this baseline's native figure later. Always written (0 when no
+    // scanner was credited) so every lock this mcpm writes is native-recoverable.
+    externalScanCredit: trustScore.breakdown.externalScan,
   };
 
   // Step 5: H11 slice 1 — capture npm artifact integrity snapshot.

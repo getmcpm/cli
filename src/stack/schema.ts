@@ -181,6 +181,16 @@ const TrustSnapshotSchema = z.object({
   maxPossible: z.number(),
   level: z.enum(["safe", "caution", "risky"]),
   assessedAt: z.string(),
+  /**
+   * The external-scanner bucket credit at lock time (TODOS #35). Recorded so the
+   * `blockOnScoreDrop` tripwire can recover the locked mcpm-NATIVE figure
+   * (`score - externalScanCredit`) and compare native-to-native — a caller-supplied
+   * `MCPM_EXTERNAL_SCANNER` cannot be verified, so its credit must not be able to
+   * mask a native score drop. Bare `.optional()`: absent on pre-#35 lockfiles, which
+   * fall back to the raw comparison (see `checkTrustPolicy`). Non-strict schema, so
+   * old lockfiles parse unchanged.
+   */
+  externalScanCredit: z.number().optional(),
 });
 
 /** A locked registry server entry. */

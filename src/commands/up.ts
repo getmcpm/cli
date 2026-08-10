@@ -632,6 +632,10 @@ async function processServer(input: ProcessInput): Promise<ServerResult> {
     serverName: name,
     currentScore: trustScore.score,
     currentMaxPossible: trustScore.maxPossible,
+    // TODOS #35: the blockOnScoreDrop tripwire compares native evidence, so a fake
+    // MCPM_EXTERNAL_SCANNER cannot mask a drop. `nativeTrust` is computed above.
+    currentNativeScore: nativeTrust.score,
+    currentNativeMaxPossible: nativeTrust.maxPossible,
     lockedSnapshot: locked.trust,
     policy,
     releaseAge: {

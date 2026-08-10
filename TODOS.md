@@ -410,9 +410,63 @@ un-clamped design into the clamped one for anyone who knows the trick. That is
 an argument about which posture is *honest*, not a reason to clamp; fix the
 bypass first, then decide the clamp on its merits.
 
-### 35. A fake external scanner masks `policy.blockOnScoreDrop`
+### 35. ~~A fake external scanner masks `policy.blockOnScoreDrop`~~ DONE (unreleased)
 **Priority:** P1 — pre-existing; sibling of #33, deliberately NOT fixed with it.
 **Found:** 2026-08-03, by the security review of the #33 change. Reproduced.
+
+**Shipped (2026-08-10):** the `blockOnScoreDrop` branch of `checkTrustPolicy`
+now compares mcpm-**native** evidence, so a caller-supplied
+`MCPM_EXTERNAL_SCANNER` cannot mask a native drop — the same rule
+`nativeTrustScore` already applied to the hard floor (#33).
+
+- **Locked side made recoverable.** `TrustSnapshot` gains a bare-`.optional()`
+  `externalScanCredit` (`src/stack/schema.ts`); `mcpm lock` always writes it,
+  including `0`. The locked native figure is `score - externalScanCredit`, so
+  the baseline no longer has to be trusted at its inflated face value.
+- **Current side** uses the `nativeTrust` figure `up.ts` already computes for
+  the floor gate — passed in as `currentNativeScore` / `currentNativeMaxPossible`.
+  Native scoring has one universal denominator (80), so both sides compare on it.
+- **Refuse, don't silently fall back.** The drop branch **throws** if the native
+  figures are absent rather than reverting to the raw comparison this fix
+  retired — the same "a future caller must not silently reopen the hole" wiring
+  discipline #33 used. No production path hits it (up.ts always supplies them).
+- **Back-compat, hardened after adversarial review.** A pre-fix lock written with
+  a scanner credited (`maxPossible 100`, no `externalScanCredit`) cannot have its
+  native figure recovered. The first cut fell back to the raw comparison here — but
+  review showed that reopened the exact hole: if the CURRENT side also has a
+  (fake) scanner, the raw current score is inflatable and could still mask a native
+  drop. So the fallback now **fails closed** (block + "re-run `mcpm lock`") whenever
+  a current-side scanner is credited, and only raw-compares when the current side
+  has no scanner (no lever, status quo). A pre-fix lock with no scanner
+  (`maxPossible 80`) is already native and recovers cleanly.
+- **`minTrustScore` / `--min-trust` deliberately unchanged**, exactly as in #33:
+  a human picks both the threshold and the scanner on their own machine.
+
+Regression coverage in `policy.test.ts`: the exploit itself (a fake scanner that
+inflates the raw score to tie the baseline is still blocked on native evidence,
+and the verdict is identical with no scanner at all), plus the recovery paths,
+the raw fallback, and the throw. `schema.test.ts` pins the field round-trip and
+that pre-#35 locks still parse.
+
+**Still open — the sibling surfaces (own PR):** `audit --fix` and the `outdated`
+trust-regression check still compare raw scores (see "Same class" below). They
+are human/CLI surfaces, lower priority than the tripwire, and were left out of
+this change deliberately. **Adversarial review sharpened the ordering:** among the
+two, `audit --fix` is the heavier one — it is **gating** (a fake clean scanner can
+lift a bad server's raw score above the removal threshold so it is *not* proposed
+for removal, `src/commands/audit.ts:87-91`), whereas `outdated` is advisory. Do
+`audit --fix` first when this sibling PR is picked up.
+
+**Verified deliberate, not bugs (adversarial review of the fix):** (1) the tripwire
+now ignores external-bucket movement in BOTH directions — a real external-scanner
+regression that lowers only that bucket no longer trips it either, because mcpm
+cannot distinguish it from a fake clean scan; it still surfaces in the score and in
+`audit`. (2) A pre-#35 scanner-credited lock can make the native path and the raw
+fallback diverge for the same evidence; the fallback now fails closed (with a
+re-lock instruction) whenever a current-side scanner is also credited, so the
+divergence always resolves to "re-lock", never a silent inconsistency.
+
+--- original report, for reference ---
 
 **What:** `checkTrustPolicy` (`src/stack/policy.ts`) compares **normalized
 percentages** of RAW scores, including `lockedSnapshot.score` from

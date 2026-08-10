@@ -294,6 +294,36 @@ describe("LockFileSchema", () => {
     const result = LockFileSchema.safeParse(input);
     expect(result.success).toBe(true);
   });
+
+  it("preserves externalScanCredit on the trust snapshot (#35)", () => {
+    // The snapshot in "accepts a valid lock file" has no externalScanCredit and
+    // still parses — that is the pre-#35 back-compat case. This asserts the field
+    // round-trips when present, so the native-drop check can recover the baseline.
+    const input = {
+      lockfileVersion: 1,
+      lockedAt: "2026-08-05T10:00:00Z",
+      servers: {
+        "io.github.example/scanned": {
+          version: "1.0.0",
+          registryType: "npm",
+          identifier: "scanned",
+          trust: {
+            score: 82,
+            maxPossible: 100,
+            level: "safe",
+            assessedAt: "2026-08-05T10:00:00Z",
+            externalScanCredit: 18,
+          },
+        },
+      },
+    };
+    const result = LockFileSchema.safeParse(input);
+    expect(result.success).toBe(true);
+    if (result.success) {
+      const server = result.data.servers["io.github.example/scanned"];
+      expect(server && "trust" in server && server.trust?.externalScanCredit).toBe(18);
+    }
+  });
 });
 
 // ---------------------------------------------------------------------------

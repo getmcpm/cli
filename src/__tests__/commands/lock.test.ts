@@ -173,6 +173,34 @@ servers:
     expect(locked.trust.level).toBe("safe");
   });
 
+  it("records externalScanCredit = the external bucket in the snapshot (#35)", async () => {
+    // Load-bearing for #35: without this field on a scanner-credited lock, the
+    // drop tripwire cannot recover the native baseline. A non-zero external bucket
+    // means this fails if lock.ts stops writing the field or hardcodes 0 — the
+    // mutation the reviewer showed the rest of the suite does not catch.
+    const stackPath = await writeTempStackFile(`
+version: "1"
+servers:
+  io.github.test/scanned:
+    version: "1.0.0"
+`);
+    const deps = makeDeps({
+      computeTrustScore: vi.fn().mockReturnValue({
+        score: 93,
+        maxPossible: 100,
+        level: "safe",
+        breakdown: { healthCheck: 15, staticScan: 40, externalScan: 18, registryMeta: 10 },
+      } satisfies TrustScore),
+    });
+
+    await handleLock({ stackFile: stackPath }, deps);
+
+    const [, content] = (deps.writeLockFile as ReturnType<typeof vi.fn>).mock.calls[0];
+    const locked = parseYaml(content).servers["io.github.test/scanned"];
+    expect(locked.trust.maxPossible).toBe(100);
+    expect(locked.trust.externalScanCredit).toBe(18);
+  });
+
   it("throws when mcpm.yaml does not exist", async () => {
     const deps = makeDeps();
     await expect(
