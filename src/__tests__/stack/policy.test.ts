@@ -151,9 +151,10 @@ describe("checkTrustPolicy", () => {
 
   // --- #35 back-compat: pre-fix lock with a scanner, native unrecoverable ----
 
-  it("falls back to raw comparison on a pre-#35 lock (scanner credited, no field)", () => {
-    // lockedSnapshot: 85/100, no externalScanCredit ⇒ native unrecoverable ⇒ raw.
-    // Current 65/80 = 81% raw < 85% locked raw ⇒ drop; reason notes the re-lock.
+  it("compares against a bounded baseline on a pre-#35 lock (scanner credited, no field)", () => {
+    // lockedSnapshot: 85/100, no externalScanCredit ⇒ exact native unrecoverable.
+    // Bounded upper baseline = min(nativeMax 80, score 85) = 80/80 = 100%.
+    // Current native 65/80 = 81% < 100% ⇒ drop; reason says the baseline is a bound.
     const result = checkTrustPolicy({
       serverName: "test-server",
       currentScore: 65,
@@ -165,33 +166,17 @@ describe("checkTrustPolicy", () => {
     });
     expect(result.pass).toBe(false);
     if (!result.pass) {
-      expect(result.reason).toContain("85%");
       expect(result.reason).toContain("81%");
-      expect(result.reason).toContain("predates");
+      expect(result.reason).toContain("upper bound");
+      expect(result.reason).toContain("mcpm lock");
     }
   });
 
-  it("passes the raw fallback when the pre-#35 lock shows no drop (no current scanner)", () => {
-    // Unrecoverable lock, but the current side has NO scanner (maxPossible 80), so
-    // there is no fake-scanner lever — raw fallback applies and there is no drop.
-    const result = checkTrustPolicy({
-      serverName: "test-server",
-      currentScore: 72,
-      currentMaxPossible: 80,
-      currentNativeScore: 72,
-      currentNativeMaxPossible: 80,
-      lockedSnapshot, // 85/100 = 85%; current 72/80 = 90% ⇒ no drop
-      policy: { blockOnScoreDrop: true },
-    });
-    expect(result.pass).toBe(true);
-  });
-
-  it("fails CLOSED on an unrecoverable lock when the current side has a scanner (#35 fallback lever)", () => {
+  it("blocks a native drop on an unrecoverable lock when the current side has a scanner (#35 lever)", () => {
     // The hole the first fix left: an unrecoverable pre-#35 lock (scanner credited,
-    // no field) AND a current-side scanner means the raw fallback would compare the
-    // fake-scanner-inflated current score — so a {"findings":[]} stub could still
-    // mask a native drop. Native genuinely fell (47/80 = 59%) but the fake scanner
-    // banks +20 → raw current 67/100 = 67% ≥ locked raw 65% would have PASSED.
+    // no field) AND a current-side scanner. Native genuinely fell (47/80 = 59%) but
+    // the fake scanner banks +20 → raw current 67/100 = 67% ≥ locked raw 65% PASSED.
+    // Bounded baseline = min(80, 65) = 65 ⇒ 59% < 81% ⇒ blocked.
     const preFixLock: TrustSnapshot = {
       score: 65,
       maxPossible: 100, // scanner credited at lock time, no externalScanCredit field
@@ -208,10 +193,41 @@ describe("checkTrustPolicy", () => {
       policy: { blockOnScoreDrop: true },
     });
     expect(result.pass).toBe(false);
-    if (!result.pass) {
-      expect(result.reason).toContain("cannot be checked");
-      expect(result.reason).toContain("mcpm lock");
-    }
+    if (!result.pass) expect(result.reason).toContain("upper bound");
+  });
+
+  it("blocks a real native drop on an unrecoverable lock even with NO current scanner (round-2 fail-open)", () => {
+    // Round 2: the old raw fallback compared 88% (current raw, native denominator)
+    // against 85% (locked raw, 100 denominator) and PASSED — while native evidence
+    // had genuinely fallen from a possible 80/80 to 70/80. Apples-to-oranges
+    // denominators hid it. Bounded baseline = min(80, 85) = 80 ⇒ 88% < 100% ⇒ block.
+    const result = checkTrustPolicy({
+      serverName: "test-server",
+      currentScore: 70,
+      currentMaxPossible: 80, // no scanner configured now
+      currentNativeScore: 70,
+      currentNativeMaxPossible: 80,
+      lockedSnapshot, // 85/100, no credit field ⇒ bounded at min(80,85)=80
+      policy: { blockOnScoreDrop: true },
+    });
+    expect(result.pass).toBe(false);
+  });
+
+  it("passes when a drop is arithmetically impossible on an unrecoverable lock (round-2 false block)", () => {
+    // Round 2: the fail-closed branch blocked a user whose native evidence is
+    // PERFECT (80/80 = 100%, the maximum the native scale can express, so no drop is
+    // representable) purely because a scanner was credited on both sides. The bound
+    // makes this pass: min(80, 85) = 80 ⇒ 100% < 100% is false.
+    const result = checkTrustPolicy({
+      serverName: "test-server",
+      currentScore: 85, // 80 native + 5 external
+      currentMaxPossible: 100,
+      currentNativeScore: 80,
+      currentNativeMaxPossible: 80,
+      lockedSnapshot, // 85/100, no credit field
+      policy: { blockOnScoreDrop: true },
+    });
+    expect(result.pass).toBe(true);
   });
 
   it("throws if blockOnScoreDrop is active without native figures", () => {

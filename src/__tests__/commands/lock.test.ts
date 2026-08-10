@@ -5,7 +5,7 @@ import type { ServerEntry } from "../../registry/types.js";
 import type { TrustScore } from "../../scanner/trust-score.js";
 import { parse as parseYaml } from "yaml";
 import { LockFileSchema } from "../../stack/schema.js";
-import { writeFile, mkdir } from "fs/promises";
+import { writeFile, mkdir, readFile } from "fs/promises";
 import path from "path";
 import os from "os";
 
@@ -67,12 +67,13 @@ function makeDeps(overrides: Partial<LockDeps> = {}): LockDeps {
 }
 
 async function writeTempStackFile(
-  content: string
+  content: string,
+  fileName = "mcpm.yaml"
 ): Promise<string> {
   const dir = await import("fs/promises").then((fs) =>
     fs.mkdtemp(path.join(os.tmpdir(), "mcpm-lock-test-"))
   );
-  const filePath = path.join(dir, "mcpm.yaml");
+  const filePath = path.join(dir, fileName);
   await writeFile(filePath, content, "utf-8");
   return filePath;
 }
@@ -171,6 +172,57 @@ servers:
     expect(locked.trust.score).toBe(75);
     expect(locked.trust.maxPossible).toBe(80);
     expect(locked.trust.level).toBe("safe");
+  });
+
+  // Round-2 review, reproduced by execution: the lock path was derived with an
+  // anchored, case-sensitive /\.yaml$/ replace, so any stack path not ending in
+  // exactly ".yaml" came back UNCHANGED ⇒ lockPath === stackPath ⇒ `mcpm lock`
+  // wrote the lock OVER the user's stack file, destroying their server
+  // declarations, and reported "Locked 1 servers" with exit 0.
+  it.each(["mcpm.yml", "mcpm.YAML", "stack.Yml"])(
+    "derives a distinct lock path for %s and leaves the stack file intact",
+    async (fileName) => {
+      const stackPath = await writeTempStackFile(
+        `
+version: "1"
+servers:
+  io.github.test/a:
+    version: "1.0.0"
+`,
+        fileName,
+      );
+      const before = await readFile(stackPath, "utf8");
+      const deps = makeDeps();
+
+      await handleLock({ stackFile: stackPath }, deps);
+
+      const [lockPath] = (deps.writeLockFile as ReturnType<typeof vi.fn>).mock.calls[0];
+      expect(lockPath).not.toBe(stackPath);
+      expect(lockPath).toContain("-lock.yaml");
+      expect(await readFile(stackPath, "utf8")).toBe(before);
+    },
+  );
+
+  it("appends rather than collides for an extensionless stack file", async () => {
+    // Nothing to strip, so the old code returned the path unchanged and destroyed
+    // it. Appending unconditionally makes collision unrepresentable.
+    const stackPath = await writeTempStackFile(
+      `
+version: "1"
+servers:
+  io.github.test/a:
+    version: "1.0.0"
+`,
+      "stack",
+    );
+    const before = await readFile(stackPath, "utf8");
+    const deps = makeDeps();
+
+    await handleLock({ stackFile: stackPath }, deps);
+
+    const [lockPath] = (deps.writeLockFile as ReturnType<typeof vi.fn>).mock.calls[0];
+    expect(lockPath).toBe(`${stackPath}-lock.yaml`);
+    expect(await readFile(stackPath, "utf8")).toBe(before);
   });
 
   it("records externalScanCredit = the external bucket in the snapshot (#35)", async () => {

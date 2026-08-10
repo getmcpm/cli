@@ -32,6 +32,7 @@ import type {
   Policy,
   NpmIntegritySnapshot,
 } from "../stack/schema.js";
+import { lockPathFor } from "../stack/paths.js";
 import {
   parseStackFile,
   parseLockFile,
@@ -260,7 +261,7 @@ export async function handleUp(
   }
 
   const stackPath = options.stackFile ?? "mcpm.yaml";
-  const lockPath = stackPath.replace(/\.yaml$/, "-lock.yaml");
+  const lockPath = lockPathFor(stackPath);
 
   // Step 1: Read stack file
   const stackFile = await parseStackFile(stackPath);

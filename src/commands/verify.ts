@@ -16,6 +16,7 @@
  */
 
 import type { LockFile, StackFile } from "../stack/schema.js";
+import { lockPathFor } from "../stack/paths.js";
 import {
   classifyIntegrity,
   frozenVerdict,
@@ -94,7 +95,7 @@ export interface VerifyOpts {
  */
 export async function verifyHandler(deps: VerifyDeps, opts: VerifyOpts = {}): Promise<number> {
   const stackPath = opts.stackFile ?? "mcpm.yaml";
-  const lockPath = stackPath.replace(/\.yaml$/, "-lock.yaml");
+  const lockPath = lockPathFor(stackPath);
 
   // Fail-closed: this handler NEVER throws — any error (a missing lock, a malformed /
   // Zod-invalid lock that makes parseLock throw, a fetch failure) resolves to exit 1

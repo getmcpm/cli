@@ -20,6 +20,7 @@ import type {
   LockFile,
   LockedServer,
 } from "../stack/schema.js";
+import { lockPathFor } from "../stack/paths.js";
 import {
   parseStackFile,
   parseLockFile,
@@ -60,7 +61,7 @@ export async function handleDiff(
   deps: DiffDeps
 ): Promise<void> {
   const stackPath = options.stackFile ?? "mcpm.yaml";
-  const lockPath = stackPath.replace(/\.yaml$/, "-lock.yaml");
+  const lockPath = lockPathFor(stackPath);
 
   const stackFile = await parseStackFile(stackPath);
   const lockFile = await parseLockFile(lockPath);

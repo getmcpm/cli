@@ -36,6 +36,7 @@ import {
 import { compareProvenance } from "../registry/npm-provenance.js";
 import { sanitizeForTerminal } from "../guard/sanitize.js";
 import { resolveVersion, resolveWithSingleVersion } from "../stack/resolve.js";
+import { lockPathFor } from "../stack/paths.js";
 import { valid as semverValid } from "semver";
 import { assessReleaseAge, DEFAULT_MIN_RELEASE_AGE_HOURS } from "../scanner/cooldown.js";
 import { extractRegistryMeta } from "../utils/format-trust.js";
@@ -115,7 +116,7 @@ export async function handleLock(
   deps: LockDeps
 ): Promise<void> {
   const stackPath = options.stackFile ?? "mcpm.yaml";
-  const lockPath = stackPath.replace(/\.yaml$/, "-lock.yaml");
+  const lockPath = lockPathFor(stackPath);
   const stackFile = await parseStackFile(stackPath);
 
   const scannerAvailable = await deps.checkScannerAvailable();
