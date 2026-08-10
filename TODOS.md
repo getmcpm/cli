@@ -638,3 +638,26 @@ Unwrapped the payload blocks; base64-wrapped it is `pass` with **zero** findings
 since the raw leaf carries no tag characters and the presence floor never fires.
 Fix the comment at minimum; closing the gap means deciding whether the texty gate
 should count tag codepoints as printable.
+
+### 41. `registryMeta` critical/high cap leaks external findings into the native score
+
+Found by the round-2 adversarial review of #35 (LOW, confirmed by execution).
+The #35 fix removes the external-scanner CREDIT from both sides of the drop check,
+but external findings also zero a **native** bucket: `computeTrustScore` derives
+`registryMeta` as `hasCriticalOrHighFindings(input.findings) ? 0 : …` over **all**
+findings, including `source: "external"`. `nativeTrustScore` subtracts only
+`breakdown.externalScan`, so that collateral −10 stays inside the "native" figure
+and is baked into the locked snapshot.
+
+Residual bypass window, ≤10 points: a real scanner reporting a critical at lock
+time zeroes `registryMeta`, lowering the locked native baseline; a later fake
+clean scanner leaves it at 10, raising the current native figure and masking a
+genuine native drop of up to that size. Narrow, and strictly smaller than the
+20-point credit window #35 closed — but it is the same class, so it should not be
+described as fully closed.
+
+Fix: make the native view independent of external findings in **both** buckets,
+e.g. compute the `registryMeta` cap from non-`source:"external"` findings for the
+native figure and expose it (`breakdown.nativeRegistryMeta`). Deferred because it
+changes `nativeTrustScore`, which the MCP hard trust floor (#33) also consumes, so
+it needs that path re-verified rather than a local patch.

@@ -20,6 +20,13 @@ All notable changes to this project will be documented in this file.
   and `--min-trust` are unchanged — a human threshold on the user's own machine.
   The sibling `audit --fix` and `outdated` raw-score comparisons are tracked
   separately (TODOS #35).
+- **`mcpm lock` no longer destroys a stack file that is not named `*.yaml`.**
+  Pre-existing since v0.3.0: the lock path came from an anchored, case-sensitive
+  `/\.yaml$/` replace, so `mcpm lock -f mcpm.yml` (also `.YAML`, or an
+  extensionless path) derived a lock path identical to the stack path and wrote the
+  generated lock **over the user's own server declarations**, reporting success and
+  exiting 0. Path derivation is now one shared `lockPathFor()` used by
+  `lock`/`up`/`verify`/`diff`, stripping `/\.ya?ml$/i` and always appending.
 
 ## [0.28.0] - 2026-08-05
 
