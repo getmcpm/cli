@@ -5,40 +5,6 @@
 > lives in [`docs/ROADMAP.md`](./docs/ROADMAP.md). The items below remain the granular
 > backlog; the roadmap is the strategic layer on top of them.
 
-## ⚠ RELEASE PENDING — v0.28.0 is staged on `main` but NOT tagged
-
-`main` (`94f8375`) carries both release commits: the docs reconcile and
-`chore(release): v0.28.0` with the CHANGELOG stamped `2026-08-05`. Everything
-else is done — 2366 tests green, `pnpm typecheck` clean.
-
-**The tag could not be pushed from the session that staged it.** `git push origin
-v0.28.0` returns **HTTP 403** from the agent proxy — an organisation egress
-policy denial, not a transient failure. Annotated and lightweight tags, explicit
-refspec, and `--follow-tags` all fail the same way; branch pushes to `main`
-succeed, so it is tag refs specifically. `/root/.ccr/README.md` says not to retry
-or route around a 403, and the GitHub MCP server exposes no create-ref or
-create-release tool, so there is no API path either. `publish.yml` triggers only
-on `push: tags: ['v*']` — it has no `workflow_dispatch`, so it cannot be fired
-another way.
-
-**To finish, from a machine with normal push access:**
-
-```bash
-git fetch origin main && git checkout main && git pull
-git tag -a v0.28.0 -m "v0.28.0 — SECURITY: tier-2 scanner fetch-execute vector, Unicode TAG-block decode-and-rescan, native-evidence trust floor"
-git push origin v0.28.0
-```
-
-That fires `publish.yml`: pack → clean-install → smoke the real binary → `pnpm
-publish --provenance` → GitHub Release with the SBOM attached at create time.
-`package.json` stays at `0.15.0` by design; the version derives from the tag.
-
-⚠ **Until that tag lands, `CLAUDE.md` says "v0.28.0 released" and the CHANGELOG
-carries a date — both are true only once it does.** This is precisely the defect
-this release fixed elsewhere (the section sat at `2026-07-29` for a week while
-unreleased), so if the tag is not going to happen soon, walk those two claims
-back rather than leaving them. Delete this section when the tag is pushed.
-
 ## Resolved Blockers
 
 ### 1. ~~Verify Official MCP Registry API~~ DONE (2026-03-28)
