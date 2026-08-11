@@ -448,14 +448,48 @@ and the verdict is identical with no scanner at all), plus the recovery paths,
 the raw fallback, and the throw. `schema.test.ts` pins the field round-trip and
 that pre-#35 locks still parse.
 
-**Still open — the sibling surfaces (own PR):** `audit --fix` and the `outdated`
-trust-regression check still compare raw scores (see "Same class" below). They
-are human/CLI surfaces, lower priority than the tripwire, and were left out of
-this change deliberately. **Adversarial review sharpened the ordering:** among the
-two, `audit --fix` is the heavier one — it is **gating** (a fake clean scanner can
-lift a bad server's raw score above the removal threshold so it is *not* proposed
-for removal, `src/commands/audit.ts:87-91`), whereas `outdated` is advisory. Do
-`audit --fix` first when this sibling PR is picked up.
+**Sibling 1 — `audit --fix`: RESOLVED 2026-08-12 as covered by the #33 carve-out.
+It keeps the RAW score, deliberately.** The earlier note in this entry said the
+opposite ("the heavier one … do it first"); that ordering was written from the
+exploit alone, without measuring the benefit or the cost, and the measurement
+inverts it.
+
+The exploit is real and reproduces: a server with two HIGH tier-1 findings scores
+35/80 `risky` and is removed; with `MCPM_EXTERNAL_SCANNER` pointed at a script
+printing `{"findings":[]}` the same server scores 55/100 `caution` and is spared —
+and `mcpm audit`'s exit code flips 1 → 0 with it (README documents that exit code
+as a CI signal). What changed is the verdict on whether native-ising the filter is
+the right answer:
+
+- **It buys nothing where it would apply.** Landing in the flip band needs ≥1 high,
+  ≥1 critical or ≥3 mediums. Over 1,199 live registry entries scored through the
+  real `scanTier1` + `computeTrustScore` with audit's own inputs, that set is
+  empty: 0 of 1,199 servers change verdict at the default threshold.
+- **It costs everything above the ceiling.** `audit` never runs a health check
+  (15/30) and never reads a download count (registryMeta ≤7/10), so its native
+  ceiling is 62, not 80. A native filter deletes every server once the threshold
+  passes 62.
+- **It is the only score-gated DESTRUCTIVE site in the CLI, and it is human-only.**
+  Verified: MCP `handleAudit` (`server/handlers.ts`) is read-only, takes no options,
+  and reaches no removal path. #33 and #35 native-ised gates that REFUSE, where the
+  caller was an agent or a locked baseline. This one DELETES.
+- **The residual threat is the one already scoped out in writing.** `trust-score.ts`
+  states that deliberate self-deception cannot be closed; a scanner that merely
+  BREAKS is already treated as ABSENT by the `scanner-error` check, not as a clean
+  scan.
+
+Locked with a drift-guard test ("--fix candidate filter is RAW, deliberately" in
+`audit.test.ts`), mutation-verified: native-ising the filter fails it. The
+carve-out list in `nativeTrustScore`'s docblock now names `audit --fix` explicitly,
+so a future reader can tell it was considered rather than missed.
+
+**Sibling 2 — `outdated`: still open**, and its defect is not really #35's. It
+compares a RAW stored score (written at install time, possibly with a scanner
+credited) against a fresh score computed with `hasExternalScanner: false`
+(`outdated.ts:96`) — different denominators on the two sides, so a user who had a
+scanner configured at install time sees a permanent phantom regression. Advisory
+display only. Fixing it properly needs a store-schema change (record the native
+figure at install time), which is its own PR.
 
 **Verified deliberate, not bugs (adversarial review of the fix):** (1) the tripwire
 now ignores external-bucket movement in BOTH directions — a real external-scanner
@@ -661,3 +695,87 @@ e.g. compute the `registryMeta` cap from non-`source:"external"` findings for th
 native figure and expose it (`breakdown.nativeRegistryMeta`). Deferred because it
 changes `nativeTrustScore`, which the MCP hard trust floor (#33) also consumes, so
 it needs that path re-verified rather than a local patch.
+
+### 42. ~~`audit --fix --min-trust` above the achievable ceiling wipes a clean stack~~ DONE (unreleased)
+**Priority:** P1 — live data-loss at HEAD, with or without an external scanner.
+**Found:** 2026-08-12, while measuring the #35 `audit --fix` sibling. Pre-existing.
+
+**What:** `parseMinTrust` accepts 0–100, but `mcpm audit` cannot produce a score
+anywhere near 100. It never executes servers, so the health check never runs
+(`healthCheckPassed: null` → 15 of 30), and it never supplies a download count
+(`downloadCount: undefined` → registryMeta caps at 7 of 10). A **flawless** server —
+zero findings, active registry status, years-old publish date — tops out at **62/80**.
+
+So any `--min-trust` above 62 put every installed server below the threshold, by
+construction. Measured before the fix, on three zero-finding servers:
+
+```
+--min-trust 50 → 0/3 removed      --min-trust 63 → 3/3 removed
+--min-trust 62 → 0/3 removed      --min-trust 70 → 3/3 removed
+```
+
+The blast radius is worse than "a confusing prompt". `--fix --json` is *forced* to
+`--yes` (`audit.ts` early validation) and passes `output: () => undefined` to
+`runFix`, so the candidate list — the only place a user sees which servers are about
+to be deleted — is suppressed. And `BaseAdapter.writeAtomic` writes the config
+`.bak` once per file *lifetime* (`wx`, EEXIST swallowed), so it is **not** a
+pre-removal snapshot: a scripted `audit --fix --min-trust 70 --json` silently
+deletes every MCP server entry, taking its plaintext `env` credentials with it, with
+nothing to restore from.
+
+**Shipped:** `handleAudit` refuses when `minTrust` exceeds the highest score this
+command can produce, before scanning or removing anything. The ceiling is derived by
+scoring a synthetic flawless server rather than hardcoded, so it cannot drift if a
+bucket is re-weighted, and it tracks `hasExternalScanner` (62 native / 82 credited).
+Refuse rather than warn: this is arithmetic, not a heuristic — "threshold above the
+maximum" and "every server is below the threshold" are the same statement, so there
+is no false positive to trade against.
+
+Four tests, all mutation-verified (deleting the guard fails three; flipping `>` to
+`>=` fails the boundary test). One pre-existing test had to change: it asserted
+removal at `--min-trust 70` against a mocked score of 65 — **both numbers
+unreachable in production**, i.e. the test encoded the hazardous usage. Rewritten to
+55/60, inside the real scale.
+
+**Note for whoever touches this next:** deriving the ceiling from the *injected*
+`deps.computeTrustScore` is wrong, not merely untestable. The suite's mock returns
+one constant for every input, which collapses the ceiling onto each server's own
+score and makes the guard fire exactly when a server is legitimately below the
+threshold. The ceiling is a property of the scoring MODEL, so it uses the real
+scorer.
+
+### 43. `mcpm audit` can never rate a server "safe" — unless an unverifiable external scanner says so
+**Priority:** P2 — not a vulnerability; a scale defect with a perverse incentive.
+**Found:** 2026-08-12, alongside #42. Pre-existing.
+
+**What:** `computeLevel` awards "safe" at ≥80% of `maxPossible`. Audit's ceiling is
+62/80 = **77.5%**, so a flawless server is rated **caution** and no server audited by
+mcpm can ever be green. Credit the external bucket and the same server reaches
+82/100 = 82% → **safe**.
+
+The incentive that creates is backwards for this project: the *only* lever that earns
+a green rating out of `mcpm audit` is `MCPM_EXTERNAL_SCANNER`, the one input
+`trust-score.ts` documents as unverifiable and that #33/#35 spent two fixes refusing
+to trust. A user who wants a clean audit report is nudged toward configuring exactly
+the thing the safety floors discount.
+
+```
+flawless server, no scanner   : 62/80  = 77.5%  → caution
+flawless server, fake scanner : 82/100 = 82.0%  → safe
+```
+
+**Deliberately not fixed here — it needs a product decision, and each option has a
+real cost:**
+1. **Run health checks in `audit`.** Closes it properly (30/30 reachable), but audit
+   would start *executing* every installed server, which the command deliberately
+   does not do today. Big security and runtime change.
+2. **Score an unrun health check as "not applicable"** — drop the bucket from
+   `maxPossible` the way the external bucket is dropped, instead of awarding a flat
+   15. Cheap and principled, but it re-bases every displayed score and every
+   `--min-trust` threshold users already have in scripts.
+3. **Supply a download count**, recovering 3 of the 10 registryMeta points. Narrows
+   the gap (62 → 65) without closing it; 65/80 is still 81%… which would actually
+   cross the line. Worth checking whether the registry exposes one.
+
+Do not silently pick one. Whichever lands should also revisit #42's ceiling guard,
+which reads the ceiling from the scorer and so follows automatically.

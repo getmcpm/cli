@@ -546,14 +546,20 @@ describe("handleAudit — --fix", () => {
     expect(deps.removeFromStore).not.toHaveBeenCalledWith("io.github.test/at-threshold");
   });
 
-  // 3. --min-trust overrides default — removes score-65 server
+  // 3. --min-trust overrides default — removes a server the default 50 would keep.
+  //
+  // Both numbers sit inside the scale `mcpm audit` can actually produce (ceiling 62
+  // with no external scanner — the command never runs a health check). This test
+  // previously used score 65 / threshold 70, neither of which is reachable here, and
+  // a threshold above the ceiling now refuses outright: it would have proposed every
+  // installed server for removal.
   it("removes server below custom --min-trust threshold", async () => {
     const server = makeInstalledServer({ name: "io.github.test/server-a", clients: ["claude-desktop"] });
     const deps = makeDeps({
       getInstalledServers: vi.fn().mockResolvedValue([server]),
-      computeTrustScore: vi.fn().mockReturnValue(makeTrustScore("caution", 65)),
+      computeTrustScore: vi.fn().mockReturnValue(makeTrustScore("caution", 55)),
     });
-    await handleAudit({ fix: true, minTrust: 70, yes: true }, deps);
+    await handleAudit({ fix: true, minTrust: 60, yes: true }, deps);
     expect(deps.removeFromStore).toHaveBeenCalledWith("io.github.test/server-a");
   });
 
@@ -755,5 +761,105 @@ describe("handleAudit — --fix", () => {
     await handleAudit({ fix: true, yes: true }, { ...deps, output: (t) => lines.push(t) });
     expect(deps.removeFromStore).not.toHaveBeenCalled();
     expect(lines.join("\n")).toMatch(/nothing to fix/i);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// --min-trust above the achievable ceiling (data-loss guard)
+// ---------------------------------------------------------------------------
+
+describe("handleAudit — --fix --min-trust above audit's achievable ceiling", () => {
+  // `mcpm audit` never runs a health check (15 of 30 points) and never reads a
+  // download count (registry metadata caps at 7 of 10), so a FLAWLESS server tops
+  // out at 62 rather than 80. `parseMinTrust` accepts 0-100, so a threshold above
+  // that ceiling puts every installed server below it by construction — measured
+  // before the guard: `--min-trust 63` proposed 3 of 3 zero-finding servers for
+  // removal. `--fix --json` forces `--yes` and suppresses the candidate list, so
+  // that lands as a silent mass delete.
+
+  it("refuses a threshold above the ceiling instead of proposing the whole stack", async () => {
+    const deps = makeDeps({
+      getInstalledServers: vi.fn().mockResolvedValue([makeInstalledServer()]),
+      computeTrustScore: vi.fn().mockReturnValue(makeTrustScore("caution", 62)),
+    });
+    await expect(handleAudit({ fix: true, minTrust: 63, yes: true }, deps)).rejects.toThrow(
+      /--min-trust 63 is above 62/i
+    );
+  });
+
+  it("removes nothing when it refuses — the point of the guard is the deletion that does not happen", async () => {
+    const deps = makeDeps({
+      getInstalledServers: vi.fn().mockResolvedValue([makeInstalledServer()]),
+      computeTrustScore: vi.fn().mockReturnValue(makeTrustScore("caution", 62)),
+    });
+    await expect(handleAudit({ fix: true, minTrust: 100, yes: true }, deps)).rejects.toThrow();
+    expect(deps.removeFromStore).not.toHaveBeenCalled();
+    expect(deps.getAdapter).not.toHaveBeenCalled();
+  });
+
+  it("allows a threshold exactly AT the ceiling", async () => {
+    const deps = makeDeps({
+      getInstalledServers: vi.fn().mockResolvedValue([makeInstalledServer()]),
+      computeTrustScore: vi.fn().mockReturnValue(makeTrustScore("caution", 62)),
+    });
+    await expect(handleAudit({ fix: true, minTrust: 62, yes: true }, deps)).resolves.toBeTypeOf("number");
+  });
+
+  it("raises the ceiling to 82 when an external scanner is credited", async () => {
+    // Same threshold, opposite verdict: 70 is above the native ceiling of 62 but
+    // inside the 82 available once the external bucket is in play. Pins that the
+    // ceiling tracks `hasExternalScanner` rather than being a hardcoded constant.
+    const withScanner = makeDeps({
+      getInstalledServers: vi.fn().mockResolvedValue([makeInstalledServer()]),
+      checkScannerAvailable: vi.fn().mockResolvedValue(true),
+      computeTrustScore: vi.fn().mockReturnValue(makeTrustScore("safe", 82)),
+    });
+    await expect(handleAudit({ fix: true, minTrust: 70, yes: true }, withScanner)).resolves.toBeTypeOf("number");
+
+    const withoutScanner = makeDeps({
+      getInstalledServers: vi.fn().mockResolvedValue([makeInstalledServer()]),
+      checkScannerAvailable: vi.fn().mockResolvedValue(false),
+      computeTrustScore: vi.fn().mockReturnValue(makeTrustScore("caution", 62)),
+    });
+    await expect(handleAudit({ fix: true, minTrust: 70, yes: true }, withoutScanner)).rejects.toThrow(
+      /is above 62/i
+    );
+  });
+
+  it("does not apply the guard when --fix is absent", async () => {
+    // `--min-trust` without `--fix` already throws for its own reason; the ceiling
+    // guard must not pre-empt that message.
+    const deps = makeDeps();
+    await expect(handleAudit({ minTrust: 100 }, deps)).rejects.toThrow(/--min-trust requires --fix/i);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Drift guard: the candidate filter stays on the RAW score (TODOS #35 sibling)
+// ---------------------------------------------------------------------------
+
+describe("handleAudit — --fix candidate filter is RAW, deliberately", () => {
+  // Decision lock, not coverage. `audit --fix` is the sibling of TODOS #35 and is
+  // resolved as covered by the #33 carve-out: it is the only score-gated DESTRUCTIVE
+  // site in the CLI and it is human-only, so subtracting the unverifiable external
+  // bucket here deletes more rather than refusing more. If a future change switches
+  // this filter to `nativeTrustScore`, this test fails and points at the decision.
+  it("does NOT remove a server that the external-scanner bucket lifts over the threshold", async () => {
+    const server = makeInstalledServer({ name: "io.github.test/server-a", clients: ["claude-desktop"] });
+    const deps = makeDeps({
+      getInstalledServers: vi.fn().mockResolvedValue([server]),
+      checkScannerAvailable: vi.fn().mockResolvedValue(true),
+      // Raw 55 (kept: 55 >= 50) but native 55 - 10 = 45 (would be removed).
+      // The fixture straddles the default threshold by exactly the external bucket.
+      computeTrustScore: vi.fn().mockReturnValue({
+        score: 55,
+        maxPossible: 100,
+        level: "caution" as const,
+        breakdown: { healthCheck: 15, staticScan: 20, externalScan: 10, registryMeta: 10 },
+      }),
+    });
+    await handleAudit({ fix: true, yes: true }, deps);
+    expect(deps.removeFromStore).not.toHaveBeenCalled();
+    expect(deps.getAdapter).not.toHaveBeenCalled();
   });
 });

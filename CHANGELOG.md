@@ -18,8 +18,23 @@ All notable changes to this project will be documented in this file.
   locks written with a scanner credited fall back safely (and fail closed rather
   than raw-compare when a current-side scanner could be the lever). `minTrustScore`
   and `--min-trust` are unchanged — a human threshold on the user's own machine.
-  The sibling `audit --fix` and `outdated` raw-score comparisons are tracked
-  separately (TODOS #35).
+  The sibling `audit --fix` comparison was investigated and deliberately left on
+  the raw score (TODOS #35); `outdated` is tracked separately.
+- **`mcpm audit --fix --min-trust` above the achievable ceiling no longer proposes
+  your entire stack for removal (TODOS #42).** Pre-existing. `--min-trust` accepts
+  0–100, but `audit` never executes servers, so the health check never runs (15 of
+  30 points) and no download count is read (registry metadata caps at 7 of 10): a
+  **flawless** server — zero findings, active status, years-old publish date — tops
+  out at 62/80. Any threshold above that put every installed server below it by
+  construction. Measured on three zero-finding servers: `--min-trust 62` removed
+  0 of 3, `--min-trust 63` removed 3 of 3. This was not merely a confusing prompt —
+  `--fix --json` is forced to `--yes` and suppresses the candidate list, and the
+  config `.bak` is written once per file lifetime rather than per removal, so a
+  scripted run deleted every server entry (and its plaintext `env` values) with
+  nothing to restore from. `audit --fix` now refuses a threshold above the highest
+  score it can produce, before scanning or removing anything. The ceiling is derived
+  from the scorer rather than hardcoded and tracks whether an external scanner is
+  credited (62 native, 82 credited).
 - **`mcpm lock` no longer destroys a stack file that is not named `*.yaml`.**
   Pre-existing since v0.3.0: the lock path came from an anchored, case-sensitive
   `/\.yaml$/` replace, so `mcpm lock -f mcpm.yml` (also `.YAML`, or an
