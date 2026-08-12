@@ -13,8 +13,9 @@
  * without the field, which killed the check outright for any server ever updated.
  *
  * `mcpm audit` is where degradation is reported. It re-scans every installed server
- * against the current registry entry and prints the FINDING — severity, message,
- * location — plus an exit code, which is strictly more than a delta integer conveys.
+ * against the current registry entry and reports the FINDING rather than a delta:
+ * score, level and a finding count in the table, with severity, message and location
+ * under `--json`/`--sarif`, plus an exit code.
  */
 
 import { Command } from "commander";

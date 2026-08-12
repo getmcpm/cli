@@ -741,10 +741,26 @@ pre-removal snapshot: a scripted `audit --fix --min-trust 70 --json` silently
 deletes every MCP server entry, taking its plaintext `env` credentials with it, with
 nothing to restore from.
 
-**Shipped:** `handleAudit` refuses when `minTrust` exceeds the highest score this
-command can produce, before scanning or removing anything. The ceiling is derived by
-scoring a synthetic flawless server rather than hardcoded, so it cannot drift if a
-bucket is re-weighted, and it tracks `hasExternalScanner` (62 native / 82 credited).
+**Shipped:** `handleAudit` refuses when `minTrust` exceeds the highest score any
+server in the run could have reached — after the scan, before any removal. The ceiling
+is derived by scoring a synthetic flawless server rather than hardcoded, so it cannot
+drift if a bucket is re-weighted (62 native / 82 credited).
+
+**Adversarial review caught the first cut keying that ceiling on the wrong predicate**
+— `checkScannerAvailable()` (a bare `<cmd> --version` exit-0 probe) rather than on the
+credit that actually materialised. `computeTrustScore` banks the 20-point bucket only
+when the scanner ALSO returned readable output, so a scanner that answers `--version`
+but cannot scan a registry server name emits a `scanner-error` per server and leaves
+every server capped at 62 — while an availability-keyed ceiling read 82 and waved
+through the entire `--min-trust` 63–82 band into the exact silent mass delete this
+entry exists to close (reproduced against the built binary: 3 of 3 servers removed,
+exit 0). That is not a contrived setup — `tier2.ts` records that a real scanner scans
+client CONFIG FILES rather than registry names, so wiring #32 lands a user in it
+directly. The ceiling now keys on `maxPossible`, i.e. on the scorer having WIDENED the
+denominator, so the ceiling and the credited-ness test come from the same function and
+cannot drift apart; `Math.max` over scanned servers, because the claim being made is
+"no server in this run could have cleared this threshold". The pinning test for the
+82 case had mocked availability only, so it passed with the defect live.
 Refuse rather than warn: this is arithmetic, not a heuristic — "threshold above the
 maximum" and "every server is below the threshold" are the same statement, so there
 is no false positive to trade against.

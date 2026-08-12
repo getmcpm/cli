@@ -563,7 +563,7 @@ describe("handleImport — trust assessment (#23)", () => {
   // compared it against a freshly computed one — but import scored with
   // `registryMeta: {}` (0 points) while the fresh side got up to 7, so a real
   // 7-point degradation was silently masked. The score is still computed and still
-  // drives the warning below; it is just never written down, because a stored
+  // printed in the warning below; it is just never written down, because a stored
   // number that four writers must keep mutually comparable is an invariant that
   // already failed twice.
   it("does NOT persist a trust score on the imported record", async () => {
@@ -616,6 +616,11 @@ describe("handleImport — trust assessment (#23)", () => {
     expect(out).toMatch(/security finding/i);
     expect(out).toMatch(/severity/i);
     expect(out).toContain(TYPOSQUAT_NAME);
+    // The printed score must REFLECT the findings, not just be present. Without this
+    // the only check that `assessImport` feeds its findings into the score lived in a
+    // test deleted when `InstalledServer.trustScore` was removed: scoring against an
+    // empty findings array would silently print a healthier number here.
+    expect(out).toMatch(/trust 45\/80/);
   });
 
   it("does NOT warn for a clean server", async () => {

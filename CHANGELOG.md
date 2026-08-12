@@ -21,14 +21,19 @@ All notable changes to this project will be documented in this file.
   `outdated` keeps what it can compute honestly — the version-drift line, with the
   latest version's freshly-scanned trust level. Use **`mcpm audit`** for degradation:
   it re-scans every installed server against the current registry entry and reports the
-  finding itself (severity, message, location) plus an exit code, which is strictly
-  more than a delta integer conveyed.
+  finding itself — score, level and a finding count in the table, with severity, message
+  and location under `--json`/`--sarif` — plus an exit code. That is strictly more than
+  a delta integer conveyed.
 
   `outdated --json` drops `trustRegression` and `installedTrustScore` (this shape is
   documented UNSTABLE in `docs/CONTRACTS.md`; only `sync --json` is frozen).
   `InstalledServer.trustScore` is removed from the store along with its two writers, so
   the number cannot be silently resurrected — an existing `servers.json` carrying the
-  key still parses and simply drops it on the next write.
+  key still parses, and the stale value is ignored. It is not actively scrubbed: the
+  store rewrites records verbatim, so the dead key survives on disk until that server
+  is next updated or reinstalled. That is inert, and deliberately preferred to having
+  the shared read path discard fields it does not recognise, which would make an older
+  binary silently destroy data written by a newer one.
 
 ### Security
 
