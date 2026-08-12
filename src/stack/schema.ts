@@ -191,6 +191,13 @@ const TrustSnapshotSchema = z.object({
    * (`recoverLockedNative`) — it does NOT fall back to comparing raw scores, because
    * that branch failed open on a genuine native drop and was removed. Non-strict
    * schema, so old lockfiles parse unchanged.
+   *
+   * Deliberately UNBOUNDED here — do NOT add `.min()`/`.max()`. `parseLockFile` runs a
+   * whole-file `safeParse` and throws on failure, so a bound would brick
+   * `up`/`verify`/`diff` over an otherwise-fine lock the moment a value fell outside it
+   * (the same forward-compat trap documented for the caps above). The range check lives
+   * in `stack/policy.ts` (`isUsableCredit`), which treats an uninterpretable value as
+   * if the field were absent and falls back to a conservative upper bound.
    */
   externalScanCredit: z.number().optional(),
 });

@@ -4,6 +4,27 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+
+- **`mcpm audit` exits `2` when the invocation itself cannot be satisfied**, keeping
+  its documented exit `1` ("a server is risky") meaningful to CI. Previously an
+  impossible `--min-trust` and a genuinely risky server were indistinguishable by exit
+  code. Scoped to four refusals — `--min-trust` above the achievable ceiling, `--fix
+  --json` without `--yes`, `--min-trust` without `--fix`, and `--sarif` with `--fix`;
+  Commander's own argument-parse failures still exit `1`. `docs/CONTRACTS.md` permits
+  adding codes but never repurposing them.
+
+### Fixed
+
+- **`mcpm audit --sarif --fix` is now refused instead of silently dropping `--fix`.**
+  The SARIF branch returns before the fix step, so that combination never removed
+  anything while appearing to have been accepted.
+- **`mcpm install --min-trust` reported the wrong denominator.** The abort message
+  hardcoded `/100`, but a score is out of **80** unless the external-scanner bucket was
+  credited — the default. A flawless 62/80 (77.5%) server read as "62/100", pointing
+  the user at the server rather than at a threshold the command cannot satisfy. The
+  `--json` error gained `maxPossible` for the same reason.
+
 ### Removed
 
 - **`mcpm outdated` no longer reports a "trust score regression" (TODOS #35 sibling).**
@@ -37,6 +58,27 @@ All notable changes to this project will be documented in this file.
 
 ### Security
 
+- **A committed `mcpm-lock.yaml` can no longer steer `policy.blockOnScoreDrop` through
+  its recorded external-scanner credit.** The lock lives in the user's own repository
+  and has no integrity sidecar, and the new `externalScanCredit` field was read back
+  with only a lower clamp — so `externalScanCredit: 999` on an untouched `score: 82`
+  snapshot recovered a baseline of 0%, after which no current score could ever be
+  "below" it and the rug-pull tripwire was dead, while `score` and `level` stayed
+  pristine in the diff a reviewer reads. A negative value inflated the baseline past
+  100% instead, blocking every server until a re-lock. Subtler and more plausible than
+  either: a credit that is individually in range (`20`) added to a snapshot whose
+  denominator was never widened (`maxPossible: 80`) dropped the baseline from 78% to 53%
+  and turned a block into a pass — `lock` cannot write that combination, since it records
+  `breakdown.externalScan`, which the scorer zeroes whenever it did not credit the
+  bucket, so rejecting it costs no false positives. A credit outside the range the
+  running version can interpret is now treated as if the field were absent (falling to
+  the conservative upper bound) rather than clamped into range, and every recovery path
+  exits through one clamp — `score` and `maxPossible` are themselves unbounded, so a
+  lock reading `score: 250` previously reported "dropped from 288%". The bound is
+  enforced in `stack/policy.ts`, deliberately not in the schema: `parseLockFile`
+  whole-file `safeParse`s and throws, so a schema `.max()` would brick
+  `up`/`verify`/`diff` over an otherwise-fine lock.
+
 - **`policy.blockOnScoreDrop` no longer trusts an unverifiable external scanner
   (TODOS #35).** The rug-pull tripwire compared raw trust-score percentages, and
   crediting the external-scanner bucket moves the denominator 80 → 100 — inflating
@@ -64,17 +106,37 @@ All notable changes to this project will be documented in this file.
   config `.bak` is written once per file lifetime rather than per removal, so a
   scripted run deleted every server entry (and its plaintext `env` values) with
   nothing to restore from. `audit --fix` now refuses a threshold above the highest
-  score it can produce for any server in the run — after the scan, before anything is
-  removed. The ceiling is derived
-  from the scorer rather than hardcoded and tracks whether an external scanner is
-  credited (62 native, 82 credited).
+  score it can produce for **every** server in the run — after the scan, before
+  anything is removed. The ceiling is derived from the scorer rather than hardcoded
+  and tracks whether an external scanner is credited (62 native, 82 credited).
+
+  It reduces with `Math.min`, not `Math.max`. Crediting is decided per server, so a
+  half-working scanner yields a mixed run, and taking the best server's ceiling let a
+  threshold in 63..82 through — deleting the servers whose scan errored, whose
+  evidence was flawless. A scanner error means the scanner is absent, which is a
+  statement about the scanner, not the server. Refusing the whole run deletes nothing,
+  the only safe direction on the CLI's single destructive score gate.
+
+  Two residuals are documented rather than hidden: 62 is reachable only by a pypi/oci
+  server (every npm package draws one `low` for the `npx -y` launcher class, capping a
+  clean npm server at 60, so `--min-trust 61..62` is unsatisfiable for an all-npm
+  stack), and a server that is unverified or published within 30 days tops out lower
+  still — that one is the registry-metadata bucket working as designed.
 - **`mcpm lock` no longer destroys a stack file that is not named `*.yaml`.**
   Pre-existing since v0.3.0: the lock path came from an anchored, case-sensitive
   `/\.yaml$/` replace, so `mcpm lock -f mcpm.yml` (also `.YAML`, or an
   extensionless path) derived a lock path identical to the stack path and wrote the
   generated lock **over the user's own server declarations**, reporting success and
   exiting 0. Path derivation is now one shared `lockPathFor()` used by
-  `lock`/`up`/`verify`/`diff`, stripping `/\.ya?ml$/i` and always appending.
+  `lock`/`up`/`verify`/`diff`, which inserts `-lock` *before* the extension and
+  preserves it — `mcpm.yaml` -> `mcpm-lock.yaml` (unchanged, so no lock file on disk
+  moves), `mcpm.yml` -> `mcpm-lock.yml`, an extensionless `stack` -> `stack-lock`.
+  A first cut instead stripped any yaml extension and appended a fixed `-lock.yaml`;
+  that cured the self-overwrite but was **not injective**, so `mcpm.yaml`,
+  `mcpm.yml` and `mcpm.YAML` in one directory all mapped onto a single
+  `mcpm-lock.yaml` and locking one silently overwrote another's trust snapshots and
+  Sigstore provenance baselines. Preserving the extension makes the map invertible,
+  and therefore injective. Never released in the stripping form.
 
 ## [0.28.0] - 2026-08-05
 

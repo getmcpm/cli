@@ -855,9 +855,17 @@ describe("handleAudit — --fix --min-trust above audit's achievable ceiling", (
     expect(deps.removeFromStore).not.toHaveBeenCalled();
   });
 
-  it("takes the ceiling from the BEST-credited server in the run, not the worst", async () => {
-    // One server banked the bucket, one did not. 70 is reachable (the credited one
-    // scores above it), so the threshold is meaningful and must not be refused.
+  // Post-merge review #1. This replaces a test that asserted the bug as a
+  // requirement ("takes the ceiling from the BEST-credited server in the run").
+  //
+  // Crediting is decided PER SERVER — a `scanner-error` is emitted per invocation —
+  // so a half-working scanner produces a MIXED run. Reducing with `Math.max` let one
+  // credited server license a threshold in 63..82 that no uncredited server can
+  // reach, and the raw candidate filter then deleted those uncredited servers
+  // although their evidence was flawless. The reducer has to be `Math.min`: the
+  // guard's claim is "no server in this run could clear this threshold", and the
+  // safe direction on a destructive path is to refuse the run, not to part-execute it.
+  it("refuses when the threshold is unreachable for ANY server in a mixed-credit run", async () => {
     const scores = [scored(75, 100), scored(60, 80)];
     let i = 0;
     const deps = makeDeps({
@@ -868,7 +876,27 @@ describe("handleAudit — --fix --min-trust above audit's achievable ceiling", (
       checkScannerAvailable: vi.fn().mockResolvedValue(true),
       computeTrustScore: vi.fn().mockImplementation(() => scores[i++ % scores.length]),
     });
-    await expect(handleAudit({ fix: true, minTrust: 70, yes: true }, deps)).resolves.toBeTypeOf("number");
+    await expect(handleAudit({ fix: true, minTrust: 70, yes: true }, deps)).rejects.toThrow(
+      /--min-trust 70 is above 62/i
+    );
+    // The whole point: the uncredited server is not deleted.
+    expect(deps.removeFromStore).not.toHaveBeenCalled();
+  });
+
+  it("names the uncredited servers as the reason the ceiling is 62", async () => {
+    const scores = [scored(75, 100), scored(60, 80)];
+    let i = 0;
+    const deps = makeDeps({
+      getInstalledServers: vi.fn().mockResolvedValue([
+        makeInstalledServer({ name: "io.github.test/a" }),
+        makeInstalledServer({ name: "io.github.test/b" }),
+      ]),
+      checkScannerAvailable: vi.fn().mockResolvedValue(true),
+      computeTrustScore: vi.fn().mockImplementation(() => scores[i++ % scores.length]),
+    });
+    await expect(handleAudit({ fix: true, minTrust: 70, yes: true }, deps)).rejects.toThrow(
+      /io\.github\.test\/b/
+    );
   });
 
   it("ignores servers whose registry lookup failed when deriving the ceiling", async () => {
@@ -894,10 +922,14 @@ describe("handleAudit — --fix --min-trust above audit's achievable ceiling", (
   });
 
   it("skips the guard entirely when NO server could be scanned", async () => {
-    // `Math.max(...[])` is -Infinity, so without the empty-run short-circuit every
-    // threshold — including 0 — would be "above" it and refuse with a nonsense
-    // "Use --min-trust -Infinity or lower". There is nothing to guard here either:
-    // a server whose registry lookup failed is never a removal candidate.
+    // `Math.min(...[])` is +Infinity, so without the empty-run short-circuit the
+    // comparison `minTrust > ceiling` would be false for every threshold and the
+    // guard would silently disable itself rather than refuse. (Under the previous
+    // `Math.max` reducer the same gap failed the other way: -Infinity refused
+    // everything, including 0, advising "Use --min-trust -Infinity or lower".)
+    // Either way the short-circuit is what makes the empty case deliberate. There is
+    // nothing to guard here regardless: a server whose registry lookup failed is
+    // never a removal candidate.
     const deps = makeDeps({
       getInstalledServers: vi.fn().mockResolvedValue([makeInstalledServer()]),
       getServer: vi.fn().mockRejectedValue(new Error("registry unavailable")),
@@ -908,8 +940,116 @@ describe("handleAudit — --fix --min-trust above audit's achievable ceiling", (
 });
 
 // ---------------------------------------------------------------------------
-// Drift guard: the candidate filter stays on the RAW score (TODOS #35 sibling)
+// The ceiling must track the REAL scorer, not a replayed literal
 // ---------------------------------------------------------------------------
+
+describe("handleAudit — the advertised ceiling matches what a real scan can produce", () => {
+  // Post-merge review #9 and #10. `flawlessAuditScore` replays audit's scan-site
+  // TrustScoreInput as a SECOND literal ~250 lines away, and every other test in this
+  // file mocks `deps.computeTrustScore` while the guard calls the REAL scorer — so a
+  // drift between the two literals (audit starts supplying a download count, or
+  // extractRegistryMeta stops yielding `isVerifiedPublisher`) is invisible to the
+  // whole suite while it silently either refuses reachable thresholds or re-opens the
+  // whole-stack delete.
+  //
+  // These two tests are the only ones here that run the REAL scanTier1 and the REAL
+  // computeTrustScore end-to-end through the public handler. The achievable score is
+  // OBSERVED through `--json` rather than recomputed locally, so the test cannot
+  // mirror the drift it is meant to catch.
+  async function realDeps(overrides: Partial<AuditDeps> = {}): Promise<AuditDeps> {
+    const { scanTier1 } = await import("../../scanner/tier1.js");
+    const { computeTrustScore } = await import("../../scanner/trust-score.js");
+    return makeDeps({
+      scanTier1: scanTier1 as AuditDeps["scanTier1"],
+      computeTrustScore: computeTrustScore as AuditDeps["computeTrustScore"],
+      checkScannerAvailable: vi.fn().mockResolvedValue(false),
+      ...overrides,
+    });
+  }
+
+  /** The score a flawless server actually reaches, read off the public --json surface. */
+  async function observedFlawless(): Promise<{ score: number; findings: unknown[] }> {
+    const lines: string[] = [];
+    const deps = await realDeps({ output: (t: string) => lines.push(t) });
+    await handleAudit({ json: true }, deps);
+    const parsed = JSON.parse(lines.join("\n")) as Array<{ score: number; findings: unknown[] }>;
+    return { score: parsed[0].score, findings: parsed[0].findings };
+  }
+
+  it("pins what a clean npm server ACTUALLY scores through the real scan site", async () => {
+    // 15 (audit never runs the health check) + 40 (clean tier-1) + 7 (verified + >30d,
+    // no download count) = 62 — MINUS 2, because `detectInstallScriptShape` gives every
+    // npm package one `low` for the `npx -y` launcher class. Its own comment calls that
+    // "a property of the launcher class ... awareness, not anomaly", so 60 is the real
+    // ceiling for the npm ecosystem and 62 is reachable only by a pypi/oci server.
+    //
+    // This number is the drift tripwire: it comes from the REAL scanTier1 and the REAL
+    // computeTrustScore driven through the public --json surface, so any change to
+    // audit's scan-site inputs (a download count, a health check, an extractRegistryMeta
+    // mapping change) fails HERE with a number rather than silently moving the guard.
+    const { score, findings } = await observedFlawless();
+    expect(score).toBe(60);
+    expect(findings).toHaveLength(1);
+  });
+
+  it("never refuses a threshold that a real server actually reaches", async () => {
+    // Mutation caught: lowering flawlessAuditScore below what a real scan produces —
+    // the direction that silently re-opens whole-stack removal.
+    const { score } = await observedFlawless();
+    const deps = await realDeps();
+    await expect(handleAudit({ fix: true, minTrust: score, yes: true }, deps)).resolves.toBeTypeOf(
+      "number"
+    );
+    expect(deps.removeFromStore).not.toHaveBeenCalled();
+  });
+
+  it("refuses one point above the model ceiling", async () => {
+    // Pins the ceiling from the other side: raising flawlessAuditScore stops this
+    // refusing. 63 is the first threshold no server of any registry type can reach.
+    const deps = await realDeps();
+    await expect(handleAudit({ fix: true, minTrust: 63, yes: true }, deps)).rejects.toThrow(
+      /is above 62/
+    );
+    expect(deps.removeFromStore).not.toHaveBeenCalled();
+  });
+
+  it("leaves a flawless server alone at the DEFAULT --fix threshold", async () => {
+    // #10: the ceiling guard only runs when --min-trust is given explicitly, so a
+    // re-weighting that pushed DEFAULT_FIX_THRESHOLD above the achievable score would
+    // delete every clean server on a plain `audit --fix --yes`, with every
+    // ceiling-guard test still green. Mutation caught: raising the default past 62.
+    const deps = await realDeps();
+    await handleAudit({ fix: true, yes: true }, deps);
+    expect(deps.removeFromStore).not.toHaveBeenCalled();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Usage errors are distinguishable from findings (exit 2, not exit 1)
+// ---------------------------------------------------------------------------
+
+describe("handleAudit — incoherent invocations", () => {
+  it("rejects --sarif with --fix instead of silently ignoring --fix", async () => {
+    // Post-merge review #5. The SARIF branch returns before the fix step, so
+    // `--sarif --fix` never removed anything — the flag was silently dropped. It also
+    // meant the ceiling guard could refuse a run that could not delete. Rejecting the
+    // combination fixes both, and makes the guard unreachable on a report-only run.
+    const deps = makeDeps();
+    await expect(handleAudit({ sarif: true, fix: true, yes: true }, deps)).rejects.toThrow(
+      /--sarif/i
+    );
+    expect(deps.removeFromStore).not.toHaveBeenCalled();
+  });
+
+  it("still emits a SARIF report for a plain --sarif run", async () => {
+    // Guards the fix above from over-reaching into report-only runs.
+    const lines: string[] = [];
+    const deps = makeDeps({ output: (t: string) => lines.push(t) });
+    await handleAudit({ sarif: true }, deps);
+    const report = JSON.parse(lines.join("\n")) as { version: string };
+    expect(report.version).toBe("2.1.0");
+  });
+});
 
 describe("handleAudit — --fix candidate filter is RAW, deliberately", () => {
   // Decision lock, not coverage. `audit --fix` is the sibling of TODOS #35 and is

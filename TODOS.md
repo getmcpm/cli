@@ -448,9 +448,10 @@ now compares mcpm-**native** evidence, so a caller-supplied
 
 Regression coverage in `policy.test.ts`: the exploit itself (a fake scanner that
 inflates the raw score to tie the baseline is still blocked on native evidence,
-and the verdict is identical with no scanner at all), plus the recovery paths,
-the raw fallback, and the throw. `schema.test.ts` pins the field round-trip and
-that pre-#35 locks still parse.
+and the verdict is identical with no scanner at all), plus every recovery path
+(exact, legacy bound, uninterpretable credit) and the throw. There is no raw
+fallback to cover — no raw-comparison path survives. `schema.test.ts` pins the
+field round-trip and that pre-#35 locks still parse.
 
 **Sibling 1 — `audit --fix`: RESOLVED 2026-08-12 as covered by the #33 carve-out.
 It keeps the RAW score, deliberately.** The earlier note in this entry said the
@@ -517,10 +518,13 @@ mutation-verified. `outdated --json` drops two fields (UNSTABLE per CONTRACTS).
 now ignores external-bucket movement in BOTH directions — a real external-scanner
 regression that lowers only that bucket no longer trips it either, because mcpm
 cannot distinguish it from a fake clean scan; it still surfaces in the score and in
-`audit`. (2) A pre-#35 scanner-credited lock can make the native path and the raw
-fallback diverge for the same evidence; the fallback now fails closed (with a
-re-lock instruction) whenever a current-side scanner is also credited, so the
-divergence always resolves to "re-lock", never a silent inconsistency.
+`audit`. (2) A pre-#35 scanner-credited lock cannot have its exact native figure
+recovered, so the baseline is a conservative UPPER BOUND — `min(nativeMax,
+score)` — regardless of whether a current-side scanner is credited. It blocks
+whenever a drop is possible and passes only when one is arithmetically
+impossible, and the block message always names re-locking as the remedy. (An
+earlier round-1 design did branch on current-side credit and fail closed; it was
+replaced outright, and this entry described it as shipped for a week.)
 
 --- original report, for reference ---
 
@@ -762,12 +766,19 @@ exit 0). That is not a contrived setup — `tier2.ts` records that a real scanne
 client CONFIG FILES rather than registry names, so wiring #32 lands a user in it
 directly. The ceiling now keys on `maxPossible`, i.e. on the scorer having WIDENED the
 denominator, so the ceiling and the credited-ness test come from the same function and
-cannot drift apart; `Math.max` over scanned servers, because the claim being made is
-"no server in this run could have cleared this threshold". The pinning test for the
-82 case had mocked availability only, so it passed with the defect live.
-Refuse rather than warn: this is arithmetic, not a heuristic — "threshold above the
-maximum" and "every server is below the threshold" are the same statement, so there
-is no false positive to trade against.
+cannot drift apart. The pinning test for the 82 case had mocked availability only, so it
+passed with the defect live.
+
+**A later review found the reducer itself wrong, and it is now `Math.min`.** Crediting is
+per server (a `scanner-error` is emitted per invocation), so a half-working scanner
+yields a MIXED run — and taking the BEST server's ceiling let one credited server license
+a threshold in 63..82 that no uncredited server could reach, whereupon the raw candidate
+filter deleted those uncredited servers although their evidence was flawless. Do not
+restore `Math.max`, and note that its stated justification ("no server in this run could
+have cleared this threshold" / "there is no false positive to trade against") was the
+argument FOR the bug: under `Math.min` a refusal can land on a run where some other
+server was genuinely removable, and that trade is taken deliberately — a false refusal
+costs a re-run, a false deletion costs the user their config and the credentials in it.
 
 Four tests, all mutation-verified (deleting the guard fails three; flipping `>` to
 `>=` fails the boundary test). One pre-existing test had to change: it asserted
@@ -815,5 +826,65 @@ real cost:**
    the gap (62 → 65) without closing it; 65/80 is still 81%… which would actually
    cross the line. Worth checking whether the registry exposes one.
 
-Do not silently pick one. Whichever lands should also revisit #42's ceiling guard,
-which reads the ceiling from the scorer and so follows automatically.
+Do not silently pick one. Whichever lands should also revisit #42's ceiling guard.
+That guard reads the ceiling from the scorer, so a re-WEIGHTING follows automatically —
+but a change to the INPUTS audit supplies (options 1 and 3 above both are) does not:
+`flawlessAuditScore` replays those inputs as a separate literal. A drift guard now runs
+the real scanner and scorer through `audit --json` and pins the number, so such a change
+fails there with a number rather than silently moving the guard.
+
+---
+
+## #44 — `mcpm up`'s legacy-lock drop baseline over-blocks (P3, deferred)
+
+**Found by the post-merge review of #166. Reproduction recorded; deliberately not
+fixed.**
+
+`recoverLockedNative` bounds an unrecoverable legacy baseline at `min(nativeMax=80,
+score)`. But the CURRENT side can never reach 80: `up` scores with
+`healthCheckPassed: null` (15 of 30) and `extractRegistryMeta` never yields a download
+count (<=7 of 10), so current native tops out at 62/80 = 78%. Any pre-#35
+scanner-credited lock whose raw score is >= 63 therefore bounds to >= 79% and blocks
+**every** run with `blockOnScoreDrop: true` — including for a server that has not
+changed — until the user re-locks. The docblock's "passes whenever a drop provably is
+not possible" is true only against the theoretical 80, not the reachable 62.
+
+**Why deferred, not fixed.** The affected population is small, but it is NOT empty —
+do not restate this as "no released mcpm could write `maxPossible: 100`", which is false.
+Before v0.28.0 the tier-2 scanner was dead (it probed a package that 404s), so
+`checkScannerAvailable()` always returned false and no lock from those versions can be
+affected. **v0.28.0 changed that**: it credits any resolvable `MCPM_EXTERNAL_SCANNER`, so
+a v0.28.0 lock CAN carry `maxPossible: 100`. And v0.28.0 never wrote `externalScanCredit`
+(verified: `git show v0.28.0:src/commands/lock.ts | grep -c externalScanCredit` = 0, with
+no tag between v0.28.0 and HEAD), which is exactly the unrecoverable shape. So the
+affected set is: users who configured a working `MCPM_EXTERNAL_SCANNER`, ran `mcpm lock`
+on v0.28.0 (released 2026-08-05), and set `blockOnScoreDrop`. Deferred because that
+window is days wide and the block message already names the exact remedy (`re-run
+mcpm lock`) — not because nobody can hit it.
+
+**The fix, when someone reports it:** bound at the *reachable* ceiling instead of the
+native denominator. That figure is a property of the CALL SITE (what `up` can measure),
+so it has to be passed in rather than assumed by `policy.ts` — which is the reason this
+is not a one-line change. Note the accompanying fail-open: bounding lower makes the
+baseline lower, so a genuine drop within the gap stops blocking. Quantify that before
+shipping; do not copy the "4 points" figure from the review, which was never measured.
+
+---
+
+## #45 — `install --min-trust` and `policy.minTrustScore` have audit's ceiling problem (P3)
+
+Both gate on a score whose reachable maximum is the same 62/82 as `audit --fix` —
+`install.ts` scores with `healthCheckPassed: null` at gate time and `extractRegistryMeta`
+never returns a download count anywhere in the product — and neither carries the ceiling
+guard #42 added. So `mcpm install --min-trust 63` refuses every server in the registry,
+forever, and a stack file with `policy.minTrustScore: 78` fails every `up` on a flawless
+stack.
+
+Deliberately NOT guarded in the #166 follow-up: both REFUSE one named server, whereas
+`audit --fix` DELETES the whole stack under a forced `--yes`, which is why that one was
+treated as a data-loss bug. Since the review, `install`'s abort message reports the real
+denominator (`62/80`, not `62/100`), so the arithmetic is at least visible to the user.
+
+A ceiling guard here would want the same primitive `audit` uses; if it is added, export
+one `maxAchievable(...)` from `scanner/trust-score.ts` rather than growing a third copy
+of the replayed-inputs literal.

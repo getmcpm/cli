@@ -8,10 +8,21 @@
  */
 
 import type { Policy, TrustSnapshot } from "./schema.js";
+// Numeric bucket weight only, never a type or a scoring call: a lockfile's recorded
+// `externalScanCredit` is this bucket's value at lock time, so validating it against a
+// second copy of `20` here would silently stop matching if the bucket is re-weighted.
+import { EXTERNAL_SCAN_MAX } from "../scanner/trust-score.js";
 
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
+
+/**
+ * How a locked snapshot's native figure was obtained — `exact` when the lock records
+ * enough to compute it, otherwise a conservative upper bound whose cause the block
+ * message names, since the two causes have different remedies to explain.
+ */
+type RecoveryBasis = "exact" | "legacy-bound" | "out-of-range";
 
 export interface PolicyCheckInput {
   readonly serverName: string;
@@ -19,24 +30,30 @@ export interface PolicyCheckInput {
   readonly currentMaxPossible: number;
   /**
    * The current score's mcpm-NATIVE figures (`nativeTrustScore(trust)`), used by
-   * `blockOnScoreDrop` INSTEAD of the raw score (TODOS #35). Optional in the type,
-   * but the drop check refuses to run without them rather than silently comparing
-   * raw scores — a caller-supplied external scanner must never be able to mask a
-   * native drop. `minTrustScore` deliberately keeps using the raw figure (a human
-   * threshold on the user's own machine — the #33 carve-out), so these are unused
-   * when only that gate is active. up.ts already computes `nativeTrust` and passes
-   * both. maxPossible is the native denominator (80).
+   * `blockOnScoreDrop` INSTEAD of the raw score (TODOS #35) — a caller-supplied
+   * external scanner must never be able to mask a native drop. `minTrustScore`
+   * deliberately keeps using the raw figure (a human threshold on the user's own
+   * machine — the #33 carve-out), so these are unused when only that gate is active.
+   * maxPossible is the native denominator (80).
+   *
+   * REQUIRED, and the drop check ALSO throws when they are missing. That is not
+   * redundant: the type is erased at runtime and this function is exported through the
+   * public `stack/index.ts` seam, so a JS or `as any` caller reaches the gate with
+   * `undefined` — where `NaN < NaN` is false and the tripwire would silently PASS.
+   * The type stops the mistake being written; the throw stops it being fatal.
    */
-  readonly currentNativeScore?: number;
-  readonly currentNativeMaxPossible?: number;
+  readonly currentNativeScore: number;
+  readonly currentNativeMaxPossible: number;
   readonly lockedSnapshot: TrustSnapshot | undefined;
   readonly policy: Policy | undefined;
   /**
    * Precomputed by assessReleaseAge — the caller MUST compute it with
    * minAgeHours = policy.minReleaseAgeHours when set, so the gate and the
    * assessment use the same threshold. Keeps policy.ts pure and clock-free.
-   * `status` is an inlined structural copy of ReleaseAgeStatus (stack/ does
-   * not import from scanner/ — same local-shape pattern as ArgSchema).
+   * `status` is an inlined structural copy of ReleaseAgeStatus (stack/ inlines
+   * scanner/ SHAPES rather than importing them — same local-shape pattern as
+   * ArgSchema; the one import from scanner/ is the numeric EXTERNAL_SCAN_MAX weight
+   * above, which exists precisely so a bucket value is not duplicated).
    */
   readonly releaseAge?: {
     readonly ageHours: number | null;
@@ -97,10 +114,11 @@ export function checkTrustPolicy(input: PolicyCheckInput): PolicyResult {
   // external-scanner regression that lowers only the external bucket no longer
   // trips THIS tripwire either. That regression still shows up in the score itself
   // and in `mcpm audit`; the native drop check watches native evidence alone.
-  // The unrecoverable-lock fallback below can also diverge from the native path for
-  // the same underlying evidence on a pre-#35 scanner-credited lock — re-locking
-  // reconciles it, which is why that path emits a re-lock instruction rather than a
-  // silent verdict.
+  // A pre-#35 scanner-credited lock cannot have its exact native figure recovered, so
+  // that path compares against a conservative UPPER BOUND and says so — it blocks
+  // whenever a drop is possible and passes only when one is arithmetically impossible.
+  // Re-locking replaces the bound with an exact baseline, which is why every bounded
+  // verdict names it as the remedy.
   if (policy.blockOnScoreDrop === true && lockedSnapshot !== undefined) {
     const { currentNativeScore, currentNativeMaxPossible } = input;
     if (
@@ -131,13 +149,20 @@ export function checkTrustPolicy(input: PolicyCheckInput): PolicyResult {
           `"${serverName}" trust score dropped from ${lockPct}% to ${curPct}% ` +
           `(mcpm-native evidence, excluding unverifiable external-scanner credit) ` +
           `since the lock file was created.` +
-          (lockedNative.bounded
+          (lockedNative.basis === "legacy-bound"
             ? ` This lock predates native-evidence drop checks and was written with ` +
               `an external scanner credited, so the baseline is an upper bound — ` +
               `re-run \`mcpm lock\` to record an exact one.`
-            : ` If you recently upgraded mcpm, new scanner findings can lower ` +
-              `scores — re-run \`mcpm lock\` to refresh snapshots if the drop is ` +
-              `expected.`),
+            : lockedNative.basis === "out-of-range"
+              ? // Deliberately NOT phrased as tampering: an upward re-weighting of the
+                // external bucket would make that accusation false for an older mcpm
+                // reading a newer lock. Re-locking is the remedy either way.
+                ` This lock records trust figures outside the range this version can ` +
+                `interpret, so the baseline is an upper bound — re-run \`mcpm lock\` to ` +
+                `record an exact one.`
+              : ` If you recently upgraded mcpm, new scanner findings can lower ` +
+                `scores — re-run \`mcpm lock\` to refresh snapshots if the drop is ` +
+                `expected.`),
       };
     }
   }
@@ -204,15 +229,41 @@ function toPct(score: number, maxPossible: number): number {
 }
 
 /**
+ * Is a lockfile's recorded `externalScanCredit` a value this scorer could have
+ * written?
+ *
+ * `mcpm-lock.yaml` lives in the user's own repository and carries no integrity
+ * sidecar — the ~/.mcpm sidecars do not cover it — so a committed edit is the threat
+ * model, and the schema deliberately does not bound this field (a `.max()` there makes
+ * `parseLockFile`'s safeParse reject the WHOLE file, bricking up/verify/diff on an
+ * otherwise-fine lock; see the note in schema.ts). Validation belongs here instead.
+ *
+ * `credit <= locked.score` is sound by construction, not a heuristic: a score is the
+ * sum of four non-negative buckets and the credit IS one of them, so a legitimate lock
+ * can never trip it.
+ */
+function isUsableCredit(credit: number, locked: TrustSnapshot, nativeMax: number): boolean {
+  // A positive credit on a snapshot whose denominator was NOT widened is a combination
+  // `lock` cannot produce: it writes `breakdown.externalScan`, which the scorer hard-
+  // zeroes whenever it did not credit the bucket, and an uncredited score carries
+  // maxPossible === nativeMax. Rejecting it therefore has zero false positives — and it
+  // closes the disarm that survives every range check, since a credit of 20 added to an
+  // untampered `{score: 62, maxPossible: 80}` lock is individually in range yet drops the
+  // baseline from 78% to 53%.
+  if (locked.maxPossible === nativeMax && credit > 0) return false;
+  return credit >= 0 && credit <= EXTERNAL_SCAN_MAX && credit <= locked.score;
+}
+
+/**
  * Recover a locked snapshot's mcpm-NATIVE figure (score over the native
  * denominator) for the #35 drop check. ALWAYS returns a figure — when the exact
- * one is unrecoverable it returns a conservative UPPER BOUND, flagged `bounded`.
+ * one is unrecoverable it returns a conservative UPPER BOUND.
  *
  * `nativeMax` is the current side's native denominator (80) — native scoring uses
  * one universal denominator, so the same value applies to the locked side.
  *
- * - `externalScanCredit` recorded (any lock this fix's mcpm wrote): native score is
- *   `score - credit`, clamped at 0 against a hand-edited lock. Exact.
+ * - `externalScanCredit` recorded AND usable (any lock this fix's mcpm wrote): native
+ *   score is `score - credit`. Exact.
  * - No credit field but `maxPossible === nativeMax`: no scanner was credited at lock
  *   time, so the locked score is already native. Exact.
  * - No credit field and `maxPossible !== nativeMax` (a scanner was credited pre-#35):
@@ -224,28 +275,44 @@ function toPct(score: number, maxPossible: number): number {
  *   credited, raw-compare otherwise) with this bound, because BOTH branches were
  *   wrong in opposite directions: the raw compare failed OPEN on a genuine native
  *   drop, and the fail-closed branch blocked cases where a drop was arithmetically
- *   impossible (current native already at 80/80). Comparing against the upper bound
- *   is exactly right in both: it blocks whenever a drop is POSSIBLE and passes
- *   whenever it provably is not. Conservative for legacy locks by construction, and
- *   the remedy is always the same — re-lock to record an exact baseline.
+ *   impossible. Comparing against the upper bound is exactly right in both: it blocks
+ *   whenever a drop is POSSIBLE and passes whenever it provably is not. Conservative
+ *   for legacy locks by construction, and the remedy is always the same — re-lock to
+ *   record an exact baseline.
+ * - A credit outside the range this version can interpret takes that SAME bounded
+ *   path, deliberately rather than being clamped into range. Clamping would fabricate
+ *   a value in whichever direction the editor chose; equating "corrupt" with "absent"
+ *   grants no capability anyone editing the file did not already have, since deleting
+ *   the field was always available.
+ *
+ * Every branch exits through one clamp, because `score` and `maxPossible` are
+ * themselves unbounded `z.number()`: without it a lock reading `score: 250` reported a
+ * baseline of 288% and blocked every run.
  */
 function recoverLockedNative(
   locked: TrustSnapshot,
   nativeMax: number,
-): { readonly score: number; readonly maxPossible: number; readonly bounded: boolean } {
-  if (locked.externalScanCredit !== undefined) {
+): { readonly score: number; readonly maxPossible: number; readonly basis: RecoveryBasis } {
+  const bounded = (score: number, basis: RecoveryBasis) => {
+    const clamped = Math.max(0, Math.min(nativeMax, score));
     return {
-      score: Math.max(0, locked.score - locked.externalScanCredit),
+      score: clamped,
       maxPossible: nativeMax,
-      bounded: false,
+      // A computation that had to be clamped was not exact, whatever produced it — an
+      // out-of-range `score` reaches here the same way an out-of-range credit does,
+      // since both are unbounded `z.number()`. Reporting it as exact would hand the
+      // user the "you upgraded mcpm" remedy for a lock that actually needs re-locking.
+      basis: basis === "exact" && clamped !== score ? ("out-of-range" as const) : basis,
     };
+  };
+
+  if (locked.externalScanCredit !== undefined) {
+    return isUsableCredit(locked.externalScanCredit, locked, nativeMax)
+      ? bounded(locked.score - locked.externalScanCredit, "exact")
+      : bounded(locked.score, "out-of-range");
   }
   if (locked.maxPossible === nativeMax) {
-    return { score: locked.score, maxPossible: nativeMax, bounded: false };
+    return bounded(locked.score, "exact");
   }
-  return {
-    score: Math.max(0, Math.min(nativeMax, locked.score)),
-    maxPossible: nativeMax,
-    bounded: true,
-  };
+  return bounded(locked.score, "legacy-bound");
 }

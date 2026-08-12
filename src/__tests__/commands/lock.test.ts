@@ -179,9 +179,17 @@ servers:
   // exactly ".yaml" came back UNCHANGED ⇒ lockPath === stackPath ⇒ `mcpm lock`
   // wrote the lock OVER the user's stack file, destroying their server
   // declarations, and reported "Locked 1 servers" with exit 0.
-  it.each(["mcpm.yml", "mcpm.YAML", "stack.Yml"])(
+  //
+  // The expected lock NAME is asserted exactly, not just "contains -lock": the first
+  // fix normalised every extension onto `-lock.yaml`, which passed a `toContain`
+  // check while quietly making sibling stacks share one lock file.
+  it.each([
+    ["mcpm.yml", "mcpm-lock.yml"],
+    ["mcpm.YAML", "mcpm-lock.YAML"],
+    ["stack.Yml", "stack-lock.Yml"],
+  ])(
     "derives a distinct lock path for %s and leaves the stack file intact",
-    async (fileName) => {
+    async (fileName, expectedLockName) => {
       const stackPath = await writeTempStackFile(
         `
 version: "1"
@@ -198,14 +206,16 @@ servers:
 
       const [lockPath] = (deps.writeLockFile as ReturnType<typeof vi.fn>).mock.calls[0];
       expect(lockPath).not.toBe(stackPath);
-      expect(lockPath).toContain("-lock.yaml");
+      expect(path.basename(lockPath as string)).toBe(expectedLockName);
       expect(await readFile(stackPath, "utf8")).toBe(before);
     },
   );
 
   it("appends rather than collides for an extensionless stack file", async () => {
     // Nothing to strip, so the old code returned the path unchanged and destroyed
-    // it. Appending unconditionally makes collision unrepresentable.
+    // it. Appending unconditionally makes collision unrepresentable. No extension is
+    // invented: `stack` -> `stack-lock`, because defaulting to `.yaml` would put
+    // `stack` and `stack.yaml` back onto one lock path.
     const stackPath = await writeTempStackFile(
       `
 version: "1"
@@ -221,8 +231,37 @@ servers:
     await handleLock({ stackFile: stackPath }, deps);
 
     const [lockPath] = (deps.writeLockFile as ReturnType<typeof vi.fn>).mock.calls[0];
-    expect(lockPath).toBe(`${stackPath}-lock.yaml`);
+    expect(lockPath).toBe(`${stackPath}-lock`);
     expect(await readFile(stackPath, "utf8")).toBe(before);
+  });
+
+  // Post-merge review #8: the strip-and-append derivation was not injective, so two
+  // stack files that differ only by extension shared ONE lock path. Locking the
+  // scratch copy overwrote the production lock — discarding its trust snapshots and
+  // sticky provenance baselines — and reported success. Locking each of three
+  // siblings in ONE directory must touch three different files.
+  it("gives sibling stack files in one directory distinct lock paths", async () => {
+    const body = `
+version: "1"
+servers:
+  io.github.test/a:
+    version: "1.0.0"
+`;
+    const dir = await import("fs/promises").then((fs) =>
+      fs.mkdtemp(path.join(os.tmpdir(), "mcpm-lock-siblings-"))
+    );
+    const lockPaths: string[] = [];
+
+    for (const fileName of ["mcpm.yaml", "mcpm.yml", "mcpm.YAML"]) {
+      const stackPath = path.join(dir, fileName);
+      await writeFile(stackPath, body, "utf8");
+      const deps = makeDeps();
+      await handleLock({ stackFile: stackPath }, deps);
+      const [lockPath] = (deps.writeLockFile as ReturnType<typeof vi.fn>).mock.calls[0];
+      lockPaths.push(lockPath as string);
+    }
+
+    expect(new Set(lockPaths).size).toBe(3);
   });
 
   it("records externalScanCredit = the external bucket in the snapshot (#35)", async () => {

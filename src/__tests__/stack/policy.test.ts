@@ -213,21 +213,226 @@ describe("checkTrustPolicy", () => {
     expect(result.pass).toBe(false);
   });
 
-  it("passes when a drop is arithmetically impossible on an unrecoverable lock (round-2 false block)", () => {
-    // Round 2: the fail-closed branch blocked a user whose native evidence is
-    // PERFECT (80/80 = 100%, the maximum the native scale can express, so no drop is
-    // representable) purely because a scanner was credited on both sides. The bound
-    // makes this pass: min(80, 85) = 80 ⇒ 100% < 100% is false.
+  it("passes when the bounded baseline is genuinely not a drop (round-2 false block)", () => {
+    // Post-merge review #11. This previously fed currentNativeScore: 80 — a state no
+    // production caller can produce, because `up` scores with healthCheckPassed: null
+    // and so caps current native at 62. A pass certified only by an unreachable
+    // fixture certifies nothing: the bound could be mutated freely and this still
+    // passed.
+    //
+    // Reachable version: a pre-#35 lock that scored 55/100 bounds to min(80, 55) = 55,
+    // i.e. 69%; current native 62/80 = 78% is ABOVE it, so there is no drop. Mutation
+    // caught: dropping the Math.min so the bound becomes the raw 55 → still 69%, no —
+    // dropping the clamp entirely (bound = maxPossible 80 ⇒ 100%) flips this to block.
+    const lowPreFixLock: TrustSnapshot = {
+      score: 55,
+      maxPossible: 100,
+      level: "caution",
+      assessedAt: "2026-08-06T00:00:00Z",
+    };
     const result = checkTrustPolicy({
       serverName: "test-server",
-      currentScore: 85, // 80 native + 5 external
-      currentMaxPossible: 100,
-      currentNativeScore: 80,
+      currentScore: 62,
+      currentMaxPossible: 80,
+      currentNativeScore: 62, // the real audit/up ceiling, not the unreachable 80
       currentNativeMaxPossible: 80,
-      lockedSnapshot, // 85/100, no credit field
+      lockedSnapshot: lowPreFixLock,
       policy: { blockOnScoreDrop: true },
     });
     expect(result.pass).toBe(true);
+  });
+
+  // --- #3: a lockfile-supplied credit must not be able to steer the tripwire ------
+
+  it("ignores an externalScanCredit larger than the locked score (disarm attempt)", () => {
+    // mcpm-lock.yaml lives in the user's repo and carries no integrity sidecar, so a
+    // committed edit is the threat. Setting the credit above the score zeroed the
+    // recovered baseline (Math.max(0, 82 - 999) = 0 ⇒ 0%), after which no current
+    // score could ever be "below" it — the tripwire was dead while score and level
+    // stayed pristine in the diff a reviewer reads.
+    //
+    // The credit can never legitimately exceed the score: the score is the sum of four
+    // non-negative buckets and the credit IS one of them.
+    const tampered: TrustSnapshot = {
+      score: 82,
+      maxPossible: 100,
+      level: "safe",
+      assessedAt: "2026-08-06T00:00:00Z",
+      externalScanCredit: 999,
+    };
+    const result = checkTrustPolicy({
+      serverName: "evil",
+      currentScore: 20,
+      currentMaxPossible: 80,
+      currentNativeScore: 20, // a catastrophic native drop
+      currentNativeMaxPossible: 80,
+      lockedSnapshot: tampered,
+      policy: { blockOnScoreDrop: true },
+    });
+    expect(result.pass).toBe(false);
+  });
+
+  it("ignores a negative externalScanCredit (jam attempt)", () => {
+    // The other direction: a negative credit inflated the baseline past 100%
+    // (82 - -20 = 102/80 = 128%), so every subsequent `up` blocked every server with a
+    // nonsensical percentage until the user re-locked.
+    const tampered: TrustSnapshot = {
+      score: 62,
+      maxPossible: 100,
+      level: "caution",
+      assessedAt: "2026-08-06T00:00:00Z",
+      externalScanCredit: -20,
+    };
+    const result = checkTrustPolicy({
+      serverName: "test-server",
+      currentScore: 62,
+      currentMaxPossible: 80,
+      currentNativeScore: 62,
+      currentNativeMaxPossible: 80,
+      lockedSnapshot: tampered,
+      policy: { blockOnScoreDrop: true },
+    });
+    // Treated as unrecoverable ⇒ bounded at min(80, 62) = 62 ⇒ 78% vs 78% ⇒ no drop.
+    expect(result.pass).toBe(true);
+  });
+
+  // Each of the following isolates ONE clause of isUsableCredit. The two tests above use
+  // 999 and -20, which every clause rejects — so deleting any single clause left them
+  // green and the guard was certified by nothing. These pick values that ONLY the named
+  // clause rejects, and each was verified to die when that clause is removed.
+  it("ignores a credit above the external bucket's maximum (isolates: credit <= 20)", () => {
+    // 40 is >= 0 and <= score, so only the bucket-maximum clause can reject it.
+    const tampered: TrustSnapshot = {
+      score: 82,
+      maxPossible: 100,
+      level: "safe",
+      assessedAt: "2026-08-06T00:00:00Z",
+      externalScanCredit: 40,
+    };
+    const result = checkTrustPolicy({
+      serverName: "evil",
+      currentScore: 50,
+      currentMaxPossible: 80,
+      currentNativeScore: 50, // 63% — a real drop against the true baseline
+      currentNativeMaxPossible: 80,
+      lockedSnapshot: tampered,
+      policy: { blockOnScoreDrop: true },
+    });
+    expect(result.pass).toBe(false);
+    if (!result.pass) expect(result.reason).toContain("outside the range");
+  });
+
+  it("ignores a credit larger than the score it came from (isolates: credit <= score)", () => {
+    // 20 is >= 0 and <= the bucket maximum, so only the score clause can reject it. A
+    // score of 15 cannot contain a 20-point bucket.
+    const tampered: TrustSnapshot = {
+      score: 15,
+      maxPossible: 100,
+      level: "risky",
+      assessedAt: "2026-08-06T00:00:00Z",
+      externalScanCredit: 20,
+    };
+    const result = checkTrustPolicy({
+      serverName: "evil",
+      currentScore: 10,
+      currentMaxPossible: 80,
+      currentNativeScore: 10,
+      currentNativeMaxPossible: 80,
+      lockedSnapshot: tampered,
+      policy: { blockOnScoreDrop: true },
+    });
+    expect(result.pass).toBe(false);
+    if (!result.pass) expect(result.reason).toContain("outside the range");
+  });
+
+  it("ignores a positive credit on a lock whose denominator was never widened", () => {
+    // The disarm that survives every range check: 20 is in range on all three counts,
+    // but `lock` cannot write it — it records breakdown.externalScan, which the scorer
+    // zeroes when it did not credit the bucket, and an uncredited score carries
+    // maxPossible 80. Untampered this lock is exactly native (62/80 = 78%) and BLOCKS a
+    // fall to 56/80 = 70%; with the credit it recovered 42/80 = 53% and passed.
+    const tampered: TrustSnapshot = {
+      score: 62,
+      maxPossible: 80, // no scanner was credited at lock time
+      level: "caution",
+      assessedAt: "2026-08-06T00:00:00Z",
+      externalScanCredit: 20,
+    };
+    const result = checkTrustPolicy({
+      serverName: "evil",
+      currentScore: 56,
+      currentMaxPossible: 80,
+      currentNativeScore: 56,
+      currentNativeMaxPossible: 80,
+      lockedSnapshot: tampered,
+      policy: { blockOnScoreDrop: true },
+    });
+    expect(result.pass).toBe(false);
+  });
+
+  it("still accepts the zero credit `lock` writes for an uncredited server", () => {
+    // The zero-FP guard on the clause above: credit 0 with maxPossible 80 is exactly
+    // what lock.ts writes when no scanner ran, and it must stay on the EXACT path.
+    const genuine: TrustSnapshot = {
+      score: 62,
+      maxPossible: 80,
+      level: "caution",
+      assessedAt: "2026-08-06T00:00:00Z",
+      externalScanCredit: 0,
+    };
+    const result = checkTrustPolicy({
+      serverName: "test-server",
+      currentScore: 62,
+      currentMaxPossible: 80,
+      currentNativeScore: 62,
+      currentNativeMaxPossible: 80,
+      lockedSnapshot: genuine,
+      policy: { blockOnScoreDrop: true },
+    });
+    expect(result.pass).toBe(true); // 78% vs 78% — no drop, and no bounded wording
+    const dropped = checkTrustPolicy({
+      serverName: "test-server",
+      currentScore: 50,
+      currentMaxPossible: 80,
+      currentNativeScore: 50,
+      currentNativeMaxPossible: 80,
+      lockedSnapshot: genuine,
+      policy: { blockOnScoreDrop: true },
+    });
+    expect(dropped.pass).toBe(false);
+    if (!dropped.pass) expect(dropped.reason).not.toContain("outside the range");
+  });
+
+  it("never reports a baseline above 100% even for an out-of-range locked score", () => {
+    // `score` and `maxPossible` are themselves unbounded z.number(), so the clamp has
+    // to live at the exit rather than on the credit alone.
+    const absurd: TrustSnapshot = {
+      score: 250,
+      maxPossible: 100,
+      level: "safe",
+      assessedAt: "2026-08-06T00:00:00Z",
+      externalScanCredit: 20,
+    };
+    const result = checkTrustPolicy({
+      serverName: "test-server",
+      currentScore: 62,
+      currentMaxPossible: 80,
+      currentNativeScore: 62,
+      currentNativeMaxPossible: 80,
+      lockedSnapshot: absurd,
+      policy: { blockOnScoreDrop: true },
+    });
+    expect(result.pass).toBe(false);
+    if (!result.pass) {
+      // 100% is legitimate (the clamp lands on nativeMax); anything ABOVE it is the
+      // bug — the unclamped form reported "dropped from 288%".
+      const percentages = [...result.reason.matchAll(/(\d+)%/g)].map((m) => Number(m[1]));
+      expect(percentages.length).toBeGreaterThan(0);
+      expect(Math.max(...percentages)).toBeLessThanOrEqual(100);
+      // And a figure that had to be clamped is not "exact", so the remedy offered must
+      // be re-locking rather than "you probably upgraded mcpm".
+      expect(result.reason).toContain("outside the range");
+    }
   });
 
   it("throws if blockOnScoreDrop is active without native figures", () => {
