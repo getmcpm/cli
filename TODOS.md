@@ -849,6 +849,8 @@ scanner-credited lock whose raw score is >= 63 therefore bounds to >= 79% and bl
 changed — until the user re-locks. The docblock's "passes whenever a drop provably is
 not possible" is true only against the theoretical 80, not the reachable 62.
 
+**This is a NEW regression, not a pre-existing bug.** `recoverLockedNative` and the whole native-evidence drop check do not exist in v0.28.0 (verified: `git show v0.28.0:src/stack/policy.ts | grep -c recoverLockedNative` = 0, and that version still compares raw percentages). So shipping it INTRODUCES this false block rather than failing to fix an existing one — weigh it that way, and do not repeat the softer framing.
+
 **Why deferred, not fixed.** The affected population is small, but it is NOT empty —
 do not restate this as "no released mcpm could write `maxPossible: 100`", which is false.
 Before v0.28.0 the tier-2 scanner was dead (it probed a package that 404s), so
