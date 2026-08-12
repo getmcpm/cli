@@ -45,7 +45,13 @@ const HEALTH_CHECK_FAIL = 0;
 const HEALTH_CHECK_NULL = 15;
 
 const STATIC_SCAN_MAX = 40;
-const EXTERNAL_SCAN_MAX = 20;
+/**
+ * Exported for `stack/policy.ts`, which validates a lockfile's recorded
+ * `externalScanCredit` against it. That field is this bucket's value at lock time,
+ * so the ceiling has to be the one this scorer actually awards — a second copy of
+ * `20` in the validator would silently stop matching if the bucket is re-weighted.
+ */
+export const EXTERNAL_SCAN_MAX = 20;
 const REGISTRY_META_MAX = 10;
 
 /** Deductions per finding severity (applied to both static and external scan). */
@@ -224,6 +230,28 @@ export function computeTrustScore(input: TrustScoreInput): TrustScore {
   const level = computeLevel(score, maxPossible);
 
   return { score, maxPossible, level, breakdown: { ...breakdown } };
+}
+
+/**
+ * Did this score bank the external-scanner bucket?
+ *
+ * The scorer widens the denominator to `FULL_MAX_POSSIBLE` exactly when it credited
+ * the bucket, so `maxPossible` IS the record of that decision — which makes this the
+ * one honest way to ask after the fact.
+ *
+ * Note what it is NOT: `checkScannerAvailable()`. That is a bare `<cmd> --version`
+ * exit-0 probe, while crediting additionally requires that the scanner returned output
+ * the scorer could READ. A scanner that answers `--version` but cannot scan a registry
+ * server name emits a `scanner-error` finding and is credited nowhere, so the two
+ * predicates disagree precisely when a scanner is half-working — the case that made
+ * `audit --fix`'s ceiling delete flawless servers.
+ *
+ * Crediting is decided PER SERVER (a `scanner-error` is per invocation), so a single
+ * run can legitimately contain both, and callers reducing over a run must decide which
+ * direction is safe rather than assume uniformity.
+ */
+export function externalCredited(trust: TrustScore): boolean {
+  return trust.maxPossible === FULL_MAX_POSSIBLE;
 }
 
 /** A trust score with third-party credit mcpm cannot verify removed. */

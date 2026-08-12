@@ -21,7 +21,8 @@ import type { InstalledServer } from "../store/servers.js";
 import type { ServerEntry } from "../registry/types.js";
 import type { Finding } from "../scanner/tier1.js";
 import { buildSarif } from "../output/sarif.js";
-import { computeTrustScore as computeTrustScoreReal } from "../scanner/trust-score.js";
+import { computeTrustScore as computeTrustScoreReal, externalCredited } from "../scanner/trust-score.js";
+import { sanitizeForTerminal } from "../guard/sanitize.js";
 import type { TrustScore, TrustScoreInput } from "../scanner/trust-score.js";
 import { levelColor, scoreBar, extractRegistryMeta } from "../utils/format-trust.js";
 import { stdoutOutput } from "../utils/output.js";
@@ -34,6 +35,17 @@ import { parseMinTrust } from "./install.js";
 // ---------------------------------------------------------------------------
 
 const DEFAULT_FIX_THRESHOLD = 50;
+
+/**
+ * An invocation `mcpm audit` cannot satisfy — as opposed to a scan that ran and found
+ * something. Both used to leave the process on exit 1, which is audit's documented
+ * "a server is risky" CI signal, so a script could not tell "your flag is impossible"
+ * from "your servers are bad". These exit 2 instead.
+ *
+ * A marker class, deliberately: no code enum, no structured payload. The exit code is
+ * the whole contract, and CONTRACTS.md permits ADDING codes but never repurposing one.
+ */
+export class AuditUsageError extends Error {}
 
 /**
  * A flawless server — zero findings, active registry status, years-old publish date —
@@ -50,6 +62,22 @@ const DEFAULT_FIX_THRESHOLD = 50;
  * the injected scorer is not merely untestable but wrong — the suite's mock returns
  * one constant for every input, which collapses the ceiling onto each server's own
  * score and fires the guard exactly when a server is legitimately below the threshold.
+ *
+ * The metadata here is deliberately the most FAVOURABLE a server could present, which
+ * makes this a property of the CALL SITE (what audit can measure) rather than of any
+ * one server. Folding each server's own `publishedAt` / registry status in instead
+ * would lower the ceiling for exactly the servers most worth removing — a publisher
+ * could republish to become unremovable, inverting F4's release-age cooldown.
+ *
+ * Two known residuals, both narrower than the band this guard closes, both recorded in
+ * TODOS rather than papered over:
+ *  - 62 is reachable only by a pypi/oci server. Every npm package draws one `low`
+ *    `install-script` finding for the `npx -y` launcher class, so a clean npm server
+ *    tops out at 60 — leaving `--min-trust 61..62` as a threshold an all-npm stack
+ *    cannot satisfy. Pinned by a test against the real scorer.
+ *  - A server that is not a verified publisher, or was published within 30 days,
+ *    tops out lower still (59 / 58). That is the registryMeta bucket doing its job —
+ *    evidence, not a measurement gap — so it is not laundered into an exemption.
  */
 function flawlessAuditScore(hasExternalScanner: boolean): TrustScore {
   return computeTrustScoreReal({
@@ -77,18 +105,30 @@ function flawlessAuditScore(hasExternalScanner: boolean): TrustScore {
  * an availability-keyed ceiling would read 82 and wave through the whole 63–82 band.
  * That band is the mass delete this guard exists to prevent.
  *
- * A server banked the bucket iff the scorer WIDENED its denominator, so both the
- * ceiling and the credited-ness test come from the same function and cannot drift
- * apart. `Math.max` is the right reducer: the guard's claim is "no server in this run
- * could have cleared this threshold", so one server that could have is enough to make
- * the threshold meaningful, and the servers below it are below it on evidence.
+ * A server banked the bucket iff the scorer WIDENED its denominator — `externalCredited`
+ * asks the scorer's own record of that decision, so the ceiling and the credited-ness
+ * test cannot drift apart.
+ *
+ * `Math.min` is the reducer, and the earlier `Math.max` was the bug. Crediting is
+ * decided PER SERVER (a `scanner-error` is emitted per invocation), so a half-working
+ * scanner yields a MIXED run — and `Math.max` let one credited server license a
+ * threshold in 63..82 that no uncredited server could reach, whereupon the raw
+ * candidate filter deleted those uncredited servers even though their evidence was
+ * flawless. "The servers below it are below it on evidence" was false for exactly
+ * them: `computeTrustScore` treats a scanner-error as the scanner being ABSENT, which
+ * is a statement about the user's scanner, not about the server.
+ *
+ * So the claim this guard enforces is the strong one — no server in this run could
+ * clear this threshold — and a run where any server structurally cannot is refused
+ * whole. Refusing deletes nothing, which is the only safe direction on the CLI's one
+ * destructive score gate; the alternative (silently sparing the servers that cannot
+ * reach the bar, and removing the rest) would spare whichever server most recently
+ * broke the user's scanner.
  */
-function maxAchievableAuditScore(scored: readonly TrustScore[]): number {
+function minAchievableAuditScore(scored: readonly TrustScore[]): number {
   const credited = flawlessAuditScore(true);
   const native = flawlessAuditScore(false);
-  return Math.max(
-    ...scored.map((t) => (t.maxPossible === credited.maxPossible ? credited.score : native.score))
-  );
+  return Math.min(...scored.map((t) => (externalCredited(t) ? credited.score : native.score)));
 }
 
 // ---------------------------------------------------------------------------
@@ -250,10 +290,19 @@ export async function handleAudit(
 ): Promise<number> {
   // Early validation
   if (options.fix === true && options.json === true && options.yes !== true) {
-    throw new Error("--fix --json requires --yes");
+    throw new AuditUsageError("--fix --json requires --yes");
   }
   if (options.minTrust !== undefined && options.fix !== true) {
-    throw new Error("--min-trust requires --fix");
+    throw new AuditUsageError("--min-trust requires --fix");
+  }
+  // The SARIF branch returns before the fix step, so `--sarif --fix` never removed
+  // anything — the flag was accepted and silently dropped. Rejecting the combination
+  // fixes that, and incidentally keeps the `--min-trust` ceiling guard from refusing a
+  // report-only run that could not have deleted anything either.
+  if (options.sarif === true && options.fix === true) {
+    throw new AuditUsageError(
+      "--sarif is report-only and cannot be combined with --fix. Run them as separate commands."
+    );
   }
 
   const { getInstalledServers, getServer, scanTier1, checkScannerAvailable, scanTier2, computeTrustScore, output } = deps;
@@ -322,24 +371,38 @@ export async function handleAudit(
   // Runs AFTER the scan and BEFORE every output branch: nothing has been deleted yet
   // (`runFix` is further down), and only here is it known what the run actually
   // credited — which is the whole point, since scanner AVAILABILITY is not scanner
-  // CREDIT. See `maxAchievableAuditScore`.
+  // CREDIT. See `minAchievableAuditScore`.
   //
   // Refuse rather than warn. This is arithmetic, not a heuristic — there is no
   // false-positive to trade against, because "threshold above the maximum" and "every
   // server is below the threshold" are the same statement.
   if (options.fix === true && options.minTrust !== undefined) {
     // Servers whose registry lookup failed are never removal candidates, so they must
-    // not drag the ceiling down. If none scanned, there is nothing to remove either.
+    // not drag the ceiling down. If none scanned, there is nothing to remove either —
+    // and `Math.min(...[])` is +Infinity, which would silently disable the guard.
     const scanned = results.filter((r) => r.error === undefined).map((r) => r.score);
     if (scanned.length > 0) {
-      const ceiling = maxAchievableAuditScore(scanned);
+      const ceiling = minAchievableAuditScore(scanned);
       if (options.minTrust > ceiling) {
-        const credited = scanned.some((t) => t.maxPossible === flawlessAuditScore(true).maxPossible);
-        throw new Error(
+        // Name the servers that hold the ceiling down in a mixed-credit run. Without
+        // this the message reads as a flat property of the command, and the user has
+        // no way to see that their scanner failed on some servers and not others.
+        const uncredited = results
+          .filter((r) => r.error === undefined && !externalCredited(r.score))
+          .map((r) => r.name);
+        const mixed = uncredited.length > 0 && uncredited.length < scanned.length;
+        throw new AuditUsageError(
           `--min-trust ${options.minTrust} is above ${ceiling}, the highest score \`mcpm audit\` ` +
-            `could produce for any of these servers` +
-            `${credited ? " (with your external scanner credited)" : ""}. ` +
-            `Every installed server would fall below it, so --fix would propose your whole stack for removal. ` +
+            `could produce for every one of these servers. ` +
+            `At least one would fall below it whatever its evidence, so --fix would propose it for removal. ` +
+            (mixed
+              ? `The external scanner was not credited for ${uncredited.length} of ${scanned.length} servers ` +
+                // Not `.map(sanitizeForTerminal)`: its second parameter is a length
+                // cap, and map would pass the array index into it — truncating the
+                // first name to zero characters.
+                `(${uncredited.map((n) => sanitizeForTerminal(n)).join(", ")}), which caps them at ${ceiling}. ` +
+                `A scanner that answers \`--version\` but cannot scan a server still counts as absent. `
+              : "") +
             `Audit does not execute servers, so the health check never runs (15 of 30 points), and it does not ` +
             `read download counts (registry metadata caps at 7 of 10). Use --min-trust ${ceiling} or lower.`
         );
@@ -508,7 +571,11 @@ export function registerAuditCommand(program: Command): void {
         deps
       ).catch((err: Error) => {
         console.error(chalk.red(err.message));
-        return 1;
+        // Exit 2 marks "this invocation cannot be satisfied", keeping audit's
+        // documented exit 1 ("a server is risky") meaningful to CI. Commander's own
+        // argument-parse failures (e.g. `--min-trust 150`) still exit 1 — they never
+        // reach this handler.
+        return err instanceof AuditUsageError ? 2 : 1;
       });
 
       if (exitCode !== 0) {
