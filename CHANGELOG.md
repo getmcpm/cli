@@ -65,7 +65,12 @@ All notable changes to this project will be documented in this file.
   snapshot recovered a baseline of 0%, after which no current score could ever be
   "below" it and the rug-pull tripwire was dead, while `score` and `level` stayed
   pristine in the diff a reviewer reads. A negative value inflated the baseline past
-  100% instead, blocking every server until a re-lock. A credit outside the range the
+  100% instead, blocking every server until a re-lock. Subtler and more plausible than
+  either: a credit that is individually in range (`20`) added to a snapshot whose
+  denominator was never widened (`maxPossible: 80`) dropped the baseline from 78% to 53%
+  and turned a block into a pass — `lock` cannot write that combination, since it records
+  `breakdown.externalScan`, which the scorer zeroes whenever it did not credit the
+  bucket, so rejecting it costs no false positives. A credit outside the range the
   running version can interpret is now treated as if the field were absent (falling to
   the conservative upper bound) rather than clamped into range, and every recovery path
   exits through one clamp — `score` and `maxPossible` are themselves unbounded, so a

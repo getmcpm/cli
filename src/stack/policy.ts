@@ -22,7 +22,7 @@ import { EXTERNAL_SCAN_MAX } from "../scanner/trust-score.js";
  * enough to compute it, otherwise a conservative upper bound whose cause the block
  * message names, since the two causes have different remedies to explain.
  */
-type RecoveryBasis = "exact" | "legacy-bound" | "uninterpretable-credit";
+type RecoveryBasis = "exact" | "legacy-bound" | "out-of-range";
 
 export interface PolicyCheckInput {
   readonly serverName: string;
@@ -153,13 +153,13 @@ export function checkTrustPolicy(input: PolicyCheckInput): PolicyResult {
             ? ` This lock predates native-evidence drop checks and was written with ` +
               `an external scanner credited, so the baseline is an upper bound — ` +
               `re-run \`mcpm lock\` to record an exact one.`
-            : lockedNative.basis === "uninterpretable-credit"
+            : lockedNative.basis === "out-of-range"
               ? // Deliberately NOT phrased as tampering: an upward re-weighting of the
                 // external bucket would make that accusation false for an older mcpm
                 // reading a newer lock. Re-locking is the remedy either way.
-                ` This lock records an external-scanner credit outside the range this ` +
-                `version can interpret, so the baseline is an upper bound — re-run ` +
-                `\`mcpm lock\` to record an exact one.`
+                ` This lock records trust figures outside the range this version can ` +
+                `interpret, so the baseline is an upper bound — re-run \`mcpm lock\` to ` +
+                `record an exact one.`
               : ` If you recently upgraded mcpm, new scanner findings can lower ` +
                 `scores — re-run \`mcpm lock\` to refresh snapshots if the drop is ` +
                 `expected.`),
@@ -242,10 +242,16 @@ function toPct(score: number, maxPossible: number): number {
  * sum of four non-negative buckets and the credit IS one of them, so a legitimate lock
  * can never trip it.
  */
-function isUsableCredit(credit: number, lockedScore: number): boolean {
-  return (
-    Number.isFinite(credit) && credit >= 0 && credit <= EXTERNAL_SCAN_MAX && credit <= lockedScore
-  );
+function isUsableCredit(credit: number, locked: TrustSnapshot, nativeMax: number): boolean {
+  // A positive credit on a snapshot whose denominator was NOT widened is a combination
+  // `lock` cannot produce: it writes `breakdown.externalScan`, which the scorer hard-
+  // zeroes whenever it did not credit the bucket, and an uncredited score carries
+  // maxPossible === nativeMax. Rejecting it therefore has zero false positives — and it
+  // closes the disarm that survives every range check, since a credit of 20 added to an
+  // untampered `{score: 62, maxPossible: 80}` lock is individually in range yet drops the
+  // baseline from 78% to 53%.
+  if (locked.maxPossible === nativeMax && credit > 0) return false;
+  return credit >= 0 && credit <= EXTERNAL_SCAN_MAX && credit <= locked.score;
 }
 
 /**
@@ -287,16 +293,23 @@ function recoverLockedNative(
   locked: TrustSnapshot,
   nativeMax: number,
 ): { readonly score: number; readonly maxPossible: number; readonly basis: RecoveryBasis } {
-  const bounded = (score: number, basis: RecoveryBasis) => ({
-    score: Math.max(0, Math.min(nativeMax, score)),
-    maxPossible: nativeMax,
-    basis,
-  });
+  const bounded = (score: number, basis: RecoveryBasis) => {
+    const clamped = Math.max(0, Math.min(nativeMax, score));
+    return {
+      score: clamped,
+      maxPossible: nativeMax,
+      // A computation that had to be clamped was not exact, whatever produced it — an
+      // out-of-range `score` reaches here the same way an out-of-range credit does,
+      // since both are unbounded `z.number()`. Reporting it as exact would hand the
+      // user the "you upgraded mcpm" remedy for a lock that actually needs re-locking.
+      basis: basis === "exact" && clamped !== score ? ("out-of-range" as const) : basis,
+    };
+  };
 
   if (locked.externalScanCredit !== undefined) {
-    return isUsableCredit(locked.externalScanCredit, locked.score)
+    return isUsableCredit(locked.externalScanCredit, locked, nativeMax)
       ? bounded(locked.score - locked.externalScanCredit, "exact")
-      : bounded(locked.score, "uninterpretable-credit");
+      : bounded(locked.score, "out-of-range");
   }
   if (locked.maxPossible === nativeMax) {
     return bounded(locked.score, "exact");

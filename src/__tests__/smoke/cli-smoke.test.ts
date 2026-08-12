@@ -145,6 +145,39 @@ describe("CLI smoke — CI-gate exit codes (docs/CONTRACTS.md)", () => {
       expect(r.out).toMatch(/stack file not found/i);
     });
   });
+
+  // audit exit 2 = "this invocation cannot be satisfied", distinct from exit 1 = "a
+  // server is risky". Only the built binary exercises it: the mapping lives in the
+  // Commander action's catch, which the handler-level tests bypass entirely — without
+  // these, replacing the ternary with `return 1` leaves the whole suite green.
+  it.each([
+    [["audit", "--sarif", "--fix"], /--sarif is report-only/i],
+    [["audit", "--min-trust", "50"], /--min-trust requires --fix/i],
+    [["audit", "--fix", "--json"], /requires --yes/i],
+  ])("audit %s exits 2 (invocation cannot be satisfied)", (argv, pattern) => {
+    withHome((home) => {
+      const r = run(argv as string[], home);
+      expect(r.code).toBe(2);
+      expect(r.out).toMatch(pattern);
+    });
+  });
+
+  it("audit exits 1, not 2, on a Commander argument-parse failure", () => {
+    // The scoped half of the CONTRACTS promise: exit 2 covers the invocations mcpm
+    // itself refuses, NOT everything a user can mistype. parseMinTrust raises
+    // Commander's InvalidArgumentError, which never reaches audit's catch.
+    withHome((home) => {
+      const r = run(["audit", "--fix", "--min-trust", "150"], home);
+      expect(r.code).toBe(1);
+    });
+  });
+
+  it("audit exits 0 on a clean run with no servers installed", () => {
+    withHome((home) => {
+      const r = run(["audit"], home);
+      expect(r.code).toBe(0);
+    });
+  });
 });
 
 describe("CLI smoke — generated completions are valid shell", () => {

@@ -296,6 +296,113 @@ describe("checkTrustPolicy", () => {
     expect(result.pass).toBe(true);
   });
 
+  // Each of the following isolates ONE clause of isUsableCredit. The two tests above use
+  // 999 and -20, which every clause rejects — so deleting any single clause left them
+  // green and the guard was certified by nothing. These pick values that ONLY the named
+  // clause rejects, and each was verified to die when that clause is removed.
+  it("ignores a credit above the external bucket's maximum (isolates: credit <= 20)", () => {
+    // 40 is >= 0 and <= score, so only the bucket-maximum clause can reject it.
+    const tampered: TrustSnapshot = {
+      score: 82,
+      maxPossible: 100,
+      level: "safe",
+      assessedAt: "2026-08-06T00:00:00Z",
+      externalScanCredit: 40,
+    };
+    const result = checkTrustPolicy({
+      serverName: "evil",
+      currentScore: 50,
+      currentMaxPossible: 80,
+      currentNativeScore: 50, // 63% — a real drop against the true baseline
+      currentNativeMaxPossible: 80,
+      lockedSnapshot: tampered,
+      policy: { blockOnScoreDrop: true },
+    });
+    expect(result.pass).toBe(false);
+    if (!result.pass) expect(result.reason).toContain("outside the range");
+  });
+
+  it("ignores a credit larger than the score it came from (isolates: credit <= score)", () => {
+    // 20 is >= 0 and <= the bucket maximum, so only the score clause can reject it. A
+    // score of 15 cannot contain a 20-point bucket.
+    const tampered: TrustSnapshot = {
+      score: 15,
+      maxPossible: 100,
+      level: "risky",
+      assessedAt: "2026-08-06T00:00:00Z",
+      externalScanCredit: 20,
+    };
+    const result = checkTrustPolicy({
+      serverName: "evil",
+      currentScore: 10,
+      currentMaxPossible: 80,
+      currentNativeScore: 10,
+      currentNativeMaxPossible: 80,
+      lockedSnapshot: tampered,
+      policy: { blockOnScoreDrop: true },
+    });
+    expect(result.pass).toBe(false);
+    if (!result.pass) expect(result.reason).toContain("outside the range");
+  });
+
+  it("ignores a positive credit on a lock whose denominator was never widened", () => {
+    // The disarm that survives every range check: 20 is in range on all three counts,
+    // but `lock` cannot write it — it records breakdown.externalScan, which the scorer
+    // zeroes when it did not credit the bucket, and an uncredited score carries
+    // maxPossible 80. Untampered this lock is exactly native (62/80 = 78%) and BLOCKS a
+    // fall to 56/80 = 70%; with the credit it recovered 42/80 = 53% and passed.
+    const tampered: TrustSnapshot = {
+      score: 62,
+      maxPossible: 80, // no scanner was credited at lock time
+      level: "caution",
+      assessedAt: "2026-08-06T00:00:00Z",
+      externalScanCredit: 20,
+    };
+    const result = checkTrustPolicy({
+      serverName: "evil",
+      currentScore: 56,
+      currentMaxPossible: 80,
+      currentNativeScore: 56,
+      currentNativeMaxPossible: 80,
+      lockedSnapshot: tampered,
+      policy: { blockOnScoreDrop: true },
+    });
+    expect(result.pass).toBe(false);
+  });
+
+  it("still accepts the zero credit `lock` writes for an uncredited server", () => {
+    // The zero-FP guard on the clause above: credit 0 with maxPossible 80 is exactly
+    // what lock.ts writes when no scanner ran, and it must stay on the EXACT path.
+    const genuine: TrustSnapshot = {
+      score: 62,
+      maxPossible: 80,
+      level: "caution",
+      assessedAt: "2026-08-06T00:00:00Z",
+      externalScanCredit: 0,
+    };
+    const result = checkTrustPolicy({
+      serverName: "test-server",
+      currentScore: 62,
+      currentMaxPossible: 80,
+      currentNativeScore: 62,
+      currentNativeMaxPossible: 80,
+      lockedSnapshot: genuine,
+      policy: { blockOnScoreDrop: true },
+    });
+    expect(result.pass).toBe(true); // 78% vs 78% — no drop, and no bounded wording
+    const dropped = checkTrustPolicy({
+      serverName: "test-server",
+      currentScore: 50,
+      currentMaxPossible: 80,
+      currentNativeScore: 50,
+      currentNativeMaxPossible: 80,
+      lockedSnapshot: genuine,
+      policy: { blockOnScoreDrop: true },
+    });
+    expect(dropped.pass).toBe(false);
+    if (!dropped.pass) expect(dropped.reason).not.toContain("outside the range");
+  });
+
   it("never reports a baseline above 100% even for an out-of-range locked score", () => {
     // `score` and `maxPossible` are themselves unbounded z.number(), so the clamp has
     // to live at the exit rather than on the credit alone.
@@ -322,6 +429,9 @@ describe("checkTrustPolicy", () => {
       const percentages = [...result.reason.matchAll(/(\d+)%/g)].map((m) => Number(m[1]));
       expect(percentages.length).toBeGreaterThan(0);
       expect(Math.max(...percentages)).toBeLessThanOrEqual(100);
+      // And a figure that had to be clamped is not "exact", so the remedy offered must
+      // be re-locking rather than "you probably upgraded mcpm".
+      expect(result.reason).toContain("outside the range");
     }
   });
 

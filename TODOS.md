@@ -766,12 +766,19 @@ exit 0). That is not a contrived setup — `tier2.ts` records that a real scanne
 client CONFIG FILES rather than registry names, so wiring #32 lands a user in it
 directly. The ceiling now keys on `maxPossible`, i.e. on the scorer having WIDENED the
 denominator, so the ceiling and the credited-ness test come from the same function and
-cannot drift apart; `Math.max` over scanned servers, because the claim being made is
-"no server in this run could have cleared this threshold". The pinning test for the
-82 case had mocked availability only, so it passed with the defect live.
-Refuse rather than warn: this is arithmetic, not a heuristic — "threshold above the
-maximum" and "every server is below the threshold" are the same statement, so there
-is no false positive to trade against.
+cannot drift apart. The pinning test for the 82 case had mocked availability only, so it
+passed with the defect live.
+
+**A later review found the reducer itself wrong, and it is now `Math.min`.** Crediting is
+per server (a `scanner-error` is emitted per invocation), so a half-working scanner
+yields a MIXED run — and taking the BEST server's ceiling let one credited server license
+a threshold in 63..82 that no uncredited server could reach, whereupon the raw candidate
+filter deleted those uncredited servers although their evidence was flawless. Do not
+restore `Math.max`, and note that its stated justification ("no server in this run could
+have cleared this threshold" / "there is no false positive to trade against") was the
+argument FOR the bug: under `Math.min` a refusal can land on a run where some other
+server was genuinely removable, and that trade is taken deliberately — a false refusal
+costs a re-run, a false deletion costs the user their config and the credentials in it.
 
 Four tests, all mutation-verified (deleting the guard fails three; flipping `>` to
 `>=` fails the boundary test). One pre-existing test had to change: it asserted
@@ -842,14 +849,18 @@ scanner-credited lock whose raw score is >= 63 therefore bounds to >= 79% and bl
 changed — until the user re-locks. The docblock's "passes whenever a drop provably is
 not possible" is true only against the theoretical 80, not the reachable 62.
 
-**Why deferred, not fixed.** The affected population is close to empty by construction:
-before v0.28.0 the tier-2 scanner was DEAD (it probed a package that 404s), so
-`checkScannerAvailable()` always returned false and no released mcpm could have written
-`maxPossible: 100`. Verified: `git show v0.28.0:src/commands/lock.ts | grep -c
-externalScanCredit` = 0, and there is no tag between v0.28.0 and HEAD. So a lock can
-only be affected if the user configured `MCPM_EXTERNAL_SCANNER` against a real
-executable, ran `mcpm lock`, and enabled `blockOnScoreDrop`, all since 2026-08-05. The
-block message already names the remedy (`re-run mcpm lock`), which resolves it exactly.
+**Why deferred, not fixed.** The affected population is small, but it is NOT empty —
+do not restate this as "no released mcpm could write `maxPossible: 100`", which is false.
+Before v0.28.0 the tier-2 scanner was dead (it probed a package that 404s), so
+`checkScannerAvailable()` always returned false and no lock from those versions can be
+affected. **v0.28.0 changed that**: it credits any resolvable `MCPM_EXTERNAL_SCANNER`, so
+a v0.28.0 lock CAN carry `maxPossible: 100`. And v0.28.0 never wrote `externalScanCredit`
+(verified: `git show v0.28.0:src/commands/lock.ts | grep -c externalScanCredit` = 0, with
+no tag between v0.28.0 and HEAD), which is exactly the unrecoverable shape. So the
+affected set is: users who configured a working `MCPM_EXTERNAL_SCANNER`, ran `mcpm lock`
+on v0.28.0 (released 2026-08-05), and set `blockOnScoreDrop`. Deferred because that
+window is days wide and the block message already names the exact remedy (`re-run
+mcpm lock`) — not because nobody can hit it.
 
 **The fix, when someone reports it:** bound at the *reachable* ceiling instead of the
 native denominator. That figure is a property of the CALL SITE (what `up` can measure),

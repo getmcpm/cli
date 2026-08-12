@@ -86,7 +86,7 @@ export interface VerifyModel {
 
 export interface VerifyOpts {
   json?: boolean;
-  /** Path to mcpm.yaml; the lock is derived as `<name>-lock.yaml`. Default `mcpm.yaml`. */
+  /** Path to mcpm.yaml; the lock inserts `-lock` before the extension (`mcpm.yml` -> `mcpm-lock.yml`). Default `mcpm.yaml`. */
   stackFile?: string;
 }
 
@@ -333,7 +333,7 @@ export function registerVerifyCommand(program: Command): void {
       "Verify mcpm-lock.yaml against npm's published record — integrity drift + Sigstore provenance regression (repo-only CI gate)"
     )
     .option("--json", "emit the structured verify model as JSON (shape UNSTABLE)")
-    .option("-f, --file <path>", "path to mcpm.yaml (the lock is derived as <name>-lock.yaml)")
+    .option("-f, --file <path>", "path to mcpm.yaml (the lock inserts -lock before the extension)")
     .action(async (opts: { json?: boolean; file?: string }) => {
       const code = await verifyHandler(
         {

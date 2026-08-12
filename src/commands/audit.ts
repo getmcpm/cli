@@ -69,8 +69,8 @@ export class AuditUsageError extends Error {}
  * would lower the ceiling for exactly the servers most worth removing — a publisher
  * could republish to become unremovable, inverting F4's release-age cooldown.
  *
- * Two known residuals, both narrower than the band this guard closes, both recorded in
- * TODOS rather than papered over:
+ * Two known residuals, both narrower than the band this guard closes, both stated in
+ * the CHANGELOG rather than papered over:
  *  - 62 is reachable only by a pypi/oci server. Every npm package draws one `low`
  *    `install-script` finding for the `npx -y` launcher class, so a clean npm server
  *    tops out at 60 — leaving `--min-trust 61..62` as a threshold an all-npm stack
@@ -373,9 +373,13 @@ export async function handleAudit(
   // credited — which is the whole point, since scanner AVAILABILITY is not scanner
   // CREDIT. See `minAchievableAuditScore`.
   //
-  // Refuse rather than warn. This is arithmetic, not a heuristic — there is no
-  // false-positive to trade against, because "threshold above the maximum" and "every
-  // server is below the threshold" are the same statement.
+  // Refuse rather than warn, and refuse the whole run. Under the `Math.min` reducer the
+  // condition is "at least one scanned server cannot reach this threshold whatever its
+  // evidence" — so a refusal can land on a run where some OTHER server was genuinely
+  // removable. That is the deliberate trade: the alternative is deleting the servers
+  // that cannot reach the bar, and on the CLI's one destructive score gate a false
+  // refusal costs a re-run while a false deletion costs the user their config and the
+  // plaintext credentials in it.
   if (options.fix === true && options.minTrust !== undefined) {
     // Servers whose registry lookup failed are never removal candidates, so they must
     // not drag the ceiling down. If none scanned, there is nothing to remove either —
@@ -391,6 +395,14 @@ export async function handleAudit(
           .filter((r) => r.error === undefined && !externalCredited(r.score))
           .map((r) => r.name);
         const mixed = uncredited.length > 0 && uncredited.length < scanned.length;
+        // Advise the highest score a server in THIS run actually reached, never the
+        // model ceiling. The ceiling is what a hypothetical best server could score, and
+        // recommending it walks the user straight into the residual band: a clean npm
+        // server tops out at 60 (the `npx -y` launcher class costs one `low`), so
+        // "use --min-trust 62" would remove an entire all-npm stack — the outcome this
+        // guard exists to prevent. The best observed score is the largest threshold that
+        // is not vacuous: at least one server is at or above it by construction.
+        const bestObserved = Math.max(...scanned.map((t) => t.score));
         throw new AuditUsageError(
           `--min-trust ${options.minTrust} is above ${ceiling}, the highest score \`mcpm audit\` ` +
             `could produce for every one of these servers. ` +
@@ -404,7 +416,9 @@ export async function handleAudit(
                 `A scanner that answers \`--version\` but cannot scan a server still counts as absent. `
               : "") +
             `Audit does not execute servers, so the health check never runs (15 of 30 points), and it does not ` +
-            `read download counts (registry metadata caps at 7 of 10). Use --min-trust ${ceiling} or lower.`
+            `read download counts (registry metadata caps at 7 of 10). ` +
+            `The highest score any server here actually reached is ${bestObserved} — use --min-trust ${bestObserved} or lower, ` +
+            `since a higher threshold removes servers for what audit cannot measure rather than for their evidence.`
         );
       }
     }
