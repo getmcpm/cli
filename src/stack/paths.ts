@@ -10,14 +10,28 @@
  * `mcpm.yml` is the obvious case (docker-compose / GitHub Actions habit), but
  * `mcpm.YAML`, `mcpm.yaml.bak` and an extensionless `stack` all self-destructed.
  *
- * The fix is to STRIP any yaml extension rather than require one, then always
- * append. Because the suffix is appended unconditionally, the result can never
- * equal the input — so no collision guard is needed here. (A guard was written and
- * then removed: no input could reach it, and an unreachable branch is unverifiable,
- * which is the shape this project keeps turning into bugs.)
+ * The first fix STRIPPED any yaml extension and appended a fixed `-lock.yaml`. That
+ * cured the self-overwrite but was not INJECTIVE: `mcpm.yaml`, `mcpm.yml` and
+ * `mcpm.YAML` all normalised onto the single path `mcpm-lock.yaml`. With two such
+ * files in one directory — a production stack and a scratch copy — `mcpm lock -f
+ * mcpm.yml` overwrote the OTHER stack's lock, discarding its trust snapshots and
+ * sticky Sigstore provenance baselines, reported as success, exit 0. Proving that the
+ * output differs from its own input says nothing about two inputs sharing an output.
+ *
+ * So the extension is PRESERVED and `-lock` inserted before it. `mcpm.yaml` still maps
+ * to `mcpm-lock.yaml`, byte-identical, so no existing lock file moves.
+ *
+ * Injective, by invertibility: the output is the input with `-lock` inserted at a
+ * position recoverable from the output itself (immediately before a trailing yaml
+ * extension, or at the end when there is none — `-lock` never ends in a yaml
+ * extension, so the two cases cannot be confused). A map you can invert cannot merge
+ * two inputs. Parameterising the `-lock` infix would void that argument.
+ *
+ * A path with no yaml extension gets `-lock` appended and nothing invented:
+ * defaulting to `.yaml` would put `stack` and `stack.yaml` back on one output.
  */
 
 /** Derive the lock-file path that belongs to a stack file. */
 export function lockPathFor(stackPath: string): string {
-  return `${stackPath.replace(/\.ya?ml$/i, "")}-lock.yaml`;
+  return stackPath.replace(/(\.ya?ml)?$/i, "-lock$1");
 }
