@@ -430,15 +430,19 @@ now compares mcpm-**native** evidence, so a caller-supplied
   figures are absent rather than reverting to the raw comparison this fix
   retired — the same "a future caller must not silently reopen the hole" wiring
   discipline #33 used. No production path hits it (up.ts always supplies them).
-- **Back-compat, hardened after adversarial review.** A pre-fix lock written with
-  a scanner credited (`maxPossible 100`, no `externalScanCredit`) cannot have its
-  native figure recovered. The first cut fell back to the raw comparison here — but
-  review showed that reopened the exact hole: if the CURRENT side also has a
-  (fake) scanner, the raw current score is inflatable and could still mask a native
-  drop. So the fallback now **fails closed** (block + "re-run `mcpm lock`") whenever
-  a current-side scanner is credited, and only raw-compares when the current side
-  has no scanner (no lever, status quo). A pre-fix lock with no scanner
-  (`maxPossible 80`) is already native and recovers cleanly.
+- **Back-compat, through two review rounds.** A pre-fix lock written with a scanner
+  credited (`maxPossible 100`, no `externalScanCredit`) cannot have its native figure
+  recovered exactly. Round 1 fell back to the raw comparison here, and review showed
+  that reopened the exact hole — if the CURRENT side also has a (fake) scanner, the
+  raw current score is inflatable and could still mask a native drop. Round 1's
+  replacement (fail closed only when a current-side scanner is credited) was wrong in
+  BOTH directions: it still failed OPEN on a genuine native drop with no current-side
+  scanner, and it BLOCKED users whose current native score was already at ceiling.
+  **Shipped instead: no raw-comparison path survives at all.** The locked figure is
+  bounded — `min(nativeMax, locked.score)` — because `native = score - credit` for
+  `credit >= 0`, so the bound is a conservative upper limit: it blocks whenever a drop
+  is possible and passes only when one is arithmetically impossible. A pre-fix lock
+  with no scanner (`maxPossible 80`) is already native and recovers exactly.
 - **`minTrustScore` / `--min-trust` deliberately unchanged**, exactly as in #33:
   a human picks both the threshold and the scanner on their own machine.
 

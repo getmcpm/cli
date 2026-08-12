@@ -186,9 +186,11 @@ const TrustSnapshotSchema = z.object({
    * `blockOnScoreDrop` tripwire can recover the locked mcpm-NATIVE figure
    * (`score - externalScanCredit`) and compare native-to-native — a caller-supplied
    * `MCPM_EXTERNAL_SCANNER` cannot be verified, so its credit must not be able to
-   * mask a native score drop. Bare `.optional()`: absent on pre-#35 lockfiles, which
-   * fall back to the raw comparison (see `checkTrustPolicy`). Non-strict schema, so
-   * old lockfiles parse unchanged.
+   * mask a native score drop. Bare `.optional()`: absent on pre-#35 lockfiles, whose
+   * native figure `checkTrustPolicy` then recovers as a conservative UPPER BOUND
+   * (`recoverLockedNative`) — it does NOT fall back to comparing raw scores, because
+   * that branch failed open on a genuine native drop and was removed. Non-strict
+   * schema, so old lockfiles parse unchanged.
    */
   externalScanCredit: z.number().optional(),
 });

@@ -46,8 +46,9 @@ All notable changes to this project will be documented in this file.
   fake scanner). The check now compares mcpm-**native** evidence on both sides — the
   same rule the hard trust floor already applied (#33). Lock snapshots record an
   `externalScanCredit` field so the locked native baseline is recoverable; pre-#35
-  locks written with a scanner credited fall back safely (and fail closed rather
-  than raw-compare when a current-side scanner could be the lever). `minTrustScore`
+  locks written with a scanner credited are compared against a conservative upper
+  bound on their native figure rather than raw — the raw-comparison fallback was
+  removed outright, because it failed OPEN on a genuine native drop. `minTrustScore`
   and `--min-trust` are unchanged — a human threshold on the user's own machine.
   The sibling `audit --fix` comparison was investigated and deliberately left on
   the raw score (TODOS #35); `outdated` is tracked separately.
@@ -63,7 +64,8 @@ All notable changes to this project will be documented in this file.
   config `.bak` is written once per file lifetime rather than per removal, so a
   scripted run deleted every server entry (and its plaintext `env` values) with
   nothing to restore from. `audit --fix` now refuses a threshold above the highest
-  score it can produce, before scanning or removing anything. The ceiling is derived
+  score it can produce for any server in the run — after the scan, before anything is
+  removed. The ceiling is derived
   from the scorer rather than hardcoded and tracks whether an external scanner is
   credited (62 native, 82 credited).
 - **`mcpm lock` no longer destroys a stack file that is not named `*.yaml`.**

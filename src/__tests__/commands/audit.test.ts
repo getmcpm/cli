@@ -892,6 +892,19 @@ describe("handleAudit — --fix --min-trust above audit's achievable ceiling", (
     const deps = makeDeps();
     await expect(handleAudit({ minTrust: 100 }, deps)).rejects.toThrow(/--min-trust requires --fix/i);
   });
+
+  it("skips the guard entirely when NO server could be scanned", async () => {
+    // `Math.max(...[])` is -Infinity, so without the empty-run short-circuit every
+    // threshold — including 0 — would be "above" it and refuse with a nonsense
+    // "Use --min-trust -Infinity or lower". There is nothing to guard here either:
+    // a server whose registry lookup failed is never a removal candidate.
+    const deps = makeDeps({
+      getInstalledServers: vi.fn().mockResolvedValue([makeInstalledServer()]),
+      getServer: vi.fn().mockRejectedValue(new Error("registry unavailable")),
+    });
+    await expect(handleAudit({ fix: true, minTrust: 100, yes: true }, deps)).resolves.toBeTypeOf("number");
+    expect(deps.removeFromStore).not.toHaveBeenCalled();
+  });
 });
 
 // ---------------------------------------------------------------------------
