@@ -2,7 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
-## [Unreleased]
+## [0.29.0] - 2026-08-13
+
+> Upgrade note: if you use `policy.blockOnScoreDrop` AND locked with a working
+> `MCPM_EXTERNAL_SCANNER` on v0.28.0, that lock predates the `externalScanCredit` field and
+> its native baseline cannot be recovered exactly, so `up` compares against a conservative
+> upper bound and may block servers that have not changed. Run `mcpm lock` once to record an
+> exact baseline. Tracked as TODOS #44.
 
 ### Added
 
