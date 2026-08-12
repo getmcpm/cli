@@ -306,6 +306,11 @@ code-scanning alerts:
           sarif_file: mcpm.sarif
 ```
 
+`mcpm audit` exits `1` when a server is risky and `2` when the invocation itself
+cannot be satisfied — an impossible `--min-trust`, or a flag combination mcpm
+refuses (`--sarif` is report-only and cannot be combined with `--fix`). A script
+that treats every non-zero exit as "a server is risky" will misread the second.
+
 > Honesty boundary: a failure means npm's *published record* diverged from your
 > lock — not that mcpm caught malicious bytes; npx/uvx fetch the artifact
 > independently at server launch.

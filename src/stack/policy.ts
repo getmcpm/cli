@@ -114,10 +114,11 @@ export function checkTrustPolicy(input: PolicyCheckInput): PolicyResult {
   // external-scanner regression that lowers only the external bucket no longer
   // trips THIS tripwire either. That regression still shows up in the score itself
   // and in `mcpm audit`; the native drop check watches native evidence alone.
-  // The unrecoverable-lock fallback below can also diverge from the native path for
-  // the same underlying evidence on a pre-#35 scanner-credited lock — re-locking
-  // reconciles it, which is why that path emits a re-lock instruction rather than a
-  // silent verdict.
+  // A pre-#35 scanner-credited lock cannot have its exact native figure recovered, so
+  // that path compares against a conservative UPPER BOUND and says so — it blocks
+  // whenever a drop is possible and passes only when one is arithmetically impossible.
+  // Re-locking replaces the bound with an exact baseline, which is why every bounded
+  // verdict names it as the remedy.
   if (policy.blockOnScoreDrop === true && lockedSnapshot !== undefined) {
     const { currentNativeScore, currentNativeMaxPossible } = input;
     if (
