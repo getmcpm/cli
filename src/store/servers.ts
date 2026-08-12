@@ -19,7 +19,6 @@ export interface InstalledServer {
   version: string;
   clients: ClientId[];
   installedAt: string; // ISO 8601 timestamp
-  trustScore?: number;  // stored at install/update time for drift detection
 }
 
 interface ServersFile {

@@ -732,7 +732,6 @@ export async function handleInstall(
     version: serverEntry.server.version,
     clients: [...installedClients],
     installedAt: new Date().toISOString(),
-    trustScore: trustScore.score,
   };
   await addToStore(storeEntry);
 

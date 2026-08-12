@@ -1,7 +1,20 @@
 /**
- * `mcpm outdated` — show installed servers with newer registry versions or trust regressions.
+ * `mcpm outdated` — show installed servers with newer registry versions.
  *
- * Always bypasses the cache to return fresh results.
+ * Every registry read here is a live fetch; mcpm keeps no registry cache.
+ *
+ * This command deliberately makes NO claim about a server getting worse since you
+ * installed it. It used to, by comparing a number frozen in `servers.json` against
+ * a freshly computed one — but the two were never comparable, because every writer
+ * of that number used different inputs. Measured against a fresh comparand of 60 on
+ * an UNCHANGED server: `install` with an external scanner stored 80 (a permanent
+ * false "regression" on every run), `import` stored 53 (so a real 7-point drop was
+ * silently masked), and `update` stored nothing at all — it rebuilt the record
+ * without the field, which killed the check outright for any server ever updated.
+ *
+ * `mcpm audit` is where degradation is reported. It re-scans every installed server
+ * against the current registry entry and prints the FINDING — severity, message,
+ * location — plus an exit code, which is strictly more than a delta integer conveys.
  */
 
 import { Command } from "commander";
@@ -36,11 +49,10 @@ export interface DriftRow {
   name: string;
   installedVersion: string;
   latestVersion: string | null;
-  installedTrustScore: number | undefined;
+  /** The LATEST version's score, from a fresh scan of the entry just fetched. */
   latestTrustScore: number | null;
   latestLevel: "safe" | "caution" | "risky" | null;
   versionChange: "none" | "patch" | "minor" | "major" | "unknown";
-  trustRegression: boolean;
   error?: string;
 }
 
@@ -68,11 +80,9 @@ async function checkVersionDrift(
           name: s.name,
           installedVersion: s.version,
           latestVersion: null,
-          installedTrustScore: s.trustScore,
           latestTrustScore: null,
           latestLevel: null,
           versionChange: "unknown",
-          trustRegression: false,
           error: "Registry unavailable",
         };
       }
@@ -101,28 +111,20 @@ async function checkVersionDrift(
           name: s.name,
           installedVersion: s.version,
           latestVersion: latest,
-          installedTrustScore: s.trustScore,
           latestTrustScore: null,
           latestLevel: null,
           versionChange,
-          trustRegression: false,
           error: "Trust assessment failed",
         };
       }
-
-      const trustRegression =
-        s.trustScore !== undefined &&
-        latestScore.score < s.trustScore;
 
       return {
         name: s.name,
         installedVersion: s.version,
         latestVersion: latest,
-        installedTrustScore: s.trustScore,
         latestTrustScore: latestScore.score,
         latestLevel: latestScore.level,
         versionChange,
-        trustRegression,
       };
     })
   );
@@ -157,7 +159,7 @@ export async function handleOutdated(
   }
 
   const errors = rows.filter((r) => r.error);
-  const outdated = rows.filter((r) => !r.error && (r.versionChange !== "none" || r.trustRegression));
+  const outdated = rows.filter((r) => !r.error && r.versionChange !== "none");
 
   for (const r of errors) {
     output(chalk.yellow(`  ${r.name}: ${r.error}`));
@@ -172,38 +174,22 @@ export async function handleOutdated(
   output(chalk.bold("\nOutdated servers:"));
   const colWidth = Math.max(...outdated.map((r) => r.name.length), 10);
 
+  // Every surviving row has a version change, so this is one line per row. The
+  // bracketed level is the LATEST version's, freshly scanned — not a comparison.
   for (const r of outdated) {
     const nameCol = chalk.white(r.name.padEnd(colWidth));
-    const hasVersionChange = r.versionChange !== "none";
-
-    // Show the version-change line whenever a newer version exists, even if a
-    // trust regression also arrived with it.
-    if (hasVersionChange) {
-      const diffColor =
-        r.versionChange === "major" ? chalk.red
-        : r.versionChange === "minor" ? chalk.yellow
-        : chalk.cyan;
-      const latest = r.latestVersion ?? "unknown";
-      const trustStr = r.latestTrustScore !== null && r.latestLevel
-        ? `  [${levelColor(r.latestLevel)}]`
-        : "";
-      output(`  ${nameCol}  ${chalk.yellow(r.installedVersion)} → ${diffColor(latest)}${trustStr}`);
-    }
-
-    // Show the trust-regression line independently so a score drop is never
-    // hidden by a coincident version bump.
-    if (r.trustRegression) {
-      const was = r.installedTrustScore ?? "?";
-      const now = r.latestTrustScore ?? "?";
-      const regCol = hasVersionChange ? chalk.white("".padEnd(colWidth)) : nameCol;
-      output(`  ${regCol}  ${chalk.yellow(`trust score regression: ${was} → ${now}`)}`);
-    }
+    const diffColor =
+      r.versionChange === "major" ? chalk.red
+      : r.versionChange === "minor" ? chalk.yellow
+      : chalk.cyan;
+    const latest = r.latestVersion ?? "unknown";
+    const trustStr = r.latestTrustScore !== null && r.latestLevel
+      ? `  [${levelColor(r.latestLevel)}]`
+      : "";
+    output(`  ${nameCol}  ${chalk.yellow(r.installedVersion)} → ${diffColor(latest)}${trustStr}`);
   }
 
-  const hasVersionUpdates = outdated.some((r) => r.versionChange !== "none");
-  if (hasVersionUpdates) {
-    output(`\nRun ${chalk.cyan("mcpm update")} to apply updates.`);
-  }
+  output(`\nRun ${chalk.cyan("mcpm update")} to apply updates.`);
 }
 
 // ---------------------------------------------------------------------------
@@ -213,7 +199,7 @@ export async function handleOutdated(
 export function registerOutdatedCommand(program: Command): void {
   program
     .command("outdated")
-    .description("Show installed servers with available updates or trust regressions")
+    .description("Show installed servers with available updates")
     .option("--json", "Output raw JSON")
     .action(async (opts: { json?: boolean }) => {
       const { getInstalledServers } = await import("../store/servers.js");

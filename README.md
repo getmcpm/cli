@@ -206,7 +206,7 @@ Those 20 points **inform the score but cannot clear a safety floor.** The MCP se
 | `mcpm remove <name>` | Remove an MCP server from client config(s) |
 | `mcpm audit` | Scan all installed servers and produce a trust report (`--json`, `--sarif` for GitHub code-scanning) |
 | `mcpm update` | Check for newer versions and update installed servers |
-| `mcpm outdated` | Show version drift and trust regression for installed servers |
+| `mcpm outdated` | Show version drift for installed servers (use `mcpm audit` for current security findings) |
 | `mcpm secrets` | Manage MCP server credentials (AES-GCM encrypted at rest; key held in the OS keychain — macOS Keychain / libsecret / Windows DPAPI — so a copied store can't be decrypted off-machine, with a machine-derived-key fallback where no keychain is available). `mcpm secrets migrate` upgrades older entries |
 | `mcpm publish scaffold` | Create a .mcpm-publish.yaml manifest interactively |
 | `mcpm publish check` | Dry-run: show trust score and what would be submitted |

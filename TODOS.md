@@ -483,13 +483,31 @@ Locked with a drift-guard test ("--fix candidate filter is RAW, deliberately" in
 carve-out list in `nativeTrustScore`'s docblock now names `audit --fix` explicitly,
 so a future reader can tell it was considered rather than missed.
 
-**Sibling 2 — `outdated`: still open**, and its defect is not really #35's. It
-compares a RAW stored score (written at install time, possibly with a scanner
-credited) against a fresh score computed with `hasExternalScanner: false`
-(`outdated.ts:96`) — different denominators on the two sides, so a user who had a
-scanner configured at install time sees a permanent phantom regression. Advisory
-display only. Fixing it properly needs a store-schema change (record the native
-figure at install time), which is its own PR.
+**Sibling 2 — `outdated`: RESOLVED 2026-08-12 by DELETING the claim.** Its defect
+turned out not to be #35's at all, and to be much worse than "a scanner denominator
+mismatch". Four independent divergences, measured against a fresh comparand of **60**
+on a server that had **not changed**:
+
+| stored by | inputs that differ | stored | effect |
+|---|---|---|---|
+| `install.ts` | real `hasExternalScanner`; adds the F4 release-age finding | **80** (scanner) | permanent FALSE regression, every run |
+| `import.ts` | `registryMeta: {}` — empty, 0 points | **53** | MASKS a real 7-point drop; shows phantom "improvements" |
+| `update.ts` | rebuilds the record **without the field** | **absent** | check already dead for every updated server |
+| `outdated.ts` (fresh side) | no scanner, registryMeta <=7, no release-age | 60 | — |
+
+Only one configuration was ever correct: CLI-installed, no external scanner, never
+updated, past the release-age cooldown. Every repair was worse than deletion — a
+like-for-like recompute costs an extra registry fetch per row (there is no cache),
+delivers nothing for `import`-created rows whose stored version is the literal
+string `"unknown"`, and structurally cannot see same-version degradation; a shared
+stored-baseline scheme fires a stack-wide false regression on every mcpm release
+that adds a tier-1 signature.
+
+So `outdated` stops claiming it. It keeps the version-drift line with the latest
+version's freshly-scanned level; `mcpm audit` reports degradation as the FINDING
+itself. `InstalledServer.trustScore` and both its writers are gone, so the number
+cannot be silently resurrected — with anti-recurrence guards on both writers, all
+mutation-verified. `outdated --json` drops two fields (UNSTABLE per CONTRACTS).
 
 **Verified deliberate, not bugs (adversarial review of the fix):** (1) the tripwire
 now ignores external-bucket movement in BOTH directions — a real external-scanner

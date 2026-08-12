@@ -298,7 +298,6 @@ export async function handleImport(
       version: "unknown",
       clients: [...clients],
       installedAt: now,
-      trustScore: trustScore.score,
     };
     await deps.addToStore(server);
   }

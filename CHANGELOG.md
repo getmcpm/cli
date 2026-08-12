@@ -4,6 +4,32 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Removed
+
+- **`mcpm outdated` no longer reports a "trust score regression" (TODOS #35 sibling).**
+  It compared a number frozen in `servers.json` against a freshly computed one, and
+  the two were never comparable — every writer of the stored number used different
+  inputs. Measured against a fresh comparand of **60** on a server that had **not
+  changed**: `mcpm install` with an external scanner stored **80** (a permanent false
+  regression on every run, forever), `mcpm import` stored **53** because it scores with
+  empty registry metadata (so a genuine 7-point degradation was silently *masked*, and
+  phantom "improvements" were shown), and `mcpm update` stored **nothing at all** — it
+  rebuilds the store record without the field, which had already killed the check
+  outright for every updated server. Only one configuration was ever correct:
+  CLI-installed, no external scanner, never updated, past the release-age cooldown.
+
+  `outdated` keeps what it can compute honestly — the version-drift line, with the
+  latest version's freshly-scanned trust level. Use **`mcpm audit`** for degradation:
+  it re-scans every installed server against the current registry entry and reports the
+  finding itself (severity, message, location) plus an exit code, which is strictly
+  more than a delta integer conveyed.
+
+  `outdated --json` drops `trustRegression` and `installedTrustScore` (this shape is
+  documented UNSTABLE in `docs/CONTRACTS.md`; only `sync --json` is frozen).
+  `InstalledServer.trustScore` is removed from the store along with its two writers, so
+  the number cannot be silently resurrected — an existing `servers.json` carrying the
+  key still parses and simply drops it on the next write.
+
 ### Security
 
 - **`policy.blockOnScoreDrop` no longer trusts an unverifiable external scanner

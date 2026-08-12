@@ -267,6 +267,20 @@ describe("handleInstall — happy path (GREEN trust score)", () => {
     );
   });
 
+  // Anti-recurrence guard (2026-08-12). `install` used to persist the trust score,
+  // and `mcpm outdated` compared that frozen number against a freshly computed one.
+  // They were never comparable: with an external scanner credited the stored value
+  // was 80 against a fresh comparand of 60, so every run reported a permanent false
+  // "regression" on a server that had not changed. The score is still computed here
+  // — it gates --min-trust, drives the display, and rides in --json — it is just
+  // never written to the store.
+  it("does NOT persist a trust score on the stored record", async () => {
+    const deps = makeDeps();
+    await handleInstall("io.github.test/my-server", {}, deps);
+    const stored = (deps.addToStore as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    expect(stored).not.toHaveProperty("trustScore");
+  });
+
   it("outputs a success message", async () => {
     const deps = makeDeps();
     await handleInstall("io.github.test/my-server", {}, deps);

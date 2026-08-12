@@ -559,7 +559,14 @@ describe("handleImport — trust assessment (#23)", () => {
   // typosquatting finding in scanTier1 → drives the trust level below "safe".
   const TYPOSQUAT_NAME = "io.github.modelcontextprotocol/servers-githubb";
 
-  it("records a trustScore on every imported server", async () => {
+  // Anti-recurrence guard. `import` used to persist this score, and `mcpm outdated`
+  // compared it against a freshly computed one — but import scored with
+  // `registryMeta: {}` (0 points) while the fresh side got up to 7, so a real
+  // 7-point degradation was silently masked. The score is still computed and still
+  // drives the warning below; it is just never written down, because a stored
+  // number that four writers must keep mutually comparable is an invariant that
+  // already failed twice.
+  it("does NOT persist a trust score on the imported record", async () => {
     const addToStoreMock = vi.fn().mockResolvedValue(undefined);
     const deps = makeDeps({
       detectClients: vi.fn().mockResolvedValue(["claude-desktop"]),
@@ -572,7 +579,7 @@ describe("handleImport — trust assessment (#23)", () => {
     });
     await handleImport({}, deps);
     const imported: InstalledServer = addToStoreMock.mock.calls[0][0];
-    expect(typeof imported.trustScore).toBe("number");
+    expect(imported).not.toHaveProperty("trustScore");
   });
 
   it("runs scanTier1 on each discovered server before importing", async () => {
@@ -609,29 +616,6 @@ describe("handleImport — trust assessment (#23)", () => {
     expect(out).toMatch(/security finding/i);
     expect(out).toMatch(/severity/i);
     expect(out).toContain(TYPOSQUAT_NAME);
-  });
-
-  it("records the (low) trustScore for a typosquatting server", async () => {
-    const addToStoreMock = vi.fn().mockResolvedValue(undefined);
-    const deps = makeDeps({
-      detectClients: vi.fn().mockResolvedValue(["claude-desktop"]),
-      getAdapter: vi.fn().mockReturnValue(
-        makeAdapter("claude-desktop", { [TYPOSQUAT_NAME]: { command: "npx" } })
-      ),
-      getInstalledServers: vi.fn().mockResolvedValue([]),
-      confirm: vi.fn().mockResolvedValue(true),
-      addToStore: addToStoreMock,
-    });
-    await handleImport({}, deps);
-    const imported: InstalledServer = addToStoreMock.mock.calls[0][0];
-    // A HIGH finding deducts from staticScan; the score must reflect that.
-    const clean = computeTrustScore({
-      findings: [],
-      healthCheckPassed: null,
-      hasExternalScanner: false,
-      registryMeta: {},
-    });
-    expect(imported.trustScore).toBeLessThan(clean.score);
   });
 
   it("does NOT warn for a clean server", async () => {
