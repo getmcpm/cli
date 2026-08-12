@@ -135,7 +135,7 @@ mcpm/
 | `mcpm remove <name>` | Remove a server from client config(s) |
 | `mcpm audit` | Scan all installed servers and produce a trust report |
 | `mcpm update` | Check for newer versions and update installed servers |
-| `mcpm outdated` | Show version drift and trust regression for installed servers |
+| `mcpm outdated` | Show version drift for installed servers (use `mcpm audit` for current security findings) |
 | `mcpm doctor` | Check MCP setup health (runtimes, configs, servers) |
 | `mcpm init <pack>` | Install a curated starter pack of MCP servers |
 | `mcpm disable <name>` | Disable a server without removing it from config |

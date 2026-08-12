@@ -32,6 +32,7 @@ import type {
   Policy,
   NpmIntegritySnapshot,
 } from "../stack/schema.js";
+import { lockPathFor } from "../stack/paths.js";
 import {
   parseStackFile,
   parseLockFile,
@@ -260,7 +261,7 @@ export async function handleUp(
   }
 
   const stackPath = options.stackFile ?? "mcpm.yaml";
-  const lockPath = stackPath.replace(/\.yaml$/, "-lock.yaml");
+  const lockPath = lockPathFor(stackPath);
 
   // Step 1: Read stack file
   const stackFile = await parseStackFile(stackPath);
@@ -632,6 +633,10 @@ async function processServer(input: ProcessInput): Promise<ServerResult> {
     serverName: name,
     currentScore: trustScore.score,
     currentMaxPossible: trustScore.maxPossible,
+    // TODOS #35: the blockOnScoreDrop tripwire compares native evidence, so a fake
+    // MCPM_EXTERNAL_SCANNER cannot mask a drop. `nativeTrust` is computed above.
+    currentNativeScore: nativeTrust.score,
+    currentNativeMaxPossible: nativeTrust.maxPossible,
     lockedSnapshot: locked.trust,
     policy,
     releaseAge: {

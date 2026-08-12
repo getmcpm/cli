@@ -36,6 +36,7 @@ import {
 import { compareProvenance } from "../registry/npm-provenance.js";
 import { sanitizeForTerminal } from "../guard/sanitize.js";
 import { resolveVersion, resolveWithSingleVersion } from "../stack/resolve.js";
+import { lockPathFor } from "../stack/paths.js";
 import { valid as semverValid } from "semver";
 import { assessReleaseAge, DEFAULT_MIN_RELEASE_AGE_HOURS } from "../scanner/cooldown.js";
 import { extractRegistryMeta } from "../utils/format-trust.js";
@@ -115,7 +116,7 @@ export async function handleLock(
   deps: LockDeps
 ): Promise<void> {
   const stackPath = options.stackFile ?? "mcpm.yaml";
-  const lockPath = stackPath.replace(/\.yaml$/, "-lock.yaml");
+  const lockPath = lockPathFor(stackPath);
   const stackFile = await parseStackFile(stackPath);
 
   const scannerAvailable = await deps.checkScannerAvailable();
@@ -377,6 +378,10 @@ async function resolveServer(
     maxPossible: trustScore.maxPossible,
     level: trustScore.level,
     assessedAt: new Date().toISOString(),
+    // TODOS #35: record the external-scanner credit so the drop tripwire can
+    // recover this baseline's native figure later. Always written (0 when no
+    // scanner was credited) so every lock this mcpm writes is native-recoverable.
+    externalScanCredit: trustScore.breakdown.externalScan,
   };
 
   // Step 5: H11 slice 1 — capture npm artifact integrity snapshot.

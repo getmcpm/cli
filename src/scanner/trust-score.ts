@@ -269,12 +269,25 @@ export interface NativeTrustScore {
  * that can suppress a healthCheck / staticScan / registryMeta finding needs the
  * same treatment; this function cannot enforce that on its own.
  *
- * This is deliberately NOT applied to `mcpm install --min-trust` or to a stack
- * file's `policy.minTrustScore`. Those are thresholds a human chose on their own
- * machine, where the same person configures both the threshold and the scanner;
- * subtracting their scanner's points there would surprise legitimate users for
- * no security gain. The floors this guards are the ones an AI agent, not a
- * human, is on the other side of.
+ * This is deliberately NOT applied to `mcpm install --min-trust`, to a stack
+ * file's `policy.minTrustScore`, or to `mcpm audit --fix`. Those are thresholds a
+ * human chose on their own machine, where the same person configures both the
+ * threshold and the scanner; subtracting their scanner's points there would
+ * surprise legitimate users for no security gain.
+ *
+ * `audit --fix` is excluded for a SECOND, independently sufficient reason, and it
+ * is the one that decided the case (TODOS #35 sibling, resolved 2026-08-12): it is
+ * the only score-gated DESTRUCTIVE gate in the CLI. Every other site on this list
+ * REFUSES; that one DELETES servers from the user's IDE configs, so subtracting the
+ * bucket there removes more rather than refusing more. Measured over 1,199 live
+ * registry entries: a native filter changes 0 servers at audit's default threshold
+ * and deletes every server once the threshold passes audit's native ceiling of 62.
+ *
+ * So the test is agent-reachability AND refuse-not-delete, not agent-reachability
+ * alone — note that `policy.minTrustScore` is on this list yet IS reachable by an
+ * agent through `mcpm_up` (`handlers.ts`), so the older one-line framing ("the
+ * floors this guards are the ones an AI agent, not a human, is on the other side
+ * of") was already too neat.
  */
 export function nativeTrustScore(trust: TrustScore): NativeTrustScore {
   const score = trust.score - trust.breakdown?.externalScan;

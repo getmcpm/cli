@@ -5,40 +5,6 @@
 > lives in [`docs/ROADMAP.md`](./docs/ROADMAP.md). The items below remain the granular
 > backlog; the roadmap is the strategic layer on top of them.
 
-## ⚠ RELEASE PENDING — v0.28.0 is staged on `main` but NOT tagged
-
-`main` (`94f8375`) carries both release commits: the docs reconcile and
-`chore(release): v0.28.0` with the CHANGELOG stamped `2026-08-05`. Everything
-else is done — 2366 tests green, `pnpm typecheck` clean.
-
-**The tag could not be pushed from the session that staged it.** `git push origin
-v0.28.0` returns **HTTP 403** from the agent proxy — an organisation egress
-policy denial, not a transient failure. Annotated and lightweight tags, explicit
-refspec, and `--follow-tags` all fail the same way; branch pushes to `main`
-succeed, so it is tag refs specifically. `/root/.ccr/README.md` says not to retry
-or route around a 403, and the GitHub MCP server exposes no create-ref or
-create-release tool, so there is no API path either. `publish.yml` triggers only
-on `push: tags: ['v*']` — it has no `workflow_dispatch`, so it cannot be fired
-another way.
-
-**To finish, from a machine with normal push access:**
-
-```bash
-git fetch origin main && git checkout main && git pull
-git tag -a v0.28.0 -m "v0.28.0 — SECURITY: tier-2 scanner fetch-execute vector, Unicode TAG-block decode-and-rescan, native-evidence trust floor"
-git push origin v0.28.0
-```
-
-That fires `publish.yml`: pack → clean-install → smoke the real binary → `pnpm
-publish --provenance` → GitHub Release with the SBOM attached at create time.
-`package.json` stays at `0.15.0` by design; the version derives from the tag.
-
-⚠ **Until that tag lands, `CLAUDE.md` says "v0.28.0 released" and the CHANGELOG
-carries a date — both are true only once it does.** This is precisely the defect
-this release fixed elsewhere (the section sat at `2026-07-29` for a week while
-unreleased), so if the tag is not going to happen soon, walk those two claims
-back rather than leaving them. Delete this section when the tag is pushed.
-
 ## Resolved Blockers
 
 ### 1. ~~Verify Official MCP Registry API~~ DONE (2026-03-28)
@@ -444,9 +410,119 @@ un-clamped design into the clamped one for anyone who knows the trick. That is
 an argument about which posture is *honest*, not a reason to clamp; fix the
 bypass first, then decide the clamp on its merits.
 
-### 35. A fake external scanner masks `policy.blockOnScoreDrop`
+### 35. ~~A fake external scanner masks `policy.blockOnScoreDrop`~~ DONE (unreleased)
 **Priority:** P1 — pre-existing; sibling of #33, deliberately NOT fixed with it.
 **Found:** 2026-08-03, by the security review of the #33 change. Reproduced.
+
+**Shipped (2026-08-10):** the `blockOnScoreDrop` branch of `checkTrustPolicy`
+now compares mcpm-**native** evidence, so a caller-supplied
+`MCPM_EXTERNAL_SCANNER` cannot mask a native drop — the same rule
+`nativeTrustScore` already applied to the hard floor (#33).
+
+- **Locked side made recoverable.** `TrustSnapshot` gains a bare-`.optional()`
+  `externalScanCredit` (`src/stack/schema.ts`); `mcpm lock` always writes it,
+  including `0`. The locked native figure is `score - externalScanCredit`, so
+  the baseline no longer has to be trusted at its inflated face value.
+- **Current side** uses the `nativeTrust` figure `up.ts` already computes for
+  the floor gate — passed in as `currentNativeScore` / `currentNativeMaxPossible`.
+  Native scoring has one universal denominator (80), so both sides compare on it.
+- **Refuse, don't silently fall back.** The drop branch **throws** if the native
+  figures are absent rather than reverting to the raw comparison this fix
+  retired — the same "a future caller must not silently reopen the hole" wiring
+  discipline #33 used. No production path hits it (up.ts always supplies them).
+- **Back-compat, through two review rounds.** A pre-fix lock written with a scanner
+  credited (`maxPossible 100`, no `externalScanCredit`) cannot have its native figure
+  recovered exactly. Round 1 fell back to the raw comparison here, and review showed
+  that reopened the exact hole — if the CURRENT side also has a (fake) scanner, the
+  raw current score is inflatable and could still mask a native drop. Round 1's
+  replacement (fail closed only when a current-side scanner is credited) was wrong in
+  BOTH directions: it still failed OPEN on a genuine native drop with no current-side
+  scanner, and it BLOCKED users whose current native score was already at ceiling.
+  **Shipped instead: no raw-comparison path survives at all.** The locked figure is
+  bounded — `min(nativeMax, locked.score)` — because `native = score - credit` for
+  `credit >= 0`, so the bound is a conservative upper limit: it blocks whenever a drop
+  is possible and passes only when one is arithmetically impossible. A pre-fix lock
+  with no scanner (`maxPossible 80`) is already native and recovers exactly.
+- **`minTrustScore` / `--min-trust` deliberately unchanged**, exactly as in #33:
+  a human picks both the threshold and the scanner on their own machine.
+
+Regression coverage in `policy.test.ts`: the exploit itself (a fake scanner that
+inflates the raw score to tie the baseline is still blocked on native evidence,
+and the verdict is identical with no scanner at all), plus the recovery paths,
+the raw fallback, and the throw. `schema.test.ts` pins the field round-trip and
+that pre-#35 locks still parse.
+
+**Sibling 1 — `audit --fix`: RESOLVED 2026-08-12 as covered by the #33 carve-out.
+It keeps the RAW score, deliberately.** The earlier note in this entry said the
+opposite ("the heavier one … do it first"); that ordering was written from the
+exploit alone, without measuring the benefit or the cost, and the measurement
+inverts it.
+
+The exploit is real and reproduces: a server with two HIGH tier-1 findings scores
+35/80 `risky` and is removed; with `MCPM_EXTERNAL_SCANNER` pointed at a script
+printing `{"findings":[]}` the same server scores 55/100 `caution` and is spared —
+and `mcpm audit`'s exit code flips 1 → 0 with it (README documents that exit code
+as a CI signal). What changed is the verdict on whether native-ising the filter is
+the right answer:
+
+- **It buys nothing where it would apply.** Landing in the flip band needs ≥1 high,
+  ≥1 critical or ≥3 mediums. Over 1,199 live registry entries scored through the
+  real `scanTier1` + `computeTrustScore` with audit's own inputs, that set is
+  empty: 0 of 1,199 servers change verdict at the default threshold.
+- **It costs everything above the ceiling.** `audit` never runs a health check
+  (15/30) and never reads a download count (registryMeta ≤7/10), so its native
+  ceiling is 62, not 80. A native filter deletes every server once the threshold
+  passes 62.
+- **It is the only score-gated DESTRUCTIVE site in the CLI, and it is human-only.**
+  Verified: MCP `handleAudit` (`server/handlers.ts`) is read-only, takes no options,
+  and reaches no removal path. #33 and #35 native-ised gates that REFUSE, where the
+  caller was an agent or a locked baseline. This one DELETES.
+- **The residual threat is the one already scoped out in writing.** `trust-score.ts`
+  states that deliberate self-deception cannot be closed; a scanner that merely
+  BREAKS is already treated as ABSENT by the `scanner-error` check, not as a clean
+  scan.
+
+Locked with a drift-guard test ("--fix candidate filter is RAW, deliberately" in
+`audit.test.ts`), mutation-verified: native-ising the filter fails it. The
+carve-out list in `nativeTrustScore`'s docblock now names `audit --fix` explicitly,
+so a future reader can tell it was considered rather than missed.
+
+**Sibling 2 — `outdated`: RESOLVED 2026-08-12 by DELETING the claim.** Its defect
+turned out not to be #35's at all, and to be much worse than "a scanner denominator
+mismatch". Four independent divergences, measured against a fresh comparand of **60**
+on a server that had **not changed**:
+
+| stored by | inputs that differ | stored | effect |
+|---|---|---|---|
+| `install.ts` | real `hasExternalScanner`; adds the F4 release-age finding | **80** (scanner) | permanent FALSE regression, every run |
+| `import.ts` | `registryMeta: {}` — empty, 0 points | **53** | MASKS a real 7-point drop; shows phantom "improvements" |
+| `update.ts` | rebuilds the record **without the field** | **absent** | check already dead for every updated server |
+| `outdated.ts` (fresh side) | no scanner, registryMeta <=7, no release-age | 60 | — |
+
+Only one configuration was ever correct: CLI-installed, no external scanner, never
+updated, past the release-age cooldown. Every repair was worse than deletion — a
+like-for-like recompute costs an extra registry fetch per row (there is no cache),
+delivers nothing for `import`-created rows whose stored version is the literal
+string `"unknown"`, and structurally cannot see same-version degradation; a shared
+stored-baseline scheme fires a stack-wide false regression on every mcpm release
+that adds a tier-1 signature.
+
+So `outdated` stops claiming it. It keeps the version-drift line with the latest
+version's freshly-scanned level; `mcpm audit` reports degradation as the FINDING
+itself. `InstalledServer.trustScore` and both its writers are gone, so the number
+cannot be silently resurrected — with anti-recurrence guards on both writers, all
+mutation-verified. `outdated --json` drops two fields (UNSTABLE per CONTRACTS).
+
+**Verified deliberate, not bugs (adversarial review of the fix):** (1) the tripwire
+now ignores external-bucket movement in BOTH directions — a real external-scanner
+regression that lowers only that bucket no longer trips it either, because mcpm
+cannot distinguish it from a fake clean scan; it still surfaces in the score and in
+`audit`. (2) A pre-#35 scanner-credited lock can make the native path and the raw
+fallback diverge for the same evidence; the fallback now fails closed (with a
+re-lock instruction) whenever a current-side scanner is also credited, so the
+divergence always resolves to "re-lock", never a silent inconsistency.
+
+--- original report, for reference ---
 
 **What:** `checkTrustPolicy` (`src/stack/policy.ts`) compares **normalized
 percentages** of RAW scores, including `lockedSnapshot.score` from
@@ -618,3 +694,126 @@ Unwrapped the payload blocks; base64-wrapped it is `pass` with **zero** findings
 since the raw leaf carries no tag characters and the presence floor never fires.
 Fix the comment at minimum; closing the gap means deciding whether the texty gate
 should count tag codepoints as printable.
+
+### 41. `registryMeta` critical/high cap leaks external findings into the native score
+
+Found by the round-2 adversarial review of #35 (LOW, confirmed by execution).
+The #35 fix removes the external-scanner CREDIT from both sides of the drop check,
+but external findings also zero a **native** bucket: `computeTrustScore` derives
+`registryMeta` as `hasCriticalOrHighFindings(input.findings) ? 0 : …` over **all**
+findings, including `source: "external"`. `nativeTrustScore` subtracts only
+`breakdown.externalScan`, so that collateral −10 stays inside the "native" figure
+and is baked into the locked snapshot.
+
+Residual bypass window, ≤10 points: a real scanner reporting a critical at lock
+time zeroes `registryMeta`, lowering the locked native baseline; a later fake
+clean scanner leaves it at 10, raising the current native figure and masking a
+genuine native drop of up to that size. Narrow, and strictly smaller than the
+20-point credit window #35 closed — but it is the same class, so it should not be
+described as fully closed.
+
+Fix: make the native view independent of external findings in **both** buckets,
+e.g. compute the `registryMeta` cap from non-`source:"external"` findings for the
+native figure and expose it (`breakdown.nativeRegistryMeta`). Deferred because it
+changes `nativeTrustScore`, which the MCP hard trust floor (#33) also consumes, so
+it needs that path re-verified rather than a local patch.
+
+### 42. ~~`audit --fix --min-trust` above the achievable ceiling wipes a clean stack~~ DONE (unreleased)
+**Priority:** P1 — live data-loss at HEAD, with or without an external scanner.
+**Found:** 2026-08-12, while measuring the #35 `audit --fix` sibling. Pre-existing.
+
+**What:** `parseMinTrust` accepts 0–100, but `mcpm audit` cannot produce a score
+anywhere near 100. It never executes servers, so the health check never runs
+(`healthCheckPassed: null` → 15 of 30), and it never supplies a download count
+(`downloadCount: undefined` → registryMeta caps at 7 of 10). A **flawless** server —
+zero findings, active registry status, years-old publish date — tops out at **62/80**.
+
+So any `--min-trust` above 62 put every installed server below the threshold, by
+construction. Measured before the fix, on three zero-finding servers:
+
+```
+--min-trust 50 → 0/3 removed      --min-trust 63 → 3/3 removed
+--min-trust 62 → 0/3 removed      --min-trust 70 → 3/3 removed
+```
+
+The blast radius is worse than "a confusing prompt". `--fix --json` is *forced* to
+`--yes` (`audit.ts` early validation) and passes `output: () => undefined` to
+`runFix`, so the candidate list — the only place a user sees which servers are about
+to be deleted — is suppressed. And `BaseAdapter.writeAtomic` writes the config
+`.bak` once per file *lifetime* (`wx`, EEXIST swallowed), so it is **not** a
+pre-removal snapshot: a scripted `audit --fix --min-trust 70 --json` silently
+deletes every MCP server entry, taking its plaintext `env` credentials with it, with
+nothing to restore from.
+
+**Shipped:** `handleAudit` refuses when `minTrust` exceeds the highest score any
+server in the run could have reached — after the scan, before any removal. The ceiling
+is derived by scoring a synthetic flawless server rather than hardcoded, so it cannot
+drift if a bucket is re-weighted (62 native / 82 credited).
+
+**Adversarial review caught the first cut keying that ceiling on the wrong predicate**
+— `checkScannerAvailable()` (a bare `<cmd> --version` exit-0 probe) rather than on the
+credit that actually materialised. `computeTrustScore` banks the 20-point bucket only
+when the scanner ALSO returned readable output, so a scanner that answers `--version`
+but cannot scan a registry server name emits a `scanner-error` per server and leaves
+every server capped at 62 — while an availability-keyed ceiling read 82 and waved
+through the entire `--min-trust` 63–82 band into the exact silent mass delete this
+entry exists to close (reproduced against the built binary: 3 of 3 servers removed,
+exit 0). That is not a contrived setup — `tier2.ts` records that a real scanner scans
+client CONFIG FILES rather than registry names, so wiring #32 lands a user in it
+directly. The ceiling now keys on `maxPossible`, i.e. on the scorer having WIDENED the
+denominator, so the ceiling and the credited-ness test come from the same function and
+cannot drift apart; `Math.max` over scanned servers, because the claim being made is
+"no server in this run could have cleared this threshold". The pinning test for the
+82 case had mocked availability only, so it passed with the defect live.
+Refuse rather than warn: this is arithmetic, not a heuristic — "threshold above the
+maximum" and "every server is below the threshold" are the same statement, so there
+is no false positive to trade against.
+
+Four tests, all mutation-verified (deleting the guard fails three; flipping `>` to
+`>=` fails the boundary test). One pre-existing test had to change: it asserted
+removal at `--min-trust 70` against a mocked score of 65 — **both numbers
+unreachable in production**, i.e. the test encoded the hazardous usage. Rewritten to
+55/60, inside the real scale.
+
+**Note for whoever touches this next:** deriving the ceiling from the *injected*
+`deps.computeTrustScore` is wrong, not merely untestable. The suite's mock returns
+one constant for every input, which collapses the ceiling onto each server's own
+score and makes the guard fire exactly when a server is legitimately below the
+threshold. The ceiling is a property of the scoring MODEL, so it uses the real
+scorer.
+
+### 43. `mcpm audit` can never rate a server "safe" — unless an unverifiable external scanner says so
+**Priority:** P2 — not a vulnerability; a scale defect with a perverse incentive.
+**Found:** 2026-08-12, alongside #42. Pre-existing.
+
+**What:** `computeLevel` awards "safe" at ≥80% of `maxPossible`. Audit's ceiling is
+62/80 = **77.5%**, so a flawless server is rated **caution** and no server audited by
+mcpm can ever be green. Credit the external bucket and the same server reaches
+82/100 = 82% → **safe**.
+
+The incentive that creates is backwards for this project: the *only* lever that earns
+a green rating out of `mcpm audit` is `MCPM_EXTERNAL_SCANNER`, the one input
+`trust-score.ts` documents as unverifiable and that #33/#35 spent two fixes refusing
+to trust. A user who wants a clean audit report is nudged toward configuring exactly
+the thing the safety floors discount.
+
+```
+flawless server, no scanner   : 62/80  = 77.5%  → caution
+flawless server, fake scanner : 82/100 = 82.0%  → safe
+```
+
+**Deliberately not fixed here — it needs a product decision, and each option has a
+real cost:**
+1. **Run health checks in `audit`.** Closes it properly (30/30 reachable), but audit
+   would start *executing* every installed server, which the command deliberately
+   does not do today. Big security and runtime change.
+2. **Score an unrun health check as "not applicable"** — drop the bucket from
+   `maxPossible` the way the external bucket is dropped, instead of awarding a flat
+   15. Cheap and principled, but it re-bases every displayed score and every
+   `--min-trust` threshold users already have in scripts.
+3. **Supply a download count**, recovering 3 of the 10 registryMeta points. Narrows
+   the gap (62 → 65) without closing it; 65/80 is still 81%… which would actually
+   cross the line. Worth checking whether the registry exposes one.
+
+Do not silently pick one. Whichever lands should also revisit #42's ceiling guard,
+which reads the ceiling from the scorer and so follows automatically.
