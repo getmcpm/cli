@@ -1845,6 +1845,47 @@ describe("handleInstall — --min-trust gate", () => {
       required: 70,
     });
     expect(jsonOutput).toHaveProperty("level");
+    // Post-merge review #6: without the denominator a consumer cannot tell whether
+    // `score: 30` is 30% or 37.5%, which is the same ambiguity the human message had.
+    expect(jsonOutput).toMatchObject({ maxPossible: 100 });
+  });
+
+  // Post-merge review #6. The abort message hardcoded `/100`, but the score is out of
+  // 80 whenever no external scanner was credited — the DEFAULT. A flawless server
+  // scores 62/80 (77.5%) and read as "62/100", so the user blamed the server instead
+  // of a threshold the command could never satisfy.
+  it("reports the real denominator (/80) when no external scanner was credited", async () => {
+    const uncredited: TrustScore = {
+      score: 62,
+      maxPossible: 80,
+      level: "caution",
+      breakdown: { healthCheck: 15, staticScan: 40, externalScan: 0, registryMeta: 7 },
+    };
+    const deps = makeDeps({
+      getAdapter: vi.fn().mockReturnValue(makeAdapter("claude-desktop")),
+      computeTrustScore: vi.fn().mockReturnValue(uncredited),
+    });
+    await expect(
+      handleInstall("io.github.test/my-server", { minTrust: 70 }, deps)
+    ).rejects.toThrow(/62\/80/);
+  });
+
+  it("reports /100 when the external bucket WAS credited", async () => {
+    // The pair matters: a fix that swaps the hardcoded 100 for a hardcoded 80 passes
+    // the test above and fails this one.
+    const credited: TrustScore = {
+      score: 62,
+      maxPossible: 100,
+      level: "caution",
+      breakdown: { healthCheck: 15, staticScan: 40, externalScan: 0, registryMeta: 7 },
+    };
+    const deps = makeDeps({
+      getAdapter: vi.fn().mockReturnValue(makeAdapter("claude-desktop")),
+      computeTrustScore: vi.fn().mockReturnValue(credited),
+    });
+    await expect(
+      handleInstall("io.github.test/my-server", { minTrust: 70 }, deps)
+    ).rejects.toThrow(/62\/100/);
   });
 
   it("no behavior change when minTrust option is absent", async () => {

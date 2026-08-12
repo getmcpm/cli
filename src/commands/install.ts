@@ -457,6 +457,7 @@ export async function handleInstall(
             name,
             error: "min_trust_not_met",
             score: trustScore.score,
+            maxPossible: trustScore.maxPossible,
             required: options.minTrust,
             level: trustScore.level,
           },
@@ -465,8 +466,11 @@ export async function handleInstall(
         )
       );
     }
+    // The denominator is 80 unless the external-scanner bucket was credited, which is
+    // the default — so a hardcoded /100 understated every score by 20 points of scale
+    // and made a flawless 62/80 (77.5%) read as 62%.
     throw new Error(
-      `Trust score ${trustScore.score}/100 is below the required minimum of ${options.minTrust}. Installation aborted.`
+      `Trust score ${trustScore.score}/${trustScore.maxPossible} is below the required minimum of ${options.minTrust}. Installation aborted.`
     );
   }
 
