@@ -890,3 +890,42 @@ denominator (`62/80`, not `62/100`), so the arithmetic is at least visible to th
 A ceiling guard here would want the same primitive `audit` uses; if it is added, export
 one `maxAchievable(...)` from `scanner/trust-score.ts` rather than growing a third copy
 of the replayed-inputs literal.
+
+## #46 — Node 26 is supported at RUNTIME but the type layer is still pinned to Node 22 (P2)
+
+`engines.node` is `^22.22.2 || ^24.15.0 || >=26.0.0` as of #168, CI's matrix includes 26,
+and `build-and-test (26)` passes — so 26 already works for users. The gap is that mcpm
+COMPILES against Node 22's type definitions: `@types/node` is pinned `^22.19.19` and
+`.github/dependabot.yml:26` ignores its major updates. Anything added to the Node API in
+24 or 26 is invisible to `tsc`, and any signature CHANGED in 26 goes unchecked against
+code we ship to 26.
+
+The dependabot comment justifies the pin with "TypeScript 6.x and @types/node 26 break
+`tsc --noEmit`", parked behind a deliberate TS6 migration (PRs #57, #103). **Measured, and
+it is far smaller than that framing implies: 3 errors in 1 file, and TypeScript 6 is not
+involved.** Under `@types/node@26.2.0` with the current TypeScript:
+
+    src/store/keychain.ts(129,34): TS2769 No overload matches this call.
+    src/store/keychain.ts(138,21): TS2322 'Uint8Array<ArrayBufferLike>' not assignable to 'BufferSource'
+    src/store/keychain.ts(166,23): TS2322 'Uint8Array<ArrayBufferLike>' not assignable to 'BufferSource'
+
+All three are the same root cause — @types/node@26 narrowed `BufferSource`, so the
+`Uint8Array<ArrayBufferLike>` that `randomBytes`/`Buffer` produce no longer assigns to a
+WebCrypto parameter — at the three `webcrypto.subtle` call sites in the HKDF/PBKDF2 path
+(`importKey` raw master key, HKDF salt, PBKDF2 salt). Nothing else in the codebase moves.
+
+Method note, because the first measurement was wrong: the @types tarball's root directory
+is `node/`, not `package/`, so an extract that assumes `package/` silently yields NO
+`@types/node` at all and reports ~56 "Cannot find name 'process'" errors. That reads as a
+catastrophic break and is a FAILED MEASUREMENT. Run a CONTROL at the pinned version
+through the same harness and DIFF the two error sets — the harness itself contributed 29
+identical `TS2339 Property 'status' does not exist on type 'Response'` errors under both
+versions, which a raw count (29 vs 32) would have buried.
+
+So the work is: fix the three WebCrypto call sites, unpin `@types/node` in
+`dependabot.yml`, and decide whether the type floor tracks the engines FLOOR (22) or the
+newest CI major (26). Tracking the floor is the safer default and is what the comment says
+it is doing — but it means the compiler never checks the majors we actually ship to, which
+is how this became a task. Independent of the TS6 migration; do not let it stay blocked on
+that. Consider also whether `publish.yml` should build on 26 rather than 24, since the
+release artifact is currently dogfooded on one major only.
