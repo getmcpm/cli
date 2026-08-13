@@ -200,7 +200,7 @@ Build the **open-source, community-owned npm+npm_audit** for MCP:
 
 ### CLI (`mcpm`) — V1 / MVP
 
-- **Runtime**: Node.js (>=22.0.0), TypeScript, ESM
+- **Runtime**: Node.js (`^22.22.2 || ^24.15.0 || >=26.0.0` — the intersection of every runtime dependency's own `engines`, enforced by `engines-invariant.test.ts`), TypeScript, ESM
 - **npm package**: `@getmcpm/cli` (bin command: `mcpm`)
 - **CLI framework**: Commander.js
 - **Schema validation**: Zod (single source of truth for all types)

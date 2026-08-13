@@ -2,6 +2,41 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased]
+
+### Fixed
+
+- **`engines.node` now matches what the dependencies actually require.** The
+  declared range was `>=22.9.0`, but four direct runtime dependencies —
+  `@sigstore/bundle` and `@sigstore/verify` (`^22.22.2 || ^24.15.0 || >=26.0.0`),
+  `@inquirer/prompts` (`>=23.5.0 || ^22.13.0 || ^20.17.0`) and `commander`
+  (`>=22.12.0`) — require more, 20 packages across the transitive closure.
+  Anyone installing on Node 22.9–22.22.1, 24.0–24.14, 23.x or 25.x got
+  `EBADENGINE` warnings, and a hard install failure under `engine-strict=true`.
+  The range is now `^22.22.2 || ^24.15.0 || >=26.0.0`, the exact intersection.
+
+  The declaration was never correct: v0.23.0 set `>=22.9.0` to match
+  `@sigstore/bundle@4`, but `commander@15` and `@inquirer/prompts@8.5.2` were
+  already in the lockfile that day and both required more. The
+  `@sigstore/bundle@4 → @5` bump five days later widened the gap — raising the
+  22.x floor to 22.22.2 and newly excluding 23.x, 24.0–24.14 and 25.x — it did
+  not create it.
+
+  CI could not catch it: the matrix is `[22, 24, 26]` and `setup-node` resolves
+  the latest minor of each, which satisfies the dependency ranges, so the
+  declared **floor** is never the Node that runs. A new
+  `engines-invariant.test.ts` checks the declaration against the installed
+  dependency tree directly, independent of the Node executing the suite.
+
+  `scripts/dogfood-release.sh` now passes `--engine-strict`. Its header already
+  claimed a broken artifact with "an engines mismatch" could never reach npm,
+  but the install line discarded npm's warning, so the gate could not perform
+  the check it advertised.
+
+  If you are on an excluded Node, upgrade within your major (22.22.2+, 24.15.0+)
+  or move to 26. Nothing about mcpm's behaviour changed — only the honesty of
+  what it claims to support.
+
 ## [0.29.0] - 2026-08-13
 
 > Upgrade note: if you use `policy.blockOnScoreDrop` AND locked with a working
