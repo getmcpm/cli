@@ -5,7 +5,10 @@ determinism over feature breadth.
 
 ## Development setup
 
-Requires **Node.js >= 22** and **pnpm 10**.
+Requires **Node.js `^22.22.2 || ^24.15.0 || >=26.0.0`** and **pnpm 10**. That range is
+the intersection of every runtime dependency's own `engines`, not a preference —
+`src/__tests__/engines-invariant.test.ts` fails the build if `package.json` promises
+a Node a dependency does not support.
 
 ```
 pnpm install            # frozen lockfile

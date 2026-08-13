@@ -25,7 +25,28 @@ cd "$WORK"
 
 echo "==> Clean-installing the packed artifact (pulls prod deps + checks engines)"
 npm init -y >/dev/null 2>&1
-npm install "$TARBALL" >/dev/null 2>&1
+# --engine-strict makes the engines claim in this header TRUE. Without it npm only
+# WARNS on EBADENGINE and this line discarded the warning, so the gate advertised an
+# engines check it could not perform — and `engines.node` sat 13 minors below its own
+# dependencies' floor while wrongly claiming 23.x and 25.x, unnoticed, for three
+# releases (see src/__tests__/engines-invariant.test.ts). Strict turns a mismatch into
+# a nonzero exit, which is what "can NEVER reach npm" has to mean.
+if ! INSTALL_LOG="$(npm install --engine-strict "$TARBALL" 2>&1)"; then
+  echo "FAIL: clean install of the packed artifact failed"
+  # Assign first: inside a pipeline `grep` finding nothing and `head` closing the pipe
+  # are both nonzero under `set -o pipefail`, so a `||` fallback would fire on success
+  # too and print the log twice.
+  ENGINE_LINES="$(printf '%s\n' "$INSTALL_LOG" | grep -iE "EBADENGINE|Unsupported engine|wanted|current" || true)"
+  if [ -n "$ENGINE_LINES" ]; then
+    printf '%s\n' "$ENGINE_LINES"
+    echo
+    echo "The running Node ($(node -v)) is outside package.json engines.node, or"
+    echo "engines.node promises more than one of these dependencies supports."
+  else
+    printf '%s\n' "$INSTALL_LOG" | tail -20
+  fi
+  exit 1
+fi
 BIN="$WORK/node_modules/.bin/mcpm"
 [ -x "$BIN" ] || { echo "FAIL: mcpm bin not installed or not executable"; exit 1; }
 
