@@ -891,22 +891,50 @@ A ceiling guard here would want the same primitive `audit` uses; if it is added,
 one `maxAchievable(...)` from `scanner/trust-score.ts` rather than growing a third copy
 of the replayed-inputs literal.
 
-## #47 — the release dogfood exercises exactly one Node major, and it is the middle one (P3)
+## #46 — ~~Node 26's type layer was pinned to Node 22~~ DONE (unreleased)
 
-`.github/workflows/publish.yml` builds and runs `scripts/dogfood-release.sh` on Node 24.
-That gate is the real protection behind a release — it packs the tarball, clean-installs
-it, and smoke-runs the actual binary — but it proves that only for whichever single major
-the workflow names, while `engines.node` promises `^22.22.2 || ^24.15.0 || >=26.0.0`.
+Fixed on the way to the next tag; see the CHANGELOG `[Unreleased]` entry "The type layer
+now covers every Node major CI builds on" for the full account. Kept here rather than
+deleted because #47 splits off it, and because of the method note below.
 
-24 is arguably the least informative choice of the three. The FLOOR (22.22.2) is where "we
-used an API that does not exist yet" bites, and the NEWEST (26) is where a fresh
-incompatibility appears first; the middle major catches neither class first. Since #168 the
-gate also runs `npm install --engine-strict`, so it now additionally proves the declared
-range admits the Node it ran on — one point on a three-major range.
+**Method note, worth more than the fix.** Two measurements of this were wrong before one
+was right, and both failures looked like results:
 
-Split out of #46 rather than fixed with it: this is a release-pipeline change, and that
-pipeline has bitten this project before (the immutable-releases SBOM gotcha, 2026-07-03),
-so it wants its own deliberate change rather than a rider. Options are to matrix the
-dogfood across all three majors (most coverage, 3x release-gate wall clock) or to move it
-to the floor (same cost, catches the more common class). Note the CI matrix already runs
-the full suite on all three — what is single-major is the packed-artifact path only.
+1. The `@types/node` tarball's root directory is `node/`, not `package/`. An extract that
+   assumes `package/` silently yields NO `@types/node` and reports ~56 `Cannot find name
+   'process'` errors — which reads as a catastrophic break and is a FAILED MEASUREMENT.
+2. `typescript@latest` is now **7.x**, not 6.x. Installing it produced 364 errors of that
+   same shape. Same failure, different cause, equally convincing-looking.
+
+So: always run a CONTROL at the pinned versions through the same harness and DIFF the error
+SETS, never the counts, and pin the compiler BEFORE sweeping the typings (a stale compiler
+left in the harness reproduced the 364 across all three majors and looked like a real
+regression). The real answer was 3 errors in 1 file, and the narrowing landed in
+`@types/node` **25**, not 26 — 22 and 24 do not see it at all.
+
+## #47 — the release path typechecks only against the engines FLOOR, and dogfoods one Node major (P3)
+
+Two gaps in `.github/workflows/publish.yml`, both split out of #46 rather than fixed with it.
+
+**1. The per-leg typecheck does not run on the publish path.** `publish.yml` triggers
+independently on a `v*` tag push — it has no `needs:` on, and no `workflow_run` from,
+`ci.yml`. Its own `pnpm run typecheck` uses the pinned `@types/node` (the engines FLOOR,
+22), so nothing on the release path checks the newer majors. Deliberately not fixed here:
+the per-leg step resolves `@types/node@<major>` as a floating range, and making a RELEASE
+blockable by an upstream DefinitelyTyped publish is a worse trade than making a PR
+blockable. If this is closed, pin the version on the publish path even though CI floats it.
+
+**2. The dogfood runs on one Node major.** `scripts/dogfood-release.sh` packs the tarball,
+clean-installs it, and smoke-runs the real binary — the strongest gate there is — but only
+on Node 24. 24 is arguably the least informative of the three: the FLOOR (22.22.2) is where
+"we used an API that does not exist yet" bites, and the NEWEST (26) is where a fresh
+incompatibility appears first. Since #168 the gate also runs `npm install --engine-strict`,
+so it proves the declared range admits the Node it ran on — one point on a three-major
+range.
+
+Options: matrix the dogfood across all three majors (most coverage, ~3x release-gate wall
+clock) or move it to the floor (same cost, catches the more common class). Note the CI
+matrix already runs the full suite on all three; what is single-major is the packed-artifact
+path only. This is release-pipeline work, and that pipeline has bitten this project before
+(the immutable-releases SBOM gotcha, 2026-07-03), so it wants a deliberate change rather
+than a rider.

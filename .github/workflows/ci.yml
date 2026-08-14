@@ -40,15 +40,27 @@ jobs:
       # above describes Node 22's API on every leg — including the legs running 24
       # and 26. Anything whose signature CHANGED in a later major goes unchecked;
       # that is how a WebCrypto `BufferSource` narrowing reached main unnoticed —
-      # measured invisible under @types/node 22 AND 24, and caught only under 26,
-      # so a guard pinned to any single version would not have found it.
+      # measured invisible under @types/node 22 and 24, caught under 25 and 26.
       # Re-run the typecheck against the typings for the Node THIS leg runs, so
-      # the matrix stays the single source of which majors get checked. Last step
-      # on purpose: it rewrites node_modules, so no step above can observe it.
+      # the matrix stays the single source of which majors get checked.
+      #
+      # `@types/node@<major>` is a RANGE, deliberately: it resolves whatever
+      # DefinitelyTyped published most recently, so a tightened signature shows up
+      # here rather than whenever someone remembers to bump a pin. The cost is that
+      # an upstream publish can redden a PR that did not touch the code; reproduce
+      # locally with the two commands in CONTRIBUTING.md before hunting a commit.
+      # Note DefinitelyTyped cuts a major 5-8 weeks AFTER the Node release and
+      # skipped 23 entirely, so a NEWLY added matrix major may have no typings yet;
+      # that surfaces as ERR_PNPM_NO_MATCHING_VERSION on the line just edited.
+      #
+      # Restore the two tracked files `pnpm add` rewrites (package.json and
+      # pnpm-lock.yaml, not just node_modules) so this stays safe wherever it sits
+      # in the step list — a comment saying "keep me last" cannot enforce itself.
       - name: Typecheck against @types/node ${{ matrix.node-version }}
         run: |
           pnpm add -D "@types/node@${{ matrix.node-version }}"
           pnpm run typecheck
+          git checkout -- package.json pnpm-lock.yaml
 
   confine-macos:
     # The --confine OS sandbox (Seatbelt / sandbox-exec) is macOS-only and cannot

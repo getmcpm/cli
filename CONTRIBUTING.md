@@ -18,6 +18,16 @@ pnpm test               # vitest
 pnpm run test:coverage  # with coverage
 ```
 
+`@types/node` is pinned to the engines floor (22), so a local `typecheck` only proves
+the code compiles against Node 22's API. CI re-runs it per matrix leg against that
+leg's own typings. To reproduce a `Typecheck against @types/node <major>` failure:
+
+```
+pnpm add -D @types/node@26   # or 24 — the major CI failed on
+pnpm run typecheck
+git checkout -- package.json pnpm-lock.yaml
+```
+
 macOS-only end-to-end check for the `--confine` sandbox:
 
 ```

@@ -6,11 +6,11 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
-- **The type layer now covers every Node major mcpm ships to.** `@types/node` is
+- **The type layer now covers every Node major CI builds on.** `@types/node` is
   pinned to the `engines.node` floor (22), so `tsc` described Node 22's API on
   every CI leg — including the legs running 24 and 26, and anything whose
   signature CHANGED in a later major went unchecked. Three WebCrypto call sites
-  in `src/store/keychain.ts` had already drifted: `@types/node@26` narrowed
+  in `src/store/keychain.ts` had already drifted: `@types/node@25` narrowed
   `BufferSource` to reject views over a `SharedArrayBuffer`, and a bare `Buffer`
   or `Uint8Array` annotation defaults to `ArrayBufferLike`, which includes one.
 
@@ -23,15 +23,22 @@ All notable changes to this project will be documented in this file.
   CI now re-runs the typecheck on each matrix leg against `@types/node` for that
   leg's own Node, so the matrix stays the single source of which majors get
   checked. Measured, not assumed: with the annotations reverted the tree
-  typechecks clean under `@types/node` 22 **and** 24 and fails only under 26, so
-  a guard pinned to any one version would have missed it.
+  typechecks clean under `@types/node` 22 **and** 24 and fails under 25 and 26 —
+  so a guard pinned at or below 24 would have missed it, and no fixed pin stays
+  the right guess as the matrix moves. The per-leg re-run is the forward-looking
+  form. Scope is the compiled sources: `tsconfig.json` excludes `**/*.test.ts`,
+  and bringing the test tree under `tsc` surfaces pre-existing unrelated errors,
+  so that stays out.
 
   The pin stays at 22 on purpose — it is what stops `tsc` accepting an API a
-  Node 22 user would not have, and raising it to 26 would trade a silent
-  type-level gap for a silent runtime one. The `dependabot.yml` comment claiming
-  `@types/node@26` breaks `tsc --noEmit` is corrected: as of this change the
-  tree typechecks clean against 22, 24 and 26. The TypeScript 6 half of that
-  comment is left as it was — it was not re-measured here.
+  Node 22 user would not have, and raising it would trade a silent type-level
+  gap for a silent runtime one. The `dependabot.yml` comment claiming
+  `@types/node@26` breaks `tsc --noEmit` is corrected: the tree typechecks clean
+  against 22, 24, 25 and 26. Its TypeScript claim is reworded but NOT
+  re-measured — it named 6.x, while npm `latest` has moved to 7.x, so the
+  deferred migration is now 5.9 → 7. An attempt to measure it here installed
+  TypeScript 7 and produced 364 `cannot find name 'process'` errors, which is a
+  broken harness rather than a result, so the major stays held.
 
 - **`engines.node` now matches what the dependencies actually require.** The
   declared range was `>=22.9.0`, but four direct runtime dependencies —
