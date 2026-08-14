@@ -486,6 +486,72 @@ describe("checkTrustPolicy", () => {
     expect(result.pass).toBe(true);
   });
 
+  // --- TODOS #45: an unsatisfiable minTrustScore ---------------------------
+  //
+  // `minTrustScore` is a PERCENTAGE, so the ceiling is 77.5 (62/80), NOT 62. `up` scores
+  // with `healthCheckPassed: null` and no download count, so a policy above that fails
+  // EVERY server on a flawless stack while the reason blames the server.
+
+  it("names the ceiling when minTrustScore is unsatisfiable natively", () => {
+    const result = checkTrustPolicy({
+      serverName: "test-server",
+      currentScore: 62,
+      currentMaxPossible: 80,
+      lockedSnapshot: undefined,
+      policy: { minTrustScore: 79 },
+    });
+    expect(result.pass).toBe(false);
+    if (!result.pass) {
+      expect(result.reason).toContain("above 78%");
+      expect(result.reason).toContain("every server in the");
+      // It must NOT read as a property of this server.
+      expect(result.reason).not.toContain('"test-server"');
+    }
+  });
+
+  it("leaves a satisfiable-but-failing minTrustScore reported as a server failure", () => {
+    // 78 is exactly the ceiling — satisfiable (a flawless 62/80 reports 78 through the
+    // same rounding), so a server below it is a real failure and must keep the ordinary
+    // message. Boundary is > not >=.
+    const result = checkTrustPolicy({
+      serverName: "test-server",
+      currentScore: 40,
+      currentMaxPossible: 80,
+      lockedSnapshot: undefined,
+      policy: { minTrustScore: 78 },
+    });
+    expect(result.pass).toBe(false);
+    if (!result.pass) {
+      expect(result.reason).toContain('"test-server"');
+      expect(result.reason).toContain("below the minimum");
+      expect(result.reason).not.toContain("highest");
+    }
+  });
+
+  it("uses the CREDITED ceiling (82%) when the denominator says the bucket was banked", () => {
+    // Keying off this score's own denominator, not scanner availability. 80 is
+    // unsatisfiable natively (77.5) but fine once credited.
+    const credited = checkTrustPolicy({
+      serverName: "test-server",
+      currentScore: 60,
+      currentMaxPossible: 100,
+      lockedSnapshot: undefined,
+      policy: { minTrustScore: 80 },
+    });
+    expect(credited.pass).toBe(false);
+    if (!credited.pass) expect(credited.reason).toContain('"test-server"');
+
+    const tooHigh = checkTrustPolicy({
+      serverName: "test-server",
+      currentScore: 60,
+      currentMaxPossible: 100,
+      lockedSnapshot: undefined,
+      policy: { minTrustScore: 83 },
+    });
+    expect(tooHigh.pass).toBe(false);
+    if (!tooHigh.pass) expect(tooHigh.reason).toContain("above 82%");
+  });
+
   // --- F4: minReleaseAgeHours gate -----------------------------------------
 
   it("blocks a fresh release when minReleaseAgeHours is set", () => {

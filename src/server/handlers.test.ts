@@ -171,6 +171,47 @@ describe("handleInstall", () => {
     expect(addServer).not.toHaveBeenCalled();
   });
 
+  // TODOS #45: with no human in the loop, an agent cannot tell "this server is
+  // untrustworthy" from "no server can ever pass". `computeTrust` scores with
+  // `healthCheckPassed: null` and `hasExternalScanner: false`, so this gate tops out at
+  // 62 and a natural-sounding `minTrustScore: 70` rejects the entire registry. The
+  // honest reading of a blanket rejection is that the ecosystem is unsafe, so say which
+  // one it is — and never name the server, which the threshold says nothing about.
+  it("refuses an unsatisfiable minTrustScore without blaming the server", async () => {
+    const entry = makeEntry("io.github.acme/fine");
+    const addServer = vi.fn().mockResolvedValue(undefined);
+    const deps = makeDeps({
+      registryGetServer: vi.fn().mockResolvedValue(entry),
+      getAdapter: vi.fn().mockReturnValue({
+        clientId: "cursor",
+        read: vi.fn().mockResolvedValue({}),
+        addServer,
+        removeServer: vi.fn(),
+      }),
+    });
+
+    await expect(
+      handleInstall({ name: "io.github.acme/fine", minTrustScore: 70 }, deps)
+    ).rejects.toThrow(/above 62, the highest score this gate can award/);
+    await expect(
+      handleInstall({ name: "io.github.acme/fine", minTrustScore: 70 }, deps)
+    ).rejects.not.toThrow(/io\.github\.acme\/fine.*below the minimum threshold/);
+    expect(addServer).not.toHaveBeenCalled();
+  });
+
+  it("treats 62 — the ceiling itself — as a satisfiable threshold", async () => {
+    // Boundary is > not >=. A server below the ceiling must still get the ordinary
+    // below-threshold rejection, or this guard would swallow real refusals.
+    const entry = makeEntry("io.github.acme/sketchy");
+    const deps = makeDeps({
+      registryGetServer: vi.fn().mockResolvedValue(entry),
+      computeTrustScore: vi.fn().mockReturnValue(BELOW_FLOOR_TRUST),
+    });
+    await expect(
+      handleInstall({ name: "io.github.acme/sketchy", minTrustScore: 62 }, deps)
+    ).rejects.toThrow(/below the minimum threshold/i);
+  });
+
   // TODOS #33: the floor is documented as unlowerable by caller-supplied values,
   // and `MCPM_EXTERNAL_SCANNER` — an arbitrary executable — is caller-supplied.
   // `computeTrust` currently pins `hasExternalScanner: false`, so this cannot be

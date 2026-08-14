@@ -21,7 +21,7 @@ import type { InstalledServer } from "../store/servers.js";
 import type { ServerEntry } from "../registry/types.js";
 import type { Finding } from "../scanner/tier1.js";
 import { buildSarif } from "../output/sarif.js";
-import { computeTrustScore as computeTrustScoreReal, externalCredited } from "../scanner/trust-score.js";
+import { externalCredited, maxAchievableBeforeHealthCheck } from "../scanner/trust-score.js";
 import { sanitizeForTerminal } from "../guard/sanitize.js";
 import type { TrustScore, TrustScoreInput } from "../scanner/trust-score.js";
 import { levelColor, scoreBar, extractRegistryMeta } from "../utils/format-trust.js";
@@ -79,18 +79,7 @@ export class AuditUsageError extends Error {}
  *    tops out lower still (59 / 58). That is the registryMeta bucket doing its job —
  *    evidence, not a measurement gap — so it is not laundered into an exemption.
  */
-function flawlessAuditScore(hasExternalScanner: boolean): TrustScore {
-  return computeTrustScoreReal({
-    findings: [],
-    healthCheckPassed: null,
-    hasExternalScanner,
-    registryMeta: {
-      isVerifiedPublisher: true,
-      publishedAt: "1970-01-01T00:00:00.000Z",
-      downloadCount: undefined,
-    },
-  });
-}
+const flawlessAuditScore = maxAchievableBeforeHealthCheck;
 
 /**
  * The best score the servers in THIS run could actually have reached.

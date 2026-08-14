@@ -1855,19 +1855,105 @@ describe("handleInstall — --min-trust gate", () => {
   // scores 62/80 (77.5%) and read as "62/100", so the user blamed the server instead
   // of a threshold the command could never satisfy.
   it("reports the real denominator (/80) when no external scanner was credited", async () => {
+    // TODOS #45: this used to assert with score 62 and `minTrust: 70`. Both are wrong
+    // together — 70 is above the 62 ceiling, so it is unsatisfiable, and a server AT the
+    // ceiling cannot be rejected by any satisfiable threshold. It now uses a score below
+    // the ceiling and a threshold at it, so both numbers are production-reachable.
     const uncredited: TrustScore = {
-      score: 62,
+      score: 55,
       maxPossible: 80,
       level: "caution",
-      breakdown: { healthCheck: 15, staticScan: 40, externalScan: 0, registryMeta: 7 },
+      breakdown: { healthCheck: 15, staticScan: 33, externalScan: 0, registryMeta: 7 },
     };
     const deps = makeDeps({
       getAdapter: vi.fn().mockReturnValue(makeAdapter("claude-desktop")),
       computeTrustScore: vi.fn().mockReturnValue(uncredited),
     });
     await expect(
-      handleInstall("io.github.test/my-server", { minTrust: 70 }, deps)
-    ).rejects.toThrow(/62\/80/);
+      handleInstall("io.github.test/my-server", { minTrust: 62 }, deps)
+    ).rejects.toThrow(/55\/80/);
+  });
+
+  // TODOS #45 — a threshold above what the gate can AWARD refuses every server in the
+  // registry, forever, while the message blames the server. The ceiling comes from the
+  // REAL scorer, not `deps.computeTrustScore`: it is a property of the scoring model, and
+  // the suite's mock returns one constant for every input, which would collapse the
+  // ceiling onto each server's own score.
+  it("refuses a --min-trust above the native ceiling as unsatisfiable, naming it", async () => {
+    const uncredited: TrustScore = {
+      score: 55,
+      maxPossible: 80,
+      level: "caution",
+      breakdown: { healthCheck: 15, staticScan: 33, externalScan: 0, registryMeta: 7 },
+    };
+    const deps = makeDeps({
+      getAdapter: vi.fn().mockReturnValue(makeAdapter("claude-desktop")),
+      computeTrustScore: vi.fn().mockReturnValue(uncredited),
+    });
+    await expect(
+      handleInstall("io.github.test/my-server", { minTrust: 63 }, deps)
+    ).rejects.toThrow(/above 62, the highest score/);
+  });
+
+  it("uses the CREDITED ceiling (82) when the external bucket was credited", async () => {
+    // The pair matters: keying the ceiling on scanner AVAILABILITY instead of on what the
+    // score actually banked would read 82 for an uncredited run and wave 63..82 through.
+    const credited: TrustScore = {
+      score: 70,
+      maxPossible: 100,
+      level: "caution",
+      breakdown: { healthCheck: 15, staticScan: 40, externalScan: 8, registryMeta: 7 },
+    };
+    const deps = makeDeps({
+      getAdapter: vi.fn().mockReturnValue(makeAdapter("claude-desktop")),
+      computeTrustScore: vi.fn().mockReturnValue(credited),
+    });
+    // 75 is unsatisfiable natively but fine once credited — must fall through to the
+    // ordinary below-threshold message, not the unsatisfiable one.
+    await expect(
+      handleInstall("io.github.test/my-server", { minTrust: 75 }, deps)
+    ).rejects.toThrow(/70\/100 is below the required minimum/);
+    await expect(
+      handleInstall("io.github.test/my-server", { minTrust: 83 }, deps)
+    ).rejects.toThrow(/above 82, the highest score/);
+  });
+
+  it("treats the ceiling itself as satisfiable (boundary is > not >=)", async () => {
+    const uncredited: TrustScore = {
+      score: 55,
+      maxPossible: 80,
+      level: "caution",
+      breakdown: { healthCheck: 15, staticScan: 33, externalScan: 0, registryMeta: 7 },
+    };
+    const deps = makeDeps({
+      getAdapter: vi.fn().mockReturnValue(makeAdapter("claude-desktop")),
+      computeTrustScore: vi.fn().mockReturnValue(uncredited),
+    });
+    await expect(
+      handleInstall("io.github.test/my-server", { minTrust: 62 }, deps)
+    ).rejects.toThrow(/is below the required minimum/);
+  });
+
+  it("emits a distinct --json error code for an unsatisfiable threshold", async () => {
+    const capturedOutput: string[] = [];
+    const uncredited: TrustScore = {
+      score: 55,
+      maxPossible: 80,
+      level: "caution",
+      breakdown: { healthCheck: 15, staticScan: 33, externalScan: 0, registryMeta: 7 },
+    };
+    const deps = makeDeps({
+      computeTrustScore: vi.fn().mockReturnValue(uncredited),
+      output: (text: string) => capturedOutput.push(text),
+    });
+    await expect(
+      handleInstall("io.github.test/my-server", { json: true, minTrust: 63 }, deps)
+    ).rejects.toThrow();
+    expect(JSON.parse(capturedOutput.join("\n"))).toMatchObject({
+      error: "min_trust_unsatisfiable",
+      required: 63,
+      ceiling: 62,
+    });
   });
 
   it("reports /100 when the external bucket WAS credited", async () => {

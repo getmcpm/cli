@@ -12,7 +12,7 @@ import type { ConfigAdapter, McpServerEntry } from "../config/adapters/index.js"
 import type { ServerEntry } from "../registry/types.js";
 import type { Finding } from "../scanner/tier1.js";
 import type { TrustScore, TrustScoreInput } from "../scanner/trust-score.js";
-import { nativeTrustScore } from "../scanner/trust-score.js";
+import { maxAchievableBeforeHealthCheck, nativeTrustScore } from "../scanner/trust-score.js";
 import { extractRegistryMeta } from "../utils/format-trust.js";
 import { formatMcpEntryCommand } from "../utils/format-entry.js";
 import { resolveInstallEntry } from "../commands/install.js";
@@ -181,6 +181,24 @@ export async function handleInstall(
   // here so that wiring a scanner into this path later cannot silently reopen the
   // floor, which is the failure mode #33 found on the sibling `mcpm_up` path.
   const minScore = effectiveMinTrustScore(args.minTrustScore);
+  //
+  // TODOS #45: an agent asking for a natural-sounding `minTrustScore: 70` gets EVERY
+  // server rejected, because `computeTrust` above scores with `healthCheckPassed: null`
+  // and `hasExternalScanner: false` — a ceiling of 62. With no human in the loop the
+  // agent has no way to tell "this server is untrustworthy" from "no server can ever
+  // pass", and the honest reading of a blanket rejection is that the ecosystem is
+  // unsafe. Say which one it is. `false` is not a guess: `computeTrust` hardcodes it,
+  // so this path's ceiling is the native one unconditionally.
+  const gateCeiling = maxAchievableBeforeHealthCheck(false);
+  if (minScore > gateCeiling.score) {
+    throw new Error(
+      `minTrustScore ${minScore} is above ${gateCeiling.score}, the highest score this gate can ` +
+      `award. Trust is scored before the health check runs and without a download count, so ` +
+      `${gateCeiling.maxPossible - gateCeiling.score} of ${gateCeiling.maxPossible} points are unreachable here — ` +
+      `no server can satisfy it, and a rejection would say nothing about "${args.name}". ` +
+      `Use ${gateCeiling.score} or lower.`
+    );
+  }
   const nativeTrust = nativeTrustScore(trust);
   if (nativeTrust.score < minScore) {
     throw new Error(

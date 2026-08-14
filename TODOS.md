@@ -873,23 +873,24 @@ shipping; do not copy the "4 points" figure from the review, which was never mea
 
 ---
 
-## #45 — `install --min-trust` and `policy.minTrustScore` have audit's ceiling problem (P3)
+## #45 — ~~`install --min-trust` and `policy.minTrustScore` have audit's ceiling problem~~ DONE (unreleased)
 
-Both gate on a score whose reachable maximum is the same 62/82 as `audit --fix` —
-`install.ts` scores with `healthCheckPassed: null` at gate time and `extractRegistryMeta`
-never returns a download count anywhere in the product — and neither carries the ceiling
-guard #42 added. So `mcpm install --min-trust 63` refuses every server in the registry,
-forever, and a stack file with `policy.minTrustScore: 78` fails every `up` on a flawless
-stack.
+Closed by exporting `maxAchievableBeforeHealthCheck()` from `scanner/trust-score.ts` — the
+single replayed-inputs literal this entry asked for — and consuming it at all four gates:
+`audit --fix` (which loses its private copy), `install --min-trust`, `policy.minTrustScore`,
+and the MCP install floor. See the CHANGELOG `[Unreleased]` entry.
 
-Deliberately NOT guarded in the #166 follow-up: both REFUSE one named server, whereas
-`audit --fix` DELETES the whole stack under a forced `--yes`, which is why that one was
-treated as a data-loss bug. Since the review, `install`'s abort message reports the real
-denominator (`62/80`, not `62/100`), so the arithmetic is at least visible to the user.
+**This entry stated a number that measurement refuted, kept so nobody re-derives it.** It
+claimed "a stack file with `policy.minTrustScore: 78` fails every `up` on a flawless stack".
+It does not: `toPct` uses `Math.round`, so a flawless 62/80 = 77.5% reports as **78**, and
+`78 < 78` is false — 78 PASSES. The first unsatisfiable percentage is **79**. The absolute
+gates (`install`, MCP) are unsatisfiable above **62**, as the entry said.
 
-A ceiling guard here would want the same primitive `audit` uses; if it is added, export
-one `maxAchievable(...)` from `scanner/trust-score.ts` rather than growing a third copy
-of the replayed-inputs literal.
+The general trap: `install --min-trust` and `policy.minTrustScore` are the same idea in
+different UNITS, and this entry treated both as "the same 62/82". A guard written with 62
+against the percentage gate would have under-guarded by 15 points and looked correct. The
+ceiling now goes through the same `toPct` as the score it is compared against, so the
+boundary is exact by construction rather than by matching two hand-computed constants.
 
 ## #46 — ~~Node 26's type layer was pinned to Node 22~~ DONE (unreleased)
 
