@@ -96,7 +96,7 @@ export function isSupportedPlatform(): boolean {
 // macOS — security(1) generic-password items in the login Keychain
 // ---------------------------------------------------------------------------
 
-async function darwinGet(): Promise<Buffer | null> {
+async function darwinGet(): Promise<Buffer<ArrayBuffer> | null> {
   // -w prints only the password; exit 44 when the item does not exist.
   const r = await run("security", [
     "find-generic-password",
@@ -137,7 +137,7 @@ async function darwinStore(keyB64: string): Promise<boolean> {
 // Linux — secret-tool (libsecret). Value is read from / written to stdin.
 // ---------------------------------------------------------------------------
 
-async function linuxGet(): Promise<Buffer | null> {
+async function linuxGet(): Promise<Buffer<ArrayBuffer> | null> {
   const r = await run("secret-tool", ["lookup", "service", SERVICE, "account", ACCOUNT]);
   if (r.code !== 0) return null;
   const value = r.stdout.trim(); // consistent with darwin/windows; tolerate \r\n / spaces
@@ -179,7 +179,7 @@ async function blobPath(): Promise<string> {
   return path.join(await getStorePath(), DPAPI_BLOB_FILE);
 }
 
-async function windowsGet(): Promise<Buffer | null> {
+async function windowsGet(): Promise<Buffer<ArrayBuffer> | null> {
   let blob: string;
   try {
     blob = (await readFile(await blobPath(), "utf8")).trim();
@@ -211,8 +211,12 @@ async function windowsStore(keyB64: string): Promise<boolean> {
 // Shared helpers + public dispatch
 // ---------------------------------------------------------------------------
 
-/** Decode a base64 master key, rejecting anything that is not exactly 32 bytes. */
-function decodeKey(b64: string): Buffer | null {
+/**
+ * Decode a base64 master key, rejecting anything that is not exactly 32 bytes.
+ * Returns `Buffer<ArrayBuffer>` rather than bare `Buffer` so the key still
+ * assigns to WebCrypto's `BufferSource` in keychain.ts — see the note there.
+ */
+function decodeKey(b64: string): Buffer<ArrayBuffer> | null {
   try {
     const buf = Buffer.from(b64, "base64");
     return buf.length === 32 ? buf : null;
@@ -225,7 +229,7 @@ function decodeKey(b64: string): Buffer | null {
  * Read the stored master key, or null if none is stored / the store is
  * unavailable. Never creates a key.
  */
-export async function getStoredKey(): Promise<Buffer | null> {
+export async function getStoredKey(): Promise<Buffer<ArrayBuffer> | null> {
   if (!isSupportedPlatform()) return null;
   switch (process.platform) {
     case "darwin":

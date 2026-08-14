@@ -36,6 +36,20 @@ jobs:
 
       - run: pnpm run test:coverage
 
+      # `@types/node` is pinned to the engines.node FLOOR (22), so the typecheck
+      # above describes Node 22's API on every leg — including the legs running 24
+      # and 26. Anything whose signature CHANGED in a later major goes unchecked;
+      # that is how a WebCrypto `BufferSource` narrowing reached main unnoticed —
+      # measured invisible under @types/node 22 AND 24, and caught only under 26,
+      # so a guard pinned to any single version would not have found it.
+      # Re-run the typecheck against the typings for the Node THIS leg runs, so
+      # the matrix stays the single source of which majors get checked. Last step
+      # on purpose: it rewrites node_modules, so no step above can observe it.
+      - name: Typecheck against @types/node ${{ matrix.node-version }}
+        run: |
+          pnpm add -D "@types/node@${{ matrix.node-version }}"
+          pnpm run typecheck
+
   confine-macos:
     # The --confine OS sandbox (Seatbelt / sandbox-exec) is macOS-only and cannot
     # be exercised by the ubuntu matrix above. This leg runs the hermetic

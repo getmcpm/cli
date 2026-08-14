@@ -6,6 +6,33 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
+- **The type layer now covers every Node major mcpm ships to.** `@types/node` is
+  pinned to the `engines.node` floor (22), so `tsc` described Node 22's API on
+  every CI leg — including the legs running 24 and 26, and anything whose
+  signature CHANGED in a later major went unchecked. Three WebCrypto call sites
+  in `src/store/keychain.ts` had already drifted: `@types/node@26` narrowed
+  `BufferSource` to reject views over a `SharedArrayBuffer`, and a bare `Buffer`
+  or `Uint8Array` annotation defaults to `ArrayBufferLike`, which includes one.
+
+  The values were never wrong — `randomBytes()` and `Buffer.from(hex, "hex")`
+  are both `ArrayBuffer`-backed — only the annotations were wider than the
+  values, so the fix is `Buffer<ArrayBuffer>` / `Uint8Array<ArrayBuffer>` along
+  the master-key chain. Nothing runtime changes; the existing round-trip,
+  migration and legacy-decrypt tests for both schemes are the evidence.
+
+  CI now re-runs the typecheck on each matrix leg against `@types/node` for that
+  leg's own Node, so the matrix stays the single source of which majors get
+  checked. Measured, not assumed: with the annotations reverted the tree
+  typechecks clean under `@types/node` 22 **and** 24 and fails only under 26, so
+  a guard pinned to any one version would have missed it.
+
+  The pin stays at 22 on purpose — it is what stops `tsc` accepting an API a
+  Node 22 user would not have, and raising it to 26 would trade a silent
+  type-level gap for a silent runtime one. The `dependabot.yml` comment claiming
+  `@types/node@26` breaks `tsc --noEmit` is corrected: as of this change the
+  tree typechecks clean against 22, 24 and 26. The TypeScript 6 half of that
+  comment is left as it was — it was not re-measured here.
+
 - **`engines.node` now matches what the dependencies actually require.** The
   declared range was `>=22.9.0`, but four direct runtime dependencies —
   `@sigstore/bundle` and `@sigstore/verify` (`^22.22.2 || ^24.15.0 || >=26.0.0`),
