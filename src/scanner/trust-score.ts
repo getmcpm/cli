@@ -340,3 +340,55 @@ export function nativeTrustScore(trust: TrustScore): NativeTrustScore {
     excludedExternalCredit: trust.breakdown.externalScan,
   };
 }
+
+/**
+ * The best score any server could reach at a gate that runs BEFORE the health check.
+ *
+ * Every score-threshold gate in the product — `install --min-trust`,
+ * `policy.minTrustScore`, `audit --fix --min-trust`, the MCP install floor, and
+ * `mcpm_setup`'s pre-filter (a FIFTH gate that does not forward its threshold to the
+ * install gate, so it needs its own check) — scores
+ * with `healthCheckPassed: null` (the check runs after install, if at all), and
+ * `extractRegistryMeta` never returns a download count anywhere in the product. So 18 of
+ * the 80 mcpm-native points are unreachable AT THOSE CALL SITES: the best possible server
+ * tops out at 62/80, or 82/100 once the external bucket is credited. A threshold above
+ * that is unsatisfiable by construction — every server is refused, forever, and the
+ * message blames the server rather than the threshold.
+ *
+ * The metadata here is deliberately the most FAVOURABLE a server could present, which
+ * makes this a property of the CALL SITE (what a gate can measure) rather than of any one
+ * server. Folding a server's own `publishedAt` / registry status in instead would move
+ * the ceiling per server — on `audit --fix` that let a publisher republish to become
+ * unremovable, inverting F4's release-age cooldown.
+ *
+ * ABSOLUTE vs PERCENTAGE is not interchangeable and has bitten this code before. Callers
+ * comparing a raw score use `.score` (62); `policy.minTrustScore` is a PERCENTAGE and
+ * must use `.score / .maxPossible * 100` (77.5). Passing 62 to the percentage gate would
+ * silently under-guard by 15 points.
+ *
+ * Known residual, unchanged from TODOS #42: 62 is reachable only by a pypi/oci server.
+ * Every npm package draws one `low` `install-script` finding for the `npx -y` launcher
+ * class, so a clean npm server tops out at 60. `--min-trust 61..62` therefore stays
+ * unsatisfiable for an all-npm stack — narrower than the band this closes, and stated
+ * rather than papered over. In PERCENTAGE units, which is what `policy.minTrustScore`
+ * reads, the same residual is 60/80 = 75% against a ceiling of 78: a policy of 76..78
+ * is unsatisfiable for an all-npm stack while this guard reports it as satisfiable.
+ *
+ * Callers must key this on whether the score was CREDITED (`externalCredited`), never on
+ * scanner AVAILABILITY. Those are different predicates: availability is a bare
+ * `<cmd> --version` probe, while the scorer credits the bucket only when the scanner also
+ * returned output it could read. An availability-keyed ceiling reads 82 for a run capped
+ * at 62.
+ */
+export function maxAchievableBeforeHealthCheck(hasExternalScanner: boolean): TrustScore {
+  return computeTrustScore({
+    findings: [],
+    healthCheckPassed: null,
+    hasExternalScanner,
+    registryMeta: {
+      isVerifiedPublisher: true,
+      publishedAt: "1970-01-01T00:00:00.000Z",
+      downloadCount: undefined,
+    },
+  });
+}

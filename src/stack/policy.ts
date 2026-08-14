@@ -11,7 +11,7 @@ import type { Policy, TrustSnapshot } from "./schema.js";
 // Numeric bucket weight only, never a type or a scoring call: a lockfile's recorded
 // `externalScanCredit` is this bucket's value at lock time, so validating it against a
 // second copy of `20` here would silently stop matching if the bucket is re-weighted.
-import { EXTERNAL_SCAN_MAX } from "../scanner/trust-score.js";
+import { EXTERNAL_SCAN_MAX, maxAchievableBeforeHealthCheck } from "../scanner/trust-score.js";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -89,6 +89,43 @@ export function checkTrustPolicy(input: PolicyCheckInput): PolicyResult {
 
   // Check absolute floor
   if (policy.minTrustScore !== undefined && currentPct < policy.minTrustScore) {
+    // `minTrustScore` is a PERCENTAGE, so the ceiling is 78 (62/80 = 77.5, and `toPct`
+    // rounds), NOT 62. `up` scores with `healthCheckPassed: null` and no download count,
+    // so a policy above that fails EVERY server on a flawless stack while the reason
+    // below reads as a property of the server (TODOS #45).
+    //
+    // The ceiling goes through the SAME `toPct` as the server's score. That is what makes
+    // the boundary exact: a flawless native server reports 78 and a policy of 78 passes
+    // it, so 79 is the first unsatisfiable value. Computing the ceiling as a raw 77.5
+    // would declare 78 unsatisfiable while the server it is compared against reports 78.
+    //
+    // Which ceiling applies is decided by this score's own denominator — the scorer's
+    // record of whether it credited the external bucket (`externalCredited` is exactly
+    // `maxPossible === FULL_MAX_POSSIBLE`). Derived from the scorer rather than a local
+    // 80/100 literal so the two cannot drift apart.
+    const creditedCeiling = maxAchievableBeforeHealthCheck(true);
+    const ceiling =
+      currentMaxPossible === creditedCeiling.maxPossible
+        ? creditedCeiling
+        : maxAchievableBeforeHealthCheck(false);
+    const ceilingPct = toPct(ceiling.score, ceiling.maxPossible);
+    if (policy.minTrustScore > ceilingPct) {
+      // Scoped to servers scored the way THIS one was, not to the whole stack. Crediting
+      // is decided per server, so a mixed-credit run legitimately contains both ceilings
+      // and "every server in the stack will fail" would be false. And no number is
+      // prescribed: `minTrustScore` lives in a committed stack file shared by the team,
+      // while the ceiling that lowered it can be one developer's broken scanner — advising
+      // an edit to a shared security gate on machine-local evidence is the wrong remedy.
+      return {
+        pass: false,
+        reason:
+          `policy.minTrustScore ${policy.minTrustScore}% is above ${ceilingPct}%, the highest ` +
+          `percentage \`mcpm up\` can award a server scored the way "${serverName}" was ` +
+          `(${currentPct}%). Trust is scored BEFORE any health check and mcpm reads no download ` +
+          `count, so no server on this evidence path can reach the threshold — it refuses for ` +
+          `what \`up\` cannot measure, not for the server's evidence.`,
+      };
+    }
     return {
       pass: false,
       reason:

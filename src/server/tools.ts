@@ -29,7 +29,7 @@ export const TOOL_DEFINITIONS = [
       properties: {
         name: { type: "string", description: "Server name (e.g. io.github.domdomegg/filesystem-mcp)" },
         client: { type: "string", description: "Install to specific client only (claude-desktop, cursor, vscode, windsurf)" },
-        minTrustScore: { type: "number", description: "Minimum trust score to allow install (default 50, range 0-100)" },
+        minTrustScore: { type: "number", description: "Minimum trust score to allow install (default 50). Scored before any health check, so 62 is the highest attainable; above that is refused as unsatisfiable rather than applied." },
       },
       required: ["name"],
     },
@@ -94,7 +94,7 @@ export const TOOL_DEFINITIONS = [
       properties: {
         description: { type: "string", description: "What you need (e.g. 'filesystem access and GitHub integration')" },
         client: { type: "string", description: "Install to specific client only" },
-        minTrustScore: { type: "number", description: "Minimum trust score to auto-install (default 50, range 0-100)" },
+        minTrustScore: { type: "number", description: "Minimum trust score to auto-install (default 50). Scored before any health check, so 62 is the highest attainable; above that is refused as unsatisfiable rather than applied." },
       },
       required: ["description"],
     },

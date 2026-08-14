@@ -6,6 +6,58 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
+- **A trust threshold higher than mcpm can award now says so, instead of refusing
+  every server forever.** Every score gate in the product is evaluated BEFORE the
+  health check runs (`healthCheckPassed: null`) and mcpm never reads a download
+  count, so 18 of the 80 native points are unreachable at gate time. A flawless
+  server tops out at **62/80**. `mcpm install --min-trust 63` therefore refused
+  every server in the registry, forever, while the message read
+  `Trust score 62/80 is below the required minimum of 63` — blaming the server and
+  sending you to look for a better one. `policy.minTrustScore` failed the same way
+  on `mcpm up`, and the MCP install gate failed worst of all: it scores with
+  `hasExternalScanner: false` unconditionally, so an agent asking for a
+  natural-sounding `minTrustScore: 70` got a blanket rejection whose honest reading
+  is "the MCP ecosystem is unsafe", with no human in the loop to notice the
+  threshold was impossible.
+
+  All **five** gates — `audit --fix --min-trust` (which had the only guard, from
+  TODOS #42), `install --min-trust`, `policy.minTrustScore`, the MCP install floor,
+  and `mcpm_setup`'s pre-filter — now share one `maxAchievableBeforeHealthCheck()`
+  exported from `scanner/trust-score.ts`, replacing `audit`'s private copy of the
+  replayed-inputs literal. An unsatisfiable threshold is refused by naming the ceiling
+  and why it exists. Nothing that previously installed is now refused: both branches
+  already refused, so this changes the diagnosis, not the outcome.
+
+  `mcpm_setup` was the fifth and it was nearly missed: it does not forward its
+  threshold to the install gate (forwarding would let a caller-supplied `30` LOWER the
+  enforcing gate), so the install guard could never fire from that path. It is also the
+  worst place to omit — every keyword reports its best match as "below minimum", and an
+  agent reading a blanket rejection concludes the ecosystem is unsafe.
+
+  Each refusal recommends the score the server **actually reached**, never the model
+  ceiling. `audit`'s sibling guard already did this and says why: a threshold above what
+  was observed refuses "for what audit cannot measure rather than for their evidence" —
+  and recommending 62 would itself be unsatisfiable for any npm server, producing a
+  second refusal. `policy.minTrustScore`'s reason is scoped to servers scored the way
+  that one was, not to the whole stack, because crediting is decided per server and a
+  mixed-credit run legitimately contains both ceilings; it also stops prescribing an
+  edit to a committed, team-shared threshold on the strength of one machine's scanner.
+
+  **`--min-trust` and `policy.minTrustScore` are the same idea in different UNITS**,
+  which is the trap here. The absolute gates are unsatisfiable above **62**; the
+  policy gate is a PERCENTAGE and unsatisfiable above **78** — not 77.5, because
+  `toPct` rounds and a flawless 62/80 reports as 78, so 78 passes and 79 is the
+  first impossible value. The ceiling is put through the same `toPct` as the score
+  it is compared against, so the boundary is exact by construction rather than by
+  two hand-computed constants agreeing.
+
+  `install --json` gains a distinct `min_trust_unsatisfiable` error code carrying
+  `ceiling` and `maxPossible` (the `--json` shape is UNSTABLE per `docs/CONTRACTS.md`).
+  Residual, unchanged: 62 is reachable only by a pypi/oci server — every npm package
+  draws one `low` `install-script` finding for the `npx -y` launcher class, capping a
+  clean npm server at 60 — so `--min-trust 61..62` stays unsatisfiable for an all-npm
+  stack. Stated rather than papered over.
+
 - **The type layer now covers every Node major CI builds on.** `@types/node` is
   pinned to the `engines.node` floor (22), so `tsc` described Node 22's API on
   every CI leg — including the legs running 24 and 26, and anything whose

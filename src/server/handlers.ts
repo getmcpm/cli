@@ -12,7 +12,7 @@ import type { ConfigAdapter, McpServerEntry } from "../config/adapters/index.js"
 import type { ServerEntry } from "../registry/types.js";
 import type { Finding } from "../scanner/tier1.js";
 import type { TrustScore, TrustScoreInput } from "../scanner/trust-score.js";
-import { nativeTrustScore } from "../scanner/trust-score.js";
+import { maxAchievableBeforeHealthCheck, nativeTrustScore } from "../scanner/trust-score.js";
 import { extractRegistryMeta } from "../utils/format-trust.js";
 import { formatMcpEntryCommand } from "../utils/format-entry.js";
 import { resolveInstallEntry } from "../commands/install.js";
@@ -181,7 +181,28 @@ export async function handleInstall(
   // here so that wiring a scanner into this path later cannot silently reopen the
   // floor, which is the failure mode #33 found on the sibling `mcpm_up` path.
   const minScore = effectiveMinTrustScore(args.minTrustScore);
+  //
+  // TODOS #45: an agent asking for a natural-sounding `minTrustScore: 70` gets EVERY
+  // server rejected, because `computeTrust` above scores with `healthCheckPassed: null`
+  // and `hasExternalScanner: false` — a ceiling of 62. With no human in the loop the
+  // agent has no way to tell "this server is untrustworthy" from "no server can ever
+  // pass", and the honest reading of a blanket rejection is that the ecosystem is
+  // unsafe. Say which one it is. `false` is not a guess: `computeTrust` hardcodes it,
+  // so this path's ceiling is the native one unconditionally.
   const nativeTrust = nativeTrustScore(trust);
+  const gateCeiling = maxAchievableBeforeHealthCheck(false);
+  if (minScore > gateCeiling.score) {
+    // Recommend the OBSERVED score, not the ceiling — `audit`'s sibling guard does the
+    // same, and recommending 62 would itself be unsatisfiable for any npm server (they
+    // cap at 60 on the `npx -y` launcher class), producing a second rejection.
+    throw new Error(
+      `minTrustScore ${minScore} is above ${gateCeiling.score}, the highest score this gate can ` +
+      `award. Trust is scored before the health check runs and without a download count, so ` +
+      `${gateCeiling.maxPossible - gateCeiling.score} of ${gateCeiling.maxPossible} points are unreachable here — ` +
+      `this is a property of the gate, not of "${args.name}", which scored ` +
+      `${nativeTrust.score}/${nativeTrust.maxPossible}. Use ${nativeTrust.score} or lower.`
+    );
+  }
   if (nativeTrust.score < minScore) {
     throw new Error(
       `Server "${args.name}" has trust score ${nativeTrust.score}/${nativeTrust.maxPossible} ` +
@@ -420,6 +441,28 @@ export async function handleSetup(
     effectiveMinTrustScore(args.minTrustScore),
     DEFAULT_MIN_TRUST_SCORE,
   );
+
+  // TODOS #45, fifth gate. This pre-filter deliberately does NOT forward minTrustScore to
+  // handleInstall (forwarding would let a caller-supplied 30 LOWER the enforcing gate), so
+  // handleInstall's ceiling guard can never fire from here — this path needs its own. It
+  // is the worst place to omit it: every keyword reports its best match as "below
+  // minimum", and an agent reading a blanket rejection concludes the ecosystem is unsafe.
+  //
+  // Placed AFTER the Math.max clamp, or a requested 0 would be compared against the
+  // ceiling before the clamp raised it. `false` is exact: `computeTrust` hardcodes
+  // `hasExternalScanner: false`. Throws rather than pushing a `skipped` row — it is a
+  // caller error about the threshold, and a `skipped` row would reintroduce the
+  // blame-the-server framing this removes.
+  const setupCeiling = maxAchievableBeforeHealthCheck(false);
+  if (minScore > setupCeiling.score) {
+    throw new Error(
+      `minTrustScore ${minScore} is above ${setupCeiling.score}, the highest score this gate can ` +
+      `award. Trust is scored before the health check runs and without a download count, so ` +
+      `${setupCeiling.maxPossible - setupCeiling.score} of ${setupCeiling.maxPossible} points are unreachable ` +
+      `here — no server can satisfy it, so every match would be reported as untrusted ` +
+      `regardless of its evidence. Use ${setupCeiling.score} or lower.`
+    );
+  }
 
   const installed: Array<{ name: string; trustScore: TrustScore }> = [];
   const skipped: Array<{ name: string; reason: string }> = [];
