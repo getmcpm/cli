@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## [0.29.1] - 2026-08-15
+## [Unreleased]
 
 ### Fixed
 
@@ -57,6 +57,10 @@ All notable changes to this project will be documented in this file.
   draws one `low` `install-script` finding for the `npx -y` launcher class, capping a
   clean npm server at 60 — so `--min-trust 61..62` stays unsatisfiable for an all-npm
   stack. Stated rather than papered over.
+
+## [0.29.1] - 2026-08-15
+
+### Fixed
 
 - **The type layer now covers every Node major CI builds on.** `@types/node` is
   pinned to the `engines.node` floor (22), so `tsc` described Node 22's API on
