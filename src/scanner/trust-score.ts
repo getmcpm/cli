@@ -345,7 +345,9 @@ export function nativeTrustScore(trust: TrustScore): NativeTrustScore {
  * The best score any server could reach at a gate that runs BEFORE the health check.
  *
  * Every score-threshold gate in the product — `install --min-trust`,
- * `policy.minTrustScore`, `audit --fix --min-trust`, and the MCP install floor — scores
+ * `policy.minTrustScore`, `audit --fix --min-trust`, the MCP install floor, and
+ * `mcpm_setup`'s pre-filter (a FIFTH gate that does not forward its threshold to the
+ * install gate, so it needs its own check) — scores
  * with `healthCheckPassed: null` (the check runs after install, if at all), and
  * `extractRegistryMeta` never returns a download count anywhere in the product. So 18 of
  * the 80 mcpm-native points are unreachable AT THOSE CALL SITES: the best possible server
@@ -368,7 +370,9 @@ export function nativeTrustScore(trust: TrustScore): NativeTrustScore {
  * Every npm package draws one `low` `install-script` finding for the `npx -y` launcher
  * class, so a clean npm server tops out at 60. `--min-trust 61..62` therefore stays
  * unsatisfiable for an all-npm stack — narrower than the band this closes, and stated
- * rather than papered over.
+ * rather than papered over. In PERCENTAGE units, which is what `policy.minTrustScore`
+ * reads, the same residual is 60/80 = 75% against a ceiling of 78: a policy of 76..78
+ * is unsatisfiable for an all-npm stack while this guard reports it as satisfiable.
  *
  * Callers must key this on whether the score was CREDITED (`externalCredited`), never on
  * scanner AVAILABILITY. Those are different predicates: availability is a bare

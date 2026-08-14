@@ -182,6 +182,16 @@ describe("handleInstall", () => {
     const addServer = vi.fn().mockResolvedValue(undefined);
     const deps = makeDeps({
       registryGetServer: vi.fn().mockResolvedValue(entry),
+      // A score this gate can actually produce. The shared GOOD_TRUST fixture is 72/80,
+      // which is ABOVE the 62 ceiling and therefore unreachable through `computeTrust` —
+      // asserting against a score production cannot emit is how a test ends up
+      // certifying nothing.
+      computeTrustScore: vi.fn().mockReturnValue({
+        score: 62,
+        maxPossible: 80,
+        level: "caution",
+        breakdown: { healthCheck: 15, staticScan: 40, externalScan: 0, registryMeta: 7 },
+      }),
       getAdapter: vi.fn().mockReturnValue({
         clientId: "cursor",
         read: vi.fn().mockResolvedValue({}),
@@ -385,6 +395,39 @@ describe("handleRemove", () => {
     const deps = makeDeps({ getAdapter: vi.fn().mockReturnValue(adapter) });
 
     await expect(handleRemove({ name: "io.github.test/nonexistent" }, deps)).rejects.toThrow(/not found/i);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// handleSetup — TODOS #45 fifth gate
+// ---------------------------------------------------------------------------
+
+describe("handleSetup — unsatisfiable minTrustScore", () => {
+  // This path does NOT forward minTrustScore to handleInstall (forwarding would let a
+  // caller-supplied 30 lower the enforcing gate), so handleInstall's guard cannot cover
+  // it. Without its own guard every keyword reports its best match as "below minimum".
+  it("refuses a threshold above the ceiling instead of skipping every match", async () => {
+    const deps = makeDeps({});
+    await expect(
+      handleSetup({ description: "filesystem", minTrustScore: 63 }, deps)
+    ).rejects.toThrow(/above 62, the highest score this gate can award/);
+  });
+
+  it("treats 62 — the ceiling itself — as satisfiable", async () => {
+    // Boundary is > not >=, and the guard must not swallow real per-server skips: at the
+    // ceiling the call proceeds and a low-scoring match is still reported as skipped.
+    const fsEntry = makeEntry("io.github.acme/filesystem");
+    const deps = makeDeps({
+      registrySearch: vi.fn().mockResolvedValue([fsEntry]),
+      registryGetServer: vi.fn().mockResolvedValue(fsEntry),
+      computeTrustScore: vi.fn().mockReturnValue(BELOW_FLOOR_TRUST),
+    });
+    const result = (await handleSetup(
+      { description: "filesystem", minTrustScore: 62 },
+      deps
+    )) as { skipped: Array<{ reason: string }> };
+    expect(result.skipped.length).toBeGreaterThan(0);
+    expect(result.skipped[0].reason).toContain("below minimum");
   });
 });
 

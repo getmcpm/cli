@@ -876,9 +876,16 @@ shipping; do not copy the "4 points" figure from the review, which was never mea
 ## #45 — ~~`install --min-trust` and `policy.minTrustScore` have audit's ceiling problem~~ DONE (unreleased)
 
 Closed by exporting `maxAchievableBeforeHealthCheck()` from `scanner/trust-score.ts` — the
-single replayed-inputs literal this entry asked for — and consuming it at all four gates:
+single replayed-inputs literal this entry asked for — and consuming it at all **five** gates:
 `audit --fix` (which loses its private copy), `install --min-trust`, `policy.minTrustScore`,
-and the MCP install floor. See the CHANGELOG `[Unreleased]` entry.
+the MCP install floor, and `mcpm_setup`'s pre-filter. See the CHANGELOG `[Unreleased]` entry.
+
+**This entry said four gates. There were five**, and the fifth was found by review, not by
+me: `mcpm_setup` runs its own threshold check and deliberately does NOT forward
+`minTrustScore` to the install gate, so no guard placed there could ever cover it. Both the
+entry and my first implementation enumerated a closed set and were wrong about its size —
+the same "generalising from the call sites you happened to look at" failure logged twice
+already this week.
 
 **This entry stated a number that measurement refuted, kept so nobody re-derives it.** It
 claimed "a stack file with `policy.minTrustScore: 78` fails every `up` on a flawless stack".

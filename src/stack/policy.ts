@@ -110,13 +110,20 @@ export function checkTrustPolicy(input: PolicyCheckInput): PolicyResult {
         : maxAchievableBeforeHealthCheck(false);
     const ceilingPct = toPct(ceiling.score, ceiling.maxPossible);
     if (policy.minTrustScore > ceilingPct) {
+      // Scoped to servers scored the way THIS one was, not to the whole stack. Crediting
+      // is decided per server, so a mixed-credit run legitimately contains both ceilings
+      // and "every server in the stack will fail" would be false. And no number is
+      // prescribed: `minTrustScore` lives in a committed stack file shared by the team,
+      // while the ceiling that lowered it can be one developer's broken scanner — advising
+      // an edit to a shared security gate on machine-local evidence is the wrong remedy.
       return {
         pass: false,
         reason:
           `policy.minTrustScore ${policy.minTrustScore}% is above ${ceilingPct}%, the highest ` +
-          `score \`mcpm up\` can award. Trust is scored BEFORE any health check and mcpm reads ` +
-          `no download count, so no server can satisfy this threshold — every server in the ` +
-          `stack will fail. Lower it to ${ceilingPct} or below.`,
+          `percentage \`mcpm up\` can award a server scored the way "${serverName}" was ` +
+          `(${currentPct}%). Trust is scored BEFORE any health check and mcpm reads no download ` +
+          `count, so no server on this evidence path can reach the threshold — it refuses for ` +
+          `what \`up\` cannot measure, not for the server's evidence.`,
       };
     }
     return {

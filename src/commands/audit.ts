@@ -48,36 +48,10 @@ const DEFAULT_FIX_THRESHOLD = 50;
 export class AuditUsageError extends Error {}
 
 /**
- * A flawless server — zero findings, active registry status, years-old publish date —
- * scored exactly the way `mcpm audit` scores real ones.
- *
- * Audit deliberately does not execute installed servers, so the health check never
- * runs (`healthCheckPassed: null` => 15 of 30), and it does not read download counts
- * (registry metadata caps at 7 of 10). 18 of the 80 mcpm-native points are therefore
- * unreachable HERE: the best possible server tops out at 62, or 82 once the external
- * bucket is credited.
- *
- * Uses the REAL scorer, not `deps.computeTrustScore`, and that is deliberate: this is
- * a property of the scoring MODEL, not of whatever a caller injected. Deriving it from
- * the injected scorer is not merely untestable but wrong — the suite's mock returns
- * one constant for every input, which collapses the ceiling onto each server's own
- * score and fires the guard exactly when a server is legitimately below the threshold.
- *
- * The metadata here is deliberately the most FAVOURABLE a server could present, which
- * makes this a property of the CALL SITE (what audit can measure) rather than of any
- * one server. Folding each server's own `publishedAt` / registry status in instead
- * would lower the ceiling for exactly the servers most worth removing — a publisher
- * could republish to become unremovable, inverting F4's release-age cooldown.
- *
- * Two known residuals, both narrower than the band this guard closes, both stated in
- * the CHANGELOG rather than papered over:
- *  - 62 is reachable only by a pypi/oci server. Every npm package draws one `low`
- *    `install-script` finding for the `npx -y` launcher class, so a clean npm server
- *    tops out at 60 — leaving `--min-trust 61..62` as a threshold an all-npm stack
- *    cannot satisfy. Pinned by a test against the real scorer.
- *  - A server that is not a verified publisher, or was published within 30 days,
- *    tops out lower still (59 / 58). That is the registryMeta bucket doing its job —
- *    evidence, not a measurement gap — so it is not laundered into an exemption.
+ * The residual `maxAchievableBeforeHealthCheck` does not carry, because it is specific to
+ * what audit measures: a server that is not a verified publisher, or was published within
+ * 30 days, tops out lower still (59 / 58). That is the registryMeta bucket doing its job —
+ * evidence, not a measurement gap — so it is not laundered into an exemption.
  */
 const flawlessAuditScore = maxAchievableBeforeHealthCheck;
 

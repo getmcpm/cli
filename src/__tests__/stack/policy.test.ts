@@ -503,9 +503,14 @@ describe("checkTrustPolicy", () => {
     expect(result.pass).toBe(false);
     if (!result.pass) {
       expect(result.reason).toContain("above 78%");
-      expect(result.reason).toContain("every server in the");
-      // It must NOT read as a property of this server.
-      expect(result.reason).not.toContain('"test-server"');
+      // Naming the server and its percentage is fine — BLAMING it is not. The reason must
+      // attribute the refusal to what `up` cannot measure, and must not use the ordinary
+      // below-threshold framing that sends the user looking for a better server.
+      expect(result.reason).toContain("cannot measure");
+      expect(result.reason).not.toContain("below the minimum");
+      // Scoped to this evidence path, never to the whole stack: crediting is per server,
+      // so a mixed-credit run legitimately contains both ceilings.
+      expect(result.reason).not.toContain("every server in the stack");
     }
   });
 

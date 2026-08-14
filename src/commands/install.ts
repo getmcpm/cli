@@ -471,12 +471,23 @@ export async function handleInstall(
           )
         );
       }
+      // Recommend the score this server ACTUALLY reached, never the model ceiling.
+      // `audit`'s sibling guard recommends `bestObserved` for the same reason and states
+      // it outright: a threshold above what was observed refuses servers "for what audit
+      // cannot measure rather than for their evidence". Recommending 62 would also be
+      // unreachable for any npm server, which caps at 60 on the `npx -y` launcher class —
+      // sending the user straight into a second refusal.
+      //
+      // Scope the claim to this invocation. If an external scanner answered `--version`
+      // but errored on THIS server, the scorer treats it as absent and the ceiling is the
+      // native one — a statement about the run, not a law about every server.
       throw new Error(
         `--min-trust ${options.minTrust} is above ${ceiling.score}, the highest score \`mcpm install\` ` +
-          `can award. The trust score is computed BEFORE the health check runs, and mcpm reads no ` +
+          `can award here. Trust is scored BEFORE the health check runs and mcpm reads no ` +
           `download count, so ${ceiling.maxPossible - ceiling.score} of the ${ceiling.maxPossible} points are ` +
-          `unreachable at install time — no server can satisfy this threshold. ` +
-          `Use --min-trust ${ceiling.score} or lower, or run \`mcpm audit\` after installing.`
+          `unreachable at install time. "${name}" scored ${trustScore.score}/${trustScore.maxPossible}. ` +
+          `Use --min-trust ${trustScore.score} or lower to gate on evidence rather than on what install ` +
+          `cannot measure, or run \`mcpm audit\` after installing to score it with more of the picture.`
       );
     }
   }
@@ -888,7 +899,7 @@ export function registerInstallCommand(program: Command): void {
     .option("-f, --force", "overwrite if server already installed")
     .option("--skip-health-check", "skip post-install health check")
     .option("--json", "output result as JSON")
-    .option("--min-trust <n>", "abort install if pre-install trust score is below this threshold (scored before the health check, so 62 is the highest attainable without an external scanner; above that is refused as unsatisfiable)", parseMinTrust)
+    .option("--min-trust <n>", "abort install if pre-install trust score is below this threshold; scored before the health check runs, so a threshold above what install can award is refused as unsatisfiable rather than applied", parseMinTrust)
     .option("--min-release-age <hours>", "abort install if the release is younger than this many hours OR its publish timestamp is missing/unparseable (fail-closed when set; also sets the scoring cooldown threshold; bypass with --allow-fresh)", parseMinReleaseAge)
     .option("--allow-fresh", "bypass the --min-release-age gate (including the missing-timestamp block)")
     .option("--secrets <mode>", "where to store secret env vars: 'keychain' (encrypted in ~/.mcpm, resolved by mcpm guard at launch) or 'plaintext' (default)", parseSecretsMode)
