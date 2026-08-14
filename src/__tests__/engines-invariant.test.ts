@@ -51,6 +51,7 @@ import { existsSync, readFileSync, realpathSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import semver from "semver";
+import { parse as parseYaml } from "yaml";
 
 const rootDir = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
 
@@ -88,6 +89,21 @@ function findPackageDir(name: string, from: string): string | null {
     if (parent === current) return null;
     current = parent;
   }
+}
+
+/**
+ * The Node majors ci.yml's matrix builds on, read from the workflow itself rather
+ * than mirrored here. The matrix is now load-bearing for two separate guards — this
+ * one, and ci.yml's own per-leg `@types/node` typecheck — so a hand-synced copy is
+ * exactly the drift this file exists to prevent.
+ */
+function ciMatrixMajors(): readonly number[] {
+  const wf = parseYaml(readFileSync(join(rootDir, ".github", "workflows", "ci.yml"), "utf8")) as {
+    jobs?: Record<string, { strategy?: { matrix?: Record<string, unknown> } }>;
+  };
+  const raw = wf.jobs?.["build-and-test"]?.strategy?.matrix?.["node-version"];
+  if (!Array.isArray(raw)) return [];
+  return raw.map((v) => Number(String(v).split(".")[0]));
 }
 
 interface ClosureEntry {
@@ -166,15 +182,23 @@ describe("engines.node ↔ dependency engines", () => {
   });
 
   it("admits every node major the CI matrix builds against", () => {
-    // ci.yml runs `node-version: [22, 24, 26]`, which setup-node resolves to the
-    // latest minor of each. If a narrowing excluded a whole major, CI would keep
-    // passing while shipping a package it cannot install there.
+    // setup-node resolves each matrix entry to the latest minor of that major. If a
+    // narrowing excluded a whole major, CI would keep passing while shipping a
+    // package it cannot install there.
     //
-    // `satisfies` against a very high minor is the whole check. An earlier
-    // version also accepted a substring match on the rendered range, which could
-    // report a major as admitted because its digits appeared in someone else's
-    // MINOR — "^24.22.0" renders containing "22." and would have "admitted" 22.
-    for (const major of [22, 24, 26]) {
+    // `satisfies` against a very high minor is the whole check. An earlier version
+    // also accepted a substring match on the rendered range, which could report a
+    // major as admitted because its digits appeared in someone else's MINOR —
+    // "^24.22.0" renders containing "22." and would have "admitted" 22.
+    const majors = ciMatrixMajors();
+
+    // Guard the guard. A renamed job, a restructured matrix, or an unreadable
+    // workflow must FAIL here — an empty list would make the loop below vacuous
+    // and this test would certify nothing while staying green.
+    expect(majors.length, "could not read node-version matrix from ci.yml").toBeGreaterThan(0);
+    expect(majors.every((m) => Number.isInteger(m) && m > 0)).toBe(true);
+
+    for (const major of majors) {
       expect(
         semver.satisfies(`${major}.999.999`, declared as string),
         `engines.node "${declared}" excludes every Node ${major}.x, but ci.yml builds on ${major}`,

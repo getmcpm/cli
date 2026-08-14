@@ -77,11 +77,20 @@ function validatedStoreKey(server: string, key: string): string {
 // never written to ~/.mcpm, a copied secrets.enc.json cannot be decrypted on
 // another machine/account. When no OS keychain is available, encrypt() falls
 // back to the machine scheme below.
+//
+// Byte annotations below spell out `<ArrayBuffer>` on purpose. Bare `Buffer` /
+// `Uint8Array` default to `ArrayBufferLike` (which includes SharedArrayBuffer),
+// and @types/node 26 narrowed WebCrypto's `BufferSource` to reject shared views,
+// so a bare annotation no longer assigns to importKey/deriveKey. The values were
+// always correct — `randomBytes()` and `Buffer.from(hex)` are both ArrayBuffer-
+// backed — only the annotations were wider. Do not widen them back: under the
+// pinned @types/node 22 that compiles clean, and CI's per-leg typecheck against
+// @types/node@<matrix node> is the only thing that catches it.
 
-let _masterKey: { value: Buffer | null } | undefined;
+let _masterKey: { value: Buffer<ArrayBuffer> | null } | undefined;
 
 /** Read the stored master key (never creates one); memoized per process. */
-async function readMasterKey(): Promise<Buffer | null> {
+async function readMasterKey(): Promise<Buffer<ArrayBuffer> | null> {
   if (_masterKey) return _masterKey.value;
   const value = await getStoredKey();
   _masterKey = { value };
@@ -94,7 +103,7 @@ async function readMasterKey(): Promise<Buffer | null> {
  * under the store lock so two concurrent first-writes cannot generate two keys
  * and leave one writer's secret undecryptable.
  */
-async function getOrCreateMasterKey(): Promise<Buffer | null> {
+async function getOrCreateMasterKey(): Promise<Buffer<ArrayBuffer> | null> {
   const existing = await readMasterKey();
   if (existing) return existing;
   if (!isSupportedPlatform()) return null;
@@ -120,9 +129,9 @@ async function getOrCreateMasterKey(): Promise<Buffer | null> {
 // ---------------------------------------------------------------------------
 
 // HKDF importKey is cheap but stable per master key; cache it per-process.
-let _hkdfMaterial: { key: Buffer; material: Promise<webcrypto.CryptoKey> } | undefined;
+let _hkdfMaterial: { key: Buffer<ArrayBuffer>; material: Promise<webcrypto.CryptoKey> } | undefined;
 
-function hkdfMaterial(masterKey: Buffer): Promise<webcrypto.CryptoKey> {
+function hkdfMaterial(masterKey: Buffer<ArrayBuffer>): Promise<webcrypto.CryptoKey> {
   if (!_hkdfMaterial || !_hkdfMaterial.key.equals(masterKey)) {
     _hkdfMaterial = {
       key: masterKey,
@@ -132,7 +141,10 @@ function hkdfMaterial(masterKey: Buffer): Promise<webcrypto.CryptoKey> {
   return _hkdfMaterial.material;
 }
 
-async function deriveKeychainKey(masterKey: Buffer, salt: Uint8Array): Promise<webcrypto.CryptoKey> {
+async function deriveKeychainKey(
+  masterKey: Buffer<ArrayBuffer>,
+  salt: Uint8Array<ArrayBuffer>
+): Promise<webcrypto.CryptoKey> {
   const material = await hkdfMaterial(masterKey);
   return webcrypto.subtle.deriveKey(
     { name: "HKDF", salt, info: HKDF_INFO, hash: "SHA-256" },
@@ -160,7 +172,7 @@ function getMachineKeyMaterial(): Promise<webcrypto.CryptoKey> {
   return _keyMaterialPromise;
 }
 
-async function deriveMachineKey(salt: Uint8Array): Promise<webcrypto.CryptoKey> {
+async function deriveMachineKey(salt: Uint8Array<ArrayBuffer>): Promise<webcrypto.CryptoKey> {
   const keyMaterial = await getMachineKeyMaterial();
   return webcrypto.subtle.deriveKey(
     { name: "PBKDF2", salt, iterations: PBKDF2_ITERATIONS, hash: "SHA-256" },

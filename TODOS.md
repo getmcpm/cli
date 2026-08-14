@@ -891,41 +891,50 @@ A ceiling guard here would want the same primitive `audit` uses; if it is added,
 one `maxAchievable(...)` from `scanner/trust-score.ts` rather than growing a third copy
 of the replayed-inputs literal.
 
-## #46 — Node 26 is supported at RUNTIME but the type layer is still pinned to Node 22 (P2)
+## #46 — ~~Node 26's type layer was pinned to Node 22~~ DONE (unreleased)
 
-`engines.node` is `^22.22.2 || ^24.15.0 || >=26.0.0` as of #168, CI's matrix includes 26,
-and `build-and-test (26)` passes — so 26 already works for users. The gap is that mcpm
-COMPILES against Node 22's type definitions: `@types/node` is pinned `^22.19.19` and
-`.github/dependabot.yml:26` ignores its major updates. Anything added to the Node API in
-24 or 26 is invisible to `tsc`, and any signature CHANGED in 26 goes unchecked against
-code we ship to 26.
+Fixed on the way to the next tag; see the CHANGELOG `[Unreleased]` entry "The type layer
+now covers every Node major CI builds on" for the full account. Kept here rather than
+deleted because #47 splits off it, and because of the method note below.
 
-The dependabot comment justifies the pin with "TypeScript 6.x and @types/node 26 break
-`tsc --noEmit`", parked behind a deliberate TS6 migration (PRs #57, #103). **Measured, and
-it is far smaller than that framing implies: 3 errors in 1 file, and TypeScript 6 is not
-involved.** Under `@types/node@26.2.0` with the current TypeScript:
+**Method note, worth more than the fix.** Two measurements of this were wrong before one
+was right, and both failures looked like results:
 
-    src/store/keychain.ts(129,34): TS2769 No overload matches this call.
-    src/store/keychain.ts(138,21): TS2322 'Uint8Array<ArrayBufferLike>' not assignable to 'BufferSource'
-    src/store/keychain.ts(166,23): TS2322 'Uint8Array<ArrayBufferLike>' not assignable to 'BufferSource'
+1. The `@types/node` tarball's root directory is `node/`, not `package/`. An extract that
+   assumes `package/` silently yields NO `@types/node` and reports ~56 `Cannot find name
+   'process'` errors — which reads as a catastrophic break and is a FAILED MEASUREMENT.
+2. `typescript@latest` is now **7.x**, not 6.x. Installing it produced 364 errors of that
+   same shape. Same failure, different cause, equally convincing-looking.
 
-All three are the same root cause — @types/node@26 narrowed `BufferSource`, so the
-`Uint8Array<ArrayBufferLike>` that `randomBytes`/`Buffer` produce no longer assigns to a
-WebCrypto parameter — at the three `webcrypto.subtle` call sites in the HKDF/PBKDF2 path
-(`importKey` raw master key, HKDF salt, PBKDF2 salt). Nothing else in the codebase moves.
+So: always run a CONTROL at the pinned versions through the same harness and DIFF the error
+SETS, never the counts, and pin the compiler BEFORE sweeping the typings (a stale compiler
+left in the harness reproduced the 364 across all three majors and looked like a real
+regression). The real answer was 3 errors in 1 file, and the narrowing landed in
+`@types/node` **25**, not 26 — 22 and 24 do not see it at all.
 
-Method note, because the first measurement was wrong: the @types tarball's root directory
-is `node/`, not `package/`, so an extract that assumes `package/` silently yields NO
-`@types/node` at all and reports ~56 "Cannot find name 'process'" errors. That reads as a
-catastrophic break and is a FAILED MEASUREMENT. Run a CONTROL at the pinned version
-through the same harness and DIFF the two error sets — the harness itself contributed 29
-identical `TS2339 Property 'status' does not exist on type 'Response'` errors under both
-versions, which a raw count (29 vs 32) would have buried.
+## #47 — the release path typechecks only against the engines FLOOR, and dogfoods one Node major (P3)
 
-So the work is: fix the three WebCrypto call sites, unpin `@types/node` in
-`dependabot.yml`, and decide whether the type floor tracks the engines FLOOR (22) or the
-newest CI major (26). Tracking the floor is the safer default and is what the comment says
-it is doing — but it means the compiler never checks the majors we actually ship to, which
-is how this became a task. Independent of the TS6 migration; do not let it stay blocked on
-that. Consider also whether `publish.yml` should build on 26 rather than 24, since the
-release artifact is currently dogfooded on one major only.
+Two gaps in `.github/workflows/publish.yml`, both split out of #46 rather than fixed with it.
+
+**1. The per-leg typecheck does not run on the publish path.** `publish.yml` triggers
+independently on a `v*` tag push — it has no `needs:` on, and no `workflow_run` from,
+`ci.yml`. Its own `pnpm run typecheck` uses the pinned `@types/node` (the engines FLOOR,
+22), so nothing on the release path checks the newer majors. Deliberately not fixed here:
+the per-leg step resolves `@types/node@<major>` as a floating range, and making a RELEASE
+blockable by an upstream DefinitelyTyped publish is a worse trade than making a PR
+blockable. If this is closed, pin the version on the publish path even though CI floats it.
+
+**2. The dogfood runs on one Node major.** `scripts/dogfood-release.sh` packs the tarball,
+clean-installs it, and smoke-runs the real binary — the strongest gate there is — but only
+on Node 24. 24 is arguably the least informative of the three: the FLOOR (22.22.2) is where
+"we used an API that does not exist yet" bites, and the NEWEST (26) is where a fresh
+incompatibility appears first. Since #168 the gate also runs `npm install --engine-strict`,
+so it proves the declared range admits the Node it ran on — one point on a three-major
+range.
+
+Options: matrix the dogfood across all three majors (most coverage, ~3x release-gate wall
+clock) or move it to the floor (same cost, catches the more common class). Note the CI
+matrix already runs the full suite on all three; what is single-major is the packed-artifact
+path only. This is release-pipeline work, and that pipeline has bitten this project before
+(the immutable-releases SBOM gotcha, 2026-07-03), so it wants a deliberate change rather
+than a rider.

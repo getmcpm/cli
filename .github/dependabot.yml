@@ -18,11 +18,18 @@ updates:
     open-pull-requests-limit: 10
     labels: ["dependencies"]
     ignore:
-      # TypeScript 6.x and @types/node 26 break `tsc --noEmit` (the lint/typecheck
-      # gate). @types/node is also pinned to the engines.node floor (>=22) on purpose.
-      # Re-evaluate on a deliberate TS6 migration. Parked PRs: #57, #103.
+      # TypeScript majors are held: the parked PRs (#57, #103) proposed 6.x and
+      # failed `tsc --noEmit`. npm `latest` has since moved to 7.x, so the deferred
+      # migration is now 5.9 -> 7, not 5.9 -> 6. Neither was re-measured here.
       - dependency-name: "typescript"
         update-types: ["version-update:semver-major"]
+      # @types/node tracks the engines.node FLOOR (22) on purpose, so `tsc` refuses
+      # APIs a Node 22 user would not have. It is NOT held back by breakage: the
+      # compiled sources typecheck clean against @types/node 22, 24, 25 and 26
+      # (tsconfig.json excludes `**/*.test.ts`), and CI re-runs the typecheck on
+      # each matrix leg against the typings for that leg's Node, so the majors CI
+      # builds on are covered without moving the floor. Raising this pin would
+      # silently give up the floor guarantee.
       - dependency-name: "@types/node"
         update-types: ["version-update:semver-major"]
     groups:
