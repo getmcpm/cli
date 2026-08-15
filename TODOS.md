@@ -943,6 +943,12 @@ range.
 Options: matrix the dogfood across all three majors (most coverage, ~3x release-gate wall
 clock) or move it to the floor (same cost, catches the more common class). Note the CI
 matrix already runs the full suite on all three; what is single-major is the packed-artifact
-path only. This is release-pipeline work, and that pipeline has bitten this project before
+path only.
+
+**Partly covered now.** `.github/workflows/dogfood.yml` runs the SAME smoke suite against an
+already-PUBLISHED spec on Node 22/24/26 plus macOS, on demand. That closes the *post*-publish
+side — a bad artifact is now detectable across every supported major without anyone's laptop.
+What remains is the pre-publish gate itself, which still proves the artifact for exactly one
+major before it goes live, and gap 1 above. This is release-pipeline work, and that pipeline has bitten this project before
 (the immutable-releases SBOM gotcha, 2026-07-03), so it wants a deliberate change rather
 than a rider.

@@ -6,6 +6,23 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
+- **The release dogfood no longer runs against your real MCP config, and can run
+  somewhere that is not your laptop.** `scripts/dogfood-release.sh` sandboxed the
+  install directory but then ran the binary with the real `$HOME`, so `mcpm doctor`
+  read the maintainer's actual client configs and `~/.mcpm` — reporting one machine's
+  setup as if it were a property of the artifact. The smoke run now uses a throwaway
+  `$HOME`, the same trick `dogfood-confine.sh` already used and for the same reason
+  (every mcpm path derives from `os.homedir()`). Set *after* build/pack/install, since
+  pnpm's store and npm's cache also live under `$HOME`.
+
+  The script also accepts `MCPM_DOGFOOD_SPEC` to smoke an **already-published** version
+  instead of packing from source — no build, no pnpm. A new on-demand `Dogfood`
+  workflow drives exactly that across Node 22/24/26 plus macOS, so a release can be
+  verified without a conforming Node installed locally, and a machine outside
+  `engines.node` is no longer a blocker. Deliberately the same script as the publish
+  gate: a second copy of the smoke suite would drift, and "we dogfooded it" would come
+  to mean two different things. Partly closes TODOS #47.
+
 - **A trust threshold higher than mcpm can award now says so, instead of refusing
   every server forever.** Every score gate in the product is evaluated BEFORE the
   health check runs (`healthCheckPassed: null`) and mcpm never reads a download
