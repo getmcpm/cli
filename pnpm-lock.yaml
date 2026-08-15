@@ -66,7 +66,7 @@ importers:
         version: 22.20.1
       '@types/semver':
         specifier: ^7.7.1
-        version: 7.7.1
+        version: 7.8.0
       '@vitest/coverage-v8':
         specifier: ^4.1.0
         version: 4.1.10(vitest@4.1.10)
@@ -905,8 +905,8 @@ packages:
   '@types/retry@0.12.5':
     resolution: {integrity: sha512-3xSjTp3v03X/lSQLkczaN9UIEwJMoMCA1+Nb5HfbJEQWogdeQIyVtTvxPXDQjZ5zws8rFQfVfRdz03ARihPJgw==}
 
-  '@types/semver@7.7.1':
-    resolution: {integrity: sha512-FmgJfu+MOcQ370SD0ev7EI8TlCAfKYU+B4m5T3yXc1CiRN94g/SZPtsCkk506aUDtlMnFZvasDwHHUcZUEaYuA==}
+  '@types/semver@7.8.0':
+    resolution: {integrity: sha512-1mAINjtQCXXeLkJ9ehXkwOcBpqtLxiVtKhpUf83DdRNdQKV0iXZpaHYqRr7nj+wvxuJzoAmAwXI+sCNMv1CzLQ==}
 
   '@vitest/coverage-v8@4.1.10':
     resolution: {integrity: sha512-IM49HmthevbgAO4anp1hwtoT9wYe59w0LR00gr+eagHE+ZJ5lK4sLPeO0ubgoJcwLk6dehU3R24N+FbEEKDc8g==}
@@ -2344,7 +2344,7 @@ snapshots:
 
   '@types/retry@0.12.5': {}
 
-  '@types/semver@7.7.1': {}
+  '@types/semver@7.8.0': {}
 
   '@vitest/coverage-v8@4.1.10(vitest@4.1.10)':
     dependencies:
