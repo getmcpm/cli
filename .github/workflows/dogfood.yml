@@ -1,0 +1,57 @@
+name: Dogfood
+
+# On-demand dogfood of an ALREADY-PUBLISHED version, run on GitHub's machines rather
+# than a maintainer's laptop. Three things this gives that `pnpm dogfood:release`
+# cannot, because that one gates `pnpm publish` and therefore runs before the artifact
+# exists:
+#
+#   1. It smokes what npm actually SERVES, not what `pnpm pack` produced locally.
+#   2. It runs on every Node major in engines.node, not the single one publish.yml
+#      builds on (TODOS #47 — the release gate proves the artifact for one major).
+#   3. It needs nothing installed locally, so a machine whose Node is outside
+#      engines.node can still verify a release.
+#
+# Same script as the release gate, driven by MCPM_DOGFOOD_SPEC. A second copy of the
+# smoke suite would drift, and then "we dogfooded it" would mean two different things.
+on:
+  workflow_dispatch:
+    inputs:
+      spec:
+        description: 'npm spec to dogfood (e.g. @getmcpm/cli@0.29.1, or @getmcpm/cli@latest)'
+        required: false
+        default: '@getmcpm/cli@latest'
+
+permissions:
+  contents: read
+
+jobs:
+  dogfood:
+    name: ${{ matrix.os }} · node ${{ matrix.node }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      # Never cancel siblings: "26 is broken, 22 and 24 are fine" is the useful
+      # answer, and fail-fast would hide it behind whichever leg died first.
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest]
+        node: [22, 24, 26]
+        include:
+          # One macOS leg: the client config paths and the confine backend are
+          # macOS-first, and the ubuntu matrix cannot exercise either.
+          - os: macos-latest
+            node: 24
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: ${{ matrix.node }}
+
+      # No pnpm and no install: in published mode the script neither builds nor packs,
+      # it just `npm install`s the spec into a throwaway project. Keeping this job free
+      # of the repo's own dependency tree is the point — a dogfood that first installs
+      # the source deps is testing the repo, not the artifact.
+      - name: Dogfood ${{ inputs.spec }}
+        env:
+          MCPM_DOGFOOD_SPEC: ${{ inputs.spec }}
+        run: ./scripts/dogfood-release.sh

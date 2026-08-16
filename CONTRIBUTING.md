@@ -28,6 +28,31 @@ pnpm run typecheck
 git checkout -- package.json pnpm-lock.yaml
 ```
 
+### Dogfooding a release
+
+`pnpm dogfood:release` packs the tarball, clean-installs it, and smoke-runs the real
+binary. It gates `pnpm publish`, so it runs against your *local* build and needs a Node
+inside `engines.node`.
+
+To smoke an **already-published** version instead, set `MCPM_DOGFOOD_SPEC` — the same
+script, same assertions, no build and no pnpm:
+
+```
+MCPM_DOGFOOD_SPEC=@getmcpm/cli@latest ./scripts/dogfood-release.sh
+```
+
+Three places to run that, in increasing order of "not your machine":
+
+| where | how | good for |
+|---|---|---|
+| your machine | the command above | fastest, but needs a conforming Node, and it is your machine |
+| a container | `docker run --rm -v "$PWD/scripts:/w/scripts:ro" -w /w -e MCPM_DOGFOOD_SPEC=@getmcpm/cli@latest node:26 ./scripts/dogfood-release.sh` | any Node major, disposable, no local Node needed |
+| GitHub | Actions → **Dogfood** → *Run workflow* | Node 22/24/26 + macOS, zero local setup |
+
+The smoke run uses a throwaway `$HOME`, so `doctor` sees a clean machine and nothing
+touches your real `~/.mcpm` or MCP client configs. `dogfood-confine.sh` does the same.
+Verified: after a full run in a container, `$HOME/.mcpm` does not exist.
+
 macOS-only end-to-end check for the `--confine` sandbox:
 
 ```

@@ -7,20 +7,42 @@
 # a clean install) can NEVER reach npm. Source tests pass on a broken pack — this
 # exercises the exact bytes users receive.
 #
+# TWO WAYS TO RUN IT:
+#   pnpm dogfood:release                                  pack from source (the publish gate)
+#   MCPM_DOGFOOD_SPEC=@getmcpm/cli@0.29.1 ./scripts/...   smoke an ALREADY-PUBLISHED version
+#
+# The second form is what `.github/workflows/dogfood.yml` runs on demand, so the
+# published artifact gets the exact assertions that gate a release — on a matrix of
+# Node majors, on someone else's machine. Deliberately the SAME script: a separate
+# copy of the smoke suite would drift, and then "we dogfooded it" would mean two
+# different things.
+#
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
-echo "==> Building + packing @getmcpm/cli"
-pnpm build >/dev/null
-pnpm pack >/dev/null
-TARBALL="$ROOT/$(ls -t getmcpm-cli-*.tgz | head -1)"
-[ -f "$TARBALL" ] || { echo "FAIL: pnpm pack produced no tarball"; exit 1; }
-echo "    tarball: $(basename "$TARBALL")"
+SPEC="${MCPM_DOGFOOD_SPEC:-}"
+TARBALL=""
+if [ -n "$SPEC" ]; then
+  # Published mode: no build, no pack, no pnpm. Whatever npm serves for this spec is
+  # what users actually get — the point is to catch a bad artifact AFTER it is live,
+  # which the pre-publish gate by construction cannot.
+  echo "==> Dogfooding PUBLISHED $SPEC (no local build)"
+  INSTALL_TARGET="$SPEC"
+else
+  echo "==> Building + packing @getmcpm/cli"
+  pnpm build >/dev/null
+  pnpm pack >/dev/null
+  TARBALL="$ROOT/$(ls -t getmcpm-cli-*.tgz | head -1)"
+  [ -f "$TARBALL" ] || { echo "FAIL: pnpm pack produced no tarball"; exit 1; }
+  echo "    tarball: $(basename "$TARBALL")"
+  INSTALL_TARGET="$TARBALL"
+fi
 
 WORK="$(mktemp -d)"
-trap 'rm -rf "$WORK" "$TARBALL"' EXIT
+# `${TARBALL:-}` so `rm` is not handed an empty arg in published mode.
+trap 'rm -rf "$WORK" ${TARBALL:+"$TARBALL"}' EXIT
 cd "$WORK"
 
 echo "==> Clean-installing the packed artifact (pulls prod deps + checks engines)"
@@ -31,7 +53,7 @@ npm init -y >/dev/null 2>&1
 # dependencies' floor while wrongly claiming 23.x and 25.x, unnoticed, for three
 # releases (see src/__tests__/engines-invariant.test.ts). Strict turns a mismatch into
 # a nonzero exit, which is what "can NEVER reach npm" has to mean.
-if ! INSTALL_LOG="$(npm install --engine-strict "$TARBALL" 2>&1)"; then
+if ! INSTALL_LOG="$(npm install --engine-strict "$INSTALL_TARGET" 2>&1)"; then
   echo "FAIL: clean install of the packed artifact failed"
   # Assign first: inside a pipeline `grep` finding nothing and `head` closing the pipe
   # are both nonzero under `set -o pipefail`, so a `||` fallback would fire on success
@@ -51,6 +73,21 @@ BIN="$WORK/node_modules/.bin/mcpm"
 [ -x "$BIN" ] || { echo "FAIL: mcpm bin not installed or not executable"; exit 1; }
 
 fail() { echo "FAIL: $1"; exit 1; }
+
+# Throwaway HOME for the smoke run, the same trick dogfood-confine.sh already uses and
+# for the same reason: every mcpm path derives from `os.homedir()`, which respects $HOME
+# on POSIX. Without this, `doctor` below reads the RUNNER'S real MCP client configs and
+# ~/.mcpm — so on a maintainer's machine the gate both reports someone's actual setup and
+# touches paths that have nothing to do with the artifact under test.
+#
+# Set AFTER the build/pack/install: pnpm's store and npm's cache also live under $HOME,
+# and moving it earlier would silently defeat both caches (and, in CI, the cache action).
+# Canonicalized with `pwd -P` — macOS `mktemp -d` returns /var/... which is a symlink to
+# /private/var, and mcpm's own confine work was bitten by exactly that.
+DFHOME="$(cd "$(mktemp -d)" && pwd -P)"
+trap 'rm -rf "$WORK" "$DFHOME" ${TARBALL:+"$TARBALL"}' EXIT
+export HOME="$DFHOME"
+echo "    hermetic HOME: $HOME"
 
 echo "==> Smoke-testing the installed binary"
 "$BIN" --version >/dev/null            || fail "mcpm --version crashed"; echo "    ✓ --version"
