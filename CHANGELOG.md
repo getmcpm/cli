@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+_Nothing yet._ Add entries here, never under a stamped version — a release commit
+renames this heading, and a branch that wrote beneath it merges without conflict
+straight into a published section (it happened to #170).
+
+## [0.30.0] - 2026-08-17
+
 ### Fixed
 
 - **The release dogfood no longer runs against your real MCP config, and can run
