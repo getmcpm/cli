@@ -75,6 +75,27 @@ All notable changes to this project will be documented in this file.
   clean npm server at 60 — so `--min-trust 61..62` stays unsatisfiable for an all-npm
   stack. Stated rather than papered over.
 
+### Changed
+
+- **Dependency backlog cleared, including a `chalk` major.** `chalk` 5.6.2 → **6.0.0**,
+  `@modelcontextprotocol/sdk` 1.29.0 → 1.30.0, `@sigstore/verify` 4.1.0 → 4.1.2,
+  `@types/semver` 7.7.1 → 7.8.0, and the SHA-pinned `pnpm/action-setup` → v6.0.10.
+
+  `chalk` 6 is a major for two reasons that both land on this project. It raises
+  `engines.node` to `>=22` — already satisfied since #168 set the floor at 22.22.2 —
+  and it drops the `main` field, so the package resolves through `exports` only. mcpm
+  imports nothing but the default export, so the type surface is unaffected (the named
+  exports it removed from the declaration file were re-added with narrower types), but
+  an exports-only dependency is exactly the class of change that passes every source
+  test and then fails on a clean install of the packed tarball.
+
+  CI does not run the release dogfood — only `publish.yml` does — so that break would
+  have surfaced at publish time. The packed artifact was therefore dogfooded before
+  merge on both ends of the supported range, Node 22.23.2 (the floor, where a missing
+  API bites) and 26.7.0 (the newest, where a fresh incompatibility appears first). Both
+  clean-install and smoke green. This is TODOS #47 gap 2 paid manually for one PR; the
+  gap itself is unchanged.
+
 ## [0.29.1] - 2026-08-15
 
 ### Fixed
