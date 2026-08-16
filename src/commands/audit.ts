@@ -50,8 +50,10 @@ export class AuditUsageError extends Error {}
 /**
  * The residual `maxAchievableBeforeHealthCheck` does not carry, because it is specific to
  * what audit measures: a server that is not a verified publisher, or was published within
- * 30 days, tops out lower still (59 / 58). That is the registryMeta bucket doing its job —
- * evidence, not a measurement gap — so it is not laundered into an exemption.
+ * 30 days, tops out lower still (58 / 59 respectively — the publisher bonus is 4 points
+ * and the release-age bonus 3, so the pair reads in the order the clauses are written).
+ * That is the registryMeta bucket doing its job — evidence, not a measurement gap — so it
+ * is not laundered into an exemption.
  */
 const flawlessAuditScore = maxAchievableBeforeHealthCheck;
 

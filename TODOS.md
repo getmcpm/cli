@@ -410,7 +410,7 @@ un-clamped design into the clamped one for anyone who knows the trick. That is
 an argument about which posture is *honest*, not a reason to clamp; fix the
 bypass first, then decide the clamp on its merits.
 
-### 35. ~~A fake external scanner masks `policy.blockOnScoreDrop`~~ DONE (unreleased)
+### 35. ~~A fake external scanner masks `policy.blockOnScoreDrop`~~ DONE (v0.29.0)
 **Priority:** P1 — pre-existing; sibling of #33, deliberately NOT fixed with it.
 **Found:** 2026-08-03, by the security review of the #33 change. Reproduced.
 
@@ -722,7 +722,7 @@ native figure and expose it (`breakdown.nativeRegistryMeta`). Deferred because i
 changes `nativeTrustScore`, which the MCP hard trust floor (#33) also consumes, so
 it needs that path re-verified rather than a local patch.
 
-### 42. ~~`audit --fix --min-trust` above the achievable ceiling wipes a clean stack~~ DONE (unreleased)
+### 42. ~~`audit --fix --min-trust` above the achievable ceiling wipes a clean stack~~ DONE (v0.29.0)
 **Priority:** P1 — live data-loss at HEAD, with or without an external scanner.
 **Found:** 2026-08-12, while measuring the #35 `audit --fix` sibling. Pre-existing.
 
@@ -873,7 +873,7 @@ shipping; do not copy the "4 points" figure from the review, which was never mea
 
 ---
 
-## #45 — ~~`install --min-trust` and `policy.minTrustScore` have audit's ceiling problem~~ DONE (unreleased)
+## #45 — ~~`install --min-trust` and `policy.minTrustScore` have audit's ceiling problem~~ DONE (v0.30.0)
 
 Closed by exporting `maxAchievableBeforeHealthCheck()` from `scanner/trust-score.ts` — the
 single replayed-inputs literal this entry asked for — and consuming it at all **five** gates:
@@ -899,10 +899,10 @@ against the percentage gate would have under-guarded by 15 points and looked cor
 ceiling now goes through the same `toPct` as the score it is compared against, so the
 boundary is exact by construction rather than by matching two hand-computed constants.
 
-## #46 — ~~Node 26's type layer was pinned to Node 22~~ DONE (unreleased)
+## #46 — ~~Node 26's type layer was pinned to Node 22~~ DONE (v0.29.1)
 
-Fixed on the way to the next tag; see the CHANGELOG `[Unreleased]` entry "The type layer
-now covers every Node major CI builds on" for the full account. Kept here rather than
+Fixed in v0.29.1; see that CHANGELOG section's entry "The type layer now covers every
+Node major CI builds on" for the full account. Kept here rather than
 deleted because #47 splits off it, and because of the method note below.
 
 **Method note, worth more than the fix.** Two measurements of this were wrong before one
@@ -952,3 +952,41 @@ What remains is the pre-publish gate itself, which still proves the artifact for
 major before it goes live, and gap 1 above. This is release-pipeline work, and that pipeline has bitten this project before
 (the immutable-releases SBOM gotcha, 2026-07-03), so it wants a deliberate change rather
 than a rider.
+
+---
+
+## #48 — three small honesty gaps in the dogfood + install story (P3)
+
+Found by the pre-release audit before the v0.30.0 tag, each survived an adversarial
+refutation pass, none blocking. Grouped because they are all one afternoon.
+
+**1. `dogfood.yml` with an emptied `spec` input reports a repo problem, not an input
+problem.** The input has a default (`@getmcpm/cli@latest`) but is `required: false`, so a
+dispatcher who clears the box sends `''`. `scripts/dogfood-release.sh` keys its mode on
+emptiness alone (`if [ -n "$SPEC" ]`), falls into pack-from-source, and the workflow
+installs no pnpm on purpose — so it dies at `pnpm build` with `pnpm: command not found`,
+exit 127. Reproduced. The fix is a guard in the script (published mode is not optional
+when the caller meant to name a spec) or `required: true`, not both.
+
+**2. A green published-mode run never names the version it exercised.** The only version
+touch is `"$BIN" --version >/dev/null`, and the workflow step title echoes the *requested*
+spec back. So the transcript that proves a release is good does not contain the release
+number — and `@latest` moving between dispatch and install would be invisible. One line:
+print `$("$BIN" --version)` after install.
+
+**3. The README states no Node requirement at all.** `grep -ci node README.md` → 0 across
+614 lines; `engines.node` lives in `package.json` and `CONTRIBUTING.md:8` only. Since #168
+made the range strict, a user on an excluded Node (22.9–22.22.1, 24.0–24.14, 23.x, 25.x)
+gets `EBADENGINE` with nothing in the front-door docs to explain it. Pre-existing, not
+introduced by v0.30.0.
+
+**4. `vitest` has no `test.exclude`, so nested git worktrees are collected as tests.**
+This repo keeps worktrees at `.claude/worktrees/<name>/`, i.e. INSIDE the tree vitest
+globs, and `vitest.config.ts` sets only `coverage.exclude` — there is no `test.exclude`.
+A `pnpm test` from the primary checkout therefore runs every worktree's copy too: 7246
+tests instead of 2440, and during the v0.30.0 reconcile it reported **3 failures** that
+were entirely in a stale worktree at an older commit. A red run that has nothing to do
+with your changes is worse than a slow one. Fix is two lines, but it must preserve the
+defaults it would otherwise replace:
+`exclude: [...configDefaults.exclude, "**/.claude/**"]`. CI is unaffected (clean
+checkout), which is exactly why this can sit unnoticed.

@@ -51,18 +51,26 @@ All notable changes to this project will be documented in this file.
   worst place to omit — every keyword reports its best match as "below minimum", and an
   agent reading a blanket rejection concludes the ecosystem is unsafe.
 
-  Each refusal recommends the score the server **actually reached**, never the model
-  ceiling. `audit`'s sibling guard already did this and says why: a threshold above what
-  was observed refuses "for what audit cannot measure rather than for their evidence" —
-  and recommending 62 would itself be unsatisfiable for any npm server, producing a
-  second refusal. `policy.minTrustScore`'s reason is scoped to servers scored the way
-  that one was, not to the whole stack, because crediting is decided per server and a
-  mixed-credit run legitimately contains both ceilings; it also stops prescribing an
-  edit to a committed, team-shared threshold on the strength of one machine's scanner.
+  Every refusal that HAS a scored server in hand recommends the score that server
+  **actually reached**, never the model ceiling. `audit`'s sibling guard already did this
+  and says why: a threshold above what was observed refuses "for what audit cannot measure
+  rather than for their evidence" — and recommending 62 would itself be unsatisfiable for
+  any npm server, producing a second refusal. `mcpm_setup` is the one gate that cannot
+  follow the rule: it is a pre-filter that fires **before** the keyword search runs, so no
+  server has been scored yet and the ceiling is the only number it can name. That is a
+  property of where the gate sits, not an oversight — but it does mean an agent handed
+  `62` there can still hit a second refusal on an all-npm stack.
+
+  `policy.minTrustScore`'s reason is scoped to servers scored the way that one was, not
+  to the whole stack, because crediting is decided per server and a mixed-credit run
+  legitimately contains both ceilings; it also stops prescribing an edit to a committed,
+  team-shared threshold on the strength of one machine's scanner.
 
   **`--min-trust` and `policy.minTrustScore` are the same idea in different UNITS**,
-  which is the trap here. The absolute gates are unsatisfiable above **62**; the
-  policy gate is a PERCENTAGE and unsatisfiable above **78** — not 77.5, because
+  which is the trap here. On mcpm-native evidence the absolute gates are unsatisfiable
+  above **62** and the policy gate — a PERCENTAGE — above **78**; where the external
+  scanner bucket is CREDITED both ceilings rise, to 82/100 and 82%, and each guard picks
+  its ceiling from the score in front of it rather than assuming one. 78 and not 77.5, because
   `toPct` rounds and a flawless 62/80 reports as 78, so 78 passes and 79 is the
   first impossible value. The ceiling is put through the same `toPct` as the score
   it is compared against, so the boundary is exact by construction rather than by
@@ -91,8 +99,9 @@ All notable changes to this project will be documented in this file.
 
   CI does not run the release dogfood — only `publish.yml` does — so that break would
   have surfaced at publish time. The packed artifact was therefore dogfooded before
-  merge on both ends of the supported range, Node 22.23.2 (the floor, where a missing
-  API bites) and 26.7.0 (the newest, where a fresh incompatibility appears first). Both
+  merge on both ends of the supported range: Node 22.23.2, the oldest major (whose
+  declared floor is 22.22.2 — that is where "we used an API that does not exist yet"
+  bites), and 26.7.0, the newest (where a fresh incompatibility appears first). Both
   clean-install and smoke green. This is TODOS #47 gap 2 paid manually for one PR; the
   gap itself is unchanged.
 
