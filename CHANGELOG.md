@@ -4,9 +4,57 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
-_Nothing yet._ Add entries here, never under a stamped version — a release commit
-renames this heading, and a branch that wrote beneath it merges without conflict
-straight into a published section (it happened to #170).
+_Add entries here, never under a stamped version — a release commit renames this
+heading, and a branch that wrote beneath it merges without conflict straight into
+a published section (it happened to #170)._
+
+### Fixed
+
+- **The official MCP Registry listing was 43 releases stale and pinned a build with
+  a known vulnerability.** `io.github.getmcpm/cli` was hand-published twice on
+  2026-03-30 and never again: it advertised `version: 0.1.3` with
+  `packages[0].version: 0.1.3` and `isLatest: true`, while npm's `latest` served
+  0.30.0. Anyone resolving mcpm *through the registry* — the registry mcpm consumes,
+  and whose "subregistries welcome" stance is this project's premise — got a tarball
+  that still probes the unregistered `@invariantlabs` npm scope, i.e. the
+  fetch-and-execute-on-every-`mcpm audit` vector closed in v0.28.0, and that predates
+  the guard relay, `--confine`, Sigstore verification and the response-side DLP.
+
+  The cause was mechanical, not neglect: **`server.json` was in `.gitignore`** from
+  #141 under the heading "MCP Registry publisher", presumably to hide the scratch file
+  `mcp-publisher init` drops in the working tree. The one file a release pipeline needs
+  was therefore uncommittable, so the listing could only ever be published by hand.
+  The repo's only manifest was `docs/registry-entry.json` — referenced by nothing,
+  stale at 0.5.0, and drifted from the published schema (no `packages[].version`, no
+  `transport`, a `runtimeArguments: ["serve"]` shape the schema no longer accepts, and
+  a description over the 100-character limit), so it would not have round-tripped had
+  anyone tried to submit it. Three sources of truth telling three different stories.
+
+  `server.json` is now tracked at the repo root, validated against the live registry
+  with `mcp-publisher validate`, and carries the immutable numeric GitHub repository id
+  the registry uses to detect repository-resurrection attacks — the same identifier
+  mcpm's own provenance tripwire keys off (v0.22.0). `publish.yml` stamps the tag
+  version, validates, authenticates over OIDC (reusing the `id-token: write` already
+  granted for npm provenance) and publishes, running *after* npm and the GitHub Release
+  so a registry outage cannot strand those, and **not** `continue-on-error` — a silent
+  skip is the exact failure being fixed. `mcp-publisher` is pinned by tag and
+  checksum-verified rather than piped from `releases/latest`, since every action in
+  this workflow is already SHA-pinned.
+
+  Version stamping lives in `scripts/stamp-server-json.mjs` rather than inline,
+  because the listing carries the version in **two** places and the upstream docs'
+  suggested `jq '.version = $v'` moves only the top-level one — which publishes a
+  listing that advertises the new release while pinning clients to the old tarball.
+  The invariant test executes that script instead of grepping the workflow for a `jq`
+  expression, so it fails on a *wrong* expression and not merely a missing one; all 14
+  mutations aimed at the new guards were caught, one clause each.
+
+### Changed
+
+- `package.json` gains `homepage`, `bugs` and `author` (all previously blank — the
+  conventional publisher-identity fields a directory scrapes) and `repository.url` is
+  canonicalized to the `git+…​.git` form npm normalizes to on publish anyway. No
+  runtime effect.
 
 ## [0.30.0] - 2026-08-17
 
