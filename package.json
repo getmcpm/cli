@@ -35,14 +35,18 @@
     "cursor",
     "vscode"
   ],
-  "author": "",
+  "author": "getmcpm (https://github.com/getmcpm)",
   "license": "MIT",
+  "homepage": "https://github.com/getmcpm/cli#readme",
+  "bugs": {
+    "url": "https://github.com/getmcpm/cli/issues"
+  },
   "publishConfig": {
     "access": "public"
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/getmcpm/cli"
+    "url": "git+https://github.com/getmcpm/cli.git"
   },
   "engines": {
     "node": "^22.22.2 || ^24.15.0 || >=26.0.0"

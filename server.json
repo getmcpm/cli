@@ -1,0 +1,31 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.getmcpm/cli",
+  "title": "mcpm",
+  "description": "MCP package manager with trust scoring, a runtime guard, and Sigstore provenance verification.",
+  "version": "0.30.0",
+  "websiteUrl": "https://github.com/getmcpm/cli",
+  "repository": {
+    "url": "https://github.com/getmcpm/cli",
+    "source": "github",
+    "id": "1194736883"
+  },
+  "packages": [
+    {
+      "registryType": "npm",
+      "registryBaseUrl": "https://registry.npmjs.org",
+      "identifier": "@getmcpm/cli",
+      "version": "0.30.0",
+      "runtimeHint": "npx",
+      "runtimeArguments": [
+        {
+          "type": "positional",
+          "value": "serve"
+        }
+      ],
+      "transport": {
+        "type": "stdio"
+      }
+    }
+  ]
+}

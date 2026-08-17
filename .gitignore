@@ -34,5 +34,10 @@ tmp/
 .gstack/
 
 # MCP Registry publisher
-server.json
+# NOTE: `server.json` is deliberately NOT ignored. It was, from #141 until
+# v0.30.0, which is why the registry listing could only ever be hand-published —
+# and so it drifted 43 releases behind npm. It is the tracked manifest now; the
+# publish workflow stamps its version from the git tag. Only `mcp-publisher`'s
+# local auth state needs ignoring.
+.mcpregistry_token
 research/
