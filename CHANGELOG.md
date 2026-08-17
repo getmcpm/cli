@@ -4,9 +4,42 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
-_Nothing yet._ Add entries here, never under a stamped version — a release commit
-renames this heading, and a branch that wrote beneath it merges without conflict
-straight into a published section (it happened to #170).
+_Add entries here, never under a stamped version_ — a release commit renames this
+heading, and a branch that wrote beneath it merges without conflict straight into a
+published section (it happened to #170).
+
+### Fixed
+
+- **The README states the Node requirement.** `^22.22.2 || ^24.15.0 || >=26.0.0` lived
+  in `package.json` and `CONTRIBUTING.md` only; the front-door docs said nothing about
+  Node at all. Since that range was narrowed to the real dependency intersection it is
+  strict enough to exclude 22.9–22.22.1, 23.x, 24.0–24.14 and 25.x, so an install on one
+  of those printed `EBADENGINE` with nothing in the README to explain why.
+
+- **The on-demand `Dogfood` workflow reports a blank input as a blank input.** Its `spec`
+  has a default but is not `required`, so clearing the box in the dispatch form sends
+  `''` — which `scripts/dogfood-release.sh` reads as *pack from source*, a mode needing
+  the pnpm that job deliberately never installs. It died at `pnpm build` with exit 127,
+  which reads as a broken repo rather than an empty field. The workflow now fails on the
+  input. The guard is in the workflow, not the script: empty is a legitimate mode for the
+  script's other caller (the publish gate), and it is only in published mode that naming
+  a spec is mandatory. The default is not repeated as a shell fallback — two copies of it
+  would drift.
+
+- **A green dogfood names the version it exercised.** The only `--version` call discarded
+  its output and the step title echoes back the *requested* spec, so the run that proves a
+  release is good never contained the release number, and `@getmcpm/cli@latest` moving
+  between dispatch and install was invisible. It now prints the installed version.
+
+- **`vitest` no longer collects nested git worktrees as tests.** This repo keeps worktrees
+  at `.claude/worktrees/<name>/` — inside the tree vitest globs — and only
+  `coverage.exclude` was configured. A `pnpm test` from the primary checkout therefore ran
+  every worktree's copy too (7247 tests instead of 2440), and during the v0.30.0 reconcile
+  it reported three failures that were entirely in a stale worktree at an older commit. A
+  red run that has nothing to do with your changes is worse than a slow one. CI is
+  unaffected — a clean checkout has no worktrees — which is exactly why it sat unnoticed.
+
+  Closes TODOS #48.
 
 ## [0.30.0] - 2026-08-17
 

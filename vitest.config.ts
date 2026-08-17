@@ -1,9 +1,18 @@
-import { defineConfig } from "vitest/config";
+import { configDefaults, defineConfig } from "vitest/config";
 
 export default defineConfig({
   test: {
     globals: true,
     setupFiles: ["./vitest.setup.ts"],
+    // Worktrees live at .claude/worktrees/<name>/ — INSIDE the tree vitest globs — so
+    // without this a run from the primary checkout collects every worktree's copy too
+    // (7247 tests instead of 2440), and a stale worktree at an older commit reports
+    // failures that have nothing to do with your changes. Spread the defaults rather
+    // than replacing them: assigning `exclude` REPLACES it, and the default carries
+    // node_modules + .git. Note `vitest --exclude` on the CLI is documented as
+    // *additional* globs, so it appends to this and cannot be used to check the
+    // counterfactual — strip the line in a sibling config instead.
+    exclude: [...configDefaults.exclude, "**/.claude/**"],
     coverage: {
       provider: "v8",
       thresholds: {

@@ -90,7 +90,10 @@ export HOME="$DFHOME"
 echo "    hermetic HOME: $HOME"
 
 echo "==> Smoke-testing the installed binary"
-"$BIN" --version >/dev/null            || fail "mcpm --version crashed"; echo "    ✓ --version"
+# Printed, not discarded: in published mode the transcript otherwise echoes back the
+# REQUESTED spec only, so `@latest` moving between dispatch and install is invisible and
+# the run that proves a release is good never contains the release number.
+MCPM_VERSION="$("$BIN" --version)" || fail "mcpm --version crashed"; echo "    ✓ --version -> $MCPM_VERSION"
 "$BIN" --help >/dev/null               || fail "mcpm --help crashed";    echo "    ✓ --help"
 "$BIN" guard list-signatures >/dev/null|| fail "guard list-signatures crashed"; echo "    ✓ guard list-signatures (catalog loads)"
 "$BIN" completions bash >/dev/null     || fail "completions bash crashed"; echo "    ✓ completions bash"

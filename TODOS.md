@@ -955,10 +955,26 @@ than a rider.
 
 ---
 
-## #48 — three small honesty gaps in the dogfood + install story (P3)
+## #48 — ~~four small honesty gaps in the dogfood + install story~~ DONE (unreleased)
 
 Found by the pre-release audit before the v0.30.0 tag, each survived an adversarial
-refutation pass, none blocking. Grouped because they are all one afternoon.
+refutation pass, none blocking. Grouped because they were all one afternoon — which
+they were. See the CHANGELOG `[Unreleased]` entries for what shipped.
+
+**The heading said three and the body listed four**, item 4 having been appended after
+the heading was written. Same closed-set-enumeration slip as #45 (which said four gates
+and had five), one week later, in an entry written by the person who logged that lesson.
+
+**Item 1 took the workflow guard, not the script guard.** The entry offered either and
+said not both; the script's emptiness-keyed mode is CORRECT for its other caller (the
+publish gate packs from source and names no spec), so the ambiguity belongs to the
+dispatch form and the guard belongs next to it.
+
+**Item 4's counterfactual needed a second config file, not a CLI flag.** `vitest
+--exclude` is documented as *additional* globs: it appends to `test.exclude` rather than
+replacing it, so the obvious "run it without the rule" check silently re-applies the rule
+and reports the fix working before it is written. Proven instead by listing through a
+sibling config with the line stripped: probe collected 1 without, 0 with.
 
 **1. `dogfood.yml` with an emptied `spec` input reports a repo problem, not an input
 problem.** The input has a default (`@getmcpm/cli@latest`) but is `required: false`, so a
