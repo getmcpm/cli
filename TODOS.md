@@ -970,6 +970,16 @@ said not both; the script's emptiness-keyed mode is CORRECT for its other caller
 publish gate packs from source and names no spec), so the ambiguity belongs to the
 dispatch form and the guard belongs next to it.
 
+**Item 1's TRIGGER was not reproduced from the CLI, and the fix shipped saying so.**
+`gh workflow run dogfood.yml -f spec=` does NOT send `''` — GitHub substitutes the input
+DEFAULT, so the guard never fires and the full dogfood runs. The reproduction in this
+entry came from the dispatch FORM, which `gh` cannot drive. So `required: true`, the
+other option offered here, would likely not have closed the API path either. The guard
+is kept because it costs four lines and cannot fire when a spec is present, not because
+the failing path was demonstrated end to end. Item 2 WAS demonstrated end to end, on all
+four legs: the run log now reads `✓ --version -> 0.30.0` under a step titled
+`Dogfood @getmcpm/cli@latest` — the two names the fix exists to reconcile.
+
 **Item 4's counterfactual needed a second config file, not a CLI flag.** `vitest
 --exclude` is documented as *additional* globs: it appends to `test.exclude` rather than
 replacing it, so the obvious "run it without the rule" check silently re-applies the rule
