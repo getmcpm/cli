@@ -980,6 +980,30 @@ the failing path was demonstrated end to end. Item 2 WAS demonstrated end to end
 four legs: the run log now reads `✓ --version -> 0.30.0` under a step titled
 `Dogfood @getmcpm/cli@latest` — the two names the fix exists to reconcile.
 
+**Item 4 was two bugs wearing one coat, and the first write-up named neither
+correctly.** The entry says a `pnpm test` from the primary checkout "reported three
+failures that were entirely in a stale worktree at an older commit". Wrong, and never
+checked — the failures were the SAME two keychain tests in every root that has them,
+including the primary's own copy at HEAD. Cause: `keychain-master-key.test.ts` mocked
+`os.homedir()` to a FIXED path under the system temp dir, so concurrently-executing
+copies shared one `secrets.enc.json` and each `beforeEach`'s `rm()` wiped a sibling's
+entries. Reproduced by running that one file twice at once: 2 of 8 fail, 8/8 alone.
+Fixed with `mkdtemp` in the same commit. The worktree rule is still right on its own
+merits, but it HID this bug rather than fixing it, by leaving one copy to collect — and
+a symptom fix that conceals its root cause is worse than no fix, because the red run
+stops appearing while the isolation defect stays live for anyone running two suites at
+once. `test-isolation.test.ts` asserts HOME is a temp dir, never the real home; it does
+not assert that temp dir is unique per process, which is the gap this walked through.
+
+**The published test count was a measurement of the experiment, not the condition.**
+"7247 tests instead of 2440" went into the CHANGELOG, this file (as 7246), a code
+comment and a commit message. 7246 was right at the time; 7247 is 7246 plus the single
+probe file planted in a worktree to prove the rule — the measurement contaminated by
+its own instrument, recorded in the commit whose lesson above is about miscounting a
+closed set. The count is also machine-local (a clean checkout has zero worktrees, so
+the counterfactual there is "2440 instead of 2440"). Both durable sites now state a
+ratio instead of a number.
+
 **Item 4's counterfactual needed a second config file, not a CLI flag.** `vitest
 --exclude` is documented as *additional* globs: it appends to `test.exclude` rather than
 replacing it, so the obvious "run it without the rule" check silently re-applies the rule
@@ -1016,3 +1040,23 @@ with your changes is worse than a slow one. Fix is two lines, but it must preser
 defaults it would otherwise replace:
 `exclude: [...configDefaults.exclude, "**/.claude/**"]`. CI is unaffected (clean
 checkout), which is exactly why this can sit unnoticed.
+
+## #49 — the `engines.node` range is copied into three prose files with no drift guard (P3)
+
+`^22.22.2 || ^24.15.0 || >=26.0.0` is now written out in `README.md` (added by #48),
+`CONTRIBUTING.md:8` and `CLAUDE.md`, in addition to `package.json`. Nothing asserts any
+of the three equals the declaration.
+
+`engines-invariant.test.ts` does NOT cover this. It asserts a semantic relation between
+the declaration and the dependency tree, and a second one against `ci.yml` — which
+carries no copy of the range. A future within-major narrowing (say `^22.24.0`) leaves
+the whole suite green while all three prose copies go stale: the subset assertion still
+holds, because narrower is still a subset.
+
+Not hypothetical. `CONTRIBUTING.md` said "Node.js >= 22" against a declared `>=22.9.0`
+for about three and a half weeks.
+
+The guard is a string comparison against `package.json`, so it belongs to all three
+files at once rather than to whichever branch happens to touch one of them. Worth doing
+with whatever next edits that value — and note the repo has precedent for exactly this
+shape of test (`completions` vs the Commander program, `engines` vs the dependency tree).

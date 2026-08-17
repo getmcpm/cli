@@ -61,8 +61,8 @@ jobs:
         # mode is not optional here, so fail on the input instead of on the symptom. The
         # default is NOT repeated as a shell fallback: two copies of it would drift.
         run: |
-          [ -n "$MCPM_DOGFOOD_SPEC" ] || {
-            echo "::error::spec is empty - name a published spec, e.g. @getmcpm/cli@latest"
-            exit 1
-          }
+          case "$MCPM_DOGFOOD_SPEC" in *[![:space:]]*) ;; *)
+            echo "::error::spec is blank - name a published spec, e.g. @getmcpm/cli@latest"
+            exit 1 ;;
+          esac
           ./scripts/dogfood-release.sh

@@ -5,13 +5,15 @@ export default defineConfig({
     globals: true,
     setupFiles: ["./vitest.setup.ts"],
     // Worktrees live at .claude/worktrees/<name>/ — INSIDE the tree vitest globs — so
-    // without this a run from the primary checkout collects every worktree's copy too
-    // (7247 tests instead of 2440), and a stale worktree at an older commit reports
-    // failures that have nothing to do with your changes. Spread the defaults rather
-    // than replacing them: assigning `exclude` REPLACES it, and the default carries
-    // node_modules + .git. Note `vitest --exclude` on the CLI is documented as
-    // *additional* globs, so it appends to this and cannot be used to check the
-    // counterfactual — strip the line in a sibling config instead.
+    // without this a run from the primary checkout collects one extra full copy of the
+    // suite per worktree. Deliberately not stated as a test count: the count is a
+    // property of how many worktrees happen to exist on one machine at one moment, and
+    // the number first written here turned out to include the probe file planted to
+    // prove the rule. Spread the defaults rather than replacing them: assigning
+    // `exclude` REPLACES it, and the default carries node_modules + .git. Note
+    // `vitest --exclude` on the CLI is documented as *additional* globs, so it appends
+    // to this and cannot be used to check the counterfactual — strip the line in a
+    // sibling config instead.
     exclude: [...configDefaults.exclude, "**/.claude/**"],
     coverage: {
       provider: "v8",
