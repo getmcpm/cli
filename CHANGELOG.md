@@ -71,6 +71,36 @@ published section (it happened to #170).
 
   Closes TODOS #49.
 
+### Changed
+
+- **The pre-publish gate now proves the packed artifact on every supported Node major.**
+  `publish.yml` packed the tarball, clean-installed it and smoke-ran the real binary — the
+  strongest gate in the pipeline — but only on Node 24, one point on a three-major range.
+  The floor is where "we used an API that does not exist yet" bites and the newest major is
+  where a fresh incompatibility appears first, so 24 was arguably the least informative
+  choice of the three.
+
+  It is now a `dogfood` job matrixed over 22/24/26 that `publish` `needs:`, rather than a
+  step inside `publish`. A separate job because the legs then run in PARALLEL — matrixing
+  it inline would have tripled the release's wall clock, which is the cost that made this
+  gap worth leaving open until now. `fail-fast: false`, because "26 is broken, 22 and 24
+  are fine" is exactly the answer you want while deciding whether to cut a release.
+
+  The single-major copy inside `publish` is gone rather than kept alongside: with 24 in the
+  matrix it was the same gate on the same commit twice. What is given up is nothing that
+  existed — the smoked pack was never the published one, because `pnpm publish` re-packs
+  from source regardless.
+
+  Verified before merge rather than on the next release, since `publish.yml` triggers only
+  on a `v*` tag and cannot otherwise be exercised without publishing: the job body was
+  sliced out of `publish.yml` (not hand-copied) into a temporary push-triggered workflow.
+  All three legs packed from source, installed under `--engine-strict` and passed all eight
+  smoke assertions. Pack-from-source on 22 and 26 had never run in CI before — `dogfood.yml`
+  only runs published mode, and the v0.30.0 checks on those majors were run on a laptop.
+
+  Partly closes TODOS #47; the publish path still typechecks only against the pinned
+  `@types/node`, which is tracked there.
+
 ## [0.30.0] - 2026-08-17
 
 ### Fixed
