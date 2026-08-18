@@ -12,7 +12,58 @@ permissions:
   contents: read
 
 jobs:
+  # PRE-PUBLISH GATE: pack the tarball, install it into a clean project, and smoke-run
+  # the real `mcpm` binary — on EVERY Node major in engines.node, not just the one the
+  # publish job happens to build on. Source tests pass on a broken pack; this exercises
+  # the bytes users receive (bin, files:["dist"], prod dep resolution, `--engine-strict`,
+  # the bundled Sigstore trusted root, lazy imports).
+  #
+  # A separate job rather than a step in `publish` so the three majors run in PARALLEL:
+  # matrixing this inline would have tripled the release's wall clock, which is what made
+  # the coverage gap (TODOS #47) worth leaving open in the first place.
+  #
+  # `needs:` makes it fail-closed — a leg that fails stops `pnpm publish` from ever
+  # running. What this does NOT prove is that the publish job's own `pnpm pack` produces
+  # byte-identical output to this job's: it never did, because `pnpm publish` re-packs
+  # from source anyway. Both pack the same commit at the same version from the same frozen
+  # lockfile, and every failure this gate catches is a property of the pack CONFIG, not of
+  # one runner.
+  dogfood:
+    name: pre-publish dogfood · node ${{ matrix.node }}
+    runs-on: ubuntu-latest
+    strategy:
+      # "26 is broken, 22 and 24 are fine" is the useful answer, and it is the answer you
+      # most want while deciding whether to cut a release. fail-fast would hide it behind
+      # whichever leg died first. Same reasoning as dogfood.yml.
+      fail-fast: false
+      matrix:
+        node: [22, 24, 26]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
+        with:
+          version: 10
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: ${{ matrix.node }}
+          cache: pnpm
+
+      # Repeated from the publish job on purpose, not extracted. package.json is committed
+      # at a placeholder version (the tag is the source of truth), so without this the gate
+      # would pack and smoke an artifact whose version is not the one being released — and
+      # the `--version` line in the transcript, the one thing proving WHICH build passed,
+      # would name the placeholder.
+      - name: Set version from git tag
+        run: npm pkg set version="${GITHUB_REF_NAME#v}"
+
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm run dogfood:release
+
   publish:
+    # Fail-closed on the gate above: no leg green, no publish.
+    needs: dogfood
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -40,14 +91,6 @@ jobs:
       - run: pnpm run typecheck
       - run: pnpm run build
       - run: pnpm run test
-
-      # PRE-PUBLISH GATE: pack the tarball, install it into a clean project, and
-      # smoke-run the real `mcpm` binary. Source tests pass on a broken pack —
-      # this exercises the exact bytes users get (bin, files:["dist"], prod dep
-      # resolution + engines, the bundled Sigstore trusted root, lazy imports).
-      # Fail-closed: a broken artifact aborts here, before `pnpm publish`.
-      - name: Dogfood the packed artifact (pre-publish gate)
-        run: pnpm run dogfood:release
 
       - run: pnpm publish --no-git-checks --provenance
         env:
