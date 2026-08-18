@@ -56,6 +56,21 @@ published section (it happened to #170).
 
   Closes TODOS #48.
 
+- **A doc that quotes a stale `engines.node` range now fails the build.** The range is
+  written out verbatim in `README.md`, `CONTRIBUTING.md` and `CLAUDE.md`, and nothing
+  asserted any of the three matched `package.json`. `engines-invariant.test.ts`
+  structurally could not: it checks a SUBSET relation against the dependency tree, and a
+  within-major narrowing is still a subset — measured, not assumed, by narrowing the
+  declaration to `^22.24.0` and watching all four existing assertions stay green while the
+  three new ones fail.
+
+  Verbatim containment only, against a whitespace-collapsed copy of each file so that
+  reflowing a paragraph across the range is not a failure. `CHANGELOG.md` and the test's
+  own header are deliberately excluded: both state what was true at a past release, so
+  freezing them to the current value is what would make them wrong.
+
+  Closes TODOS #49.
+
 ## [0.30.0] - 2026-08-17
 
 ### Fixed

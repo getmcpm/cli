@@ -206,3 +206,45 @@ describe("engines.node ↔ dependency engines", () => {
     }
   });
 });
+
+/**
+ * The declared range is also written out in PROSE, in three files no semantic
+ * check can reach: `README.md` is the user-facing promise, `CONTRIBUTING.md`
+ * tells a contributor what to install, and `CLAUDE.md` is read into every
+ * Claude Code session on this repo — so a stale copy there misinforms the agent
+ * doing the work.
+ *
+ * The subset assertion above structurally cannot catch this. A within-major
+ * narrowing (say `^22.24.0`) is still a subset of every dependency's range, so
+ * the whole suite stays green while all three copies go stale. Not
+ * hypothetical: CONTRIBUTING.md said "Node.js >= 22" against a declared
+ * `>=22.9.0` for about three and a half weeks.
+ *
+ * `CHANGELOG.md` is deliberately NOT in the list, and neither is this file's
+ * own header. Both state what was true at a past release; freezing them to the
+ * current value is what would make them wrong.
+ *
+ * Matched against a whitespace-collapsed copy of each file, so that reflowing a
+ * paragraph across the range is not a failure — markdown renders that newline
+ * as a space, and the doc is still correct.
+ *
+ * Verbatim containment ONLY. README also restates the range in human form
+ * ("22.22.2+, 24.15.0+ or 26+"), which this cannot check: deriving it would
+ * have to know that ">=26.0.0" was written "26+". That is the ceiling. It is
+ * survivable because a failure here points at the same sentence, so whoever
+ * fixes the quoted range is looking straight at the prose restating it.
+ */
+describe("engines.node ↔ the docs that quote it", () => {
+  const declared = readManifest(rootDir).engines?.node as string;
+
+  for (const file of ["README.md", "CONTRIBUTING.md", "CLAUDE.md"]) {
+    it(`${file} quotes the declared range verbatim`, () => {
+      const text = readFileSync(join(rootDir, file), "utf8").replace(/\s+/g, " ");
+      expect(
+        text.includes(declared),
+        `${file} does not contain engines.node "${declared}". package.json is the source ` +
+          `of truth — update the range where that file writes it out.`,
+      ).toBe(true);
+    });
+  }
+});
