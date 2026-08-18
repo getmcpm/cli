@@ -103,7 +103,7 @@ mcpm/
 │   └── demo.sh                     — asciinema demo recording script
 ├── .github/workflows/
 │   ├── ci.yml                      — build + test on push/PR (Node 22, 24, 26)
-│   └── publish.yml                 — npm publish + GitHub Release on v* tags (Node 24)
+│   └── publish.yml                 — packed-artifact gate (Node 22, 24, 26) then npm publish + GitHub Release, on v* tags
 ├── package.json                    — @getmcpm/cli, bin: mcpm
 ├── tsconfig.json
 ├── tsup.config.ts                  — bundler config

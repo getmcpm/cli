@@ -32,6 +32,7 @@ pnpm-debug.log*
 tmp/
 *.tmp
 .gstack/
+.serena/
 
 # MCP Registry publisher
 server.json
