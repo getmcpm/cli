@@ -1041,7 +1041,7 @@ defaults it would otherwise replace:
 `exclude: [...configDefaults.exclude, "**/.claude/**"]`. CI is unaffected (clean
 checkout), which is exactly why this can sit unnoticed.
 
-## #49 — the `engines.node` range is copied into three prose files with no drift guard (P3)
+## #49 — ~~the `engines.node` range is copied into three prose files with no drift guard~~ DONE (unreleased)
 
 `^22.22.2 || ^24.15.0 || >=26.0.0` is now written out in `README.md` (added by #48),
 `CONTRIBUTING.md:8` and `CLAUDE.md`, in addition to `package.json`. Nothing asserts any
@@ -1060,3 +1060,26 @@ The guard is a string comparison against `package.json`, so it belongs to all th
 files at once rather than to whichever branch happens to touch one of them. Worth doing
 with whatever next edits that value — and note the repo has precedent for exactly this
 shape of test (`completions` vs the Commander program, `engines` vs the dependency tree).
+
+**Done** as three cases in `engines-invariant.test.ts` itself, next to the assertion that
+cannot see this class. Method notes:
+
+- The claim the entry rests on — "a within-major narrowing leaves the whole suite green" —
+  was MEASURED before being written down again, by setting the declaration to
+  `^22.24.0 || ^24.15.0 || >=26.0.0`: all four existing assertions stayed green, all three
+  new ones failed. Mutating one doc instead fails exactly one case, so the per-file split
+  is real and not three copies of one assertion.
+- Mutations were run AFTER committing the test, not before. `git checkout -- <file>`
+  between rounds is how #169 destroyed uncommitted work in three files; the entry recording
+  that lesson is two screens up from this one.
+- The reflow FP was closed before it could happen rather than after: the range is matched
+  against a whitespace-collapsed copy, so a paragraph rewrap that puts a newline inside the
+  range is not a failure. Markdown renders that newline as a space, so the doc is still
+  correct and a failure there would be false. Verified by inserting one.
+- `CHANGELOG.md` is NOT guarded, and neither is this test file's own header. Both make
+  dated statements about past releases — a guard would force them to be rewritten to a
+  value that was not true when they were written, which is the opposite of the point.
+- **Known ceiling:** verbatim containment only. `README.md` also restates the range in
+  human form ("22.22.2+, 24.15.0+ or 26+") and that copy is unguarded — deriving it would
+  need to know `>=26.0.0` was written `26+`. Survivable because a failure names the file
+  and the range, and the prose sits in the same sentence as the quoted copy.
