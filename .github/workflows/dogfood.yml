@@ -54,4 +54,15 @@ jobs:
       - name: Dogfood ${{ inputs.spec }}
         env:
           MCPM_DOGFOOD_SPEC: ${{ inputs.spec }}
-        run: ./scripts/dogfood-release.sh
+        # The input has a default but is not `required`, so clearing the box in the
+        # dispatch form sends ''. The script reads empty as pack-from-source, which needs
+        # the pnpm this job deliberately never installs — it would die at `pnpm build`
+        # with exit 127 and read as a broken repo rather than a blank field. Published
+        # mode is not optional here, so fail on the input instead of on the symptom. The
+        # default is NOT repeated as a shell fallback: two copies of it would drift.
+        run: |
+          case "$MCPM_DOGFOOD_SPEC" in *[![:space:]]*) ;; *)
+            echo "::error::spec is blank - name a published spec, e.g. @getmcpm/cli@latest"
+            exit 1 ;;
+          esac
+          ./scripts/dogfood-release.sh

@@ -4,9 +4,57 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
-_Nothing yet._ Add entries here, never under a stamped version — a release commit
-renames this heading, and a branch that wrote beneath it merges without conflict
-straight into a published section (it happened to #170).
+_Add entries here, never under a stamped version_ — a release commit renames this
+heading, and a branch that wrote beneath it merges without conflict straight into a
+published section (it happened to #170).
+
+### Fixed
+
+- **The README states the Node requirement.** `^22.22.2 || ^24.15.0 || >=26.0.0` lived in
+  `package.json`, `CONTRIBUTING.md` and `CLAUDE.md`; the front-door docs said nothing about
+  Node at all, so an install on an unsupported one printed `EBADENGINE` with no README
+  entry to explain it. Stated as the SUPPORTED set (22.22.2+, 24.15.0+, 26+) rather than a
+  list of excluded versions, because an excluded-list can be — and in the first draft of
+  this entry was — under-enumerated, leaving a reader on 22.5 to conclude they were fine.
+  It also names what each package manager does: npm warns and fails under
+  `--engine-strict`, while **pnpm installs an unsupported Node silently and exits 0**
+  unless `engine-strict=true` is set, so on pnpm the mismatch surfaces at runtime instead.
+
+- **The on-demand `Dogfood` workflow reports a blank input as a blank input.** Its `spec`
+  has a default but is not `required`, so clearing the box in the dispatch form sends
+  `''` — which `scripts/dogfood-release.sh` reads as *pack from source*, a mode needing
+  the pnpm that job deliberately never installs. It died at `pnpm build` with exit 127,
+  which reads as a broken repo rather than an empty field. The workflow now fails on the
+  input. The guard is in the workflow, not the script: empty is a legitimate mode for the
+  script's other caller (the publish gate), and it is only in published mode that naming
+  a spec is mandatory. The default is not repeated as a shell fallback — two copies of it
+  would drift.
+
+- **A green dogfood names the version it exercised.** The only `--version` call discarded
+  its output and the step title echoes back the *requested* spec, so the run that proves a
+  release is good never contained the release number, and `@getmcpm/cli@latest` moving
+  between dispatch and install was invisible. It now prints the installed version.
+
+- **`vitest` no longer collects nested git worktrees as tests.** This repo keeps worktrees
+  at `.claude/worktrees/<name>/` — inside the tree vitest globs — and only
+  `coverage.exclude` was configured, so a `pnpm test` from the primary checkout ran one
+  full extra copy of the suite per worktree (roughly 4x the real test count on this
+  machine). CI is unaffected — a clean checkout has no worktrees — which is exactly why it
+  sat unnoticed.
+
+- **`keychain-master-key.test.ts` no longer collides with itself across processes.** Its
+  `os.homedir()` mock pointed at a FIXED path under the system temp dir, so two vitest
+  processes running that file at the same time shared one `secrets.enc.json` and each
+  `beforeEach`'s `rm()` wiped the other's entries. Now `mkdtemp`, one home per process.
+
+  This is what the three red tests during the v0.30.0 reconcile actually were. The first
+  draft of this entry blamed "a stale worktree at an older commit" — a guess that fit the
+  symptom, was never checked, and would have sent the next reader looking at the wrong
+  thing. Running the one file twice concurrently reproduces it: 2 of 8 fail, 8/8 alone,
+  8/8 both after the fix. The worktree rule above and this are separate bugs; the rule
+  hid this one by leaving only a single copy of the file to collect.
+
+  Closes TODOS #48.
 
 ## [0.30.0] - 2026-08-17
 

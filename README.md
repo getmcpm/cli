@@ -38,6 +38,13 @@ Install with the package manager you already use:
 | **pnpm** | `pnpm add -g @getmcpm/cli` |
 | **mise** | `mise use -g npm:@getmcpm/cli` |
 
+**Requires Node `^22.22.2 || ^24.15.0 || >=26.0.0`** — that is **22.22.2+, 24.15.0+ or
+26+**, the intersection of what every runtime dependency itself supports. Everything
+else is excluded, 23.x and 25.x included. npm warns `EBADENGINE` and fails outright
+under `--engine-strict`; pnpm installs silently and exits 0 unless you set
+`engine-strict=true`, so there an unsupported Node surfaces as a runtime error rather
+than an install one.
+
 The binary is `mcpm`. **Heads up:** the `mcpm` Homebrew formula is a *different,
 unrelated* project ([mcpm.sh](https://mcpm.sh)) — install this mcpm via
 npm/npx/pnpm/mise above (all resolve the scoped `@getmcpm/cli` package, so there's

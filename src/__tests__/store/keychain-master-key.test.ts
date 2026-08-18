@@ -31,7 +31,13 @@ vi.mock("../../store/os-keychain.js", () => ({
 vi.mock("os", async (importActual) => {
   const actual = await importActual<typeof import("os")>();
   const pathm = await import("node:path");
-  const HOME = pathm.join(actual.tmpdir(), "mcpm-kc-mk-test-home");
+  const fsm = await import("node:fs");
+  // mkdtemp, not a FIXED path: this file's HOME was a constant under the system temp
+  // dir, so any two vitest processes running it at once shared one secrets.enc.json
+  // and each beforeEach's rm() wiped the other's entries. Reproduced 2 failures out
+  // of 8 by running this one file twice concurrently, 8/8 alone. That is what the
+  // three red tests during the v0.30.0 reconcile actually were.
+  const HOME = fsm.mkdtempSync(pathm.join(actual.tmpdir(), "mcpm-kc-mk-test-home-"));
   return { ...actual, default: { ...actual, homedir: () => HOME }, homedir: () => HOME };
 });
 
