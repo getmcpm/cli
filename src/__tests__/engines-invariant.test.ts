@@ -97,14 +97,17 @@ function findPackageDir(name: string, from: string): string | null {
  * one, and ci.yml's own per-leg `@types/node` typecheck — so a hand-synced copy is
  * exactly the drift this file exists to prevent.
  */
-function ciMatrixMajors(): readonly number[] {
-  const wf = parseYaml(readFileSync(join(rootDir, ".github", "workflows", "ci.yml"), "utf8")) as {
+function workflowMatrixMajors(file: string, job: string, key: string): readonly number[] {
+  const wf = parseYaml(readFileSync(join(rootDir, ".github", "workflows", file), "utf8")) as {
     jobs?: Record<string, { strategy?: { matrix?: Record<string, unknown> } }>;
   };
-  const raw = wf.jobs?.["build-and-test"]?.strategy?.matrix?.["node-version"];
+  const raw = wf.jobs?.[job]?.strategy?.matrix?.[key];
   if (!Array.isArray(raw)) return [];
   return raw.map((v) => Number(String(v).split(".")[0]));
 }
+
+const ciMatrixMajors = (): readonly number[] =>
+  workflowMatrixMajors("ci.yml", "build-and-test", "node-version");
 
 interface ClosureEntry {
   readonly id: string;
@@ -204,6 +207,35 @@ describe("engines.node ↔ dependency engines", () => {
         `engines.node "${declared}" excludes every Node ${major}.x, but ci.yml builds on ${major}`,
       ).toBe(true);
     }
+  });
+
+  it("gates the RELEASE on the same majors, not a hand-synced second list", () => {
+    // publish.yml's pre-publish dogfood — pack, clean-install, smoke the real binary —
+    // carries its own `node: [...]` matrix, a THIRD copy of the major list after
+    // engines.node and ci.yml. Nothing read it: the check above opens ci.yml and only
+    // ci.yml, so narrowing the release gate to `[24]` left all 2443 tests green while the
+    // strongest gate in the pipeline silently stopped covering two supported majors.
+    //
+    // Only the NARROWING direction is silent, which is why this is worth a test.
+    // WIDENING to an unsupported major is already caught at release time, because the
+    // dogfood installs under `npm install --engine-strict` and that leg fails.
+    //
+    // Equality against ci.yml, NOT "every major engines.node admits" — the third clause of
+    // the range is an open-ended `>=26.0.0`, so the admitted set is unbounded and no fixed
+    // matrix can satisfy it. ci.yml is the satisfiable anchor, and the assertion above
+    // already ties ci.yml to engines.node. Adding a major therefore means editing ci.yml,
+    // and this fails until the release gate follows.
+    const gate = [...workflowMatrixMajors("publish.yml", "dogfood", "node")].sort((a, b) => a - b);
+    const ci = [...ciMatrixMajors()].sort((a, b) => a - b);
+
+    // Guard the guard: a renamed job or restructured matrix must FAIL, not read as [].
+    expect(gate.length, "could not read the dogfood matrix from publish.yml").toBeGreaterThan(0);
+    expect(
+      gate,
+      `publish.yml's pre-publish dogfood runs Node [${gate}] but ci.yml builds [${ci}]. The ` +
+        `release gate must cover every major CI does, or a release ships an artifact ` +
+        `nobody packed and ran on that major.`,
+    ).toEqual(ci);
   });
 });
 

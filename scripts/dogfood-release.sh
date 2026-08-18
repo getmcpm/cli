@@ -4,16 +4,20 @@
 # and smoke-run the REAL `mcpm` binary. This gates `pnpm publish`: a broken
 # artifact (missing dist, broken bin, an unresolved runtime dep, an un-bundled
 # vendored trusted root, an engines mismatch, a dynamic import that only fails on
-# a clean install) can NEVER reach npm. Source tests pass on a broken pack — this
-# exercises the exact bytes users receive.
+# a clean install) can NEVER reach npm. Source tests pass on a broken pack — this packs
+# and runs the artifact instead. Note "the artifact", not "the exact bytes published":
+# `pnpm publish` re-packs from source, so this tarball is a same-config sibling of the
+# published one, never literally it. Everything the gate catches is a property of the pack
+# CONFIG, so that is enough — but do not let the shorthand harden into a claim it isn't.
 #
 # TWO WAYS TO RUN IT:
 #   pnpm dogfood:release                                  pack from source (the publish gate)
 #   MCPM_DOGFOOD_SPEC=@getmcpm/cli@0.29.1 ./scripts/...   smoke an ALREADY-PUBLISHED version
 #
-# The second form is what `.github/workflows/dogfood.yml` runs on demand, so the
-# published artifact gets the exact assertions that gate a release — on a matrix of
-# Node majors, on someone else's machine. Deliberately the SAME script: a separate
+# The second form is what `.github/workflows/dogfood.yml` runs on demand, so the PUBLISHED
+# artifact gets the exact assertions that gate a release, on someone else's machine and
+# with a macOS leg. (Node-major coverage is no longer what separates them: publish.yml's
+# gate matrixes 22/24/26 too, as of TODOS #47.) Deliberately the SAME script: a separate
 # copy of the smoke suite would drift, and then "we dogfooded it" would mean two
 # different things.
 #

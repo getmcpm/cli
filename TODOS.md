@@ -920,7 +920,7 @@ left in the harness reproduced the 364 across all three majors and looked like a
 regression). The real answer was 3 errors in 1 file, and the narrowing landed in
 `@types/node` **25**, not 26 — 22 and 24 do not see it at all.
 
-## #47 — the release path typechecks only against the engines FLOOR, and dogfoods one Node major (P3)
+## #47 — the release path typechecks only against the engines FLOOR (P3; the one-Node-major dogfood half is DONE, unreleased)
 
 Two gaps in `.github/workflows/publish.yml`, both split out of #46 rather than fixed with it.
 
@@ -945,13 +945,65 @@ clock) or move it to the floor (same cost, catches the more common class). Note 
 matrix already runs the full suite on all three; what is single-major is the packed-artifact
 path only.
 
-**Partly covered now.** `.github/workflows/dogfood.yml` runs the SAME smoke suite against an
-already-PUBLISHED spec on Node 22/24/26 plus macOS, on demand. That closes the *post*-publish
-side — a bad artifact is now detectable across every supported major without anyone's laptop.
-What remains is the pre-publish gate itself, which still proves the artifact for exactly one
-major before it goes live, and gap 1 above. This is release-pipeline work, and that pipeline has bitten this project before
-(the immutable-releases SBOM gotcha, 2026-07-03), so it wants a deliberate change rather
-than a rider.
+**Gap 2 is DONE** (unreleased). The dogfood is now its own job in `publish.yml`, matrixed
+over 22/24/26, which `publish` `needs:`. The single-major copy in `publish` was deleted
+rather than kept, since 24 is in the matrix.
+
+**The "~3x" above is scoped to the GATE, and the first draft of this entry silently
+re-scoped it to the RELEASE** — which is false, and was caught only by measuring. Across the
+last four publish runs the inline gate is **11–13s of a 62–80s publish job**, so three
+serial legs would have been ~1.3x the release, not 3x. The honest accounting of what
+actually shipped:
+
+- A separate **job** is not a wall-clock win. It is the only shape that works: a step cannot
+  carry `strategy.matrix` (so inline is serial), and matrixing the `publish` job itself
+  would run `pnpm publish` three times, which is fatal rather than slow.
+- The change makes releases **slower**, not equal to option (b): `needs:` serializes a whole
+  job bootstrap ahead of publish (~26–28s per leg, over half of it checkout/setup/install),
+  taking the critical path from ~75s to ~95s. ~20s for two more majors of artifact coverage.
+
+Other notes:
+
+- The smoked pack was never the published one — `pnpm publish` re-packs from source — so
+  moving the gate out of the publishing job gives up nothing that existed. Checked before
+  relying on it, because "exercises the exact bytes users receive" in the script header
+  reads like it does. That header now says so itself.
+- `publish.yml` fires only on a `v*` tag, so the change was verified by slicing the job body
+  out of the file programmatically into a temporary push-triggered workflow. **One line
+  differed** — the tag-derived `npm pkg set version`, which a branch push has no tag to
+  satisfy, so it was pinned to a literal. Worth stating: that is the only line in the job
+  whose input arrives at release time, and it is therefore the one line the probe did not
+  exercise. It is byte-identical to the expression the publish job has run on every release.
+- All three legs packed from source, installed under `--engine-strict`, and passed all eight
+  smoke assertions. **Pack-from-source on 22 and 26 had never run in CI**: `dogfood.yml` only
+  runs published mode, and the v0.30.0 checks on those majors were run on a laptop.
+- `workflow_dispatch` was not an option for that probe — it requires the workflow to exist on
+  the default branch — hence a `push:` trigger scoped to the branch.
+- The gate reaches each major's LATEST minor, never the declared floor 22.22.2, because
+  `setup-node` with `22` resolves the newest 22.x. An API added after 22.22.2 is still
+  untested by it; the dependency-floor half of that class is covered by
+  `engines-invariant.test.ts`, which reads the dependency tree and ignores the running Node.
+- The matrix was a THIRD hand-synced copy of the major list and nothing read it — narrowing
+  it to `[24]` left all 2443 tests green. Now asserted equal to `ci.yml`'s matrix. Equality
+  against ci.yml and not "every major engines.node admits", because the range ends in an
+  open-ended `>=26.0.0` and no fixed matrix can cover an unbounded set. **So when Node 27
+  ships, nothing will notice**: `engines.node` will promise it, both matrices will silently
+  omit it, and the guard is one-directional by necessity. That is the residual, and it is
+  pre-existing — the same sentence is on `main` in `dogfood.yml`.
+
+**Gap 1 remains, and is lower severity than it looked.** With gap 2 closed, the release path
+now runs the artifact on all three majors; what it still does not do is typecheck against
+each major's own typings. That gap is TYPE-only, and types are erased at build — so it cannot
+by itself produce a bad artifact, which is what the dogfood gate exists to stop. The original
+objection also stands: `@types/node@<major>` is a floating range, and making a RELEASE
+blockable by an upstream DefinitelyTyped publish is a worse trade than making a PR blockable.
+
+The broader version of gap 1 is that `publish.yml` has no `needs:`/`workflow_run` on `ci.yml`
+at all, so a tag on a commit CI never verified publishes anyway. A "CI must be green for this
+SHA" step is ~6 lines of `gh run list`, but the release ritual pushes the release commit and
+the tag back to back, so it would routinely fire while CI is still running and block releases
+on a race. That wants a deliberate decision, not a rider — this pipeline has bitten this
+project before (the immutable-releases SBOM gotcha, 2026-07-03).
 
 ---
 

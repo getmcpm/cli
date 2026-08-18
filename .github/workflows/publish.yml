@@ -12,7 +12,75 @@ permissions:
   contents: read
 
 jobs:
+  # PRE-PUBLISH GATE: pack the tarball, install it into a clean project, and smoke-run
+  # the real `mcpm` binary — on every Node major ci.yml builds against, not just the one
+  # the publish job happens to build on. Source tests pass on a broken pack; this exercises
+  # the bytes users receive (bin, files:["dist"], prod dep resolution, `--engine-strict`,
+  # the bundled Sigstore trusted root, lazy imports).
+  #
+  # "every major ci.yml builds against" and not "every major engines.node admits": the
+  # range ends in an open-ended `>=26.0.0`, so the admitted set is unbounded and no fixed
+  # matrix can cover it. `engines-invariant.test.ts` asserts this matrix EQUALS ci.yml's,
+  # and separately that ci.yml's is admitted by engines.node — so the two lists cannot
+  # drift apart, but a NEW major (27, when it ships) still has to be added by hand.
+  #
+  # A separate JOB because neither inline shape works, not because it is faster. A step
+  # cannot carry `strategy.matrix`, so three majors inside `publish` would run SERIALLY;
+  # and matrixing the `publish` job itself would run `pnpm publish` three times, which is
+  # fatal rather than slow. Be honest about the cost: measured over the last four releases
+  # the old inline gate was 11-13s of a 62-80s publish job, so three serial legs would have
+  # been ~1.3x, not the "~3x" TODOS #47 quoted — that figure is scoped to the GATE, not the
+  # release. This shape instead adds a job bootstrap ahead of publish (~26-28s per leg, over
+  # half of it checkout/setup/install), taking the release critical path from ~75s to ~95s.
+  # ~20s buys two more majors of artifact coverage, and the legs stay parallel, so the next
+  # major is free.
+  #
+  # `needs:` makes it fail-closed — a leg that fails stops `pnpm publish` from ever
+  # running. What this does NOT prove is that the publish job's own `pnpm pack` produces
+  # byte-identical output to this job's: it never did, because `pnpm publish` re-packs
+  # from source anyway. Both pack the same commit at the same version from the same frozen
+  # lockfile, and every failure this gate catches is a property of the pack CONFIG, not of
+  # one runner.
+  #
+  # Reaches each major's LATEST minor, not the declared floor: `setup-node` with `22`
+  # resolves the newest 22.x, so an API added after 22.22.2 is still untested here. The
+  # dependency-floor half of that class is covered independently by engines-invariant.
+  dogfood:
+    name: pre-publish dogfood · node ${{ matrix.node }}
+    runs-on: ubuntu-latest
+    strategy:
+      # "26 is broken, 22 and 24 are fine" is the useful answer, and it is the answer you
+      # most want while deciding whether to cut a release. fail-fast would hide it behind
+      # whichever leg died first. Same reasoning as dogfood.yml.
+      fail-fast: false
+      matrix:
+        node: [22, 24, 26]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
+        with:
+          version: 10
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: ${{ matrix.node }}
+          cache: pnpm
+
+      # Repeated from the publish job on purpose, not extracted. package.json is committed
+      # at a placeholder version (the tag is the source of truth), so without this the gate
+      # would pack and smoke an artifact whose version is not the one being released — and
+      # the `--version` line in the transcript, the one thing proving WHICH build passed,
+      # would name the placeholder.
+      - name: Set version from git tag
+        run: npm pkg set version="${GITHUB_REF_NAME#v}"
+
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm run dogfood:release
+
   publish:
+    # Fail-closed on the gate above: no leg green, no publish.
+    needs: dogfood
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -40,14 +108,6 @@ jobs:
       - run: pnpm run typecheck
       - run: pnpm run build
       - run: pnpm run test
-
-      # PRE-PUBLISH GATE: pack the tarball, install it into a clean project, and
-      # smoke-run the real `mcpm` binary. Source tests pass on a broken pack —
-      # this exercises the exact bytes users get (bin, files:["dist"], prod dep
-      # resolution + engines, the bundled Sigstore trusted root, lazy imports).
-      # Fail-closed: a broken artifact aborts here, before `pnpm publish`.
-      - name: Dogfood the packed artifact (pre-publish gate)
-        run: pnpm run dogfood:release
 
       - run: pnpm publish --no-git-checks --provenance
         env:

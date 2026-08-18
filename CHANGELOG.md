@@ -71,6 +71,59 @@ published section (it happened to #170).
 
   Closes TODOS #49.
 
+### Changed
+
+- **The pre-publish gate now proves the packed artifact on three Node majors, not one.**
+  `publish.yml` packed the tarball, clean-installed it and smoke-ran the real binary — the
+  strongest gate in the pipeline — but only on Node 24. The lowest supported major is where
+  "we used an API that does not exist yet" bites and the newest is where a fresh
+  incompatibility appears first, so 24 was arguably the least informative of the three.
+
+  It is now a `dogfood` job matrixed over 22/24/26 that `publish` `needs:`, so a failing leg
+  stops `pnpm publish` from ever running. `fail-fast: false`, because "26 is broken, 22 and
+  24 are fine" is exactly the answer you want while deciding whether to cut a release.
+
+  A separate **job** because neither inline shape works — not because it is faster. A step
+  cannot carry `strategy.matrix`, so three majors inside `publish` would run serially; and
+  matrixing the `publish` job itself would run `pnpm publish` three times, which is fatal
+  rather than slow. The cost is real and is paid deliberately: measured over the last four
+  releases the inline gate was 11–13s of a 62–80s publish job, and the new job adds a
+  bootstrap ahead of publish, taking the release critical path from roughly 75s to 95s.
+
+  The single-major copy inside `publish` is gone rather than kept alongside: with 24 in the
+  matrix it was the same gate on the same commit twice. What is given up is nothing that
+  existed — the smoked pack was never the published one, because `pnpm publish` re-packs
+  from source regardless.
+
+  Each leg reaches its major's LATEST minor, not the declared floor: `setup-node` with `22`
+  resolves the newest 22.x, so an API added after 22.22.2 is still untested here. The
+  dependency-floor half of that class stays covered by `engines-invariant.test.ts`, which
+  reads the dependency tree and so does not care which Node runs it.
+
+  Verified before merge rather than on the next release, since `publish.yml` triggers only
+  on a `v*` tag and cannot otherwise be exercised without publishing: the job body was
+  sliced out of `publish.yml` programmatically into a temporary push-triggered workflow —
+  with exactly one line changed, the tag-derived `npm pkg set version`, which a branch push
+  has no tag to satisfy. All three legs packed from source, installed under
+  `--engine-strict` and passed all eight smoke assertions. Pack-from-source on 22 and 26 had
+  never run in CI before: `dogfood.yml` only runs published mode, and the v0.30.0 checks on
+  those majors were run on a laptop.
+
+  Partly closes TODOS #47; the publish path still typechecks only against the pinned
+  `@types/node`, which is tracked there.
+
+- **The release gate's Node matrix is now guarded against drift.** It was a third hand-synced
+  copy of the major list, after `engines.node` and `ci.yml`, and the only test that reads a
+  workflow read `ci.yml` exclusively — so narrowing the gate back to `[24]` left all 2443
+  tests green while the strongest gate in the pipeline silently stopped covering two
+  supported majors. Only that direction is silent: widening it to an *unsupported* major
+  already fails at release time, because the dogfood installs under `--engine-strict`.
+
+  Asserted equal to `ci.yml`'s matrix rather than to "every major `engines.node` admits" —
+  the range ends in an open-ended `>=26.0.0`, so the admitted set is unbounded and no fixed
+  matrix can satisfy it. `ci.yml` is the satisfiable anchor, and it is already checked
+  against `engines.node`. A new major still has to be added by hand when one ships.
+
 ## [0.30.0] - 2026-08-17
 
 ### Fixed

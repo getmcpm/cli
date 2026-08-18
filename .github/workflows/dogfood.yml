@@ -6,8 +6,9 @@ name: Dogfood
 # exists:
 #
 #   1. It smokes what npm actually SERVES, not what `pnpm pack` produced locally.
-#   2. It runs on every Node major in engines.node, not the single one publish.yml
-#      builds on (TODOS #47 — the release gate proves the artifact for one major).
+#   2. It adds a macOS leg. The pre-publish gate matrixes ubuntu 22/24/26 as of TODOS #47
+#      gap 2, so Node-major coverage is no longer the difference between these two — the
+#      OS is, plus reasons 1 and 3.
 #   3. It needs nothing installed locally, so a machine whose Node is outside
 #      engines.node can still verify a release.
 #
