@@ -463,7 +463,9 @@ export async function handleAudit(
     ],
     style: { head: [], border: [] },
     wordWrap: true,
-    colWidths: [45, 25, 12, 10],
+    // Level fits `clean · not run` (15 chars + padding) on one line — at 12 it wrapped,
+    // and per the TODOS #43 measurement that label is the common case, not the exception.
+    colWidths: [45, 25, 17, 10],
   });
 
   for (const result of results) {

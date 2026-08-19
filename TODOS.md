@@ -890,10 +890,13 @@ gather today, which is option 1 wearing different clothes. Left open deliberatel
 
 Two follow-ups this surfaced and did not fix:
 
-- **`mcpm install` has the same defect, unrelabelled.** `install.ts:582` warns on
-  `level === "caution"`, so a flawless server triggers a caution warning on every install.
-  Same root, but it sits in the consent flow rather than a report, so it wants its own
-  decision rather than a rider.
+- **`mcpm install` has the same defect, unrelabelled — and it is not alone.** The full
+  survey of raw-`level` renderers reached by an unrun health check: `install.ts:582` warns
+  on `level === "caution"` (a flawless server triggers a caution warning on every install,
+  in the consent flow), `update.ts:308` prints `[caution]` beside every successful update,
+  `outdated.ts:188` labels the LATEST version caution, and `why.ts:246` renders it in the
+  score line. Same root; install sits in a consent flow and the others are informational,
+  so they may not all want the same treatment. Deliberately not ridden in here.
 - The harness that produced these numbers dropped 52 of 800 servers on a missing field,
   because it scored raw registry JSON instead of going through the Zod schema the product
   parses with. The 748 are sound; a future sweep should parse first.
