@@ -826,6 +826,47 @@ real cost:**
    the gap (62 → 65) without closing it; 65/80 is still 81%… which would actually
    cross the line. Worth checking whether the registry exposes one.
 
+**MEASURED 2026-08-19 — two of the three options are now settled, and the framing above
+is wrong about what the defect is.** 748 live registry servers scored through the real
+`scanTier1` + `computeTrustScore` with audit's inputs (`healthCheckPassed: null`, no
+external scanner). 800 fetched, 52 dropped by the harness on a missing field:
+
+```
+today          : caution 748,  safe 0,  risky 0
+option 2        : safe   743,  caution 5,  risky 0     (743 move caution -> safe)
+score histogram : 50-54: 5    55-59: 376    60-62: 367   (of 80)
+```
+
+**The scale does not discriminate, in either direction.** Today every server on the live
+registry is `caution` — not just "no server can be green", but the 3-level scale collapses
+to ONE level across the whole population. Option 2 collapses it to one level again, the
+other one: **99.3% safe**. It does not fix the scale, it slides the population across a
+threshold.
+
+The reason is visible in the histogram: on real data the score occupies **50-62 of 80**, a
+14-point spread, because tier-1 finds nearly nothing on nearly everything (consistent with
+#42's finding that the live registry has no high/critical). The level is therefore decided
+almost entirely by the CONSTANT offsets — health 15/30, registryMeta 7/10 — and not by any
+evidence about the server. Move the denominator and the entire population moves together.
+
+**Option 3 is disqualified, on two independent grounds.**
+1. The premise fails: the official registry exposes **no download count**. Walked every key
+   of a v0.1 page — `count` is pagination, `status`/`statusChangedAt` are registry state.
+   The only other source is npm's own downloads API, which covers `npm` servers only (not
+   pypi/oci/remote) and costs a live fetch per server, since mcpm has no cache.
+2. It is against this project's own threat model. `trust-score.ts:185` already says
+   "Attacker-controlled metadata (publishedAt, downloads) must not inflate", and CLAUDE.md
+   cites SmartLoader — a trojanized server backed by fake accounts and **manufactured
+   social proof**. Awarding trust points for download count rewards exactly the signal a
+   documented in-the-wild attack fabricated.
+
+So the live question is no longer "which of the three", it is whether the fix is arithmetic
+at all. Anything that only re-bases (option 2) inverts the collapse rather than removing it;
+option 1 buys real discrimination but only by executing every installed server. A third
+direction the entry never considered is that the LABEL is what is wrong — a server that
+passed everything mcpm can check without running it is not "caution", and saying so costs
+no re-base and no execution.
+
 Do not silently pick one. Whichever lands should also revisit #42's ceiling guard.
 That guard reads the ceiling from the scorer, so a re-WEIGHTING follows automatically —
 but a change to the INPUTS audit supplies (options 1 and 3 above both are) does not:
