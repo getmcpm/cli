@@ -380,6 +380,47 @@ export function nativeTrustScore(trust: TrustScore): NativeTrustScore {
  * returned output it could read. An availability-keyed ceiling reads 82 for a run capped
  * at 62.
  */
+/**
+ * True when the ONLY thing between this server and a clean bill of health is a check
+ * mcpm did not run.
+ *
+ * Every score gate in the product scores with `healthCheckPassed: null`, which awards a
+ * flat 15 of 30 — a constant, not evidence. Measured over 748 live registry servers the
+ * whole population scores 50-62 of 80, so `computeLevel` returned `caution` for ALL of
+ * them: a flawless server and a server with real findings got the same word, and no
+ * server mcpm audits could ever be green (TODOS #43).
+ *
+ * This is deliberately a LABEL and not a re-scoring. `score`, `maxPossible` and `level`
+ * are untouched, because they are load-bearing elsewhere in ways a relabel must not
+ * disturb: `level` is in the lockfile enum (`stack/schema.ts`), it decides `mcpm audit`'s
+ * exit code, and the absolute score is what `--min-trust` compares. Re-basing instead
+ * would have moved absolute scores DOWN 15 (breaking existing `--min-trust` scripts) while
+ * moving percentages UP (silently loosening `policy.minTrustScore`) — asymmetric, and the
+ * loosening is the direction nobody would notice.
+ *
+ * The predicate judges the buckets that were actually MEASURED — health leaves both the
+ * numerator and the denominator, exactly the way the external bucket already does when it
+ * is not credited. Deliberately NOT "would it be safe if the health check had passed":
+ * that assumes a perfect result for the one thing nobody checked, and it rates a server
+ * clean on strictly less evidence.
+ */
+/**
+ * Did the health check actually run, or did the bucket contribute the flat unrun constant?
+ * Keeps that constant private to this module — the two other places that wanted to ask
+ * this question would otherwise each carry their own copy of `15`.
+ */
+export function healthCheckWasRun(trust: TrustScore): boolean {
+  return trust.breakdown.healthCheck !== HEALTH_CHECK_NULL;
+}
+
+export function isCleanPendingHealthCheck(trust: TrustScore): boolean {
+  if (healthCheckWasRun(trust)) return false;
+  return (
+    computeLevel(trust.score - HEALTH_CHECK_NULL, trust.maxPossible - HEALTH_CHECK_PASS) ===
+    "safe"
+  );
+}
+
 export function maxAchievableBeforeHealthCheck(hasExternalScanner: boolean): TrustScore {
   return computeTrustScore({
     findings: [],

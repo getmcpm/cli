@@ -12,7 +12,12 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { computeTrustScore, nativeTrustScore } from "./trust-score.js";
+import {
+  computeTrustScore,
+  healthCheckWasRun,
+  isCleanPendingHealthCheck,
+  nativeTrustScore,
+} from "./trust-score.js";
 import type { Finding } from "./tier1.js";
 import type { TrustScoreInput } from "./trust-score.js";
 
@@ -786,5 +791,66 @@ describe("nativeTrustScore — unverifiable credit cannot clear a safety floor",
         }
       }
     }
+  });
+});
+
+describe("isCleanPendingHealthCheck — the TODOS #43 relabel", () => {
+  const base = {
+    findings: [] as Finding[],
+    hasExternalScanner: false,
+    registryMeta: { isVerifiedPublisher: true, publishedAt: "1970-01-01T00:00:00.000Z" },
+  };
+
+  it("is true for a flawless server whose health check never ran", () => {
+    const t = computeTrustScore({ ...base, healthCheckPassed: null });
+    // The exact shape of the defect: 62/80 is 77.5%, so `level` is `caution` on a server
+    // with nothing wrong with it.
+    expect(t.score).toBe(62);
+    expect(t.level).toBe("caution");
+    expect(isCleanPendingHealthCheck(t)).toBe(true);
+  });
+
+  it("is FALSE once the health check has actually run", () => {
+    for (const passed of [true, false]) {
+      const t = computeTrustScore({ ...base, healthCheckPassed: passed });
+      expect(healthCheckWasRun(t)).toBe(true);
+      expect(isCleanPendingHealthCheck(t)).toBe(false);
+    }
+  });
+
+  it("is FALSE when the measured buckets alone do not clear the bar", () => {
+    // One high finding: 10 off the static scan AND registryMeta capped to 0. On the
+    // measured basis that is 30/50 = 60%, so the unrun health check is NOT the only thing
+    // standing between this server and a clean bill of health.
+    const t = computeTrustScore({
+      ...base,
+      findings: [{ type: "prompt-injection", severity: "high", message: "m", location: "l" }],
+      healthCheckPassed: null,
+    });
+    expect(isCleanPendingHealthCheck(t)).toBe(false);
+  });
+
+  it("never relabels a risky server, which is what audit's exit code rests on", () => {
+    const t = computeTrustScore({
+      ...base,
+      findings: [{ type: "prompt-injection", severity: "critical", message: "m", location: "l" }],
+      healthCheckPassed: null,
+    });
+    expect(t.level).toBe("risky");
+    expect(isCleanPendingHealthCheck(t)).toBe(false);
+  });
+
+  it("judges the MEASURED buckets, not an assumed-perfect health check", () => {
+    // 3 mediums: static 25, registryMeta 7 -> score 47, measured basis 32/50 = 64%.
+    // Assuming the health check WOULD have passed instead gives 62/80 = 77.5%... which is
+    // also not safe, so pick a case where the two rules disagree: 2 mediums.
+    // static 30 + meta 7 = 52; measured 37/50 = 74% -> not clean.
+    // assumed-pass would be 67/80 = 84% -> safe. The assumed-pass rule is the wrong one:
+    // it rates a server clean using a result nobody obtained.
+    const med = { type: "prompt-injection", severity: "medium", message: "m", location: "l" } as const;
+    const t = computeTrustScore({ ...base, findings: [med, med], healthCheckPassed: null });
+    expect(t.score).toBe(52);
+    expect((t.score + 15) / t.maxPossible).toBeGreaterThanOrEqual(0.8); // assumed-pass says safe
+    expect(isCleanPendingHealthCheck(t)).toBe(false); // measured basis does not
   });
 });
