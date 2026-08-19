@@ -73,6 +73,37 @@ published section (it happened to #170).
 
 ### Changed
 
+- **`mcpm audit` no longer calls every server `caution`.** A server that cleared every check
+  mcpm actually ran now reads **`clean · not run`**. Measured over 748 live registry servers
+  scored through the real scanner: **all 748 were `caution`** — the 3-level scale collapsed
+  to one level across the entire public ecosystem, and no server mcpm audited could ever be
+  green. The cause is that audit never runs a health check, so that bucket contributes a
+  flat 15 of 30 — a constant, not evidence — and on real data the score only occupies 50–62
+  of 80, leaving the verdict decided by the constant rather than by the server.
+
+  **A relabel, not a re-score.** `score`, `maxPossible` and `level` are untouched, because
+  each is load-bearing somewhere a relabel must not reach: `level` is in the lockfile enum
+  and decides audit's exit code, and the absolute score is what `--min-trust` compares.
+  Re-basing the arithmetic instead — the fix TODOS #43 proposed — would have moved absolute
+  scores DOWN 15, breaking existing `--min-trust` scripts, while moving percentages UP,
+  silently loosening `policy.minTrustScore`. The silent direction is the one nobody notices.
+
+  The label is decided on the buckets that were actually MEASURED: health leaves both the
+  numerator and the denominator, exactly the way the external-scanner bucket already does
+  when it is not credited. Deliberately not "would it be safe if the health check had
+  passed", which assumes a perfect result for the one thing nobody checked.
+
+  **Be clear about what this does and does not fix.** On the same 748 servers, 743 now read
+  `clean · not run` and 5 read `caution` — still one dominant bucket. What changed is the
+  claim, not the spread: `caution` asserted a graded safety judgement the evidence could not
+  support, while `clean · not run` says only what mcpm did — found nothing, ran nothing. It
+  is cyan rather than green for that reason, and a server whose health check really did run
+  still reads `safe`. Making the score itself discriminate needs evidence audit does not
+  currently gather; that stays open in TODOS #43.
+
+  `audit --json` keeps `level` byte-identical and gains `healthCheckRun`, so a consumer can
+  tell the two apart. Exit codes are unchanged, with a test pinning it.
+
 - **The pre-publish gate now proves the packed artifact on three Node majors, not one.**
   `publish.yml` packed the tarball, clean-installed it and smoke-ran the real binary — the
   strongest gate in the pipeline — but only on Node 24. The lowest supported major is where

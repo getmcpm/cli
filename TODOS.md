@@ -793,7 +793,7 @@ score and makes the guard fire exactly when a server is legitimately below the
 threshold. The ceiling is a property of the scoring MODEL, so it uses the real
 scorer.
 
-### 43. `mcpm audit` can never rate a server "safe" — unless an unverifiable external scanner says so
+### 43. `mcpm audit` can never rate a server "safe" — ~~relabelled~~ PARTLY DONE (unreleased); the score still does not discriminate
 **Priority:** P2 — not a vulnerability; a scale defect with a perverse incentive.
 **Found:** 2026-08-12, alongside #42. Pre-existing.
 
@@ -867,7 +867,38 @@ direction the entry never considered is that the LABEL is what is wrong — a se
 passed everything mcpm can check without running it is not "caution", and saying so costs
 no re-base and no execution.
 
-Do not silently pick one. Whichever lands should also revisit #42's ceiling guard.
+**SHIPPED (unreleased): the relabel, chosen over all three listed options.** `audit` now
+renders `clean · not run` where the server cleared everything mcpm measured and the only
+unmeasured bucket is the health check. `isCleanPendingHealthCheck` in `trust-score.ts`;
+`levelLabel` in `format-trust.ts`; rows, summary and `--json` in `audit.ts`.
+
+Why not the three options: option 3 is disqualified above; option 2 inverts the collapse
+and pays for it asymmetrically (absolute scores down 15, breaking `--min-trust` scripts
+LOUDLY; percentages up, loosening `policy.minTrustScore` SILENTLY); option 1 buys real
+discrimination but only by executing every installed server from a read-only command.
+
+The relabel keeps `score` / `maxPossible` / `level` byte-identical, which is what makes it
+cheap: `level` is in the lockfile enum (`stack/schema.ts:182`) and decides audit's exit
+code, so anything that touched it would have reached both. Verified on the shipped
+predicate over the same 748 servers: 743 `clean · not run`, 5 `caution`.
+
+**What is still open, and it is the substance of this entry.** 743 of 748 in one bucket is
+the same spread option 2 produced. The label is now honest — it claims only what mcpm did —
+but the SCORE still does not discriminate, because tier-1 finds nothing on nearly
+everything and the level rides on constants. Closing that needs evidence audit does not
+gather today, which is option 1 wearing different clothes. Left open deliberately.
+
+Two follow-ups this surfaced and did not fix:
+
+- **`mcpm install` has the same defect, unrelabelled.** `install.ts:582` warns on
+  `level === "caution"`, so a flawless server triggers a caution warning on every install.
+  Same root, but it sits in the consent flow rather than a report, so it wants its own
+  decision rather than a rider.
+- The harness that produced these numbers dropped 52 of 800 servers on a missing field,
+  because it scored raw registry JSON instead of going through the Zod schema the product
+  parses with. The 748 are sound; a future sweep should parse first.
+
+Whichever closes the remainder should also revisit #42's ceiling guard.
 That guard reads the ceiling from the scorer, so a re-WEIGHTING follows automatically —
 but a change to the INPUTS audit supplies (options 1 and 3 above both are) does not:
 `flawlessAuditScore` replays those inputs as a separate literal. A drift guard now runs
