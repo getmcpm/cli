@@ -21,10 +21,20 @@ import type { InstalledServer } from "../store/servers.js";
 import type { ServerEntry } from "../registry/types.js";
 import type { Finding } from "../scanner/tier1.js";
 import { buildSarif } from "../output/sarif.js";
-import { externalCredited, maxAchievableBeforeHealthCheck } from "../scanner/trust-score.js";
+import {
+  externalCredited,
+  healthCheckWasRun,
+  maxAchievableBeforeHealthCheck,
+} from "../scanner/trust-score.js";
 import { sanitizeForTerminal } from "../guard/sanitize.js";
 import type { TrustScore, TrustScoreInput } from "../scanner/trust-score.js";
-import { levelColor, scoreBar, extractRegistryMeta } from "../utils/format-trust.js";
+import {
+  CLEAN_PENDING_LABEL,
+  levelColor,
+  levelLabel,
+  scoreBar,
+  extractRegistryMeta,
+} from "../utils/format-trust.js";
 import { stdoutOutput } from "../utils/output.js";
 import type { ClientId } from "../config/paths.js";
 import type { ConfigAdapter } from "../config/adapters/index.js";
@@ -415,6 +425,9 @@ export async function handleAudit(
       score: r.score.score,
       maxPossible: r.score.maxPossible,
       level: r.score.level,
+      // `level` alone could not distinguish "we looked and found nothing" from "we found
+      // problems" — both read `caution`, for every server on the live registry.
+      healthCheckRun: healthCheckWasRun(r.score),
       findings: r.findings,
       error: r.error ?? null,
     }));
@@ -450,7 +463,9 @@ export async function handleAudit(
     ],
     style: { head: [], border: [] },
     wordWrap: true,
-    colWidths: [45, 25, 12, 10],
+    // Level fits `clean · not run` (15 chars + padding) on one line — at 12 it wrapped,
+    // and per the TODOS #43 measurement that label is the common case, not the exception.
+    colWidths: [45, 25, 17, 10],
   });
 
   for (const result of results) {
@@ -465,7 +480,7 @@ export async function handleAudit(
       table.push([
         chalk.white(result.name),
         `${scoreBar(result.score.score, result.score.maxPossible, 10)} ${result.score.score}/${result.score.maxPossible}`,
-        levelColor(result.score.level),
+        levelColor(levelLabel(result.score)),
         String(result.findings.length),
       ]);
     }
@@ -474,14 +489,19 @@ export async function handleAudit(
   output(table.toString());
 
   // Summary line
-  const safe = results.filter((r) => r.score.level === "safe").length;
-  const caution = results.filter((r) => r.score.level === "caution").length;
-  const risky = results.filter((r) => r.score.level === "risky").length;
+  // Counted off the DISPLAYED verdict, not `level` — a summary that disagrees with the
+  // rows above it is worse than either number alone.
+  const labels = results.map((r) => levelLabel(r.score));
+  const safe = labels.filter((l) => l === "safe").length;
+  const cleanPending = labels.filter((l) => l === CLEAN_PENDING_LABEL).length;
+  const caution = labels.filter((l) => l === "caution").length;
+  const risky = labels.filter((l) => l === "risky").length;
   const registryErrors = results.filter((r) => r.error !== undefined).length;
 
   const summaryParts = [
     `${results.length} server${results.length !== 1 ? "s" : ""} scanned`,
     `${safe} safe`,
+    `${cleanPending} ${CLEAN_PENDING_LABEL}`,
     `${caution} caution`,
     `${risky} risky`,
   ];
@@ -489,9 +509,21 @@ export async function handleAudit(
     summaryParts.push(`${registryErrors} registry error${registryErrors !== 1 ? "s" : ""}`);
   }
 
+  // Still the exit-code signal, and still keyed off `risky`. Safe to count off labels:
+  // `levelLabel` only ever replaces `caution`, because `isCleanPendingHealthCheck`
+  // requires the measured-basis level to be `safe` — so a `risky` server can never be
+  // relabelled and this count is identical to filtering on `score.level`. Pinned by test.
   const hasRisky = risky > 0;
   const summaryLine = summaryParts.join(", ");
-  output(hasRisky ? chalk.red(summaryLine) : chalk.green(summaryLine));
+  // Green only when something was actually VERIFIED green. A run that is entirely
+  // `clean · not run` is cyan: nothing was found, and nothing was executed.
+  output(
+    risky > 0
+      ? chalk.red(summaryLine)
+      : safe > 0
+        ? chalk.green(summaryLine)
+        : chalk.cyan(summaryLine)
+  );
 
   // --fix step (non-JSON mode)
   if (options.fix === true) {

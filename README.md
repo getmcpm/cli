@@ -194,6 +194,8 @@ What it checks:
 
 Levels are a **ratio** of the points available, not absolute: **safe** at 80% of `maxPossible` or better, **caution** at 50-79%, **risky** below 50%. With no external scanner (`maxPossible` 80) that puts safe at 64 points, not 80.
 
+`mcpm audit` shows **`clean · not run`** where the server cleared every check that actually ran and the only unmeasured component is the health check — audit never executes servers, so that bucket scores a flat 15/30 and would otherwise drag every flawless server into **caution**. It is a statement about what mcpm did (found nothing, ran nothing), deliberately weaker than **safe**, which is reserved for servers whose health check really ran.
+
 Without an external scanner, the maximum possible score is 80/100 and the bucket is dropped from the total rather than counted as a failure. The static scan catches common patterns but cannot detect all vulnerabilities. Treat the score as a signal, not a guarantee.
 
 **External scanning is opt-in and mcpm never downloads a scanner.** Set `MCPM_EXTERNAL_SCANNER` to the path or name of a scanner you have already installed. mcpm probes it with `<scanner> --version` and, if that exits 0, scans each server with `<scanner> --json <server-name>`, expecting `{"findings": [...]}` on stdout. A scanner whose output cannot be read is treated as **absent** rather than as a clean pass, so the bucket leaves the total instead of silently earning 20/20 — otherwise any binary that exits 0 would raise trust scores.

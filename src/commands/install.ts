@@ -20,9 +20,13 @@ import type { ServerEntry, EnvVar } from "../registry/types.js";
 import { argvTokens, type RuntimeArgument } from "../registry/argument-tokens.js";
 import type { Finding } from "../scanner/tier1.js";
 import type { TrustScore, TrustScoreInput } from "../scanner/trust-score.js";
-import { externalCredited, maxAchievableBeforeHealthCheck } from "../scanner/trust-score.js";
+import {
+  externalCredited,
+  isCleanPendingHealthCheck,
+  maxAchievableBeforeHealthCheck,
+} from "../scanner/trust-score.js";
 import type { InstalledServer } from "../store/servers.js";
-import { scoreBar, levelColor, extractRegistryMeta } from "../utils/format-trust.js";
+import { scoreBar, levelColor, levelLabel, extractRegistryMeta } from "../utils/format-trust.js";
 import { assessReleaseAge, DEFAULT_MIN_RELEASE_AGE_HOURS } from "../scanner/cooldown.js";
 import { assessServerStatus } from "../scanner/registry-status.js";
 import { DANGEROUS_FLAG_PREFIXES } from "../scanner/patterns.js";
@@ -334,13 +338,15 @@ export function resolveInstallEntry(
  * Format a trust score as a visual progress bar with breakdown details.
  */
 export function formatTrustScore(trustScore: TrustScore): string {
-  const { score, maxPossible, level, breakdown } = trustScore;
+  const { score, maxPossible, breakdown } = trustScore;
 
-  const levelLabel = levelColor(level.toUpperCase());
+  // Renamed from `levelLabel` to free the name for the imported helper. `levelColor` is
+  // case-insensitive, so the uppercase form is coloured now instead of falling through.
+  const levelText = levelColor(levelLabel(trustScore).toUpperCase());
   const bar = scoreBar(score, maxPossible);
 
   const lines: string[] = [
-    `${bar} ${score}/${maxPossible} ${levelLabel}`,
+    `${bar} ${score}/${maxPossible} ${levelText}`,
     `  \u251C\u2500 Health check: ${breakdown.healthCheck > 0 ? "not yet run" : "failed or skipped"}`,
     `  \u251C\u2500 Tool descriptions: ${breakdown.staticScan === 40 ? "CLEAN (no injection patterns)" : `score ${breakdown.staticScan}/40`}`,
     `  \u251C\u2500 Package: publisher verification ${breakdown.registryMeta > 0 ? "passed" : "unverified"}`,
@@ -579,6 +585,19 @@ export async function handleInstall(
       shouldProceed = await confirm(
         "I understand the risks and want to install this server anyway. Continue?"
       );
+    } else if (isCleanPendingHealthCheck(trustScore)) {
+      // Nothing was found, and nothing was run. Before TODOS #43 this took the CAUTION
+      // branch, so a server with zero findings still warned about a "moderate trust score"
+      // and asked for a caution-flavoured confirm — on essentially every install, since
+      // the health check has not run at this point in the flow. That is consent fatigue
+      // (the H12 concern), and it made the warning meaningless where it matters.
+      // Still says what was NOT checked: quieter, not silent.
+      if (!jsonMode) {
+        output(
+          "\u001b[36mNo findings. The health check runs after install, so this is not a verified pass.\u001b[0m"
+        );
+      }
+      shouldProceed = await confirm(`Install '${name}'?`);
     } else if (trustScore.level === "caution") {
       if (!jsonMode) {
         output("\u001b[33mCAUTION: This server has a moderate trust score. Review the details above.\u001b[0m");

@@ -14,6 +14,7 @@ import type { ServerEntry } from "../../registry/types.js";
 import type { Finding } from "../../scanner/tier1.js";
 import type { TrustScore } from "../../scanner/trust-score.js";
 import type { ClientId } from "../../config/paths.js";
+import { CLEAN_PENDING_LABEL } from "../../utils/format-trust.js";
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -57,15 +58,25 @@ function makeServerEntry(name: string, version = "1.0.0"): ServerEntry {
   } as ServerEntry;
 }
 
-function makeTrustScore(level: "safe" | "caution" | "risky", score = 75): TrustScore {
+function makeTrustScore(
+  level: "safe" | "caution" | "risky",
+  score = 75,
+  // 15 is the score for an UNRUN health check, which is what every audit produces —
+  // `handleAudit` always scores with `healthCheckPassed: null`. Defaulted so every
+  // existing call site keeps its meaning; pass 30 for the ran-and-passed case.
+  healthCheck = 15,
+  // 10 means the credited external scanner FOUND things worth 10 points of deductions —
+  // so the server is not clean, whatever band it lands in. Pass 20 for a clean scan.
+  externalScan = 10
+): TrustScore {
   return {
     score,
     maxPossible: 100,
     level,
     breakdown: {
-      healthCheck: 15,
+      healthCheck,
       staticScan: 40,
-      externalScan: 10,
+      externalScan,
       registryMeta: 10,
     },
   };
@@ -320,7 +331,7 @@ describe("handleAudit — safe/caution/risky mix", () => {
         Promise.resolve(makeServerEntry(name))
       ),
       computeTrustScore: vi.fn()
-        .mockReturnValueOnce(makeTrustScore("safe", 80))
+        .mockReturnValueOnce(makeTrustScore("safe", 80, 15, 20))
         .mockReturnValueOnce(makeTrustScore("caution", 55))
         .mockReturnValueOnce(makeTrustScore("risky", 30)),
     });
@@ -332,9 +343,55 @@ describe("handleAudit — safe/caution/risky mix", () => {
     await handleAudit({}, deps);
     const out = lines.join("\n");
     expect(out).toMatch(/3.*server/i);
-    expect(out).toMatch(/1.*safe/i);
+    // NOT "1 safe". The fixture's 80/100 server has `healthCheck: 15`, an UNRUN check —
+    // which is what every real audit produces — so it reads `clean · not run`. This
+    // assertion said `safe` before TODOS #43 and was asserting the defect: audit called a
+    // server safe on evidence it never gathered.
+    expect(out).toMatch(/0 safe/);
+    expect(out).toContain(CLEAN_PENDING_LABEL);
     expect(out).toMatch(/1.*caution/i);
     expect(out).toMatch(/1.*risky/i);
+  });
+
+  it("still says safe when the health check actually ran", async () => {
+    // The discriminating case the fixture above cannot express: same score, but the
+    // health-check bucket holds evidence (30) rather than the unrun constant. Without
+    // this, `levelLabel` could relabel EVERYTHING and the suite would not notice.
+    const deps = makeMultiServerDeps();
+    const lines: string[] = [];
+    await handleAudit(
+      {},
+      {
+        ...deps,
+        computeTrustScore: vi.fn().mockReturnValue(makeTrustScore("safe", 80, 30, 20)),
+        getInstalledServers: vi
+          .fn()
+          .mockResolvedValue([makeInstalledServer({ name: "io.github.test/ran" })]),
+        output: (t: string) => lines.push(t),
+      }
+    );
+    const out = lines.join("\n");
+    expect(out).toMatch(/1 safe/);
+    // The summary always prints all four counts, so assert the COUNT is zero rather than
+    // that the label is absent — the label is in the summary either way.
+    expect(out).toMatch(new RegExp(`0 ${CLEAN_PENDING_LABEL}`));
+  });
+
+  it("does not move the exit code — risky is still 1, relabelled is still 0", async () => {
+    // `hasRisky` is now counted off the DISPLAYED label. That is only safe because a
+    // `risky` server can never be relabelled; this pins it rather than trusting the
+    // argument in the comment beside it.
+    const risky = await handleAudit({}, makeMultiServerDeps());
+    expect(risky).toBe(1);
+
+    const clean = await handleAudit(
+      {},
+      {
+        ...makeMultiServerDeps(),
+        computeTrustScore: vi.fn().mockReturnValue(makeTrustScore("caution", 62)),
+      }
+    );
+    expect(clean).toBe(0);
   });
 
   it("shows all server names in the output", async () => {

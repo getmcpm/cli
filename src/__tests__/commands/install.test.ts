@@ -9,6 +9,7 @@
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import type { ClientId } from "../../config/paths.js";
+import { CLEAN_PENDING_LABEL } from "../../utils/format-trust.js";
 import type { ConfigAdapter, McpServerEntry } from "../../config/adapters/index.js";
 import type { ServerEntry } from "../../registry/types.js";
 import type { Finding } from "../../scanner/tier1.js";
@@ -61,13 +62,15 @@ function makeServerEntry(overrides: Partial<ServerEntry["server"]> = {}): Server
   };
 }
 
-function makeGreenTrustScore(): TrustScore {
+function makeGreenTrustScore(healthCheck = 15): TrustScore {
   return {
     score: 82,
     maxPossible: 100,
     level: "safe",
     breakdown: {
-      healthCheck: 15,
+      // 15 = health check NOT run, which is what `install` always produces at the point
+      // this is displayed (the check runs after install). Pass 30 for the ran case.
+      healthCheck,
       staticScan: 40,
       externalScan: 20,
       registryMeta: 7,
@@ -293,6 +296,80 @@ describe("handleInstall — happy path (GREEN trust score)", () => {
 // ---------------------------------------------------------------------------
 // Trust score: YELLOW caution
 // ---------------------------------------------------------------------------
+
+/**
+ * The real shape of a flawless server at install time, with no external scanner: 62/80,
+ * which is 77.5% and therefore `caution`. This is the ceiling `maxAchievableBeforeHealthCheck`
+ * reports, and it is what almost every install actually produces — so it, not the
+ * externally-credited green fixture, is the case the consent branch exists for.
+ */
+function makeFlawlessNativeTrustScore(): TrustScore {
+  return {
+    score: 62,
+    maxPossible: 80,
+    level: "caution",
+    breakdown: { healthCheck: 15, staticScan: 40, externalScan: 0, registryMeta: 7 },
+  };
+}
+
+describe("handleInstall — clean but unverified (TODOS #43)", () => {
+  // Guards the consent branch. Deleting it entirely left the whole suite green, which is
+  // how a prompt silently reverts to warning on every install.
+  it("does not cry CAUTION at a server with no findings", async () => {
+    const deps = makeDeps({
+      computeTrustScore: vi.fn().mockReturnValue(makeGreenTrustScore()),
+    });
+    await handleInstall("io.github.test/my-server", {}, deps);
+    const all = (deps.output as ReturnType<typeof vi.fn>).mock.calls.flat().join("\n");
+    expect(all).not.toMatch(/CAUTION:/);
+    expect(all).toMatch(/health check runs after install/i);
+  });
+
+  it("uses the plain confirm, not the caution-flavoured one", async () => {
+    const deps = makeDeps({
+      computeTrustScore: vi.fn().mockReturnValue(makeGreenTrustScore()),
+    });
+    await handleInstall("io.github.test/my-server", {}, deps);
+    expect(deps.confirm).toHaveBeenCalledWith("Install 'io.github.test/my-server'?");
+  });
+
+  it("still asks — quieter is not silent", async () => {
+    const deps = makeDeps({
+      computeTrustScore: vi.fn().mockReturnValue(makeGreenTrustScore()),
+      confirm: vi.fn().mockResolvedValue(false),
+    });
+    const adapter = makeAdapter("claude-desktop");
+    await handleInstall("io.github.test/my-server", {}, { ...deps, getAdapter: vi.fn().mockReturnValue(adapter) });
+    expect(deps.confirm).toHaveBeenCalled();
+    expect(adapter.addServer).not.toHaveBeenCalled();
+  });
+
+  it("the 62/80 flawless server — level `caution` — gets the quiet path, not the warning", async () => {
+    // Without this the branch could be deleted and only ONE assertion would notice, because
+    // the green fixture's level is already `safe` and falls through to the same plain
+    // confirm. This is the case that regresses loudly: raw level `caution`.
+    const deps = makeDeps({
+      computeTrustScore: vi.fn().mockReturnValue(makeFlawlessNativeTrustScore()),
+    });
+    await handleInstall("io.github.test/my-server", {}, deps);
+    const all = (deps.output as ReturnType<typeof vi.fn>).mock.calls.flat().join("\n");
+    expect(all).not.toMatch(/CAUTION:/);
+    expect(deps.confirm).toHaveBeenCalledWith("Install 'io.github.test/my-server'?");
+  });
+
+  it("a server WITH findings keeps the caution prompt", async () => {
+    // The discriminating half: same unrun health check, findings present.
+    const deps = makeDeps({
+      computeTrustScore: vi.fn().mockReturnValue(makeYellowTrustScore()),
+    });
+    await handleInstall("io.github.test/my-server", {}, deps);
+    const all = (deps.output as ReturnType<typeof vi.fn>).mock.calls.flat().join("\n");
+    expect(all).toMatch(/CAUTION:/);
+    expect(deps.confirm).toHaveBeenCalledWith(
+      "Install 'io.github.test/my-server'? (caution recommended)"
+    );
+  });
+});
 
 describe("handleInstall — YELLOW trust score", () => {
   it("displays caution message for yellow trust score", async () => {
@@ -1067,13 +1144,24 @@ describe("formatTrustScore", () => {
     expect(output).toMatch(/[█░▓▒]/);
   });
 
-  it("contains SAFE label for green trust score", () => {
-    const trustScore = makeGreenTrustScore();
-    const output = formatTrustScore(trustScore);
-    // Strip ANSI codes for testing
-    const stripped = output.replace(/\x1B\[[0-9;]*m/g, "");
-    expect(stripped).toMatch(/safe/i);
+  it("says CLEAN · NOT RUN, not SAFE, while the health check has not run", () => {
+    // This fixture reaches `level: "safe"` ONLY because a credited external scanner
+    // supplied 20 points — 62/80 is the native ceiling, which is 77.5%. Printing SAFE
+    // there is the perverse incentive TODOS #43 is named for: the one lever that earned a
+    // green verdict was the input `trust-score.ts` documents as unverifiable.
+    // Strip ANSI first: `levelColor` now actually colours this string, where before the
+    // uppercase form fell through to `default` and came back bare.
+    const formatted = formatTrustScore(makeGreenTrustScore()).replace(/\x1B\[[0-9;]*m/g, "");
+    expect(formatted).toContain(CLEAN_PENDING_LABEL.toUpperCase());
+    expect(formatted).not.toMatch(/\bSAFE\b/);
   });
+
+  it("contains SAFE label once the health check has actually run", () => {
+    const formatted = formatTrustScore(makeGreenTrustScore(30)).replace(/\x1B\[[0-9;]*m/g, "");
+    expect(formatted).toMatch(/safe/i);
+    expect(formatted).not.toContain(CLEAN_PENDING_LABEL.toUpperCase());
+  });
+
 
   it("contains CAUTION label for yellow trust score", () => {
     const trustScore = makeYellowTrustScore();

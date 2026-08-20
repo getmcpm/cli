@@ -73,6 +73,57 @@ published section (it happened to #170).
 
 ### Changed
 
+- **`mcpm audit` no longer calls every server `caution`.** A server that cleared every check
+  mcpm actually ran now reads **`clean · not run`**. Measured over 748 live registry servers
+  scored through the real scanner: **all 748 were `caution`** — the 3-level scale collapsed
+  to one level across the entire public ecosystem, and no server mcpm audited could ever be
+  green. The cause is that audit never runs a health check, so that bucket contributes a
+  flat 15 of 30 — a constant, not evidence — and on real data the score only occupies 50–62
+  of 80, leaving the verdict decided by the constant rather than by the server.
+
+  **A relabel, not a re-score.** `score`, `maxPossible` and `level` are untouched, because
+  each is load-bearing somewhere a relabel must not reach: `level` is in the lockfile enum
+  and decides audit's exit code, and the absolute score is what `--min-trust` compares.
+  Re-basing the arithmetic instead — the fix TODOS #43 proposed — would have moved absolute
+  scores DOWN 15, breaking existing `--min-trust` scripts, while moving percentages UP,
+  silently loosening `policy.minTrustScore`. The silent direction is the one nobody notices.
+
+  The label is decided on the buckets that were actually MEASURED: health leaves both the
+  numerator and the denominator, exactly the way the external-scanner bucket already does
+  when it is not credited. Deliberately not "would it be safe if the health check had
+  passed", which assumes a perfect result for the one thing nobody checked.
+
+  **`clean` means the scan found nothing** — not merely that the measured buckets land in
+  the top band. The first cut checked only the band, and on the same 748 servers that
+  labelled 743 of them clean, 414 of which carry findings; `mcpm audit` prints a findings
+  count in the next column, so those rows contradicted themselves. Both deduction-bearing
+  buckets must be intact, external included: a caller-supplied scanner may not INFLATE
+  mcpm's verdict (#33/#35), but it is free to make it worse. Final split on live data:
+  **329 `clean · not run`, 419 `caution`** — the scale distinguishes something again,
+  where before every server got the same word.
+
+  A server whose health check really did run still reads `safe`, and the label is cyan
+  rather than green because "found nothing" is weaker than "verified". Note what that
+  demotes: an 82/100 server reaching `safe` **only** because a credited external scanner
+  supplied 20 points now reads `clean · not run`, which is the perverse incentive #43 is
+  named for.
+
+  The same relabel is applied to **`install`, `update`, `outdated` and `why`**, all of which
+  also score with `healthCheckPassed: null`. In `install` it also reaches the consent flow:
+  a server with no findings used to print "CAUTION: this server has a moderate trust score"
+  and ask for a caution-flavoured confirm on essentially every install, which is consent
+  fatigue rather than a warning. It now says what was not checked and asks plainly —
+  quieter, not silent.
+
+  `audit --json` keeps `level` byte-identical and gains `healthCheckRun`; `outdated --json`
+  keeps `latestLevel` and gains `latestLevelLabel`. Exit codes are unchanged, with a test
+  pinning it.
+
+- **`levelColor` matches case-insensitively.** `install`'s trust display passes
+  `level.toUpperCase()`, which fell through to `default` and returned the string
+  uncoloured — every trust level in the install flow has been printing monochrome.
+  Uppercasing the result instead is not an option: it corrupts the escape sequence.
+
 - **The pre-publish gate now proves the packed artifact on three Node majors, not one.**
   `publish.yml` packed the tarball, clean-installed it and smoke-ran the real binary — the
   strongest gate in the pipeline — but only on Node 24. The lowest supported major is where

@@ -26,7 +26,7 @@ import type { InstalledServer } from "../store/servers.js";
 import type { ServerEntry } from "../registry/types.js";
 import type { Finding } from "../scanner/tier1.js";
 import type { TrustScore, TrustScoreInput } from "../scanner/trust-score.js";
-import { levelColor, extractRegistryMeta } from "../utils/format-trust.js";
+import { levelColor, levelLabel, extractRegistryMeta } from "../utils/format-trust.js";
 import { stdoutOutput } from "../utils/output.js";
 
 // ---------------------------------------------------------------------------
@@ -53,6 +53,12 @@ export interface DriftRow {
   /** The LATEST version's score, from a fresh scan of the entry just fetched. */
   latestTrustScore: number | null;
   latestLevel: "safe" | "caution" | "risky" | null;
+  /**
+   * What to PRINT. Separate from `latestLevel`, which stays the raw scorer output so the
+   * `--json` shape does not move: a consumer keying off `"caution"` keeps working, and
+   * gets the honest verdict alongside instead of in place of it.
+   */
+  latestLevelLabel: string | null;
   versionChange: "none" | "patch" | "minor" | "major" | "unknown";
   error?: string;
 }
@@ -83,6 +89,7 @@ async function checkVersionDrift(
           latestVersion: null,
           latestTrustScore: null,
           latestLevel: null,
+          latestLevelLabel: null,
           versionChange: "unknown",
           error: "Registry unavailable",
         };
@@ -114,6 +121,7 @@ async function checkVersionDrift(
           latestVersion: latest,
           latestTrustScore: null,
           latestLevel: null,
+          latestLevelLabel: null,
           versionChange,
           error: "Trust assessment failed",
         };
@@ -125,6 +133,7 @@ async function checkVersionDrift(
         latestVersion: latest,
         latestTrustScore: latestScore.score,
         latestLevel: latestScore.level,
+        latestLevelLabel: levelLabel(latestScore),
         versionChange,
       };
     })
@@ -184,8 +193,8 @@ export async function handleOutdated(
       : r.versionChange === "minor" ? chalk.yellow
       : chalk.cyan;
     const latest = r.latestVersion ?? "unknown";
-    const trustStr = r.latestTrustScore !== null && r.latestLevel
-      ? `  [${levelColor(r.latestLevel)}]`
+    const trustStr = r.latestTrustScore !== null && r.latestLevelLabel
+      ? `  [${levelColor(r.latestLevelLabel)}]`
       : "";
     output(`  ${nameCol}  ${chalk.yellow(r.installedVersion)} → ${diffColor(latest)}${trustStr}`);
   }

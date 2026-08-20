@@ -793,7 +793,7 @@ score and makes the guard fire exactly when a server is legitimately below the
 threshold. The ceiling is a property of the scoring MODEL, so it uses the real
 scorer.
 
-### 43. `mcpm audit` can never rate a server "safe" — unless an unverifiable external scanner says so
+### 43. `mcpm audit` can never rate a server "safe" — ~~relabelled~~ PARTLY DONE (unreleased); the score still does not discriminate
 **Priority:** P2 — not a vulnerability; a scale defect with a perverse incentive.
 **Found:** 2026-08-12, alongside #42. Pre-existing.
 
@@ -826,7 +826,92 @@ real cost:**
    the gap (62 → 65) without closing it; 65/80 is still 81%… which would actually
    cross the line. Worth checking whether the registry exposes one.
 
-Do not silently pick one. Whichever lands should also revisit #42's ceiling guard.
+**MEASURED 2026-08-19 — two of the three options are now settled, and the framing above
+is wrong about what the defect is.** 748 live registry servers scored through the real
+`scanTier1` + `computeTrustScore` with audit's inputs (`healthCheckPassed: null`, no
+external scanner). 800 fetched, 52 dropped by the harness on a missing field:
+
+```
+today          : caution 748,  safe 0,  risky 0
+option 2        : safe   743,  caution 5,  risky 0     (743 move caution -> safe)
+score histogram : 50-54: 5    55-59: 376    60-62: 367   (of 80)
+```
+
+**The scale does not discriminate, in either direction.** Today every server on the live
+registry is `caution` — not just "no server can be green", but the 3-level scale collapses
+to ONE level across the whole population. Option 2 collapses it to one level again, the
+other one: **99.3% safe**. It does not fix the scale, it slides the population across a
+threshold.
+
+The reason is visible in the histogram: on real data the score occupies **50-62 of 80**, a
+14-point spread, because tier-1 finds nearly nothing on nearly everything (consistent with
+#42's finding that the live registry has no high/critical). The level is therefore decided
+almost entirely by the CONSTANT offsets — health 15/30, registryMeta 7/10 — and not by any
+evidence about the server. Move the denominator and the entire population moves together.
+
+**Option 3 is disqualified, on two independent grounds.**
+1. The premise fails: the official registry exposes **no download count**. Walked every key
+   of a v0.1 page — `count` is pagination, `status`/`statusChangedAt` are registry state.
+   The only other source is npm's own downloads API, which covers `npm` servers only (not
+   pypi/oci/remote) and costs a live fetch per server, since mcpm has no cache.
+2. It is against this project's own threat model. `trust-score.ts:185` already says
+   "Attacker-controlled metadata (publishedAt, downloads) must not inflate", and CLAUDE.md
+   cites SmartLoader — a trojanized server backed by fake accounts and **manufactured
+   social proof**. Awarding trust points for download count rewards exactly the signal a
+   documented in-the-wild attack fabricated.
+
+So the live question is no longer "which of the three", it is whether the fix is arithmetic
+at all. Anything that only re-bases (option 2) inverts the collapse rather than removing it;
+option 1 buys real discrimination but only by executing every installed server. A third
+direction the entry never considered is that the LABEL is what is wrong — a server that
+passed everything mcpm can check without running it is not "caution", and saying so costs
+no re-base and no execution.
+
+**SHIPPED (unreleased): the relabel, chosen over all three listed options.** `audit` now
+renders `clean · not run` where the server cleared everything mcpm measured and the only
+unmeasured bucket is the health check. `isCleanPendingHealthCheck` in `trust-score.ts`;
+`levelLabel` in `format-trust.ts`; rows, summary and `--json` in `audit.ts`.
+
+Why not the three options: option 3 is disqualified above; option 2 inverts the collapse
+and pays for it asymmetrically (absolute scores down 15, breaking `--min-trust` scripts
+LOUDLY; percentages up, loosening `policy.minTrustScore` SILENTLY); option 1 buys real
+discrimination but only by executing every installed server from a read-only command.
+
+The relabel keeps `score` / `maxPossible` / `level` byte-identical, which is what makes it
+cheap: `level` is in the lockfile enum (`stack/schema.ts:182`) and decides audit's exit
+code, so anything that touched it would have reached both. Verified on the shipped
+predicate over the same 748 servers: **329 `clean · not run`, 419 `caution`**.
+
+**The first cut of the predicate was wrong, and a pre-existing test caught it.** It checked
+only that the measured buckets landed in the top band, which labelled 743 of 748 clean —
+414 of them carrying findings, printed beside a non-zero findings COUNT in the very next
+column. `install.test.ts`'s "displays caution message for yellow trust score" failed, and
+taking it seriously instead of editing it was what surfaced this: the test was right and
+the predicate was wrong. `clean` now requires both deduction-bearing buckets intact.
+
+**What is still open, and it is the substance of this entry.** 743 of 748 in one bucket is
+the same spread option 2 produced. The label is now honest — it claims only what mcpm did —
+but the SCORE still does not discriminate, because tier-1 finds nothing on nearly
+everything and the level rides on constants. Closing that needs evidence audit does not
+gather today, which is option 1 wearing different clothes. Left open deliberately.
+
+Two follow-ups this surfaced and did not fix:
+
+- ~~`mcpm install` has the same defect, unrelabelled~~ **DONE.** All four raw-`level`
+  renderers reached by an unrun health check are relabelled: `install` (display AND the
+  consent branch — a flawless server no longer prints "CAUTION: moderate trust score" and
+  ask for a caution-flavoured confirm on every install), `update`, `outdated` and `why`.
+  `outdated --json` keeps `latestLevel` raw and gains `latestLevelLabel`, the same
+  add-beside-rather-than-replace shape audit used.
+- Found while doing it: `levelColor` matched case-SENSITIVELY, so `install`'s
+  `level.toUpperCase()` fell through to `default` and the install flow has been printing
+  its trust level uncoloured. Fixed by matching on `.toLowerCase()`; uppercasing the
+  RESULT would corrupt chalk's escape sequence.
+- The harness that produced these numbers dropped 52 of 800 servers on a missing field,
+  because it scored raw registry JSON instead of going through the Zod schema the product
+  parses with. The 748 are sound; a future sweep should parse first.
+
+Whichever closes the remainder should also revisit #42's ceiling guard.
 That guard reads the ceiling from the scorer, so a re-WEIGHTING follows automatically —
 but a change to the INPUTS audit supplies (options 1 and 3 above both are) does not:
 `flawlessAuditScore` replays those inputs as a separate literal. A drift guard now runs
