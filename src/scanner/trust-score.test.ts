@@ -830,6 +830,37 @@ describe("isCleanPendingHealthCheck — the TODOS #43 relabel", () => {
     expect(isCleanPendingHealthCheck(t)).toBe(false);
   });
 
+  it("is FALSE when the scan found ANYTHING, even in the top band", () => {
+    // The word has to survive the column next to it: `mcpm audit` prints a findings COUNT
+    // beside the level, so "clean" must mean zero. Measured over 748 live registry
+    // servers, a band-only rule labelled 743 clean — 414 of which carry findings.
+    const low = { type: "install-script", severity: "low", message: "m", location: "l" } as const;
+    const t = computeTrustScore({ ...base, findings: [low], healthCheckPassed: null });
+    // Still comfortably top-band on the measured buckets...
+    expect(computeTrustScore({ ...base, healthCheckPassed: null }).score - t.score).toBe(2);
+    // ...but it is not clean, because something was found.
+    expect(isCleanPendingHealthCheck(t)).toBe(false);
+  });
+
+  it("lets a credited external scanner's findings block clean, but never grant it", () => {
+    // One-directional, per #33/#35: caller-supplied scanner output may not INFLATE mcpm's
+    // verdict, but it is free to make it worse.
+    const ext = {
+      type: "install-script", severity: "low", message: "m", location: "l", source: "external",
+    } as const;
+    const withExt = computeTrustScore({
+      ...base,
+      hasExternalScanner: true,
+      findings: [ext],
+      healthCheckPassed: null,
+    });
+    expect(withExt.breakdown.externalScan).toBeLessThan(20);
+    expect(isCleanPendingHealthCheck(withExt)).toBe(false);
+
+    const cleanExt = computeTrustScore({ ...base, hasExternalScanner: true, healthCheckPassed: null });
+    expect(isCleanPendingHealthCheck(cleanExt)).toBe(true);
+  });
+
   it("never relabels a risky server, which is what audit's exit code rests on", () => {
     const t = computeTrustScore({
       ...base,

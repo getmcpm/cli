@@ -9,6 +9,7 @@
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import type { ClientId } from "../../config/paths.js";
+import { CLEAN_PENDING_LABEL } from "../../utils/format-trust.js";
 import type { ConfigAdapter, McpServerEntry } from "../../config/adapters/index.js";
 import type { ServerEntry } from "../../registry/types.js";
 import type { Finding } from "../../scanner/tier1.js";
@@ -61,13 +62,15 @@ function makeServerEntry(overrides: Partial<ServerEntry["server"]> = {}): Server
   };
 }
 
-function makeGreenTrustScore(): TrustScore {
+function makeGreenTrustScore(healthCheck = 15): TrustScore {
   return {
     score: 82,
     maxPossible: 100,
     level: "safe",
     breakdown: {
-      healthCheck: 15,
+      // 15 = health check NOT run, which is what `install` always produces at the point
+      // this is displayed (the check runs after install). Pass 30 for the ran case.
+      healthCheck,
       staticScan: 40,
       externalScan: 20,
       registryMeta: 7,
@@ -1067,13 +1070,24 @@ describe("formatTrustScore", () => {
     expect(output).toMatch(/[█░▓▒]/);
   });
 
-  it("contains SAFE label for green trust score", () => {
-    const trustScore = makeGreenTrustScore();
-    const output = formatTrustScore(trustScore);
-    // Strip ANSI codes for testing
-    const stripped = output.replace(/\x1B\[[0-9;]*m/g, "");
-    expect(stripped).toMatch(/safe/i);
+  it("says CLEAN · NOT RUN, not SAFE, while the health check has not run", () => {
+    // This fixture reaches `level: "safe"` ONLY because a credited external scanner
+    // supplied 20 points — 62/80 is the native ceiling, which is 77.5%. Printing SAFE
+    // there is the perverse incentive TODOS #43 is named for: the one lever that earned a
+    // green verdict was the input `trust-score.ts` documents as unverifiable.
+    // Strip ANSI first: `levelColor` now actually colours this string, where before the
+    // uppercase form fell through to `default` and came back bare.
+    const formatted = formatTrustScore(makeGreenTrustScore()).replace(/\x1B\[[0-9;]*m/g, "");
+    expect(formatted).toContain(CLEAN_PENDING_LABEL.toUpperCase());
+    expect(formatted).not.toMatch(/\bSAFE\b/);
   });
+
+  it("contains SAFE label once the health check has actually run", () => {
+    const formatted = formatTrustScore(makeGreenTrustScore(30)).replace(/\x1B\[[0-9;]*m/g, "");
+    expect(formatted).toMatch(/safe/i);
+    expect(formatted).not.toContain(CLEAN_PENDING_LABEL.toUpperCase());
+  });
+
 
   it("contains CAUTION label for yellow trust score", () => {
     const trustScore = makeYellowTrustScore();

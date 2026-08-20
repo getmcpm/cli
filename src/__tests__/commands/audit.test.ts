@@ -64,7 +64,10 @@ function makeTrustScore(
   // 15 is the score for an UNRUN health check, which is what every audit produces —
   // `handleAudit` always scores with `healthCheckPassed: null`. Defaulted so every
   // existing call site keeps its meaning; pass 30 for the ran-and-passed case.
-  healthCheck = 15
+  healthCheck = 15,
+  // 10 means the credited external scanner FOUND things worth 10 points of deductions —
+  // so the server is not clean, whatever band it lands in. Pass 20 for a clean scan.
+  externalScan = 10
 ): TrustScore {
   return {
     score,
@@ -73,7 +76,7 @@ function makeTrustScore(
     breakdown: {
       healthCheck,
       staticScan: 40,
-      externalScan: 10,
+      externalScan,
       registryMeta: 10,
     },
   };
@@ -328,7 +331,7 @@ describe("handleAudit — safe/caution/risky mix", () => {
         Promise.resolve(makeServerEntry(name))
       ),
       computeTrustScore: vi.fn()
-        .mockReturnValueOnce(makeTrustScore("safe", 80))
+        .mockReturnValueOnce(makeTrustScore("safe", 80, 15, 20))
         .mockReturnValueOnce(makeTrustScore("caution", 55))
         .mockReturnValueOnce(makeTrustScore("risky", 30)),
     });
@@ -360,7 +363,7 @@ describe("handleAudit — safe/caution/risky mix", () => {
       {},
       {
         ...deps,
-        computeTrustScore: vi.fn().mockReturnValue(makeTrustScore("safe", 80, 30)),
+        computeTrustScore: vi.fn().mockReturnValue(makeTrustScore("safe", 80, 30, 20)),
         getInstalledServers: vi
           .fn()
           .mockResolvedValue([makeInstalledServer({ name: "io.github.test/ran" })]),

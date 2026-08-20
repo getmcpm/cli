@@ -20,7 +20,7 @@ import type { Finding } from "../scanner/tier1.js";
 import type { TrustScore, TrustScoreInput } from "../scanner/trust-score.js";
 import { NotFoundError } from "../registry/errors.js";
 import { assessReleaseAge } from "../scanner/cooldown.js";
-import { scoreBar, levelColor, extractRegistryMeta } from "../utils/format-trust.js";
+import { scoreBar, levelColor, levelLabel, extractRegistryMeta } from "../utils/format-trust.js";
 import { stdoutOutput } from "../utils/output.js";
 import { valid as semverValid } from "semver";
 import { sanitizeForTerminal } from "../guard/sanitize.js";
@@ -238,12 +238,14 @@ export async function handleWhy(
     return;
   }
 
-  const { score, maxPossible, level, breakdown } = trust;
+  const { score, maxPossible, breakdown } = trust;
   const lines: string[] = [];
 
   lines.push(`${chalk.bold.white(entry.server.name)}  ${chalk.dim(`v${entry.server.version}`)}`);
   lines.push("");
-  lines.push(`${scoreBar(score, maxPossible)}  ${score}/${maxPossible}  (${levelColor(level)})`);
+  lines.push(
+    `${scoreBar(score, maxPossible)}  ${score}/${maxPossible}  (${levelColor(levelLabel(trust))})`
+  );
   lines.push("");
   lines.push(componentLine("Health check", breakdown.healthCheck, 30, "not run until install"));
   lines.push(componentLine("Static scan", breakdown.staticScan, 40));

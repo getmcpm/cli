@@ -10,6 +10,7 @@ import { scanTier1 } from "../../scanner/tier1.js";
 import type { Finding } from "../../scanner/tier1.js";
 import { computeTrustScore } from "../../scanner/trust-score.js";
 import type { TrustScore } from "../../scanner/trust-score.js";
+import { CLEAN_PENDING_LABEL } from "../../utils/format-trust.js";
 import { NotFoundError } from "../../registry/errors.js";
 import type { NpmProvenanceSnapshot } from "../../registry/npm-provenance.js";
 
@@ -37,10 +38,10 @@ function makeServerEntry(over: Partial<ServerEntry["server"]> = {}): ServerEntry
 
 function makeTrust(over: Partial<TrustScore> = {}): TrustScore {
   return {
-    score: 72,
+    score: 82,
     maxPossible: 100,
     level: "caution",
-    breakdown: { healthCheck: 15, staticScan: 40, externalScan: 10, registryMeta: 7 },
+    breakdown: { healthCheck: 15, staticScan: 40, externalScan: 20, registryMeta: 7 },
     ...over,
   };
 }
@@ -66,14 +67,36 @@ describe("mcpm why", () => {
     const deps = makeDeps();
     await handleWhy("io.github.test/srv", {}, deps);
     const o = out(deps);
-    expect(o).toMatch(/72\/100/);
-    expect(o).toMatch(/caution/);
+    expect(o).toMatch(/82\/100/);
+    // NOT `caution`. The fixture's health check is 15/30 — the UNRUN constant, which is
+    // what `why` always produces — so the verdict is `clean · not run` (TODOS #43). This
+    // assertion said `caution` before, i.e. it asserted that a server with no findings
+    // reads as a moderate risk.
+    expect(o).toContain(CLEAN_PENDING_LABEL);
     expect(o).toMatch(/Health check/);
     expect(o).toMatch(/15\/30/);
     expect(o).toMatch(/Static scan/);
     expect(o).toMatch(/40\/40/);
     expect(o).toMatch(/Registry meta/);
     expect(o).toMatch(/7\/10/);
+  });
+
+  it("says caution, not clean, once the measured buckets alone fall short", async () => {
+    // The discriminating case: same unrun health check, but real findings. Without this,
+    // `levelLabel` could relabel everything and this file would not notice.
+    const deps = makeDeps({
+      computeTrustScore: vi.fn().mockReturnValue(
+        makeTrust({
+          score: 55,
+          level: "caution",
+          breakdown: { healthCheck: 15, staticScan: 25, externalScan: 10, registryMeta: 5 },
+        })
+      ),
+    });
+    await handleWhy("io.github.test/srv", {}, deps);
+    const o = out(deps);
+    expect(o).toMatch(/caution/);
+    expect(o).not.toContain(CLEAN_PENDING_LABEL);
   });
 
   it("lists findings with severity, type, message, and location", async () => {
@@ -139,7 +162,7 @@ describe("mcpm why", () => {
     const parsed = JSON.parse(out(deps));
     expect(parsed).toMatchObject({
       name: "io.github.test/srv",
-      score: 72,
+      score: 82,
       level: "caution",
       registryMetaCapped: true,
     });

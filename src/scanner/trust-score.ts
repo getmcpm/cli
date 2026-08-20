@@ -415,6 +415,21 @@ export function healthCheckWasRun(trust: TrustScore): boolean {
 
 export function isCleanPendingHealthCheck(trust: TrustScore): boolean {
   if (healthCheckWasRun(trust)) return false;
+
+  // CLEAN means the scan found NOTHING, not merely that the measured buckets land in the
+  // top band. The first cut of this checked only the band, and measured over 748 live
+  // registry servers that labelled 743 of them clean — including 414 that carry findings.
+  // `mcpm audit` prints a findings COUNT in the next column, so those rows would have read
+  // `clean · not run` beside a non-zero count and contradicted themselves.
+  //
+  // Both deduction-bearing buckets, not just the static scan. External findings deflating
+  // this label is consistent with #33/#35: caller-supplied scanner output may never INFLATE
+  // mcpm's own verdict, but it is free to make it worse.
+  const scanFoundNothing =
+    trust.breakdown.staticScan === STATIC_SCAN_MAX &&
+    (!externalCredited(trust) || trust.breakdown.externalScan === EXTERNAL_SCAN_MAX);
+  if (!scanFoundNothing) return false;
+
   return (
     computeLevel(trust.score - HEALTH_CHECK_NULL, trust.maxPossible - HEALTH_CHECK_PASS) ===
     "safe"

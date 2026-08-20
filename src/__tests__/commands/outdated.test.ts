@@ -205,6 +205,22 @@ describe("handleOutdated — makes no claim about change since install", () => {
     expect(text).not.toContain("Outdated servers:");
   });
 
+  it("--json keeps `latestLevel` raw and adds the display verdict beside it", async () => {
+    // Uses the REAL scorer, so this is the shape a consumer actually receives. `outdated`
+    // scores with `healthCheckPassed: null`, so its verdict was decided by a constant
+    // (TODOS #43); the printed label now says so, while `latestLevel` stays exactly what
+    // the scorer returned so an existing `--json` consumer keying off it keeps working.
+    const text = await runReal(legacyRecord(80), makeEntry("io.github.a/srv", "2.0.0"), true);
+    const rows = JSON.parse(text) as Array<Record<string, unknown>>;
+    expect(["safe", "caution", "risky"]).toContain(rows[0].latestLevel);
+    expect(typeof rows[0].latestLevelLabel).toBe("string");
+
+    // And the human render must agree with the JSON it was built from — a table that
+    // disagrees with `--json` is how two callers reach different conclusions.
+    const human = await runReal(legacyRecord(80), makeEntry("io.github.a/srv", "2.0.0"));
+    expect(human).toContain(rows[0].latestLevelLabel as string);
+  });
+
   it("--json publishes no cross-version comparison fields, and keeps the honest ones", async () => {
     const text = await runReal(legacyRecord(80), makeEntry("io.github.a/srv", "2.0.0"), true);
     const rows = JSON.parse(text) as Array<Record<string, unknown>>;

@@ -14,6 +14,7 @@ import type { ServerEntry } from "../../registry/types.js";
 import type { TrustScore } from "../../scanner/trust-score.js";
 import type { Finding } from "../../scanner/tier1.js";
 import type { ClientId } from "../../config/paths.js";
+import { CLEAN_PENDING_LABEL } from "../../utils/format-trust.js";
 import type { ConfigAdapter } from "../../config/adapters/index.js";
 
 // ---------------------------------------------------------------------------
@@ -58,12 +59,20 @@ function makeServerEntry(name: string, version = "1.0.0"): ServerEntry {
   } as ServerEntry;
 }
 
-function makeTrustScore(level: "safe" | "caution" | "risky", score = 75): TrustScore {
+function makeTrustScore(
+  level: "safe" | "caution" | "risky",
+  score = 75,
+  // 15 = health check NOT run, which is what `update` always produces (it scores with
+  // `healthCheckPassed: null`). Pass 30 for the ran-and-passed case.
+  healthCheck = 15,
+  // 10 = the credited external scanner found things, so the server is not clean.
+  externalScan = 10
+): TrustScore {
   return {
     score,
     maxPossible: 100,
     level,
-    breakdown: { healthCheck: 15, staticScan: 40, externalScan: 10, registryMeta: 10 },
+    breakdown: { healthCheck, staticScan: 40, externalScan, registryMeta: 10 },
   };
 }
 
@@ -519,11 +528,26 @@ describe("handleUpdate — trust score on update", () => {
     const lines: string[] = [];
     const deps = makeDeps({
       getServer: vi.fn().mockResolvedValue(makeServerEntry("io.github.test/server-a", "2.0.0")),
-      computeTrustScore: vi.fn().mockReturnValue(makeTrustScore("safe", 80)),
+      computeTrustScore: vi.fn().mockReturnValue(makeTrustScore("safe", 80, 15, 20)),
       output: (t) => lines.push(t),
     });
     await handleUpdate({ yes: true }, deps);
-    expect(lines.join("\n")).toMatch(/safe/i);
+    // NOT /safe/i. `update` scores with `healthCheckPassed: null`, so nothing it prints was
+    // ever verified by a health check — it now says so rather than borrowing `safe`.
+    expect(lines.join("\n")).toContain(CLEAN_PENDING_LABEL);
+  });
+
+  it("still says safe when the health check actually ran", async () => {
+    const lines: string[] = [];
+    const deps = makeDeps({
+      getServer: vi.fn().mockResolvedValue(makeServerEntry("io.github.test/server-a", "2.0.0")),
+      computeTrustScore: vi.fn().mockReturnValue(makeTrustScore("safe", 80, 30, 20)),
+      output: (t) => lines.push(t),
+    });
+    await handleUpdate({ yes: true }, deps);
+    const out = lines.join("\n");
+    expect(out).toMatch(/safe/i);
+    expect(out).not.toContain(CLEAN_PENDING_LABEL);
   });
 });
 

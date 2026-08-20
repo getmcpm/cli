@@ -46,7 +46,12 @@ export function levelLabel(trust: TrustScore): string {
  * as the same verdict at a glance.
  */
 export function levelColor(level: string): string {
-  switch (level) {
+  // Matched case-INSENSITIVELY, and the caller's own casing is what gets returned.
+  // `install`'s formatTrustScore passes `level.toUpperCase()`, which fell straight through
+  // to `default` and printed uncoloured — every trust level in the install flow has been
+  // monochrome. Uppercasing the RESULT instead is not an option: it would corrupt the
+  // escape sequence chalk wraps the string in.
+  switch (level.toLowerCase()) {
     case CLEAN_PENDING_LABEL:
       return chalk.cyan(level);
     case "safe":

@@ -22,7 +22,7 @@ import type { Finding } from "../scanner/tier1.js";
 import type { TrustScore, TrustScoreInput } from "../scanner/trust-score.js";
 import type { ClientId } from "../config/paths.js";
 import type { ConfigAdapter, McpServerEntry } from "../config/adapters/index.js";
-import { levelColor, extractRegistryMeta } from "../utils/format-trust.js";
+import { levelColor, levelLabel, extractRegistryMeta } from "../utils/format-trust.js";
 import { resolveInstallEntry } from "./install.js";
 import { stdoutOutput } from "../utils/output.js";
 
@@ -305,7 +305,7 @@ export async function handleUpdate(
           ? chalk.yellow(` (warning: could not update ${clientErrors.join("; ")})`)
           : "";
       output(
-        `  ${chalk.green("✓")} Updated ${chalk.white(r.name)} to ${chalk.green(r.newVersion)} [${levelColor(trustScore.level)}]${warning}`
+        `  ${chalk.green("✓")} Updated ${chalk.white(r.name)} to ${chalk.green(r.newVersion)} [${levelColor(levelLabel(trustScore))}]${warning}`
       );
     }
   }
