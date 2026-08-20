@@ -93,16 +93,36 @@ published section (it happened to #170).
   when it is not credited. Deliberately not "would it be safe if the health check had
   passed", which assumes a perfect result for the one thing nobody checked.
 
-  **Be clear about what this does and does not fix.** On the same 748 servers, 743 now read
-  `clean · not run` and 5 read `caution` — still one dominant bucket. What changed is the
-  claim, not the spread: `caution` asserted a graded safety judgement the evidence could not
-  support, while `clean · not run` says only what mcpm did — found nothing, ran nothing. It
-  is cyan rather than green for that reason, and a server whose health check really did run
-  still reads `safe`. Making the score itself discriminate needs evidence audit does not
-  currently gather; that stays open in TODOS #43.
+  **`clean` means the scan found nothing** — not merely that the measured buckets land in
+  the top band. The first cut checked only the band, and on the same 748 servers that
+  labelled 743 of them clean, 414 of which carry findings; `mcpm audit` prints a findings
+  count in the next column, so those rows contradicted themselves. Both deduction-bearing
+  buckets must be intact, external included: a caller-supplied scanner may not INFLATE
+  mcpm's verdict (#33/#35), but it is free to make it worse. Final split on live data:
+  **329 `clean · not run`, 419 `caution`** — the scale distinguishes something again,
+  where before every server got the same word.
 
-  `audit --json` keeps `level` byte-identical and gains `healthCheckRun`, so a consumer can
-  tell the two apart. Exit codes are unchanged, with a test pinning it.
+  A server whose health check really did run still reads `safe`, and the label is cyan
+  rather than green because "found nothing" is weaker than "verified". Note what that
+  demotes: an 82/100 server reaching `safe` **only** because a credited external scanner
+  supplied 20 points now reads `clean · not run`, which is the perverse incentive #43 is
+  named for.
+
+  The same relabel is applied to **`install`, `update`, `outdated` and `why`**, all of which
+  also score with `healthCheckPassed: null`. In `install` it also reaches the consent flow:
+  a server with no findings used to print "CAUTION: this server has a moderate trust score"
+  and ask for a caution-flavoured confirm on essentially every install, which is consent
+  fatigue rather than a warning. It now says what was not checked and asks plainly —
+  quieter, not silent.
+
+  `audit --json` keeps `level` byte-identical and gains `healthCheckRun`; `outdated --json`
+  keeps `latestLevel` and gains `latestLevelLabel`. Exit codes are unchanged, with a test
+  pinning it.
+
+- **`levelColor` matches case-insensitively.** `install`'s trust display passes
+  `level.toUpperCase()`, which fell through to `default` and returned the string
+  uncoloured — every trust level in the install flow has been printing monochrome.
+  Uppercasing the result instead is not an option: it corrupts the escape sequence.
 
 - **The pre-publish gate now proves the packed artifact on three Node majors, not one.**
   `publish.yml` packed the tarball, clean-installed it and smoke-ran the real binary — the

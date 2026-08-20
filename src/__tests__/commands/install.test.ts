@@ -297,6 +297,21 @@ describe("handleInstall — happy path (GREEN trust score)", () => {
 // Trust score: YELLOW caution
 // ---------------------------------------------------------------------------
 
+/**
+ * The real shape of a flawless server at install time, with no external scanner: 62/80,
+ * which is 77.5% and therefore `caution`. This is the ceiling `maxAchievableBeforeHealthCheck`
+ * reports, and it is what almost every install actually produces — so it, not the
+ * externally-credited green fixture, is the case the consent branch exists for.
+ */
+function makeFlawlessNativeTrustScore(): TrustScore {
+  return {
+    score: 62,
+    maxPossible: 80,
+    level: "caution",
+    breakdown: { healthCheck: 15, staticScan: 40, externalScan: 0, registryMeta: 7 },
+  };
+}
+
 describe("handleInstall — clean but unverified (TODOS #43)", () => {
   // Guards the consent branch. Deleting it entirely left the whole suite green, which is
   // how a prompt silently reverts to warning on every install.
@@ -327,6 +342,19 @@ describe("handleInstall — clean but unverified (TODOS #43)", () => {
     await handleInstall("io.github.test/my-server", {}, { ...deps, getAdapter: vi.fn().mockReturnValue(adapter) });
     expect(deps.confirm).toHaveBeenCalled();
     expect(adapter.addServer).not.toHaveBeenCalled();
+  });
+
+  it("the 62/80 flawless server — level `caution` — gets the quiet path, not the warning", async () => {
+    // Without this the branch could be deleted and only ONE assertion would notice, because
+    // the green fixture's level is already `safe` and falls through to the same plain
+    // confirm. This is the case that regresses loudly: raw level `caution`.
+    const deps = makeDeps({
+      computeTrustScore: vi.fn().mockReturnValue(makeFlawlessNativeTrustScore()),
+    });
+    await handleInstall("io.github.test/my-server", {}, deps);
+    const all = (deps.output as ReturnType<typeof vi.fn>).mock.calls.flat().join("\n");
+    expect(all).not.toMatch(/CAUTION:/);
+    expect(deps.confirm).toHaveBeenCalledWith("Install 'io.github.test/my-server'?");
   });
 
   it("a server WITH findings keeps the caution prompt", async () => {

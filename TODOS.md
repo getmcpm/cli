@@ -880,7 +880,14 @@ discrimination but only by executing every installed server from a read-only com
 The relabel keeps `score` / `maxPossible` / `level` byte-identical, which is what makes it
 cheap: `level` is in the lockfile enum (`stack/schema.ts:182`) and decides audit's exit
 code, so anything that touched it would have reached both. Verified on the shipped
-predicate over the same 748 servers: 743 `clean · not run`, 5 `caution`.
+predicate over the same 748 servers: **329 `clean · not run`, 419 `caution`**.
+
+**The first cut of the predicate was wrong, and a pre-existing test caught it.** It checked
+only that the measured buckets landed in the top band, which labelled 743 of 748 clean —
+414 of them carrying findings, printed beside a non-zero findings COUNT in the very next
+column. `install.test.ts`'s "displays caution message for yellow trust score" failed, and
+taking it seriously instead of editing it was what surfaced this: the test was right and
+the predicate was wrong. `clean` now requires both deduction-bearing buckets intact.
 
 **What is still open, and it is the substance of this entry.** 743 of 748 in one bucket is
 the same spread option 2 produced. The label is now honest — it claims only what mcpm did —
@@ -890,13 +897,16 @@ gather today, which is option 1 wearing different clothes. Left open deliberatel
 
 Two follow-ups this surfaced and did not fix:
 
-- **`mcpm install` has the same defect, unrelabelled — and it is not alone.** The full
-  survey of raw-`level` renderers reached by an unrun health check: `install.ts:582` warns
-  on `level === "caution"` (a flawless server triggers a caution warning on every install,
-  in the consent flow), `update.ts:308` prints `[caution]` beside every successful update,
-  `outdated.ts:188` labels the LATEST version caution, and `why.ts:246` renders it in the
-  score line. Same root; install sits in a consent flow and the others are informational,
-  so they may not all want the same treatment. Deliberately not ridden in here.
+- ~~`mcpm install` has the same defect, unrelabelled~~ **DONE.** All four raw-`level`
+  renderers reached by an unrun health check are relabelled: `install` (display AND the
+  consent branch — a flawless server no longer prints "CAUTION: moderate trust score" and
+  ask for a caution-flavoured confirm on every install), `update`, `outdated` and `why`.
+  `outdated --json` keeps `latestLevel` raw and gains `latestLevelLabel`, the same
+  add-beside-rather-than-replace shape audit used.
+- Found while doing it: `levelColor` matched case-SENSITIVELY, so `install`'s
+  `level.toUpperCase()` fell through to `default` and the install flow has been printing
+  its trust level uncoloured. Fixed by matching on `.toLowerCase()`; uppercasing the
+  RESULT would corrupt chalk's escape sequence.
 - The harness that produced these numbers dropped 52 of 800 servers on a missing field,
   because it scored raw registry JSON instead of going through the Zod schema the product
   parses with. The 748 are sound; a future sweep should parse first.
