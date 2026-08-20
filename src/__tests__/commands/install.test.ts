@@ -297,6 +297,52 @@ describe("handleInstall — happy path (GREEN trust score)", () => {
 // Trust score: YELLOW caution
 // ---------------------------------------------------------------------------
 
+describe("handleInstall — clean but unverified (TODOS #43)", () => {
+  // Guards the consent branch. Deleting it entirely left the whole suite green, which is
+  // how a prompt silently reverts to warning on every install.
+  it("does not cry CAUTION at a server with no findings", async () => {
+    const deps = makeDeps({
+      computeTrustScore: vi.fn().mockReturnValue(makeGreenTrustScore()),
+    });
+    await handleInstall("io.github.test/my-server", {}, deps);
+    const all = (deps.output as ReturnType<typeof vi.fn>).mock.calls.flat().join("\n");
+    expect(all).not.toMatch(/CAUTION:/);
+    expect(all).toMatch(/health check runs after install/i);
+  });
+
+  it("uses the plain confirm, not the caution-flavoured one", async () => {
+    const deps = makeDeps({
+      computeTrustScore: vi.fn().mockReturnValue(makeGreenTrustScore()),
+    });
+    await handleInstall("io.github.test/my-server", {}, deps);
+    expect(deps.confirm).toHaveBeenCalledWith("Install 'io.github.test/my-server'?");
+  });
+
+  it("still asks — quieter is not silent", async () => {
+    const deps = makeDeps({
+      computeTrustScore: vi.fn().mockReturnValue(makeGreenTrustScore()),
+      confirm: vi.fn().mockResolvedValue(false),
+    });
+    const adapter = makeAdapter("claude-desktop");
+    await handleInstall("io.github.test/my-server", {}, { ...deps, getAdapter: vi.fn().mockReturnValue(adapter) });
+    expect(deps.confirm).toHaveBeenCalled();
+    expect(adapter.addServer).not.toHaveBeenCalled();
+  });
+
+  it("a server WITH findings keeps the caution prompt", async () => {
+    // The discriminating half: same unrun health check, findings present.
+    const deps = makeDeps({
+      computeTrustScore: vi.fn().mockReturnValue(makeYellowTrustScore()),
+    });
+    await handleInstall("io.github.test/my-server", {}, deps);
+    const all = (deps.output as ReturnType<typeof vi.fn>).mock.calls.flat().join("\n");
+    expect(all).toMatch(/CAUTION:/);
+    expect(deps.confirm).toHaveBeenCalledWith(
+      "Install 'io.github.test/my-server'? (caution recommended)"
+    );
+  });
+});
+
 describe("handleInstall — YELLOW trust score", () => {
   it("displays caution message for yellow trust score", async () => {
     const deps = makeDeps({
