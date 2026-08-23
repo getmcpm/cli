@@ -1220,3 +1220,140 @@ cannot see this class. Method notes:
   human form ("22.22.2+, 24.15.0+ or 26+") and that copy is unguarded — deriving it would
   need to know `>=26.0.0` was written `26+`. Survivable because a failure names the file
   and the range, and the prose sits in the same sentence as the quoted copy.
+
+## #50 — no signature detects shell metacharacters / command substitution in `tool_call_args` (P2, open)
+
+**Found:** 2026-08-23, an external-corpus measurement against 10 real, publicly disclosed
+MCP CVEs (the CVE set cited in arXiv 2607.11086's ground truth).
+
+Two real, disclosed HIGH-severity command-injection CVEs are reachable purely through a
+`tools/call` argument value — content mcpm inspects on every call — and mcpm's shipped
+0.30.0 catalog does not detect either. CVE-2025-53818
+(Sunwood-ai-labs/github-kanban-mcp-server: `add_comment`'s `issue_number` argument is
+spliced unescaped into a `gh` CLI shell string via `exec()`) and CVE-2026-25546
+(Coding-Solo/godot-mcp: `create_scene`'s `projectPath` argument is spliced into a Godot
+CLI shell string via `exec()`, the identical shape) both score `pass`, no findings,
+against the real GHSA PoC payloads run through `mcpm guard inspect --json`.
+
+mcpm's only `tool_call_args` signature is `owasp-mcp-7-path-exfil-in-args`
+(sensitive-path detection, e.g. `~/.ssh/`), which is orthogonal to shell-metacharacter
+syntax. The github-kanban PoC's exfil target happens to contain `.ssh/id_rsa`, so it
+draws a WARN from that unrelated signature — reads as partial credit, isn't: strip the
+path reference and the same shell-injection payload passes clean.
+
+**What:** a structural signature on `tool_call_args` flagging shell-metacharacter /
+command-substitution syntax (`$(`, backtick, `;`, `&&`, `||`, unescaped `|`, leading/
+trailing `&`) inside a string argument value.
+
+**FP risk, unmeasured.** Legitimate arguments can contain `|` (filter syntax), `&` (URL
+query strings), `;` in some DSLs — a blanket rule will FP. Needs the zero-FP benign-corpus
+discipline every other signature went through; likely wants to anchor on argument fields
+whose schema/description implies a filesystem path or single-token identifier, not a
+blanket scan of every string argument.
+
+## #51 — no signature detects query-injection control syntax in `tool_call_args` (P2, open)
+
+**Found:** 2026-08-23, same external-corpus measurement as #50.
+
+CVE-2026-33980 (pab1it0/adx-mcp-server: `get_table_schema` / `sample_table_data` /
+`get_table_details`) f-string-interpolates a `table_name` argument directly into a KQL
+query with no escaping. The advisory's own PoC
+(`sensitive_data | project Secret, Password | take 100 //`) uses pipe re-scoping plus a
+`//` comment to exfiltrate columns; a sibling PoC uses a newline + `.drop table` to
+destructively drop tables. These three tools are marketed as "safe" read-only metadata
+inspectors (unlike the server's raw `execute_query` tool), so an MCP client may
+auto-approve them without confirmation — the injection bypasses the client's trust
+boundary entirely. Verified against shipped 0.30.0: the real PoC payload scores `pass`,
+no findings.
+
+**What:** a signature (plausibly a generalization of #50) recognizing query-language
+control syntax — pipe operators, comment tokens (`//`, `--`), statement-separator /
+management-command prefixes (`.drop`, `;DROP`) — inside an argument whose tool
+schema/description implies a bare identifier (a table/column/resource name), not a
+query fragment.
+
+**FP risk.** Identifier arguments can legitimately contain `|` or `.` in some domains
+(namespaced identifiers). Same benign-corpus discipline as #50.
+
+## #52 — no signature detects CLI-flag / argument injection via delimiter-split arguments (P2, open)
+
+**Found:** 2026-08-23, same external-corpus measurement as #50.
+
+CVE-2026-39884 (Flux159/mcp-server-kubernetes: `port_forward`) builds its `kubectl`
+invocation by string-concatenating `resourceName`/`namespace`/etc. into one command
+string, then does a naive `command.split(" ")` before `spawn()` — every OTHER tool in
+that same codebase uses the safe array-based `execFileSync(argsArray)` pattern, so this
+is a single-tool regression, not a design flaw of the server as a whole. Splitting on
+whitespace lets an attacker embed a second CLI flag inside a string argument that should
+be a bare resource identifier; the advisory's PoC is `resourceName: "my-database
+--address=0.0.0.0"`, which turns a normally localhost-only port-forward into one bound
+on all interfaces, exposing an internal database to the network (CVSS 8.3 HIGH).
+Verified against shipped 0.30.0: the real PoC payload scores `pass`, no findings.
+
+**What:** a signature flagging a `--`-prefixed (or platform-appropriate single-dash)
+token embedded inside a tool argument whose schema/description implies a plain resource
+name or identifier — i.e. the argument contains what looks like a second, hidden CLI
+flag.
+
+**FP risk.** Some tools legitimately accept flag-shaped strings as pass-through data
+(e.g. relaying user-authored config text). Scope to arguments described as
+identifiers/names rather than free-text/config fields to avoid FPs.
+
+## #53 — `credential-egress-in-response` is prefix-anchored and misses generic Bearer-token disclosure (P2, open)
+
+**Found:** 2026-08-23, same external-corpus measurement as #50.
+
+CVE-2026-25650 (smn2gnt/MCP-Salesforce: `get_record`) passes a caller-supplied
+`object_name` argument into `getattr(sf_client.sf, object_name)` with no type check;
+`object_name="headers"` returns the wrapped Salesforce client's live `Authorization:
+Bearer <session token>` dict entry verbatim in the tool's own response text — a real
+CVSS 7.5 HIGH OAuth bearer-token disclosure. mcpm's shipped `credential-egress-in-response`
+signature (`src/scanner/patterns.ts`, one of 10 catalog entries as of 0.30.0) is
+deliberately **structural and prefix-anchored** (PEM keys, `gh[pousr]_`, `sk-`/`sk-ant-`/
+`sk-proj-`, `xox[baprs]-`, `npm_`, `AIza`, `AKIA`) and does not match a bare
+`"Bearer <token>"` string — generic Bearer-prefix matching was explicitly deferred as a
+"suspect tier" candidate in the F10 decisions log, because the 2026-07-12 registry sweep
+found it FPs hard on prose (164 CRITICAL false positives on the literal English phrase
+"Bearer token" in documentation). This CVE is the mirror image of that finding: the same
+conservative choice that closed one FP class now causes a real miss on the other side.
+Verified against shipped 0.30.0: the real PoC response payload scores `pass`, no
+findings.
+
+**What:** the deferred "generic Bearer / bare JWT / 40-char base64 = suspect tier" work
+(already named as deferred in the 2026-07-12 F10 decisions log), now motivated by a real
+CVE rather than a hypothetical. A lower-confidence WARN tier gated on structural shape
+(a `Bearer ` prefix followed by a long high-entropy token, not the bare phrase "Bearer
+token") should clear the FP class this repo already measured while catching this shape.
+
+**FP risk.** This is exactly the class that produced the 164-FP "Bearer token" incident —
+do not ship any new rule here without re-running that same benign corpus (prose/docs
+containing the literal phrase "Bearer token") against it.
+
+## #54 — no signature detects HTML/script-tag injection or renderer-targeted code-execution payloads in `tool_response` (P2, open)
+
+**Found:** 2026-08-23, same external-corpus measurement as #50.
+
+Two real, disclosed CVEs in the same MCP client (nanbingxyz/5ire) reach RCE through
+content a malicious/compromised MCP server can place in a `tools/call` response:
+CVE-2025-68669 (`securityLevel: 'loose'` in the client's Mermaid renderer permits
+`<img src=x onerror=...>` inside a diagram node label, whose `onerror` handler calls a
+privileged `electron.mcp.activate()` IPC bridge) and CVE-2026-22793 (a separate ECharts
+markdown-fence plugin `eval`s fenced content via `new Function()`, reaching the same
+privileged bridge). Both are client-render-side bugs, but the attack payload is ordinary
+text embedded in a tool response — exactly the carrier mcpm inspects. Verified against
+shipped 0.30.0: both real GHSA PoC payloads score `pass`, no findings — the 10-signature
+catalog has nothing that scans `tool_response` content for inline event-handler
+attributes (`onerror=`, `onload=`), raw `<script>`/`<img onerror>` tags, or
+markdown-fence-embedded JS-eval idioms (`new Function(`, a self-invoking
+`(function(){...})()` inside a fenced code block).
+
+**What:** a signature family for HTML/script-injection-shaped content in `tool_response`
+text — inline event-handler attributes, `<script>` tags, and JS-eval idioms embedded in
+fenced/code-block-looking text.
+
+**FP risk.** Tool responses legitimately contain code snippets that mention `onerror=`
+or `new Function` in a documentation/example context — mirrors the "system prompt
+access" FP class from the 2026-07-12 sweep, which flagged the word "injection" in benign
+prompt-tooling descriptions. Likely needs to require the payload sit inside an ACTIVE
+rendering context (an HTML tag with an event-handler attribute set to a call expression,
+not a bare keyword match) rather than a substring scan.
