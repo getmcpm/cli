@@ -295,6 +295,62 @@ servers:
     );
   });
 
+  // TODOS #41: the drop check must compare dropCheckNativeScore, not
+  // nativeTrustScore — the latter would falsely read this as a drop.
+  it("does not false-positive a drop from an incidental external-only registryMeta collateral (#41)", async () => {
+    const stackWithDrop = `
+version: "1"
+policy:
+  blockOnScoreDrop: true
+servers:
+  io.github.test/server-a:
+    version: "^1.0.0"
+`;
+    // Locked baseline: no scanner, native evidence 15 + 40 + 10 = 65/80 = 81%.
+    const lockWithBaseline = `
+lockfileVersion: 1
+lockedAt: "2026-04-05T10:00:00Z"
+servers:
+  io.github.test/server-a:
+    version: "1.2.0"
+    registryType: npm
+    identifier: "@test/server-a"
+    trust:
+      score: 65
+      maxPossible: 80
+      level: safe
+      assessedAt: "2026-04-05T10:00:00Z"
+`;
+    const stackPath = await writeStackAndLock(stackWithDrop, lockWithBaseline);
+
+    // Current: mcpm's own evidence is UNCHANGED (health 15 + static 40 = 55),
+    // but an external-only critical incidentally fired THIS run, collaterally
+    // zeroing the displayed registryMeta bucket. nativeRegistryMeta stays 10 —
+    // nothing NATIVE caused the cap.
+    const currentWithIncidentalExternalCollateral: TrustScore = {
+      score: 55, // 15 + 40 + 0 (externalScan, critical) + 0 (registryMeta, collateral)
+      maxPossible: 100,
+      level: "caution",
+      breakdown: {
+        healthCheck: 15,
+        staticScan: 40,
+        externalScan: 0,
+        registryMeta: 0,
+        nativeRegistryMeta: 10,
+      },
+    };
+    const deps = makeDeps({
+      computeTrustScore: vi.fn().mockReturnValue(currentWithIncidentalExternalCollateral),
+    });
+
+    // nativeTrustScore(current) = 55/80 = 69% < locked 81% would falsely block.
+    // dropCheckNativeScore(current) = 65/80 = 81% == locked 81%, so it proceeds.
+    await handleUp({ stackFile: stackPath }, deps);
+
+    const adapter = (deps.getAdapter as ReturnType<typeof vi.fn>).mock.results[0].value;
+    expect(adapter.addServer).toHaveBeenCalledTimes(1);
+  });
+
   it("prints plan without writing in --dry-run mode", async () => {
     const stackPath = await writeStackAndLock(basicStack, basicLock);
     const adapter = makeAdapter();

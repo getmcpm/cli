@@ -11,7 +11,11 @@ import type { Policy, TrustSnapshot } from "./schema.js";
 // Numeric bucket weight only, never a type or a scoring call: a lockfile's recorded
 // `externalScanCredit` is this bucket's value at lock time, so validating it against a
 // second copy of `20` here would silently stop matching if the bucket is re-weighted.
-import { EXTERNAL_SCAN_MAX, maxAchievableBeforeHealthCheck } from "../scanner/trust-score.js";
+import {
+  EXTERNAL_SCAN_MAX,
+  REGISTRY_META_MAX,
+  maxAchievableBeforeHealthCheck,
+} from "../scanner/trust-score.js";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -29,12 +33,20 @@ export interface PolicyCheckInput {
   readonly currentScore: number;
   readonly currentMaxPossible: number;
   /**
-   * The current score's mcpm-NATIVE figures (`nativeTrustScore(trust)`), used by
+   * The current score's mcpm-NATIVE figures for the DROP check, used by
    * `blockOnScoreDrop` INSTEAD of the raw score (TODOS #35) — a caller-supplied
    * external scanner must never be able to mask a native drop. `minTrustScore`
    * deliberately keeps using the raw figure (a human threshold on the user's own
    * machine — the #33 carve-out), so these are unused when only that gate is active.
    * maxPossible is the native denominator (80).
+   *
+   * TODOS #41: this must be `dropCheckNativeScore(trust)`, NOT `nativeTrustScore
+   * (trust)` — the latter is right for the #33 hard floor (a single point-in-time
+   * check) but lets an external-only critical/high finding's `registryMeta` cap
+   * leak into a figure this gate then compares ACROSS TWO DIFFERENT POINTS IN
+   * TIME, which the same attacker can trigger independently at lock time and at
+   * check time. up.ts computes both `nativeTrust` (for its own floor check) and a
+   * separate `dropCheckNative` (for this input) from the same trust score.
    *
    * REQUIRED, and the drop check ALSO throws when they are missing. That is not
    * redundant: the type is erased at runtime and this function is exported through the
@@ -292,6 +304,41 @@ function isUsableCredit(credit: number, locked: TrustSnapshot, nativeMax: number
 }
 
 /**
+ * Is a lockfile's recorded `dropCheckNativeScore` a value this scorer could have
+ * written for THIS `score` (TODOS #41)? Same threat model and rationale as
+ * `isUsableCredit` above: no integrity sidecar, so validation lives here rather
+ * than as a schema bound that would brick `safeParse` on an out-of-range value.
+ *
+ * Unlike `externalScanCredit`, this field is not a share carved out of `score` —
+ * `dropCheckNativeScore` can legitimately EXCEED `score` (an external-only
+ * critical/high can zero `registryMeta`, in `score`, without touching
+ * `nativeRegistryMeta`, which feeds this field) — so `<= locked.score` would
+ * reject the exact values TODOS #41 introduces this field to record. The sound
+ * bound instead comes from `dropCheckNativeScore - score`'s provable range:
+ * that difference equals `nativeRegistryMeta - externalScan - registryMeta`
+ * (see `dropCheckNativeScore`'s derivation in trust-score.ts), and each term is
+ * bounded by the scorer's own bucket ceilings — `nativeRegistryMeta` and
+ * `registryMeta` each in `[0, REGISTRY_META_MAX]`, `externalScan` in
+ * `[0, EXTERNAL_SCAN_MAX]` — giving `[-(EXTERNAL_SCAN_MAX + REGISTRY_META_MAX),
+ * REGISTRY_META_MAX]`. Deliberately a LOOSE bound (it does not exploit the
+ * correlation between `nativeRegistryMeta` and `registryMeta`, which would tighten
+ * the lower end): a loose sound bound can only ever accept a legitimate value, a
+ * tight one risks a subtle proof error rejecting one.
+ *
+ * Without this check, a lock reading `{score: 65, dropCheckNativeScore: 0}` — a
+ * `score` that looks entirely ordinary — was reported as an exact locked native
+ * baseline of 0%, permanently and silently disarming `blockOnScoreDrop` (unlike
+ * a direct `score: 0` edit, which is conspicuous in every other display of that
+ * server). Found by adversarial review, reproduced before this fix landed.
+ */
+function isUsableDropCheckScore(value: number, locked: TrustSnapshot): boolean {
+  return (
+    value >= locked.score - (EXTERNAL_SCAN_MAX + REGISTRY_META_MAX) &&
+    value <= locked.score + REGISTRY_META_MAX
+  );
+}
+
+/**
  * Recover a locked snapshot's mcpm-NATIVE figure (score over the native
  * denominator) for the #35 drop check. ALWAYS returns a figure — when the exact
  * one is unrecoverable it returns a conservative UPPER BOUND.
@@ -299,8 +346,18 @@ function isUsableCredit(credit: number, locked: TrustSnapshot, nativeMax: number
  * `nativeMax` is the current side's native denominator (80) — native scoring uses
  * one universal denominator, so the same value applies to the locked side.
  *
+ * - `dropCheckNativeScore` recorded AND usable (`isUsableDropCheckScore`; any lock
+ *   a post-#41 mcpm wrote): use it directly. Exact, and the ONLY branch immune to
+ *   the #41 residual bypass — `score - credit` alone still carries whatever
+ *   `registryMeta` cap an external-only critical/high triggered AT LOCK TIME,
+ *   which this field does not. An unusable value (out of the provable range
+ *   relative to `score`) degrades to `bounded(locked.score, "out-of-range")`,
+ *   same as an unusable credit — never trusted outright, since it is exactly as
+ *   editable as `externalScanCredit` and can disarm the drop check just as
+ *   effectively if taken on faith.
  * - `externalScanCredit` recorded AND usable (any lock this fix's mcpm wrote): native
- *   score is `score - credit`. Exact.
+ *   score is `score - credit`. Exact for #35's purposes, but re-exposed to #41's
+ *   narrower bypass until the next `mcpm lock`.
  * - No credit field but `maxPossible === nativeMax`: no scanner was credited at lock
  *   time, so the locked score is already native. Exact.
  * - No credit field and `maxPossible !== nativeMax` (a scanner was credited pre-#35):
@@ -343,6 +400,11 @@ function recoverLockedNative(
     };
   };
 
+  if (locked.dropCheckNativeScore !== undefined) {
+    return isUsableDropCheckScore(locked.dropCheckNativeScore, locked)
+      ? bounded(locked.dropCheckNativeScore, "exact")
+      : bounded(locked.score, "out-of-range");
+  }
   if (locked.externalScanCredit !== undefined) {
     return isUsableCredit(locked.externalScanCredit, locked, nativeMax)
       ? bounded(locked.score - locked.externalScanCredit, "exact")

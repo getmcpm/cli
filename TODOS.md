@@ -699,7 +699,7 @@ since the raw leaf carries no tag characters and the presence floor never fires.
 Fix the comment at minimum; closing the gap means deciding whether the texty gate
 should count tag codepoints as printable.
 
-### 41. `registryMeta` critical/high cap leaks external findings into the native score
+### 41. ~~`registryMeta` critical/high cap leaks external findings into the native score~~ DONE (unreleased)
 
 Found by the round-2 adversarial review of #35 (LOW, confirmed by execution).
 The #35 fix removes the external-scanner CREDIT from both sides of the drop check,
@@ -716,11 +716,98 @@ genuine native drop of up to that size. Narrow, and strictly smaller than the
 20-point credit window #35 closed — but it is the same class, so it should not be
 described as fully closed.
 
-Fix: make the native view independent of external findings in **both** buckets,
-e.g. compute the `registryMeta` cap from non-`source:"external"` findings for the
-native figure and expose it (`breakdown.nativeRegistryMeta`). Deferred because it
-changes `nativeTrustScore`, which the MCP hard trust floor (#33) also consumes, so
-it needs that path re-verified rather than a local patch.
+**The entry's own "Fix" framing was wrong about what needed to change.**
+It proposed exposing `breakdown.nativeRegistryMeta` and said the deferral was
+because that "changes `nativeTrustScore`, which the MCP hard trust floor (#33)
+also consumes." Tracing the actual mechanism found `nativeTrustScore` must NOT
+change: a pre-existing, deliberately-worded test
+(`nativeTrustScore — … "a scanner reporting a critical still drags the floor
+figure down"`) pins that letting an external critical drag the FLOOR figure down
+is correct for a single point-in-time check — `nativeTrustScore` can push a
+server DOWN through #33's floor, never UP, and that is a feature, not this bug.
+
+**The real mechanism is narrower, and lives entirely in `blockOnScoreDrop`
+(#35), not in the #33 floor.** `nativeTrustScore` compared once, at one point in
+time, is fine — the registryMeta collateral just reflects real evidence AT THAT
+MOMENT. The bug only appears when the SAME shaped figure is compared ACROSS TWO
+DIFFERENT MOMENTS (a locked snapshot vs. a live re-score): whether an
+external-only finding zeroed `registryMeta` at each moment depends on whatever
+`MCPM_EXTERNAL_SCANNER` happened to report THEN, and the same attacker controls
+that independently at lock time and at check time. That divergence — not
+`nativeTrustScore` itself — is what needed a fix.
+
+**Shipped:** a NEW, separate figure (`dropCheckNativeScore` in
+`trust-score.ts`), used ONLY by `blockOnScoreDrop`, alongside the unchanged
+`nativeTrustScore` used ONLY by the #33 floor.
+- `breakdown.nativeRegistryMeta` — the same critical/high cap as `registryMeta`,
+  but evaluated over `staticFindings` (mcpm's own evidence) instead of every
+  finding. Deliberately reuses `staticFindings` rather than a fresh
+  `f.source !== "external"` filter: `staticFindings` already treats an orphan
+  external finding (present with no credited scanner — "should not happen in
+  normal flow" but handled defensively) as native so it still deducts from
+  `staticScan`; a fresh filter would have excluded that same finding from the
+  registryMeta cap, capping the two buckets on different evidence for the same
+  input. Found and fixed during review, before merge.
+- `dropCheckNativeScore(trust)` — `healthCheck + staticScan + nativeRegistryMeta`,
+  computed as `score` minus the two things that make it not-native (the external
+  bucket's credit, and whatever collateral an external-only finding added to
+  `registryMeta`'s cap), the same "total minus the excluded part" shape
+  `nativeTrustScore`'s `score - externalScan` already uses — not a hardcoded
+  three-term sum, so a future native bucket added to `score` is picked up
+  automatically instead of silently omitted.
+- `TrustSnapshot.dropCheckNativeScore` (bare `.optional()`, same back-compat
+  shape as `externalScanCredit`) — `lock.ts` records
+  `dropCheckNativeScore(trustScore).score` at lock time; `recoverLockedNative`
+  uses it directly when present, ahead of the `externalScanCredit`
+  reconstruction, which cannot exclude the collateral because it was never
+  recorded and cannot be recovered from `score` alone.
+- `up.ts` now computes `dropCheckNative` separately from `nativeTrust` and feeds
+  it — not `nativeTrust` — into `checkTrustPolicy`'s `currentNativeScore`. The
+  #33 floor check just above it keeps using `nativeTrust`, unchanged.
+
+**Adversarial review (2 independent angles) caught a validation gap the first
+cut shipped without.** `recoverLockedNative`'s new `dropCheckNativeScore` branch
+trusted the field outright, clamped only to `[0, nativeMax]` — unlike the
+sibling `externalScanCredit` branch, which additionally runs `isUsableCredit`
+(a cross-check against `locked.score`). Reproduced: a lock reading
+`{score: 65, maxPossible: 80, externalScanCredit: 0, dropCheckNativeScore: 0}`
+looks entirely ordinary in every other field, but reported an exact 0% locked
+baseline — permanently and silently disarming `blockOnScoreDrop`, and unlike
+editing `score` directly (visible in every display of that server), leaving
+nothing to notice. Fixed with `isUsableDropCheckScore`: the field can
+legitimately EXCEED `score` by up to `REGISTRY_META_MAX` (an external-only
+critical can zero `registryMeta` without touching `nativeRegistryMeta`), so
+`<= score` — the shape of `isUsableCredit`'s own check — would have rejected the
+exact values this fix exists to record. The sound bound instead comes from the
+provable range of `nativeRegistryMeta − externalScan − registryMeta` given the
+scorer's own bucket ceilings: `score − 30 ≤ dropCheckNativeScore ≤ score + 10`.
+Deliberately loose rather than tight (it does not exploit the correlation
+between `nativeRegistryMeta` and `registryMeta`, which would tighten the lower
+end) — a loose sound bound can only accept a legitimate value; a tight one
+risks a proof error rejecting one.
+
+**Residual, same shape as #35's own launch, not fully closed here:** a lock
+written BEFORE this fix (`dropCheckNativeScore` absent, `externalScanCredit`
+present) still recovers via `score - credit`, which still carries whatever
+`registryMeta` collateral applied AT THAT LOCK TIME — re-exposed to exactly the
+bypass this entry describes until the next `mcpm lock`. Closes prospectively,
+same as `externalScanCredit` itself did for #35; `up`'s output does not
+proactively flag a lock in this shape, matching the precedent rather than
+extending it.
+
+**Note for whoever reads #44 next to this:** this fix does NOT make #44's
+`legacy-bound` branch newly unreachable. `externalScanCredit` has been written
+unconditionally by `lock.ts` since #35 and is checked ahead of `legacy-bound` in
+`recoverLockedNative`'s priority order — so `legacy-bound` was ALREADY
+unreachable for any post-#35 lock, independent of this fix. The new
+`dropCheckNativeScore` branch sits above `externalScanCredit`, not above
+`legacy-bound`, and changes nothing about #44's population (pre-#35 locks) or
+remedy. Caught by adversarial review before it was written into this entry as a
+tempting-but-wrong causal claim.
+
+All new/changed logic mutation-verified (deleting `isUsableDropCheckScore`'s
+call, or reverting `nativeRegistryMetaScore` to the unconditional filter,
+each fails a dedicated test). 2481 tests green.
 
 ### 42. ~~`audit --fix --min-trust` above the achievable ceiling wipes a clean stack~~ DONE (v0.29.0)
 **Priority:** P1 — live data-loss at HEAD, with or without an external scanner.

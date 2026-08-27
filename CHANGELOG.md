@@ -71,6 +71,34 @@ published section (it happened to #170).
 
   Closes TODOS #49.
 
+### Security
+
+- **`policy.blockOnScoreDrop` no longer trusts a native-evidence figure that could
+  differ by which external scanner happened to be configured at lock time vs. check
+  time.** `nativeTrustScore` (the #33 hard-floor figure) deliberately lets an
+  external-only critical/high finding zero the `registryMeta` bucket — correct for a
+  single point-in-time floor check. But the drop check compares that shape of figure
+  across TWO different points in time, and whether the cap fired at each point depends
+  on `MCPM_EXTERNAL_SCANNER`, which the same attacker controls independently at both.
+  Reproduced: a real scanner reporting a critical at lock time zeroed `registryMeta`,
+  lowering the locked baseline; a later fake clean scanner left it un-zeroed, masking a
+  genuine native regression of up to 10 points. A new `dropCheckNativeScore` figure —
+  distinct from, and used only in place of, `nativeTrustScore` for this ONE gate — is
+  immune to it, and a new `TrustSnapshot.dropCheckNativeScore` lockfile field carries it
+  forward from lock time.
+
+  Found by adversarial review, before merge: the first cut trusted the new lockfile
+  field outright, with no validation analogous to the existing `externalScanCredit`
+  check — a lock edit reading an otherwise-ordinary `score` alongside
+  `dropCheckNativeScore: 0` silently and permanently disarmed the drop check, less
+  detectably than editing `score` directly (which is visible everywhere else the
+  server is shown). Closed with a bound derived from the scorer's own bucket ceilings.
+
+  Residual, same shape as #35's own launch: a lock written BEFORE this fix stays
+  exposed to the bypass until the next `mcpm lock`.
+
+  Closes TODOS #41.
+
 ### Changed
 
 - **`mcpm audit` no longer calls every server `caution`.** A server that cleared every check

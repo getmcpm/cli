@@ -24,7 +24,7 @@ import type { ConfigAdapter, McpServerEntry } from "../config/adapters/index.js"
 import type { ServerEntry } from "../registry/types.js";
 import type { Finding } from "../scanner/tier1.js";
 import type { TrustScore, TrustScoreInput } from "../scanner/trust-score.js";
-import { nativeTrustScore } from "../scanner/trust-score.js";
+import { nativeTrustScore, dropCheckNativeScore } from "../scanner/trust-score.js";
 import type {
   StackFile,
   LockFile,
@@ -629,14 +629,24 @@ async function processServer(input: ProcessInput): Promise<ServerResult> {
   }
 
   // Policy check
+  //
+  // TODOS #41: deliberately NOT `nativeTrust` (computed above for the floor
+  // check). `nativeTrustScore` lets an external-only critical/high finding's
+  // `registryMeta` cap drag the figure down — correct for a single point-in-time
+  // floor, but the drop check below compares that figure across two DIFFERENT
+  // points in time (lock vs. now), and whether that cap fired at each point
+  // depends on whatever MCPM_EXTERNAL_SCANNER happened to report THEN — the same
+  // attacker controls that independently at both points. `dropCheckNativeScore`
+  // is immune to it.
+  const dropCheckNative = dropCheckNativeScore(trustScore);
   const policyResult = checkTrustPolicy({
     serverName: name,
     currentScore: trustScore.score,
     currentMaxPossible: trustScore.maxPossible,
     // TODOS #35: the blockOnScoreDrop tripwire compares native evidence, so a fake
-    // MCPM_EXTERNAL_SCANNER cannot mask a drop. `nativeTrust` is computed above.
-    currentNativeScore: nativeTrust.score,
-    currentNativeMaxPossible: nativeTrust.maxPossible,
+    // MCPM_EXTERNAL_SCANNER cannot mask a drop.
+    currentNativeScore: dropCheckNative.score,
+    currentNativeMaxPossible: dropCheckNative.maxPossible,
     lockedSnapshot: locked.trust,
     policy,
     releaseAge: {
