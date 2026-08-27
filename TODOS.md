@@ -1413,7 +1413,7 @@ discipline every other signature went through; likely wants to anchor on argumen
 whose schema/description implies a filesystem path or single-token identifier, not a
 blanket scan of every string argument.
 
-## #51 — no signature detects query-injection control syntax in `tool_call_args` (P2, open)
+## #51 — ~~no signature detects query-injection control syntax in `tool_call_args`~~ DONE (unreleased)
 
 **Found:** 2026-08-23, same external-corpus measurement as #50.
 
@@ -1428,14 +1428,43 @@ auto-approve them without confirmation — the injection bypasses the client's t
 boundary entirely. Verified against shipped 0.30.0: the real PoC payload scores `pass`,
 no findings.
 
-**What:** a signature (plausibly a generalization of #50) recognizing query-language
-control syntax — pipe operators, comment tokens (`//`, `--`), statement-separator /
-management-command prefixes (`.drop`, `;DROP`) — inside an argument whose tool
-schema/description implies a bare identifier (a table/column/resource name), not a
-query fragment.
+**Shipped:** a new catalog entry `query-control-syntax-in-identifier-arg` (15th entry,
+`MCP-QUERY-INJECTION`, `critical` → block, `tool_call_args`), emitted by a bespoke
+structural detector (`src/guard/query-control-args.ts`) — the same key-first design as
+#50: `tool_call_args` carries no schema context at call time, so a blanket value-only
+regex would FP on any query-builder tool whose `query`/`filter` argument is MEANT to
+carry this syntax. Only tests the VALUE when the key canonicalizes to a schema/resource
+noun (table/column/field/collection/database/schema/index/view/dataset, matched anywhere
+in the canonicalized token list — not just the last token, since the CVE's own key,
+`table_name`, tokenizes to `["table","name"]`) or a scalar-id suffix (id/identifier/uuid/
+slug). `name` alone stays excluded, same reasoning as #50. Both PoC shapes block: the
+pipe+comment PoC via a pipe-followed-by-query-verb pattern, the `.drop table` PoC via a
+literal `.drop` management-command pattern. **The generalization-of-#50 framing held**:
+the walker (`tool-call-args-walk.ts`) was extracted out of `shell-metachar-args.ts` and
+is now shared by both detectors verbatim, and `canonicalizeKey` (already shared since
+#50) needed no changes.
 
-**FP risk.** Identifier arguments can legitimately contain `|` or `.` in some domains
-(namespaced identifiers). Same benign-corpus discipline as #50.
+**A pre-merge adversarial review (2 parallel finder angles) independently converged on
+the same real bug, fixed before merge:** the naive port of #50's design used bare `--`
+and `//` line-comment patterns with no adjacent-context requirement — unlike the pipe
+and `.drop` patterns, which already required a following verb/keyword per the entry's own
+documented FP-risk reasoning. Both angles reproduced the same failure: a `database`/
+`schema` key (exactly the keys this detector scopes to) holding an ordinary connection-
+string URI (`mongodb://localhost:27017/mydb`, `https://acct.blob.core.windows.net/...`)
+or a version-suffixed name (`analytics--eu-west`) false-blocked, since a URI scheme's
+`://` and a mid-token `--` both contain the bare pattern with no query-injection intent.
+**Fixed by anchoring both comment patterns to whitespace-or-start immediately before the
+marker** (`/(?:^|\s)--/`, `/(?:^|\s)\/\//`) — a real trailing comment in an injected query
+fragment always follows a query token with a space (the CVE PoC's own `"... | take 100
+//"`), so this scoping clears both FP classes without weakening detection of the
+motivating CVE, which the pipe+verb pattern still independently catches regardless.
+Residual, accepted risk: a computed-expression value like `column_name: "price * 1.1 --
+includes VAT"` still matches (space before `--`) — narrower than the CVE shape needs,
+left open rather than special-cased further.
+
+**Known gap, not fixed (TODOS #55, same class as #50):** this detector doesn't decode-
+and-rescan TAG-block/base64-concealed values either — it's a second instance of the same
+bespoke-key+value-detector architecture gap, not a new one.
 
 ## #52 — no signature detects CLI-flag / argument injection via delimiter-split arguments (P2, open)
 
@@ -1530,13 +1559,16 @@ leaf through **two decode-and-rescan passes** before giving up: `inspectTagEncod
 (Unicode TAG-block "ASCII smuggling", TODOS #31) and `inspectDecoded` (F10
 Detector-B, bounded base64/base64url). A **bespoke structural detector** that walks a
 frame's own KEYS+VALUES directly instead of going through `stringLeaves`/the
-signature/pattern list — `detectExfilParams` (F5) and now `detectShellMetacharArgs`
-(#50) — never passes its VALUES through either decode pass, because those passes are
-wired into `inspectMessage`'s per-leaf loop, not into a standalone value check. For
-`shell-metachar-args.ts` specifically: it calls `normalizeForMatch(value)` alone, which
-**strips** TAG-block characters (`PATTERN_BREAKERS`) rather than decoding them — the
-exact "erased rather than revealed" failure mode TODOS #31 already documented for the
-regex catalog, reproduced fresh in a detector that never plugs into that fix.
+signature/pattern list — `detectExfilParams` (F5), `detectShellMetacharArgs` (#50), and
+now `detectQueryControlArgs` (#51) — never passes its VALUES through either decode
+pass, because those passes are wired into `inspectMessage`'s per-leaf loop, not into a
+standalone value check. Both `shell-metachar-args.ts` and `query-control-args.ts` call
+`normalizeForMatch(value)` alone, which **strips** TAG-block characters
+(`PATTERN_BREAKERS`) rather than decoding them — the exact "erased rather than
+revealed" failure mode TODOS #31 already documented for the regex catalog, reproduced
+twice now in detectors that never plug into that fix. Sharing a walker (#51 extracted
+`tool-call-args-walk.ts` out of #50) does not close this — the gap is in the per-value
+match call each detector makes independently, not in how either reaches a leaf.
 
 **What:** extend `inspectTagEncoded`/`inspectDecoded`'s decode step (or a shared
 primitive extracted from them) so a bespoke key+value detector can rescan a

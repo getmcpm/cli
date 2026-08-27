@@ -1,0 +1,18 @@
+{
+  "name": "Destructive .drop table via a newline in a table_name argument (CVE-2026-33980 sibling shape)",
+  "category": "MCP-QUERY-INJECTION",
+  "expected_action": "block",
+  "expected_signature_id": "query-control-syntax-in-identifier-arg",
+  "notes": "TODOS #51. The sibling PoC for CVE-2026-33980: a newline embeds a KQL `.drop table` management command after the intended table name, destructively dropping a table through sample_table_data — a tool marketed as a safe read-only metadata inspector.",
+  "message": {
+    "jsonrpc": "2.0",
+    "id": 52,
+    "method": "tools/call",
+    "params": {
+      "name": "sample_table_data",
+      "arguments": {
+        "table_name": "mytable\n.drop table dropped_table"
+      }
+    }
+  }
+}
