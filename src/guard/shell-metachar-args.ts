@@ -45,15 +45,10 @@ import type { JSONRPCMessage } from "@modelcontextprotocol/sdk/types.js";
 import type { InspectFinding, InspectResult } from "./types.js";
 import { normalizeForMatch, truncate, worstAction } from "./patterns.js";
 import { canonicalizeKey } from "./key-canon.js";
+import { stringArgLeaves, toolCallArguments } from "./tool-call-args-walk.js";
 
 export const SHELL_METACHAR_ARG_SIGNATURE_ID = "shell-metachar-in-identifier-arg";
 
-// Top-level + one nested object level of OBJECT nesting — matches exfilKeys'
-// depth cap. Arrays are walked transparently (see identifierArgLeaves) and do
-// not themselves consume this budget, so a batch-style `{ items: [{...}] }`
-// argument is still covered. `tools/call` arguments are small, so no
-// leaf-walk node budget (unlike stringLeaves' MAX_LEAF_WALK_NODES) is needed.
-const MAX_DEPTH = 1;
 const PASS: InspectResult = { action: "pass", findings: [] };
 
 /**
@@ -129,53 +124,18 @@ function makeFinding(toolName: string, key: string, value: string): InspectFindi
 }
 
 /**
- * Yield every {key, value} pair (bounded to top-level + one nested OBJECT
- * level) whose KEY is identifier-like and whose VALUE is a string.
- *
- * Arrays are walked TRANSPARENTLY — recursing into an array element does not
- * increment `depth` — so a batch-style argument shape like
- * `{ items: [{issue_number: "..."}] }` is still covered; only descending into
- * a nested OBJECT consumes the depth budget. (review: TODOS #50 — an earlier
- * version incremented depth on array entry too, which combined with the
- * depth cap to make every array element's own keys unreachable: the array
- * itself was recursed into, but the very next call immediately hit the
- * Array.isArray guard and returned before any element was inspected.)
- *
- * `Object.hasOwn` guards inherited keys.
- */
-function* identifierArgLeaves(node: unknown, depth: number): Iterable<{ key: string; value: string }> {
-  if (node === null || typeof node !== "object") return;
-  if (Array.isArray(node)) {
-    for (const item of node) yield* identifierArgLeaves(item, depth);
-    return;
-  }
-  if (depth > MAX_DEPTH) return;
-  for (const key of Object.keys(node)) {
-    if (!Object.hasOwn(node, key)) continue;
-    const value = (node as Record<string, unknown>)[key];
-    if (typeof value === "string") {
-      if (isIdentifierLikeArgKey(key)) yield { key, value };
-    } else if (value !== null && typeof value === "object") {
-      yield* identifierArgLeaves(value, depth + 1);
-    }
-  }
-}
-
-/**
  * Inspect a `tools/call` request for shell-metacharacter syntax in an
  * identifier-shaped argument. A no-op (pass) on every other frame shape.
  */
 export function detectShellMetacharArgs(msg: JSONRPCMessage): InspectResult {
-  if (!("method" in msg) || (msg as { method?: unknown }).method !== "tools/call") return PASS;
-  if (!("params" in msg)) return PASS;
-  const params = (msg as { params?: { name?: unknown; arguments?: unknown } }).params;
-  const args = params?.arguments;
-  if (args === null || typeof args !== "object" || Array.isArray(args)) return PASS;
-  const toolName = typeof params?.name === "string" ? params.name : "<unnamed>";
+  const call = toolCallArguments(msg);
+  if (call === null) return PASS;
 
   const findings: InspectFinding[] = [];
-  for (const { key, value } of identifierArgLeaves(args, 0)) {
-    if (matchesShellMetachar(value)) findings.push(makeFinding(toolName, key, value));
+  for (const { key, value } of stringArgLeaves(call.args)) {
+    if (isIdentifierLikeArgKey(key) && matchesShellMetachar(value)) {
+      findings.push(makeFinding(call.toolName, key, value));
+    }
   }
   if (findings.length === 0) return PASS;
 

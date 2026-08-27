@@ -408,6 +408,28 @@ export const OWASP_MCP_TOP_10: readonly Signature[] = [
       "`mcpm guard mute shell-metachar-in-identifier-arg`.",
   },
   {
+    // TODOS #51 — query-control-syntax-in-identifier-arg. STRUCTURAL key+value
+    // detector (detectQueryControlArgs in query-control-args.ts), same shape
+    // as shell-metachar-in-identifier-arg above — this entry carries NO
+    // patterns and exists only so the id is recognized by `guard mute
+    // query-control-syntax-in-identifier-arg`, `guard list-signatures`, and
+    // policy signature_overrides.
+    id: "query-control-syntax-in-identifier-arg",
+    category: "MCP-QUERY-INJECTION",
+    severity: "critical",
+    description:
+      "A tools/call argument named like a bare table/column/database name contains query-language control syntax (CVE-2026-33980 shape)",
+    target: "tool_call_args",
+    patterns: [],
+    remediation:
+      "A tool call argument named like a bare table, column, database, schema, or resource " +
+      "identifier contains query-control syntax (a pipe re-scoping operator, a statement " +
+      "separator before a DDL/DML keyword, a `.drop` management command, or a line-comment " +
+      "token). A real, disclosed CVE reaches data exfiltration and destructive table drops " +
+      "through exactly this shape. If this tool legitimately accepts query syntax in this " +
+      "field, mute via `mcpm guard mute query-control-syntax-in-identifier-arg`.",
+  },
+  {
     // unicode-tag-concealment — the tag-block PRESENCE floor on the carriers H2
     // deliberately skips (tool_response / tool_call_args / retrieved data, and
     // sampling_prompt by re-tagging). Emitted inline by detectTagConcealment from

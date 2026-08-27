@@ -106,6 +106,34 @@ published section (it happened to #170).
 
   Closes TODOS #50.
 
+- **New signature: `query-control-syntax-in-identifier-arg` — blocks query-language
+  control syntax in a `tools/call` argument shaped like a bare table, column, database,
+  schema, or resource identifier.** CVE-2026-33980 (pab1it0/adx-mcp-server) f-string-
+  interpolates a `table_name` argument directly into a live KQL query with no escaping;
+  the advisory's own PoC uses pipe re-scoping plus a trailing `//` comment
+  (`... \| project Secret, Password \| take 100 //`) to exfiltrate columns, and a
+  sibling PoC uses a newline + `.drop table` to destructively drop tables — through
+  tools marketed as safe read-only metadata inspectors. Same key-first design as #50
+  (the new detector, 15th catalog entry, shares its argument-tree walker with
+  `shell-metachar-in-identifier-arg`): only tests the VALUE when the key canonicalizes
+  to a schema/resource noun (table/column/field/collection/database/schema/index/view/
+  dataset) or a scalar-id suffix, so a query-builder tool's own `query`/`filter`
+  argument is never scanned. `name` alone stays excluded, same reasoning as #50.
+
+  A pre-merge adversarial review (2 independent finder angles) converged on the same
+  real bug before ship: the line-comment patterns (`--`, `//`) had no adjacent-context
+  requirement, unlike the pipe and `.drop` patterns — so a `database`/`schema` key
+  holding an ordinary connection-string URI (`mongodb://...`, `https://...`) or a
+  version-suffixed name (`analytics--eu-west`) false-blocked. Fixed by anchoring both
+  comment patterns to whitespace-or-start immediately before the marker, which clears
+  both FP classes without weakening detection of the motivating CVE (still caught
+  independently by the pipe+verb pattern).
+
+  Same known gap as #50, not fixed here: no tag/base64 decode-and-rescan. Filed as part
+  of TODOS #55.
+
+  Closes TODOS #51.
+
 - **`policy.blockOnScoreDrop` no longer trusts a native-evidence figure that could
   differ by which external scanner happened to be configured at lock time vs. check
   time.** `nativeTrustScore` (the #33 hard-floor figure) deliberately lets an

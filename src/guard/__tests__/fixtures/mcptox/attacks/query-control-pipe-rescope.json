@@ -1,0 +1,18 @@
+{
+  "name": "Pipe re-scoping + trailing comment in a table_name argument (CVE-2026-33980 shape)",
+  "category": "MCP-QUERY-INJECTION",
+  "expected_action": "block",
+  "expected_signature_id": "query-control-syntax-in-identifier-arg",
+  "notes": "TODOS #51. Reproduces the advisory's own PoC for CVE-2026-33980 (pab1it0/adx-mcp-server): get_table_schema's table_name argument is f-string-interpolated directly into a KQL query with no escaping. The pipe re-scopes the query to `project Secret, Password` (column exfiltration) and the trailing `//` comments out the rest of the original query. table_name is query-scoped (contains the resource-noun token \"table\"), so the key+value detector fires on the pipe+verb pattern.",
+  "message": {
+    "jsonrpc": "2.0",
+    "id": 51,
+    "method": "tools/call",
+    "params": {
+      "name": "get_table_schema",
+      "arguments": {
+        "table_name": "sensitive_data | project Secret, Password | take 100 //"
+      }
+    }
+  }
+}

@@ -1,0 +1,18 @@
+{
+  "name": "Benign query-scoped tool_call_args (a plain table name, a namespaced identifier, and a legitimate free-text query field)",
+  "expected_action": "pass",
+  "notes": "TODOS #51 FP guard. A plain table_name, a real dot-namespaced Kusto table identifier (Security.SigninLogs), and a `query` field that legitimately contains pipe/query syntax (key-scoping keeps this out of the identifier-only classifier) must never trip query-control-syntax-in-identifier-arg.",
+  "message": {
+    "jsonrpc": "2.0",
+    "id": 108,
+    "method": "tools/call",
+    "params": {
+      "name": "run_query",
+      "arguments": {
+        "table_name": "customers",
+        "database": "Security.SigninLogs",
+        "query": "SigninLogs | where ResultType == 0 | take 50"
+      }
+    }
+  }
+}
