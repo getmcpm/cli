@@ -73,6 +73,39 @@ published section (it happened to #170).
 
 ### Security
 
+- **New signature: `shell-metachar-in-identifier-arg` — blocks shell-metacharacter /
+  command-substitution syntax in a `tools/call` argument shaped like a bare identifier
+  or filesystem path.** Two real, disclosed HIGH-severity CVEs (CVE-2025-53818
+  github-kanban-mcp-server `issue_number`; CVE-2026-25546 godot-mcp `projectPath`)
+  splice such an argument unescaped into a shell `exec()`; both PoCs scored `pass`
+  against the shipped catalog, whose only `tool_call_args` signature matches sensitive
+  PATH REFERENCES, not shell-metacharacter SYNTAX. The new detector (14th catalog
+  entry) walks the argument KEY first — via a `canonicalizeKey` helper now shared with
+  the F5 exfil-param-in-schema detector — and only tests the VALUE when the key's
+  canonical form names a scalar identifier (`id`/`number`/`num`/`path`/`slug`/`uuid`/
+  `identifier`/`namespace`), so a legitimate shell/exec-style tool's own `command`
+  argument is never scanned. `name` is deliberately excluded (natural-language display
+  names carry punctuation the value check would flag).
+
+  A pre-merge adversarial review found and fixed 5 real bugs before ship: a
+  pre-existing homoglyph bug in the (now-shared) key-canonicalization helper that let a
+  confusable character hide a camelCase boundary; a depth-budget bug that left every
+  batch-style array-of-objects argument completely unwalked; a whitespace-gated `&`
+  pattern that was trivially evadable by omitting a space (fixed by dropping the
+  pattern, not widening it — an unconditional bare-`&` match would FP on real path
+  values like `R&D/report.pdf`); a routing change that made the server-initiated
+  block-to-origin path reachable from the wrong (client→server) direction in the
+  in-process relay; and a redundant regex alternative. `truncate`/`MAX_EXCERPT`/the
+  "worst action across findings" reduce — each independently duplicated three or four
+  times across the guard subsystem once this detector added its own copies — are now
+  single shared exports from `patterns.ts`.
+
+  Known gap, documented not fixed: this detector does not run through the tag-block /
+  base64 decode-and-rescan passes the regular signature catalog uses, so an encoded
+  payload in an identifier-shaped argument evades it. Filed as TODOS #55.
+
+  Closes TODOS #50.
+
 - **`policy.blockOnScoreDrop` no longer trusts a native-evidence figure that could
   differ by which external scanner happened to be configured at lock time vs. check
   time.** `nativeTrustScore` (the #33 hard-floor figure) deliberately lets an

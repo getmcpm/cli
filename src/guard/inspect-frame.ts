@@ -17,8 +17,9 @@
  */
 
 import type { JSONRPCMessage } from "@modelcontextprotocol/sdk/types.js";
-import { inspectMessage, defaultActionForFinding, ACTION_RANK } from "./patterns.js";
+import { inspectMessage, ACTION_RANK, worstAction } from "./patterns.js";
 import { detectExfilParams } from "./exfil-params.js";
+import { detectShellMetacharArgs } from "./shell-metachar-args.js";
 import { OWASP_MCP_TOP_10 } from "./signatures.js";
 import type { InspectFinding, InspectResult } from "./types.js";
 
@@ -121,10 +122,7 @@ export function inspectServerInitiated(msg: JSONRPCMessage): InspectResult | nul
   if (scan.findings.length === 0) return null;
 
   const findings: InspectFinding[] = scan.findings.map((f) => ({ ...f, target: "sampling_prompt" }));
-  const action = findings.reduce<InspectResult["action"]>((acc, f) => {
-    const a = defaultActionForFinding(f);
-    return ACTION_RANK[a] > ACTION_RANK[acc] ? a : acc;
-  }, "pass");
+  const action = worstAction(findings);
 
   const hasId = "id" in msg && (msg as { id?: unknown }).id !== undefined;
   return action === "block" && hasId
@@ -133,16 +131,40 @@ export function inspectServerInitiated(msg: JSONRPCMessage): InspectResult | nul
 }
 
 /**
- * Every stateless verdict the guard can reach for one frame.
+ * The pattern/structural detectors that apply regardless of which direction a
+ * frame travels: the OWASP regex catalog, detectExfilParams (self-guards on
+ * `result.tools` — a no-op on anything else), and detectShellMetacharArgs
+ * (self-guards on a `tools/call` request — a no-op on anything else). No
+ * caller-side gating needed. reduce(mergeInspect) over an array (rather than
+ * nested calls) so adding a future detector (TODOS #51/#52 are the same
+ * key+value shape) is a one-line array entry, not a growing nest of merges.
  *
- * A server-initiated sampling/elicitation frame SHORT-CIRCUITS, matching the
- * relay: such a frame carries `method`, never `result`, so the pattern and
- * exfil passes would have nothing to inspect anyway.
+ * Deliberately EXCLUDES inspectServerInitiated: that check is only valid on
+ * the child->parent direction (a server sending sampling/createMessage or
+ * elicitation/create). run-inner.ts's inspectParent (parent->child requests)
+ * uses this function directly, not inspectFrame, so a malformed/malicious
+ * client message can never trip isServerInitiatedMethod and get routed
+ * through inspectServerInitiated's replyToOrigin path — found in review: the
+ * in-process relay's inspectAndWrite sink selection for replyToOrigin is
+ * shared, non-direction-aware code, so a parent-side false match would have
+ * misrouted a block response to the child instead of back to the real client.
+ */
+export function inspectStatelessDetectors(msg: JSONRPCMessage): InspectResult {
+  return [inspectMessage(msg, OWASP_MCP_TOP_10), detectExfilParams(msg), detectShellMetacharArgs(msg)].reduce(
+    mergeInspect,
+  );
+}
+
+/**
+ * Every stateless verdict the guard can reach for one CHILD->PARENT frame (a
+ * server response or a server-initiated request). A server-initiated
+ * sampling/elicitation frame SHORT-CIRCUITS, matching the relay: such a frame
+ * carries `method`, never `result`, so the pattern and exfil passes would
+ * have nothing to inspect anyway. Only ever call this on child-authored
+ * content — see inspectStatelessDetectors above for the parent->child path.
  */
 export function inspectFrame(msg: JSONRPCMessage): InspectResult {
   const serverInitiated = inspectServerInitiated(msg);
   if (serverInitiated !== null) return serverInitiated;
-  // detectExfilParams self-guards on `result.tools`, so it is a no-op pass on
-  // every non-tools/list frame — no caller-side gate needed.
-  return mergeInspect(inspectMessage(msg, OWASP_MCP_TOP_10), detectExfilParams(msg));
+  return inspectStatelessDetectors(msg);
 }

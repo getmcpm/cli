@@ -1308,7 +1308,82 @@ cannot see this class. Method notes:
   need to know `>=26.0.0` was written `26+`. Survivable because a failure names the file
   and the range, and the prose sits in the same sentence as the quoted copy.
 
-## #50 — no signature detects shell metacharacters / command substitution in `tool_call_args` (P2, open)
+## #50 — ~~no signature detects shell metacharacters / command substitution in `tool_call_args`~~ DONE (unreleased)
+
+**Shipped:** a new catalog entry `shell-metachar-in-identifier-arg` (14th entry, `MCP-COMMAND-INJECTION`,
+`critical` → block, `tool_call_args`), emitted by a bespoke structural detector
+(`src/guard/shell-metachar-args.ts`) rather than a content regex — the same
+`patterns: []` idiom as `exfil-param-in-schema`. **The "likely wants to anchor on
+argument fields whose schema/description implies a filesystem path or single-token
+identifier" note in the original entry turned out to be load-bearing, not optional:** a
+blanket value-only regex was never viable (it would FP on every shell/exec-style MCP
+tool, whose arguments are MEANT to carry `;`/`|`/`&&`), so the detector walks the
+argument KEY first — canonicalized via a new shared `canonicalizeKey` (extracted from
+F5's `exfil-names.ts`, now used by both) — and only tests the VALUE when the key's
+canonical last token names a scalar identifier/path (`id`/`number`/`num`/`path`/
+`slug`/`uuid`/`identifier`/`namespace`). `name` is deliberately excluded (display/
+company/file names legitimately carry punctuation the value patterns would flag);
+revisit alongside #51/#52, which need the same key classifier plus their own
+benign-corpus pass.
+
+**A pre-merge adversarial review (5 parallel finder angles) found 5 real bugs the
+initial implementation shipped with, all fixed before merge — none were in the two
+motivating CVE cases themselves, all were in edge cases a careful reviewer, not the
+author, found:**
+1. `canonicalizeKey` split camelCase on the RAW key **before** folding homoglyphs, so
+   a confusable character standing in for an ASCII uppercase letter at a camelCase
+   boundary (Cyrillic "Р" for Latin "P" in `projectРath`) silently defeated the split
+   — `[A-Z]` doesn't match a Cyrillic letter, fold-after-split never recovers the lost
+   boundary. This was a **pre-existing bug in the original `exfil-names.ts` function**,
+   invisible until this PR gave it a second caller; fixed by folding first (case-
+   preserving, so the ASCII path is unaffected) — closed for both consumers at once.
+2. The `identifierArgLeaves` walk incremented its depth budget on entering an array
+   AND on entering each array element, so a batch-style argument
+   (`{items: [{issue_number: "1;rm -rf /"}]}`) was recursed into once and then
+   immediately abandoned by the depth-limit/array guard before any element's own keys
+   were visited — every array-of-objects argument was silently unwalked. Fixed by
+   making arrays depth-transparent (only descending into a nested OBJECT consumes the
+   budget).
+3. The leading/trailing-`&` pattern required whitespace on both sides, but real shells
+   don't need whitespace around `&` (`cmd1&cmd2` is valid) — trivially evadable by
+   omitting a space. Fixed by **dropping** the lone-`&` pattern rather than widening it:
+   an unconditional bare-`&` match would FP on real path/namespace values containing a
+   literal ampersand (`R&D/report.pdf`), and neither motivating CVE even uses `&`. The
+   exclusion is a test, not a silent gap.
+4. `inspectParent` (run-inner.ts, the parent→child / client-to-server direction) was
+   wired through `inspectFrame` to make the new detector reachable on the live relay —
+   but `inspectFrame` also runs `inspectServerInitiated`, which is only valid on the
+   child→parent direction, and the in-process relay's block-response sink selection
+   for `replyToOrigin` is shared, non-direction-aware code. Nothing prevents a
+   malformed/malicious client message from using the literal method name
+   `sampling/createMessage`/`elicitation/create`, which would have misrouted a block
+   meant for the client to the child instead. Fixed by splitting `inspectFrame` into a
+   new exported `inspectStatelessDetectors` (the direction-agnostic detector array) plus
+   the server-initiated short-circuit; `inspectParent` now calls the former directly,
+   structurally eliminating the reachability rather than merely noting it as unlikely.
+5. `/&&|\|\|/`'s `\|\|` alternative was dead weight (any `||` already contains a `|`
+   the separate bare-pipe pattern matches) — simplified away.
+
+**Documented, not fixed — filed as #55:** the detector matches
+`normalizeForMatch(value)` alone, which **strips** Unicode TAG-block characters
+(`PATTERN_BREAKERS`) rather than decoding-and-rescanning them the way the OWASP
+catalog's `inspectTagEncoded`/`inspectDecoded` passes do — so a TAG-encoded or
+base64-encoded shell-metachar payload in an identifier-shaped argument evades this
+detector. Closing it needs the same decode-and-rescan machinery `inspectMessage` uses
+(hardened over 7 adversarial rounds for the regex catalog — see the v0.28.0 history),
+applied to a bespoke key+value walker instead of a signature list; out of scope for
+this slice, and deliberately not rushed given this codebase's own repeated lesson that
+a hurried encoding-evasion fix tends to introduce a fresh bug of the same shape.
+
+**Incidental cleanup, found by the same review:** `truncate()`/`MAX_EXCERPT` and the
+"max action across findings" reduce were duplicated a third and fourth time
+respectively once this detector added its own copies — both now exported once from
+`patterns.ts` (`truncate`, `MAX_EXCERPT`, `worstAction`) and reused by `exfil-params.ts`,
+`inspect-frame.ts`, and this detector. `docs/SIGNATURES.md`'s catalog-entry counts
+(13→14) and missing table row were also stale after the addition, caught by the same
+pass.
+
+Original entry, kept for the reproduction:
 
 **Found:** 2026-08-23, an external-corpus measurement against 10 real, publicly disclosed
 MCP CVEs (the CVE set cited in arXiv 2607.11086's ground truth).
@@ -1444,3 +1519,36 @@ access" FP class from the 2026-07-12 sweep, which flagged the word "injection" i
 prompt-tooling descriptions. Likely needs to require the payload sit inside an ACTIVE
 rendering context (an HTML tag with an event-handler attribute set to a call expression,
 not a bare keyword match) rather than a substring scan.
+
+## #55 — bespoke key+value detectors don't get tag/base64 decode-and-rescan (P2, open)
+
+**Found:** 2026-08-27, adversarial review of #50's `shell-metachar-in-identifier-arg`
+implementation.
+
+The regular OWASP signature pipeline (`inspectMessage` in `patterns.ts`) runs every
+leaf through **two decode-and-rescan passes** before giving up: `inspectTagEncoded`
+(Unicode TAG-block "ASCII smuggling", TODOS #31) and `inspectDecoded` (F10
+Detector-B, bounded base64/base64url). A **bespoke structural detector** that walks a
+frame's own KEYS+VALUES directly instead of going through `stringLeaves`/the
+signature/pattern list — `detectExfilParams` (F5) and now `detectShellMetacharArgs`
+(#50) — never passes its VALUES through either decode pass, because those passes are
+wired into `inspectMessage`'s per-leaf loop, not into a standalone value check. For
+`shell-metachar-args.ts` specifically: it calls `normalizeForMatch(value)` alone, which
+**strips** TAG-block characters (`PATTERN_BREAKERS`) rather than decoding them — the
+exact "erased rather than revealed" failure mode TODOS #31 already documented for the
+regex catalog, reproduced fresh in a detector that never plugs into that fix.
+
+**What:** extend `inspectTagEncoded`/`inspectDecoded`'s decode step (or a shared
+primitive extracted from them) so a bespoke key+value detector can rescan a
+TAG-decoded/base64-decoded VALUE the same way the regex catalog does, without
+duplicating the multi-round-hardened texty-gate / bounded-attempt / warn-clamp logic
+those passes already carry.
+
+**Not urgent, but not nothing either.** The threat requires the CALLING AGENT to embed
+an encoded payload in an argument value it's about to send — an unusual link in a
+poisoning chain (unlike a server concealing text from human review in a description or
+response, where TAG-concealment's motivating scenario is much more natural) — but
+mcpm's own security posture explicitly assumes a sophisticated attacker will target
+whatever the guard is known to check for. Growing to a THIRD bespoke detector (#51/#52
+are the same key+value shape) without this raises the number of independently-evadable
+value checks in the codebase; worth closing before, not after, that happens.

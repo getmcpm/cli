@@ -189,10 +189,28 @@ function targetSubtree(msg: JSONRPCMessage, target: SignatureTarget): unknown {
 // Public API
 // ---------------------------------------------------------------------------
 
-const MAX_EXCERPT = 200;
+// Exported for reuse by other detectors that build their own InspectFinding
+// excerpts (structural key-walk detectors like exfil-params.ts and
+// shell-metachar-args.ts, which don't go through this file's own leaf walk).
+// A single implementation means the excerpt cap changes in one place.
+export const MAX_EXCERPT = 200;
 
-function truncate(s: string): string {
+export function truncate(s: string): string {
   return s.length > MAX_EXCERPT ? `${s.slice(0, MAX_EXCERPT)}…` : s;
+}
+
+/**
+ * The MAX action across a set of findings, each clamped by its own carrier
+ * policy first via {@link defaultActionForFinding}. Exported so every detector
+ * that builds an InspectResult from its own findings (exfil-params.ts,
+ * shell-metachar-args.ts, inspectServerInitiated below) shares one
+ * implementation instead of re-deriving the same reduce.
+ */
+export function worstAction(findings: readonly InspectFinding[]): InspectResult["action"] {
+  return findings.reduce<InspectResult["action"]>((acc, f) => {
+    const a = defaultActionForFinding(f);
+    return ACTION_RANK[a] > ACTION_RANK[acc] ? a : acc;
+  }, "pass");
 }
 
 /**
@@ -1261,9 +1279,5 @@ export function inspectMessage(
   // Max action across findings AFTER each is clamped by its carrier policy. A
   // warn-only resource finding can't be elevated by — and doesn't suppress — a
   // block-capable finding in the same message. (security: H1 finding-level clamp)
-  const action = findings.reduce<InspectResult["action"]>((acc, f) => {
-    const a = defaultActionForFinding(f);
-    return ACTION_RANK[a] > ACTION_RANK[acc] ? a : acc;
-  }, "pass");
-  return { action, findings };
+  return { action: worstAction(findings), findings };
 }

@@ -29,9 +29,9 @@
  * `sys_prompt`, `context_dump`) evades it.
  */
 
-import { normalizeForMatch } from "./patterns.js";
+import { canonicalizeKey } from "./key-canon.js";
 
-// Match against the CANONICAL key (see canonicalize): homoglyph/zero-width folded,
+// Match against the CANONICAL key (see canonicalizeKey in key-canon.ts): homoglyph/zero-width folded,
 // camelCase split, lowercased, separator runs collapsed to a single `_`. So
 // `_systemPrompt_`, `__system__prompt__`, `_System-Prompt_` all reduce to
 // `_system_prompt_`. The leading/trailing `_` is the load-bearing FP gate — a bare
@@ -46,17 +46,8 @@ const EXFIL_PARAM_DENY: ReadonlyArray<RegExp> = [
   /^_exfil(?:trate)?(?:_[a-z0-9]+)*_$/,
 ];
 
-function canonicalize(rawKey: string): string {
-  // Split camelCase BEFORE folding so `_systemPrompt_` → `_system_Prompt_`.
-  const camelSplit = rawKey.replace(/([a-z0-9])([A-Z])/g, "$1_$2");
-  return normalizeForMatch(camelSplit)
-    .toLowerCase()
-    .replace(/[\s-]+/g, "_") // hyphens / whitespace → underscore
-    .replace(/_{2,}/g, "_"); // collapse runs (wrap stays a single `_`)
-}
-
 /** Returns "deny" if the parameter name matches the zero-FP exfil-sigil denylist. */
 export function classifyParamName(rawKey: string): "deny" | null {
-  const canonical = canonicalize(rawKey);
+  const canonical = canonicalizeKey(rawKey);
   return EXFIL_PARAM_DENY.some((re) => re.test(canonical)) ? "deny" : null;
 }

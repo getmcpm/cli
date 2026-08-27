@@ -384,6 +384,30 @@ export const OWASP_MCP_TOP_10: readonly Signature[] = [
       "legitimate (rare), mute via `mcpm guard mute hidden-chars-in-metadata`.",
   },
   {
+    // TODOS #50 — shell-metachar-in-identifier-arg. STRUCTURAL key+value
+    // detector (detectShellMetacharArgs in shell-metachar-args.ts), NOT a
+    // content regex — like exfil-param-in-schema and guard-inspection-truncated
+    // above, this entry carries NO patterns and exists only so the id is
+    // recognized by `guard mute shell-metachar-in-identifier-arg`, `guard
+    // list-signatures`, and policy signature_overrides. `inspectAgainstSignatures`
+    // no-ops on the empty patterns array.
+    id: "shell-metachar-in-identifier-arg",
+    category: "MCP-COMMAND-INJECTION",
+    severity: "critical",
+    description:
+      "A tools/call argument named like a bare identifier or path contains shell-metacharacter / command-substitution syntax (CVE-2025-53818, CVE-2026-25546 shape)",
+    target: "tool_call_args",
+    patterns: [],
+    remediation:
+      "A tool call argument named like a bare identifier or filesystem path (an id, " +
+      "number, path, slug, uuid, or namespace field) contains shell-metacharacter or " +
+      "command-substitution syntax ($(...), a backtick, ;, &&, or a pipe). " +
+      "Two real, disclosed CVEs reach command injection through exactly this shape — the " +
+      "value is spliced unescaped into a shell command. The call was blocked. If this " +
+      "tool legitimately accepts shell syntax in this field, mute via " +
+      "`mcpm guard mute shell-metachar-in-identifier-arg`.",
+  },
+  {
     // unicode-tag-concealment — the tag-block PRESENCE floor on the carriers H2
     // deliberately skips (tool_response / tool_call_args / retrieved data, and
     // sampling_prompt by re-tagging). Emitted inline by detectTagConcealment from
