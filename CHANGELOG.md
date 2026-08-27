@@ -8,6 +8,8 @@ _Add entries here, never under a stamped version_ — a release commit renames t
 heading, and a branch that wrote beneath it merges without conflict straight into a
 published section (it happened to #170).
 
+## [0.31.0] - 2026-08-28
+
 ### Fixed
 
 - **The README states the Node requirement.** `^22.22.2 || ^24.15.0 || >=26.0.0` lived in
