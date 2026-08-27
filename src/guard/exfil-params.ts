@@ -16,12 +16,11 @@
 
 import type { JSONRPCMessage } from "@modelcontextprotocol/sdk/types.js";
 import type { InspectFinding, InspectResult } from "./types.js";
-import { ACTION_RANK, defaultActionForFinding } from "./patterns.js";
+import { truncate, worstAction } from "./patterns.js";
 import { classifyParamName } from "./exfil-names.js";
 
 export const EXFIL_PARAM_SIGNATURE_ID = "exfil-param-in-schema";
 
-const MAX_EXCERPT = 200;
 const PASS: InspectResult = { action: "pass", findings: [] };
 
 const REMEDIATION =
@@ -31,10 +30,6 @@ const REMEDIATION =
   "way. The server's ENTIRE tools/list was blocked before the agent saw it. This is a tripwire " +
   "for the documented underscore-sigil convention — a renamed parameter evades it. If you trust " +
   "this server, mute via `mcpm guard mute exfil-param-in-schema` (re-enables the whole server).";
-
-function truncate(s: string): string {
-  return s.length > MAX_EXCERPT ? `${s.slice(0, MAX_EXCERPT)}…` : s;
-}
 
 /**
  * Yield every property KEY (bounded to top-level + one nested `properties` level)
@@ -86,9 +81,5 @@ export function detectExfilParams(msg: JSONRPCMessage): InspectResult {
   }
   if (findings.length === 0) return PASS;
 
-  const action = findings.reduce<InspectResult["action"]>((acc, f) => {
-    const a = defaultActionForFinding(f);
-    return ACTION_RANK[a] > ACTION_RANK[acc] ? a : acc;
-  }, "pass");
-  return { action, findings };
+  return { action: worstAction(findings), findings };
 }

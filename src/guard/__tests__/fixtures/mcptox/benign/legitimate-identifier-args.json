@@ -1,0 +1,19 @@
+{
+  "name": "Benign identifier-shaped tool_call_args (numeric id, path with spaces, namespace)",
+  "expected_action": "pass",
+  "notes": "TODOS #50 FP guard. A numeric issue_number, a real absolute path containing spaces (legitimate on every OS), and a plain namespace slug must never trip the shell-metachar-in-identifier-arg detector — none of these values contain the shell-metacharacter syntax the detector looks for.",
+  "message": {
+    "jsonrpc": "2.0",
+    "id": 107,
+    "method": "tools/call",
+    "params": {
+      "name": "add_comment",
+      "arguments": {
+        "issue_number": "42",
+        "projectPath": "/Users/jane doe/My Project/scene.tscn",
+        "namespace": "production",
+        "body": "Looks good, thanks!"
+      }
+    }
+  }
+}

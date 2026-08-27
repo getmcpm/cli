@@ -1,0 +1,16 @@
+{
+  "name": "A shell/exec-style tool's own 'command' argument legitimately contains shell syntax",
+  "expected_action": "pass",
+  "notes": "TODOS #50 FP guard, the exact scenario the key-scoping exists to protect: a legitimate execute_command-style MCP tool's whole purpose is to run a shell command, so its argument value routinely carries `;`/`|`/`&&`. Because the key ('command') is not identifier-shaped, shell-metachar-in-identifier-arg must not fire here — a blanket value-only scan would have made this entire tool class unusable.",
+  "message": {
+    "jsonrpc": "2.0",
+    "id": 108,
+    "method": "tools/call",
+    "params": {
+      "name": "run_command",
+      "arguments": {
+        "command": "ls -la | grep report.txt && echo done"
+      }
+    }
+  }
+}

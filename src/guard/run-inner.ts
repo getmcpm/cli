@@ -11,15 +11,15 @@
  */
 
 import type { JSONRPCMessage } from "@modelcontextprotocol/sdk/types.js";
-import { inspectMessage, defaultActionForFinding, ACTION_RANK } from "./patterns.js";
+import { defaultActionForFinding, ACTION_RANK } from "./patterns.js";
 import {
   inspectFrame,
+  inspectStatelessDetectors,
   mergeInspect,
   withReplyToOrigin,
   hasToolsList,
   inspectServerInitiated,
 } from "./inspect-frame.js";
-import { OWASP_MCP_TOP_10 } from "./signatures.js";
 import { startRelay, buildSafeEnv, type GuardEvent } from "./relay.js";
 import { inspectForDrift, inspectHandshakeForDrift, classifyDrift, buildDriftFinding } from "./drift.js";
 import { readPins, writePins } from "./pins.js";
@@ -336,7 +336,28 @@ export async function runInner(parsed: RunInnerArgs): Promise<number> {
 
   const inspectParent = (msg: JSONRPCMessage): InspectResult => {
     if (pausedUntilFuture) return { action: "pass", findings: [] };
-    return applyPolicy(inspectMessage(msg, OWASP_MCP_TOP_10), policy);
+    // TODOS #50: route through the shared stateless-detector composition
+    // instead of calling inspectMessage bare. Behavior-preserving for every
+    // pre-existing detector — detectExfilParams self-guards on a frame shape
+    // (`result.tools`) a parent->child request never has — but it is what
+    // makes detectShellMetacharArgs (a bespoke tool_call_args detector)
+    // actually enforced on live parent->child traffic instead of only
+    // visible to `mcpm guard inspect` / the fixture release-gate. Without
+    // this, a future request-side bespoke detector added there would
+    // silently apply everywhere except the live relay — the parent-side
+    // mirror of the v0.27.0 (#153) gap.
+    //
+    // Deliberately inspectStatelessDetectors, NOT inspectFrame: inspectFrame
+    // also runs inspectServerInitiated, which is only valid on the
+    // child->parent direction. Review found that routing a parent request
+    // through inspectFrame would make inspectServerInitiated's
+    // replyToOrigin path reachable from a malformed/malicious client message
+    // (nothing here enforces that a client never sends a method literally
+    // named "sampling/createMessage"/"elicitation/create"), and the
+    // in-process relay's block-response sink selection for replyToOrigin is
+    // shared, non-direction-aware code — a false match on this path would
+    // have misrouted a block meant for the client to the child instead.
+    return applyPolicy(inspectStatelessDetectors(msg), policy);
   };
 
   // SECURITY F2 / issue #20: build the wrapped child's env from an intentional
