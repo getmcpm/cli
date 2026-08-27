@@ -11,7 +11,7 @@
  */
 
 import type { JSONRPCMessage } from "@modelcontextprotocol/sdk/types.js";
-import { defaultActionForFinding, ACTION_RANK } from "./patterns.js";
+import { defaultActionForFinding, ACTION_RANK, worstAction } from "./patterns.js";
 import {
   inspectFrame,
   inspectStatelessDetectors,
@@ -589,10 +589,7 @@ export function inspectForDriftSync(
   }
   // Action = MAX over findings via defaultActionForFinding (no hardcoded block):
   // a cosmetic-only result is warn; any security finding makes it block.
-  const action = findings.reduce<InspectResult["action"]>((acc, f) => {
-    const a = defaultActionForFinding(f);
-    return ACTION_RANK[a] > ACTION_RANK[acc] ? a : acc;
-  }, "pass");
+  const action = worstAction(findings);
   return { action, findings };
 }
 
@@ -755,10 +752,7 @@ export function inspectHandshakeDriftSync(
     cls,
     safeServer: sanitizeLabel(serverName),
   });
-  const action = findings.reduce<InspectResult["action"]>((acc, f) => {
-    const a = defaultActionForFinding(f);
-    return ACTION_RANK[a] > ACTION_RANK[acc] ? a : acc;
-  }, "pass");
+  const action = worstAction(findings);
   return { action, findings };
 }
 

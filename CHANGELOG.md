@@ -85,7 +85,8 @@ published section (it happened to #170).
   canonical form names a scalar identifier (`id`/`number`/`num`/`path`/`slug`/`uuid`/
   `identifier`/`namespace`), so a legitimate shell/exec-style tool's own `command`
   argument is never scanned. `name` is deliberately excluded (natural-language display
-  names carry punctuation the value check would flag).
+  names carry punctuation the value check would flag). The value patterns are `$(`, a
+  backtick, `;` and `&&`.
 
   A pre-merge adversarial review found and fixed 5 real bugs before ship: a
   pre-existing homoglyph bug in the (now-shared) key-canonicalization helper that let a
@@ -98,7 +99,21 @@ published section (it happened to #170).
   in-process relay; and a redundant regex alternative. `truncate`/`MAX_EXCERPT`/the
   "worst action across findings" reduce — each independently duplicated three or four
   times across the guard subsystem once this detector added its own copies — are now
-  single shared exports from `patterns.ts`.
+  single shared exports from `patterns.ts`, `worstAction` included: the four remaining
+  verbatim copies in `run-inner.ts` and `drift.ts` were folded into it during the
+  pre-release audit, which is what made that sentence true rather than aspirational.
+
+  **A pre-release audit then dropped the bare-pipe pattern**, found by measuring the
+  detector against a benign corpus rather than reading it. `/\|/` hard-BLOCKED three
+  ordinary values under a `path`-suffixed argument — `?family=Roboto|Open+Sans` (the
+  Google Fonts URL shape), `?fields=id|name|email`, `?sort=created|desc` — because the
+  reasoning that admitted the `path` suffix ("a filesystem path never contains an
+  unescaped `|`") is true of filesystem paths and false of the argument key, which is
+  routinely a URL path. Dropped on the same three premises this file already uses for
+  `&`: gating is evadable, ungated it FPs, and neither CVE needs it — both still block,
+  and removing it left all 150 guard tests green, so nothing pinned it. The cost is
+  stated rather than hidden: a pipe-ONLY injection now passes. Filed as TODOS #56 with
+  the measurement and a route to restoring it.
 
   Known gap, documented not fixed: this detector does not run through the tag-block /
   base64 decode-and-rescan passes the regular signature catalog uses, so an encoded

