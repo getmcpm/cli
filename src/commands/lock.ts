@@ -17,6 +17,7 @@ import type { ClientId } from "../config/paths.js";
 import type { ServerEntry } from "../registry/types.js";
 import type { Finding } from "../scanner/tier1.js";
 import type { TrustScore, TrustScoreInput } from "../scanner/trust-score.js";
+import { dropCheckNativeScore } from "../scanner/trust-score.js";
 import type {
   StackFile,
   StackServer,
@@ -382,6 +383,11 @@ async function resolveServer(
     // recover this baseline's native figure later. Always written (0 when no
     // scanner was credited) so every lock this mcpm writes is native-recoverable.
     externalScanCredit: trustScore.breakdown.externalScan,
+    // TODOS #41: also record the collateral-free figure directly, so the drop
+    // tripwire's recovery doesn't have to reconstruct it from a `registryMeta`
+    // value this snapshot doesn't otherwise store. Always written, like the
+    // credit above.
+    dropCheckNativeScore: dropCheckNativeScore(trustScore).score,
   };
 
   // Step 5: H11 slice 1 — capture npm artifact integrity snapshot.

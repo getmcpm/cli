@@ -27,6 +27,14 @@ export interface TrustScoreBreakdown {
   staticScan: number;    // 0-40
   externalScan: number;  // 0-20
   registryMeta: number;  // 0-10
+  /**
+   * `registryMeta`, but the critical/high cap is evaluated over non-"external"
+   * findings only (TODOS #41). Always populated by `computeTrustScore` — optional
+   * only so a hand-built `TrustScore` fixture that predates this field (a test
+   * double, or a pre-#41 `TrustSnapshot`-shaped object) still type-checks;
+   * `dropCheckNativeScore` falls back to `registryMeta` when it is absent.
+   */
+  nativeRegistryMeta?: number;
 }
 
 export interface TrustScore {
@@ -52,7 +60,14 @@ const STATIC_SCAN_MAX = 40;
  * `20` in the validator would silently stop matching if the bucket is re-weighted.
  */
 export const EXTERNAL_SCAN_MAX = 20;
-const REGISTRY_META_MAX = 10;
+/**
+ * Exported for `stack/policy.ts`, which bounds a lockfile's recorded
+ * `dropCheckNativeScore` against it (TODOS #41) — that field can legitimately
+ * exceed `score` by up to this bucket's ceiling (an external-only critical/high
+ * can zero `registryMeta` without touching `nativeRegistryMeta`), so the
+ * validator needs the real ceiling, not a duplicated `10`.
+ */
+export const REGISTRY_META_MAX = 10;
 
 /** Deductions per finding severity (applied to both static and external scan). */
 const SEVERITY_DEDUCTIONS: Record<Finding["severity"], number> = {
@@ -214,11 +229,34 @@ export function computeTrustScore(input: TrustScoreInput): TrustScore {
     ? input.findings.filter((f) => f.source !== "external")
     : input.findings.filter((f) => !(f.type === "scanner-error" && f.source === "external"));
 
+  // TODOS #41: the same cap as `registryMetaScore` above, but over `staticFindings`
+  // — mcpm's OWN evidence — instead of every finding. `registryMetaScore` is
+  // deliberately the broader, displayed figure: an external critical SHOULD still
+  // zero the number a human reads in `mcpm audit`. But that broader cap is unusable
+  // for comparing two trust snapshots taken at different times
+  // (`dropCheckNativeScore`, TODOS #35's blockOnScoreDrop): whether it fires
+  // depends on whatever MCPM_EXTERNAL_SCANNER happened to report at THAT moment,
+  // which the same attacker can set independently at lock time and at check time.
+  // This narrower figure is immune to that noise; it moves only when mcpm's own
+  // tier-1 evidence changes.
+  //
+  // Reusing `staticFindings` (rather than a fresh `f.source !== "external"` filter)
+  // is deliberate, not just less code: `staticFindings` already handles the
+  // uncredited-orphan case correctly (an "external"-tagged finding present without
+  // a credited scanner is treated as native and still deducts, per the comment
+  // above) — a fresh filter would have unconditionally excluded it here while
+  // `staticScan` above still counted it, capping the two buckets on different
+  // evidence for the same edge case.
+  const nativeRegistryMetaScore = hasCriticalOrHighFindings(staticFindings)
+    ? 0
+    : scoreRegistryMeta(input.registryMeta);
+
   const breakdown: TrustScoreBreakdown = {
     healthCheck: scoreHealthCheck(input.healthCheckPassed),
     staticScan: scoreStaticScan(staticFindings),
     externalScan: scoreExternalScan(externalCredited, externalFindings),
     registryMeta: registryMetaScore,
+    nativeRegistryMeta: nativeRegistryMetaScore,
   };
 
   const score =
@@ -339,6 +377,65 @@ export function nativeTrustScore(trust: TrustScore): NativeTrustScore {
     maxPossible: NATIVE_MAX_POSSIBLE,
     excludedExternalCredit: trust.breakdown.externalScan,
   };
+}
+
+/** A native trust figure for comparing two snapshots taken at different times. */
+export interface DropCheckNativeScore {
+  readonly score: number;
+  readonly maxPossible: number;
+}
+
+/**
+ * The native trust figure for `blockOnScoreDrop` (TODOS #35 / #41), NOT for the
+ * hard trust floor — that stays `nativeTrustScore`, unchanged, deliberately.
+ *
+ * `nativeTrustScore` lets an external critical/high finding drag the figure down
+ * via the `registryMeta` cap ("can push a server DOWN through the floor, never
+ * UP" — see its docblock). That is correct for a single point-in-time floor
+ * check. It is NOT safe for `blockOnScoreDrop`, which compares that figure
+ * across two DIFFERENT points in time (lock vs. check): whether an external
+ * finding zeroed `registryMeta` at each point depends on whatever
+ * `MCPM_EXTERNAL_SCANNER` happened to report THEN, and the same attacker
+ * controls that independently at both points. Reproduced (TODOS #41): a real
+ * scanner reporting a critical at lock time zeroes `registryMeta`, artificially
+ * lowering the locked baseline; a later fake clean scanner leaves it un-zeroed,
+ * masking a genuine native regression of up to `registryMeta`'s 10 points.
+ *
+ * This uses `breakdown.nativeRegistryMeta` instead, which only mcpm's own
+ * findings can zero — so the figure is immune to what an external scanner
+ * reported, or when, on EITHER side of the comparison.
+ */
+export function dropCheckNativeScore(trust: TrustScore): DropCheckNativeScore {
+  const registryMeta = trust.breakdown?.registryMeta;
+  // Falls back to the (possibly external-collateralized) `registryMeta` when
+  // `nativeRegistryMeta` is absent — a hand-built `TrustScore` fixture that
+  // predates this field (this function is never called with a `TrustSnapshot`;
+  // the lockfile's own recovery path in `stack/policy.ts` reads
+  // `TrustSnapshot.dropCheckNativeScore` directly and never reaches here). Same
+  // value as `nativeRegistryMeta` whenever no external-only critical/high
+  // triggered the cap, which is the overwhelming common case.
+  const nativeRegistryMeta = trust.breakdown?.nativeRegistryMeta ?? registryMeta;
+  const externalScan = trust.breakdown?.externalScan;
+
+  // Derived as `score` minus the two things that make it NOT native — the
+  // external bucket's own credit, and whatever collateral an external-only
+  // finding added to registryMeta's cap — rather than re-summing
+  // healthCheck+staticScan+nativeRegistryMeta from scratch. Same value today
+  // (the four buckets ARE `score`'s whole sum), but this form tracks `score`
+  // automatically if a native bucket is ever added, the way `nativeTrustScore`'s
+  // `score - externalScan` already does; a hardcoded positive sum would have
+  // silently omitted a new bucket instead.
+  const score =
+    trust.score - (externalScan ?? NaN) - (registryMeta ?? NaN) + (nativeRegistryMeta ?? NaN);
+
+  if (!Number.isFinite(score)) {
+    throw new Error(
+      "Cannot evaluate a trust-drop comparison: the trust score has no usable breakdown. " +
+      "This is a bug — report it rather than working around it.",
+    );
+  }
+
+  return { score, maxPossible: NATIVE_MAX_POSSIBLE };
 }
 
 /**

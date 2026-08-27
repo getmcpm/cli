@@ -324,6 +324,36 @@ describe("LockFileSchema", () => {
       expect(server && "trust" in server && server.trust?.externalScanCredit).toBe(18);
     }
   });
+
+  it("preserves dropCheckNativeScore on the trust snapshot (#41)", () => {
+    // Same back-compat shape as #35: absent on old lockfiles (still parses),
+    // round-trips when present.
+    const input = {
+      lockfileVersion: 1,
+      lockedAt: "2026-08-05T10:00:00Z",
+      servers: {
+        "io.github.example/scanned": {
+          version: "1.0.0",
+          registryType: "npm",
+          identifier: "scanned",
+          trust: {
+            score: 82,
+            maxPossible: 100,
+            level: "safe",
+            assessedAt: "2026-08-05T10:00:00Z",
+            externalScanCredit: 18,
+            dropCheckNativeScore: 55,
+          },
+        },
+      },
+    };
+    const result = LockFileSchema.safeParse(input);
+    expect(result.success).toBe(true);
+    if (result.success) {
+      const server = result.data.servers["io.github.example/scanned"];
+      expect(server && "trust" in server && server.trust?.dropCheckNativeScore).toBe(55);
+    }
+  });
 });
 
 // ---------------------------------------------------------------------------

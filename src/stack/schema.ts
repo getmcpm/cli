@@ -200,6 +200,23 @@ const TrustSnapshotSchema = z.object({
    * if the field were absent and falls back to a conservative upper bound.
    */
   externalScanCredit: z.number().optional(),
+  /**
+   * `dropCheckNativeScore(trustScore).score` at lock time (TODOS #41). Recorded so
+   * `blockOnScoreDrop` can compare a native figure that is immune to WHEN an
+   * external scanner ran: `score - externalScanCredit` alone still carries
+   * whatever `registryMeta` cap an external-only critical/high triggered AT LOCK
+   * TIME, which a differently-configured (or absent, or faked) scanner at check
+   * time need not reproduce — masking up to 10 points of a genuine native drop.
+   * Bare `.optional()`: absent on pre-#41 lockfiles, whose exact recovery this
+   * field would otherwise enable is unavailable until the next `mcpm lock`; they
+   * fall back to the pre-#41 `externalScanCredit` reconstruction, unchanged.
+   *
+   * Deliberately UNBOUNDED, same reasoning as `externalScanCredit` above — the
+   * range check lives in `stack/policy.ts` (`recoverLockedNative`'s `bounded`
+   * clamp), not here, so a value outside it degrades to a conservative bound
+   * rather than bricking `safeParse` over the whole lock file.
+   */
+  dropCheckNativeScore: z.number().optional(),
 });
 
 /** A locked registry server entry. */

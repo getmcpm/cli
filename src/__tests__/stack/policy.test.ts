@@ -149,6 +149,158 @@ describe("checkTrustPolicy", () => {
     if (!result.pass) expect(result.reason).toContain("native");
   });
 
+  // --- #41: a lock's own registryMeta collateral can mask a later native drop -
+
+  it("residual (documented, not fixed here): a pre-#41 recoverable lock can mask a genuine native drop", () => {
+    // Lock time: a real external scanner reported a critical, zeroing BOTH
+    // externalScan and — collaterally — registryMeta. True native evidence at
+    // lock time was healthCheck 15 + staticScan 40 + registryMeta(uncapped) 10
+    // = 65, but the pre-#41 recovery formula (score - credit) can only see 55:
+    // the registryMeta collateral is baked into `score` with no way to undo it
+    // from externalScanCredit alone.
+    const preFix41Lock: TrustSnapshot = {
+      score: 55, // 15 + 40 + 0 (externalScan, critical) + 0 (registryMeta, collateral)
+      maxPossible: 100,
+      level: "caution",
+      assessedAt: "2026-08-10T00:00:00Z",
+      externalScanCredit: 0,
+      // dropCheckNativeScore deliberately absent: what an mcpm between #35 and
+      // #41 would have written.
+    };
+
+    // Check time: a fake clean scanner, AND mcpm's own evidence genuinely fell
+    // (health+static 55 → 45, a real 10-point native regression).
+    const result = checkTrustPolicy({
+      serverName: "evil",
+      currentScore: 75, // 10 + 35 + 20 (fake clean scanner) + 10 (registryMeta)
+      currentMaxPossible: 100,
+      currentNativeScore: 55, // dropCheckNativeScore(current) = 10 + 35 + 10
+      currentNativeMaxPossible: 80,
+      lockedSnapshot: preFix41Lock,
+      policy: { blockOnScoreDrop: true },
+    });
+
+    // MASKED: the pre-#41 recovery reads 55/80 = 69% on both sides, so no drop
+    // is visible even though native evidence fell 65/80=81% → 55/80=69%. Closes
+    // only on re-lock (next test) — see TODOS #41.
+    expect(result.pass).toBe(true);
+  });
+
+  it("fixed: the same drop is caught once the lock records dropCheckNativeScore", () => {
+    const fixedLock: TrustSnapshot = {
+      score: 55,
+      maxPossible: 100,
+      level: "caution",
+      assessedAt: "2026-08-10T00:00:00Z",
+      externalScanCredit: 0,
+      dropCheckNativeScore: 65, // 15 + 40 + 10 (nativeRegistryMeta, uncollateralized)
+    };
+
+    const result = checkTrustPolicy({
+      serverName: "evil",
+      currentScore: 75,
+      currentMaxPossible: 100,
+      currentNativeScore: 55,
+      currentNativeMaxPossible: 80,
+      lockedSnapshot: fixedLock,
+      policy: { blockOnScoreDrop: true },
+    });
+
+    expect(result.pass).toBe(false);
+    if (!result.pass) {
+      expect(result.reason).toContain("81%");
+      expect(result.reason).toContain("69%");
+    }
+  });
+
+  it("dropCheckNativeScore takes priority over externalScanCredit when both are present", () => {
+    // If they ever disagree, the more precise #41 field must win.
+    const bothFields: TrustSnapshot = {
+      score: 90,
+      maxPossible: 100,
+      level: "safe",
+      assessedAt: "2026-08-10T00:00:00Z",
+      externalScanCredit: 20, // would recover to 70/80 = 88% via the old formula
+      dropCheckNativeScore: 60, // 60/80 = 75%, the #41-precise figure
+    };
+
+    const result = checkTrustPolicy({
+      serverName: "test-server",
+      currentScore: 68,
+      currentMaxPossible: 80,
+      currentNativeScore: 55, // 55/80 = 69%
+      currentNativeMaxPossible: 80,
+      lockedSnapshot: bothFields,
+      policy: { blockOnScoreDrop: true },
+    });
+
+    // 69% < 75% (the #41 figure) ⇒ blocks. Had the old 88% won, this would pass.
+    expect(result.pass).toBe(false);
+  });
+
+  // Found by adversarial review of this fix, before it shipped: `dropCheckNativeScore`
+  // is exactly as editable as `externalScanCredit`, and had no analogous validation.
+  it("rejects a dropCheckNativeScore that could not have come from this score, rather than trusting it", () => {
+    // score:65 looks entirely ordinary (matches every other test's shape for this
+    // score); dropCheckNativeScore:0 alone would report a 0% locked baseline —
+    // permanently and silently disarming the drop check — and unlike editing
+    // `score` directly, nothing else about this lock (score, level, maxPossible)
+    // looks abnormal.
+    const tamperedLock: TrustSnapshot = {
+      score: 65,
+      maxPossible: 80,
+      level: "safe",
+      assessedAt: "2026-08-10T00:00:00Z",
+      externalScanCredit: 0,
+      dropCheckNativeScore: 0, // out of [65-30, 65+10] = [35, 75]
+    };
+
+    const result = checkTrustPolicy({
+      serverName: "evil",
+      currentScore: 10,
+      currentMaxPossible: 80,
+      currentNativeScore: 10, // a genuine, severe native regression
+      currentNativeMaxPossible: 80,
+      lockedSnapshot: tamperedLock,
+      policy: { blockOnScoreDrop: true },
+    });
+
+    // Rejected value falls back to bounded(65, "out-of-range") = 65/80 = 81%.
+    // 10/80 = 13% < 81% ⇒ blocks, catching the regression the tampered value
+    // was trying to hide. Had 0 been trusted, this would have PASSED (10 >= 0).
+    expect(result.pass).toBe(false);
+    if (!result.pass) expect(result.reason).toContain("upper bound");
+  });
+
+  it("still trusts a legitimate dropCheckNativeScore at the edge of the provable range", () => {
+    // score - 30 is the lower edge of the sound bound — this is the case an
+    // over-tight validator would wrongly reject.
+    const edgeLock: TrustSnapshot = {
+      score: 65,
+      maxPossible: 80,
+      level: "caution",
+      assessedAt: "2026-08-10T00:00:00Z",
+      externalScanCredit: 0,
+      dropCheckNativeScore: 35, // exactly score - (EXTERNAL_SCAN_MAX + REGISTRY_META_MAX)
+    };
+
+    const result = checkTrustPolicy({
+      serverName: "test-server",
+      currentScore: 34,
+      currentMaxPossible: 80,
+      currentNativeScore: 34, // 34/80 = 43% < 35/80 = 44%
+      currentNativeMaxPossible: 80,
+      lockedSnapshot: edgeLock,
+      policy: { blockOnScoreDrop: true },
+    });
+
+    expect(result.pass).toBe(false);
+    if (!result.pass) {
+      expect(result.reason).toContain("44%");
+      expect(result.reason).not.toContain("upper bound"); // trusted as exact
+    }
+  });
+
   // --- #35 back-compat: pre-fix lock with a scanner, native unrecoverable ----
 
   it("compares against a bounded baseline on a pre-#35 lock (scanner credited, no field)", () => {

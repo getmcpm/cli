@@ -292,6 +292,40 @@ servers:
     expect(locked.trust.externalScanCredit).toBe(18);
   });
 
+  it("records dropCheckNativeScore from breakdown.nativeRegistryMeta, not registryMeta (#41)", async () => {
+    // A scenario the mutation could hide: registryMeta and nativeRegistryMeta
+    // DIVERGE (an external-only critical zeroed the displayed bucket but not the
+    // native one). If lock.ts read the wrong field, or hardcoded a passthrough
+    // of `score - externalScanCredit`, this would record 40 (10+30+0) instead
+    // of 50 (10+30+10).
+    const stackPath = await writeTempStackFile(`
+version: "1"
+servers:
+  io.github.test/scanned:
+    version: "1.0.0"
+`);
+    const deps = makeDeps({
+      computeTrustScore: vi.fn().mockReturnValue({
+        score: 40, // 10 + 30 + 0 (externalScan, critical) + 0 (registryMeta, collateral)
+        maxPossible: 100,
+        level: "caution",
+        breakdown: {
+          healthCheck: 10,
+          staticScan: 30,
+          externalScan: 0,
+          registryMeta: 0,
+          nativeRegistryMeta: 10, // no NATIVE finding capped it
+        },
+      } satisfies TrustScore),
+    });
+
+    await handleLock({ stackFile: stackPath }, deps);
+
+    const [, content] = (deps.writeLockFile as ReturnType<typeof vi.fn>).mock.calls[0];
+    const locked = parseYaml(content).servers["io.github.test/scanned"];
+    expect(locked.trust.dropCheckNativeScore).toBe(50);
+  });
+
   it("throws when mcpm.yaml does not exist", async () => {
     const deps = makeDeps();
     await expect(

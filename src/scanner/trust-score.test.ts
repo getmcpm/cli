@@ -14,12 +14,13 @@
 import { describe, it, expect } from "vitest";
 import {
   computeTrustScore,
+  dropCheckNativeScore,
   healthCheckWasRun,
   isCleanPendingHealthCheck,
   nativeTrustScore,
 } from "./trust-score.js";
 import type { Finding } from "./tier1.js";
-import type { TrustScoreInput } from "./trust-score.js";
+import type { TrustScore, TrustScoreInput } from "./trust-score.js";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -246,6 +247,69 @@ describe("computeTrustScore — finding source partitioning", () => {
     const result = computeTrustScore(makeInput({ hasExternalScanner: false, findings }));
     expect(result.breakdown.externalScan).toBe(0); // no scanner → always 0
     expect(result.breakdown.staticScan).toBe(30);  // 40 - 10, the finding still deducts
+  });
+});
+
+// ---------------------------------------------------------------------------
+// nativeRegistryMeta component — TODOS #41
+// ---------------------------------------------------------------------------
+
+describe("computeTrustScore — nativeRegistryMeta component", () => {
+  const oldDate = new Date(Date.now() - 60 * 24 * 60 * 60 * 1000).toISOString();
+  const meta = { isVerifiedPublisher: true, publishedAt: oldDate, downloadCount: 500 };
+
+  it("stays uncapped when only an EXTERNAL critical/high is present, unlike registryMeta", () => {
+    const result = computeTrustScore(makeInput({
+      hasExternalScanner: true,
+      findings: makeFindings([{ severity: "critical", source: "external" }]),
+      registryMeta: meta,
+    }));
+    // The divergence this field exists for: the displayed bucket is still
+    // capped (an external critical is real evidence a human should see), but
+    // the native figure is not — no mcpm-native finding caused it.
+    expect(result.breakdown.registryMeta).toBe(0);
+    expect(result.breakdown.nativeRegistryMeta).toBe(10);
+  });
+
+  it("is ALSO capped when a native (static) critical/high is present", () => {
+    const result = computeTrustScore(makeInput({
+      hasExternalScanner: true,
+      findings: makeFindings([{ severity: "critical", source: "static" }]),
+      registryMeta: meta,
+    }));
+    // Not "always uncapped" — mcpm's own evidence still zeroes it, same as the
+    // displayed bucket.
+    expect(result.breakdown.registryMeta).toBe(0);
+    expect(result.breakdown.nativeRegistryMeta).toBe(0);
+  });
+
+  it("equals registryMeta when no critical/high finding is present at all", () => {
+    const result = computeTrustScore(makeInput({ registryMeta: meta }));
+    expect(result.breakdown.nativeRegistryMeta).toBe(result.breakdown.registryMeta);
+    expect(result.breakdown.nativeRegistryMeta).toBe(10);
+  });
+
+  it("a finding with undefined source counts as native (same default as static bucket)", () => {
+    const result = computeTrustScore(makeInput({
+      findings: makeFindings([{ severity: "critical" }]), // no `source` set
+      registryMeta: meta,
+    }));
+    expect(result.breakdown.nativeRegistryMeta).toBe(0);
+  });
+
+  // Edge case (should not happen in normal flow, per the comment on
+  // `staticFindings`): an "external"-tagged finding present when no scanner ran.
+  // It still deducts from staticScan (routed there as a safe fallback) — the
+  // cap here must agree, or the two buckets judge the same evidence differently.
+  it("an orphan external finding (no credited scanner) caps this bucket too, consistent with staticScan", () => {
+    const result = computeTrustScore(makeInput({
+      hasExternalScanner: false,
+      findings: makeFindings([{ severity: "critical", source: "external" }]),
+      registryMeta: meta,
+    }));
+    expect(result.breakdown.staticScan).toBeLessThan(40); // the orphan deducted here
+    expect(result.breakdown.registryMeta).toBe(0);
+    expect(result.breakdown.nativeRegistryMeta).toBe(0);
   });
 });
 
@@ -791,6 +855,87 @@ describe("nativeTrustScore — unverifiable credit cannot clear a safety floor",
         }
       }
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// dropCheckNativeScore — TODOS #41
+// ---------------------------------------------------------------------------
+
+describe("dropCheckNativeScore — a native figure comparable across two points in time", () => {
+  const wellRegarded = {
+    healthCheckPassed: null,
+    registryMeta: {
+      isVerifiedPublisher: true,
+      publishedAt: new Date(Date.now() - 400 * 24 * 60 * 60 * 1000).toISOString(),
+      downloadCount: 5000,
+    },
+  };
+  const baseline = computeTrustScore(makeInput(wellRegarded));
+
+  it("agrees with nativeTrustScore whenever no external-only finding taints registryMeta", () => {
+    expect(dropCheckNativeScore(baseline).score).toBe(nativeTrustScore(baseline).score);
+    expect(dropCheckNativeScore(baseline).maxPossible).toBe(nativeTrustScore(baseline).maxPossible);
+  });
+
+  // The reproduction TODOS #41 is closed against: nativeTrustScore lets the
+  // external critical's registryMeta collateral survive (asserted deliberately
+  // in the "still drags the floor figure down" test above — correct for THAT,
+  // single point-in-time, use). dropCheckNativeScore must NOT — an external-only
+  // finding must never move the figure used to compare two different snapshots.
+  it("closes the reproduction: an external-only critical does not move the figure", () => {
+    const scanned = computeTrustScore(
+      makeInput({
+        ...wellRegarded,
+        hasExternalScanner: true,
+        findings: makeFindings([{ severity: "critical", source: "external" }]),
+      }),
+    );
+
+    expect(baseline.breakdown.registryMeta).toBeGreaterThan(0);
+    // nativeTrustScore DOES move (pinned above) — dropCheckNativeScore must not.
+    expect(nativeTrustScore(scanned).score).toBeLessThan(nativeTrustScore(baseline).score);
+    expect(dropCheckNativeScore(scanned).score).toBe(dropCheckNativeScore(baseline).score);
+  });
+
+  it("still falls when mcpm's OWN evidence drops", () => {
+    const degraded = computeTrustScore(
+      makeInput({
+        ...wellRegarded,
+        findings: makeFindings([{ severity: "critical", source: "static" }]),
+      }),
+    );
+    expect(dropCheckNativeScore(degraded).score).toBeLessThan(dropCheckNativeScore(baseline).score);
+  });
+
+  it("falls back to registryMeta when nativeRegistryMeta is absent from the breakdown", () => {
+    // A hand-built TrustScore predating this field (or a pre-#41 TrustSnapshot
+    // recovered elsewhere) — must not silently produce NaN or a wrong figure
+    // when the two would agree anyway.
+    const legacy = {
+      score: baseline.score,
+      maxPossible: baseline.maxPossible,
+      level: baseline.level,
+      breakdown: {
+        healthCheck: baseline.breakdown.healthCheck,
+        staticScan: baseline.breakdown.staticScan,
+        externalScan: baseline.breakdown.externalScan,
+        registryMeta: baseline.breakdown.registryMeta,
+        // nativeRegistryMeta deliberately omitted
+      },
+    } as TrustScore;
+    expect(dropCheckNativeScore(legacy).score).toBe(dropCheckNativeScore(baseline).score);
+  });
+
+  it("refuses a trust score with no usable breakdown rather than failing open", () => {
+    const partial = { score: 35, maxPossible: 100, level: "risky", breakdown: {} } as never;
+    const absent = { score: 35, maxPossible: 100, level: "risky" } as never;
+    expect(() => dropCheckNativeScore(partial)).toThrow(/no usable breakdown/);
+    expect(() => dropCheckNativeScore(absent)).toThrow();
+  });
+
+  it("reports the native denominator", () => {
+    expect(dropCheckNativeScore(baseline).maxPossible).toBe(80);
   });
 });
 
