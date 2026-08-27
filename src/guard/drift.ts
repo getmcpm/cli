@@ -17,7 +17,7 @@
 
 import type { JSONRPCMessage } from "@modelcontextprotocol/sdk/types.js";
 import type { InspectFinding, InspectResult } from "./types.js";
-import { defaultActionForFinding, ACTION_RANK } from "./patterns.js";
+import { worstAction } from "./patterns.js";
 import { sanitizeForTerminal } from "./sanitize.js";
 import {
   PinsIntegrityError,
@@ -406,10 +406,7 @@ export async function inspectForDrift(
     }),
   );
   // Action = MAX over findings (cosmetic-only → warn; any security → block).
-  const action = findings.reduce<InspectResult["action"]>((acc, f) => {
-    const a = defaultActionForFinding(f);
-    return ACTION_RANK[a] > ACTION_RANK[acc] ? a : acc;
-  }, "pass");
+  const action = worstAction(findings);
   return { action, findings };
 }
 
@@ -520,10 +517,7 @@ export async function inspectHandshakeForDrift(
     cls,
     safeServer: sanitizeLabel(serverName),
   });
-  const action = findings.reduce<InspectResult["action"]>((acc, f) => {
-    const a = defaultActionForFinding(f);
-    return ACTION_RANK[a] > ACTION_RANK[acc] ? a : acc;
-  }, "pass");
+  const action = worstAction(findings);
   return { action, findings };
 }
 

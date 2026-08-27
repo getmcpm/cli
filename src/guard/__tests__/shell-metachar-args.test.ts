@@ -118,6 +118,19 @@ describe("detectShellMetacharArgs", () => {
     expect(r.findings[0]?.matched_text_excerpt).toContain("issue_number");
   });
 
+  test("a URL query string with a raw pipe in a path arg → pass (FP risk on real URL values)", () => {
+    // Measured pre-release: `?family=Roboto|Open+Sans` (Google Fonts), `?fields=id|name`
+    // and `?sort=created|desc` are ordinary values for a path-suffixed argument, and a
+    // bare-pipe match hard-BLOCKED all three on the live relay.
+    for (const value of [
+      "/css?family=Roboto|Open+Sans",
+      "/api/users?fields=id|name|email",
+      "/v1/items?sort=created|desc",
+    ]) {
+      expect(detectShellMetacharArgs(toolCall("fetch", { path: value })).action, value).toBe("pass");
+    }
+  });
+
   test("a lone background '&' is deliberately NOT flagged (FP risk on real path/namespace values)", () => {
     const r = detectShellMetacharArgs(toolCall("t", { path: "/data/R&D/report.pdf" }));
     expect(r.action).toBe("pass");
