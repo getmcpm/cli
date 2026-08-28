@@ -646,6 +646,73 @@ describe("patterns: credential-egress DLP (F10)", () => {
   });
 });
 
+// TODOS #53 — generic Bearer-token disclosure, the deferred "suspect tier" from
+// F10, now motivated by CVE-2026-25650 (MCP-Salesforce `get_record` returns its
+// own live `Authorization: Bearer <session token>` header verbatim). Pattern is
+// reused verbatim from scanner/patterns.ts's already-corpus-validated fix for
+// the 2026-07 registry sweep's 164-FP "Bearer token" prose incident.
+describe("patterns: generic Bearer-token disclosure (TODOS #53)", () => {
+  const resp = (text: string): JSONRPCMessage => ({
+    jsonrpc: "2.0",
+    id: 1,
+    result: { content: [{ type: "text", text }] },
+  });
+  const SIG_ID = "generic-bearer-token-disclosure";
+
+  test("warns (forwards, not blocks) on the CVE-2026-25650 shape (a live Salesforce session token)", () => {
+    const r = inspectMessage(
+      resp("{'Authorization': 'Bearer 00D5f000000TXXXX!AQEAQNu6Iv2ZOwd6pkuUUuLA_LTvIkP4qxxSFDCTOKEN123'}"),
+      OWASP_MCP_TOP_10,
+    );
+    expect(r.action).toBe("warn");
+    expect(r.findings.some((f) => f.signature_id === SIG_ID)).toBe(true);
+  });
+
+  test("warns on a real JWT bearer token literal", () => {
+    const jwt =
+      "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c";
+    const r = inspectMessage(resp(jwt), OWASP_MCP_TOP_10);
+    expect(r.findings.some((f) => f.signature_id === SIG_ID)).toBe(true);
+  });
+
+  test("warns on an opaque high-entropy bearer token", () => {
+    const r = inspectMessage(resp("Authorization: Bearer a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6"), OWASP_MCP_TOP_10);
+    expect(r.findings.some((f) => f.signature_id === SIG_ID)).toBe(true);
+  });
+
+  test("REDACTS the caught token from the finding excerpt", () => {
+    const r = inspectMessage(resp("Authorization: Bearer a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6"), OWASP_MCP_TOP_10);
+    const f = r.findings.find((fi) => fi.signature_id === SIG_ID);
+    expect(f).toBeDefined();
+    expect(f!.matched_text_excerpt).not.toContain("a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6");
+    expect(f!.matched_text_excerpt).toMatch(/redacted/i);
+  });
+
+  // The exact 6-phrase benign corpus from the 2026-07 registry sweep
+  // (src/scanner/patterns.test.ts) that produced 164 CRITICAL false positives —
+  // re-run here against the guard's own copy of the pattern.
+  const benignBearerProse = [
+    "Bearer token for the Cortex REST API",
+    "Bearer token from /api/payment",
+    "Bearer credential",
+    "Bearer key",
+    "Provide a Bearer token to authenticate.",
+    "Use this or the BIGHUB Bearer token.",
+    "Send your API key as a Bearer token in the Authorization header.",
+  ];
+  for (const prose of benignBearerProse) {
+    test(`does NOT warn on prose: "${prose}"`, () => {
+      const r = inspectMessage(resp(prose), OWASP_MCP_TOP_10);
+      expect(r.findings.some((f) => f.signature_id === SIG_ID)).toBe(false);
+    });
+  }
+
+  test("does NOT warn on an all-letter >=20-char token (digit requirement; accepted recall boundary)", () => {
+    const r = inspectMessage(resp("Bearer abcdefghijklmnopqrstuvwxyzABCDEFGH"), OWASP_MCP_TOP_10);
+    expect(r.findings.some((f) => f.signature_id === SIG_ID)).toBe(false);
+  });
+});
+
 // F10 Detector-B — decode-and-rescan. An encoded payload (injection or credential)
 // inside server-returned data is decoded to a synthetic leaf and re-matched. Every
 // decoded finding is WARN-only (strictly additive: pass→warn, never block) and the

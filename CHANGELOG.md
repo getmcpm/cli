@@ -10,6 +10,40 @@ published section (it happened to #170).
 
 ### Security
 
+- **New signature: `generic-bearer-token-disclosure` — warns on a generic `Bearer <token>`
+  credential (no vendor-specific prefix) disclosed in a tool response.** Closes
+  CVE-2026-25650 (smn2gnt/MCP-Salesforce `get_record`): an unchecked argument reaches
+  `getattr(sf_client.sf, object_name)`, and `object_name="headers"` returns the live
+  client's own `Authorization: Bearer <session token>` header dict verbatim in the tool's
+  response text. `credential-egress-in-response`'s existing patterns are deliberately
+  prefix-anchored (`gh_`/`sk-`/`AKIA`/…) and cannot match a bare Bearer-prefixed token, so
+  this ships as its own 17th catalog entry, `high` severity (→ warn, not block),
+  independently muteable.
+
+  Rather than write a new pattern, this reuses — verbatim — the already
+  registry-sweep-validated regex from `scanner/patterns.ts`'s Tier-1 `SECRET_PATTERNS`
+  "Bearer token" entry: it requires ≥20 token characters AND at least one digit after
+  `Bearer `, which is exactly what a 2026-07 full-registry sweep found necessary to avoid
+  164 CRITICAL false positives on the documentation phrase "Bearer token" / "Bearer
+  credential" (both short, digit-free) while still catching real JWTs and opaque session
+  tokens.
+
+  Testing against the CVE's own PoC (not a generic token) found one gap in the reused
+  pattern: a real Salesforce session id is `<15-char org id>!<signature>`, and the literal
+  `!` broke the contiguous token-char run before the length/digit requirement could be
+  satisfied — so the first cut caught a generic JWT but missed the CVE's own motivating
+  shape. Added `!` to this signature's own copy of the character class (the shared
+  Tier-1 pattern is untouched) and re-verified against the same 6-phrase benign corpus
+  that produced the 164-FP incident — none of those phrases reach 20 characters or
+  contain a digit regardless of which punctuation the class admits.
+
+  Unlike #50–#52, this signature runs through the regular `inspectMessage` regex pipeline
+  rather than a bespoke key+value walker, so it already gets both existing decode-and-
+  rescan passes (Unicode TAG-block, base64/base64url) for free — TODOS #55's gap does not
+  apply to it.
+
+  Closes TODOS #53.
+
 - **New signature: `cli-flag-injection-in-identifier-arg` — blocks a `--`-prefixed CLI
   flag token embedded in a `tools/call` argument shaped like a bare namespace or opaque
   identifier.** CVE-2026-39884 (Flux159/mcp-server-kubernetes `port_forward`)

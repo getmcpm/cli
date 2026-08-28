@@ -311,6 +311,62 @@ export const OWASP_MCP_TOP_10: readonly Signature[] = [
       "`mcpm guard mute credential-egress-in-response`.",
   },
   {
+    // TODOS #53 — the deferred "suspect tier" from the comment above, now
+    // motivated by a real CVE: CVE-2026-25650 (smn2gnt/MCP-Salesforce
+    // `get_record`) passes a caller-supplied `object_name` into
+    // `getattr(sf_client.sf, object_name)` unchecked; `object_name="headers"`
+    // returns the live Salesforce client's `Authorization: Bearer <session
+    // token>` header dict verbatim in the tool's own response text (CVSS 7.5).
+    // Verified against shipped 0.30.0: scored `pass`, no findings.
+    //
+    // A generic "Bearer <token>" shape has no distinctive prefix (unlike the
+    // sibling entry's gh_/sk-/AKIA patterns), so it is lower-confidence and
+    // gets its OWN signature id — muteable independently of the always-safe
+    // prefix-anchored patterns above. Severity stays `high` (→ warn, same
+    // "forward + log, don't block" tier), because this is exactly the shape
+    // that produced the 2026-07 registry sweep's 164 CRITICAL "Bearer token"
+    // false positives on documentation prose (see scanner/patterns.ts's
+    // `SECRET_PATTERNS` "Bearer token" entry, src/scanner/patterns.test.ts's
+    // "sweep 2026-07" suite). Pattern reused VERBATIM from that
+    // already-corpus-validated fix rather than reinvented: it requires a
+    // real-looking credential after "Bearer " — >=20 token chars AND at least
+    // one digit — which the English phrase "Bearer token" / "Bearer
+    // credential" (short, no digits) and multi-word prose (spaces break the
+    // token) cannot satisfy, while a real JWT or opaque session token can.
+    //
+    // Deliberately NOT extended to bare JWTs or generic 40-char base64 with no
+    // "Bearer " anchor — the CVE's own PoC only needs the Bearer-prefixed
+    // shape, and those two carry meaningfully higher FP risk (base64 blobs are
+    // common in ordinary responses) with no concrete CVE motivating them yet.
+    //
+    // One character was added on top of the reused base: `!`. A real Salesforce
+    // session id/access token (the CVE's own PoC shape) is
+    // `<15-char org id>!<signature>` — the base scanner/patterns.ts class has
+    // no reason to include it (it scans config/description text, not OAuth
+    // session tokens) and without it this signature missed the CVE's own PoC
+    // outright, since `!` breaks the contiguous token-char run before the
+    // 20-char/digit requirement is satisfied. Re-verified against the same
+    // benign corpus with `!` added — a bare "Bearer token" phrase, digit-free
+    // and 5 chars long, is unaffected regardless of the char class.
+    id: "generic-bearer-token-disclosure",
+    category: "MCP-CREDENTIAL-EXFIL",
+    severity: "high",
+    description:
+      "A generic Bearer-prefixed credential (no distinctive vendor prefix) in a tool response",
+    target: "tool_response",
+    redact: true,
+    patterns: [/Bearer\s+(?=[A-Za-z0-9._~+/=!-]{20,})[A-Za-z0-9._~+/=!-]*[0-9][A-Za-z0-9._~+/=!-]*/],
+    remediation:
+      "A tool response contained a generic `Bearer <token>` credential (e.g. an OAuth session " +
+      "token or API bearer token with no distinctive vendor prefix). CVE-2026-25650 " +
+      "(MCP-Salesforce `get_record`) reaches this exact shape: an unchecked argument lets a " +
+      "caller read the live client's own `Authorization` header back through the tool's " +
+      "response. This is a lower-confidence heuristic than the prefix-anchored credential " +
+      "signature above — it was forwarded with a warning and the secret is redacted in the " +
+      "log. If this tool legitimately returns bearer tokens (e.g. an OAuth helper), mute via " +
+      "`mcpm guard mute generic-bearer-token-disclosure`.",
+  },
+  {
     // F5 — STRUCTURAL exfil-param detector. The finding is emitted by
     // detectExfilParams (a property-KEY walker over tools/list inputSchemas, NOT a
     // content regex), so this catalog entry carries NO patterns. It exists only so

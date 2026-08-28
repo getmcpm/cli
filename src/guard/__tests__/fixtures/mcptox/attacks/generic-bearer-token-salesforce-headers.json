@@ -1,0 +1,19 @@
+{
+  "name": "Generic Bearer session token leaked via a tool response (CVE-2026-25650 shape)",
+  "category": "MCP-CREDENTIAL-EXFIL",
+  "expected_action": "warn",
+  "expected_signature_id": "generic-bearer-token-disclosure",
+  "notes": "TODOS #53. CVE-2026-25650 (smn2gnt/MCP-Salesforce get_record): an unchecked object_name argument reaches getattr(sf_client.sf, object_name); object_name=\"headers\" returns the live client's own Authorization: Bearer <session token> header dict verbatim in the tool response text. No vendor-specific prefix, so this is a lower-confidence signature distinct from credential-egress-in-response's prefix-anchored patterns. Token is a synthetic, pattern-shaped value.",
+  "message": {
+    "jsonrpc": "2.0",
+    "id": 214,
+    "result": {
+      "content": [
+        {
+          "type": "text",
+          "text": "{'Authorization': 'Bearer 00D5f000000TXXXX!AQEAQNu6Iv2ZOwd6pkuUUuLA_LTvIkP4qxxSFDCTOKEN123', 'Sforce-Call-Options': 'client=mcp-salesforce'}"
+        }
+      ]
+    }
+  }
+}

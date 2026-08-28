@@ -1,0 +1,17 @@
+{
+  "name": "Bearer-token documentation prose and a short non-credential token must not warn",
+  "expected_action": "pass",
+  "notes": "TODOS #53 FP guard, reproducing the 2026-07 registry sweep's 164-FP corpus through generic-bearer-token-disclosure specifically. 'Bearer token'/'Bearer credential' phrasing has no digit and is under the 20-char floor; an all-letter token fails the digit requirement even past 20 chars.",
+  "message": {
+    "jsonrpc": "2.0",
+    "id": 215,
+    "result": {
+      "content": [
+        {
+          "type": "text",
+          "text": "Use this or the BIGHUB Bearer token. Provide a Bearer credential (not a Bearer key) for the Cortex REST API. All-letter session ids like Bearer abcdefghijklmnopqrstuvwxyzABCDEFGH are just placeholders."
+        }
+      ]
+    }
+  }
+}
