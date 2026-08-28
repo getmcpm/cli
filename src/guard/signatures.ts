@@ -266,10 +266,12 @@ export const OWASP_MCP_TOP_10: readonly Signature[] = [
     // FP discipline (the 2026-07 "Bearer token" phrase lesson applies directly):
     // ONLY prefix-anchored STRUCTURAL credential shapes are here — they cannot
     // match prose. AWS's literal docs key (AKIAIOSFODNN7EXAMPLE) is excluded.
-    // Generic Bearer / bare JWT / 40-char base64 (no distinctive prefix) are the
-    // SUSPECT tier and are DEFERRED — they false-positive on legitimate auth tools
-    // that return a token the user asked for. `redact: true` keeps the caught
-    // secret out of the event log and the warning message.
+    // Generic Bearer is now covered separately by `generic-bearer-token-disclosure`
+    // below (TODOS #53). Bare JWT / 40-char base64 (no distinctive prefix at all,
+    // not even a "Bearer " anchor) remain the SUSPECT tier and are still DEFERRED —
+    // they false-positive on legitimate auth tools that return a token the user
+    // asked for. `redact: true` keeps the caught secret out of the event log and
+    // the warning message.
     id: "credential-egress-in-response",
     category: "MCP-CREDENTIAL-EXFIL",
     severity: "high",
@@ -309,6 +311,86 @@ export const OWASP_MCP_TOP_10: readonly Signature[] = [
       "in the log. If this tool legitimately returns credentials (e.g. a secrets manager), " +
       "promote-to-block is opt-in per policy, or mute via " +
       "`mcpm guard mute credential-egress-in-response`.",
+  },
+  {
+    // TODOS #53 — the deferred "suspect tier" from the comment above, now
+    // motivated by a real CVE: CVE-2026-25650 (smn2gnt/MCP-Salesforce
+    // `get_record`) passes a caller-supplied `object_name` into
+    // `getattr(sf_client.sf, object_name)` unchecked; `object_name="headers"`
+    // returns the live Salesforce client's `Authorization: Bearer <session
+    // token>` header dict verbatim in the tool's own response text (CVSS 7.5).
+    // Verified against shipped 0.30.0: scored `pass`, no findings.
+    //
+    // A generic "Bearer <token>" shape has no distinctive prefix (unlike the
+    // sibling entry's gh_/sk-/AKIA patterns), so it is lower-confidence and
+    // gets its OWN signature id — muteable independently of the always-safe
+    // prefix-anchored patterns above. Severity stays `high` (→ warn, same
+    // "forward + log, don't block" tier), because this is exactly the shape
+    // that produced the 2026-07 registry sweep's 164 CRITICAL "Bearer token"
+    // false positives on documentation prose (see scanner/patterns.ts's
+    // `SECRET_PATTERNS` "Bearer token" entry, src/scanner/patterns.test.ts's
+    // "sweep 2026-07" suite). Pattern reused VERBATIM from that
+    // already-corpus-validated fix rather than reinvented: it requires a
+    // real-looking credential after "Bearer " — >=20 token chars AND at least
+    // one digit — which the English phrase "Bearer token" / "Bearer
+    // credential" (short, no digits) and multi-word prose (spaces break the
+    // token) cannot satisfy, while a real JWT or opaque session token can.
+    //
+    // Deliberately NOT extended to bare JWTs or generic 40-char base64 with no
+    // "Bearer " anchor — the CVE's own PoC only needs the Bearer-prefixed
+    // shape, and those two carry meaningfully higher FP risk (base64 blobs are
+    // common in ordinary responses) with no concrete CVE motivating them yet.
+    //
+    // KNOWN, ACCEPTED GAP: the CVE's own PoC token is a real Salesforce session
+    // id, shaped `<15-char org id>!<signature>`. An earlier version of this
+    // pattern added `!` to the reused character class specifically to match
+    // that literal shape. A pre-merge adversarial review measured that
+    // widening (not just read it) and found it FALSE-POSITIVES on real benign
+    // text the un-widened, registry-sweep-validated pattern never matched:
+    // webpack's loader-chaining syntax (`Bearer style-loader!css-loader!v2`),
+    // a PEP-440-style version string immediately after the word "Bearer", and
+    // — the closest parallel to the sibling signature's own AWS
+    // `AKIAIOSFODNN7EXAMPLE` carve-out — Salesforce's OWN documentation
+    // explaining the `<org-id>!<signature>` token FORMAT with an example
+    // token, which is prose about a shape, not a leaked secret. None of these
+    // are in the tiny 6-7 phrase benign corpus this signature was tested
+    // against, which is exactly the "corpus tests the wrong slice of the
+    // input space" lesson TODOS #52's own review already logged for this
+    // detector family. The `!` was REMOVED rather than patched around it (same
+    // choice as TODOS #56/#57: prefer a narrower, unmodified, already-validated
+    // pattern over an unmeasured widening). Accepted cost, stated plainly: the
+    // CVE's own literal PoC token (with `!`) now scores `pass` against this
+    // signature — see TODOS #53's writeup. The signature still generalizes to
+    // any OTHER Bearer-disclosed JWT or opaque session token, which is the
+    // majority shape this class of vulnerability takes outside Salesforce's
+    // own token format.
+    //
+    // Overlap, not a bug: a vendor-prefixed token disclosed with a literal
+    // "Bearer " prefix (e.g. `Bearer ghp_...`) matches BOTH this signature and
+    // the sibling `credential-egress-in-response` above — two findings for one
+    // secret. Both are correctly redacted and both resolve to the same `warn`
+    // action, so this is redundant signal (two remediation lines instead of
+    // one), not incorrect signal. Not scoped away deliberately: doing so would
+    // require this signature to hardcode (and keep in sync with) every vendor
+    // prefix the sibling signature knows about, which is more state than the
+    // noise it would save.
+    id: "generic-bearer-token-disclosure",
+    category: "MCP-CREDENTIAL-EXFIL",
+    severity: "high",
+    description:
+      "A generic Bearer-prefixed credential (typically no distinctive vendor prefix) in a tool response",
+    target: "tool_response",
+    redact: true,
+    patterns: [/Bearer\s+(?=[A-Za-z0-9._~+/=-]{20,})[A-Za-z0-9._~+/=-]*[0-9][A-Za-z0-9._~+/=-]*/],
+    remediation:
+      "A tool response contained a generic `Bearer <token>` credential (e.g. an OAuth session " +
+      "token or API bearer token, typically with no distinctive vendor prefix). CVE-2026-25650 " +
+      "(MCP-Salesforce `get_record`) reaches this general shape: an unchecked argument lets a " +
+      "caller read the live client's own `Authorization` header back through the tool's " +
+      "response. This is a lower-confidence heuristic than the prefix-anchored credential " +
+      "signature above — it was forwarded with a warning and the secret is redacted in the " +
+      "log. If this tool legitimately returns bearer tokens (e.g. an OAuth helper), mute via " +
+      "`mcpm guard mute generic-bearer-token-disclosure`.",
   },
   {
     // F5 — STRUCTURAL exfil-param detector. The finding is emitted by

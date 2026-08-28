@@ -1521,7 +1521,7 @@ load-bearing, not decorative.
 
 **Known gap, same as #50/#51 (TODOS #55):** no tag/base64 decode-and-rescan.
 
-## #53 — `credential-egress-in-response` is prefix-anchored and misses generic Bearer-token disclosure (P2, open)
+## #53 — ~~`credential-egress-in-response` is prefix-anchored and misses generic Bearer-token disclosure~~ DONE (unreleased)
 
 **Found:** 2026-08-23, same external-corpus measurement as #50.
 
@@ -1541,15 +1541,62 @@ conservative choice that closed one FP class now causes a real miss on the other
 Verified against shipped 0.30.0: the real PoC response payload scores `pass`, no
 findings.
 
-**What:** the deferred "generic Bearer / bare JWT / 40-char base64 = suspect tier" work
-(already named as deferred in the 2026-07-12 F10 decisions log), now motivated by a real
-CVE rather than a hypothetical. A lower-confidence WARN tier gated on structural shape
-(a `Bearer ` prefix followed by a long high-entropy token, not the bare phrase "Bearer
-token") should clear the FP class this repo already measured while catching this shape.
+**Shipped:** `generic-bearer-token-disclosure`, 17th catalog entry, `high` severity (→
+warn, same "forward + log, don't block" tier as its sibling), `tool_response`, own
+signature id (independently muteable from the always-safe prefix-anchored patterns).
+Rather than write a new pattern, reused the ALREADY registry-sweep-validated regex from
+`scanner/patterns.ts`'s Tier-1 `SECRET_PATTERNS` "Bearer token" entry verbatim — it
+requires ≥20 token chars AND at least one digit after `Bearer `, which is exactly what
+kills the bare phrase "Bearer token"/"Bearer credential" (short, no digits) while still
+catching real JWTs and opaque session tokens. Deliberately NOT extended to bare JWTs or
+generic 40-char base64 with no `Bearer ` anchor: the CVE only needs the Bearer-prefixed
+shape, and those two carry meaningfully higher FP risk with no concrete CVE motivating
+them yet.
 
-**FP risk.** This is exactly the class that produced the 164-FP "Bearer token" incident —
-do not ship any new rule here without re-running that same benign corpus (prose/docs
-containing the literal phrase "Bearer token") against it.
+**A one-character widening was tried, measured by adversarial review, and reverted —
+this is the load-bearing lesson of this entry.** A real Salesforce session id/access
+token — the exact shape this CVE discloses — is `<15-char org id>!<signature>`; the
+reused pattern's char class lacks `!`, so the first cut of this signature missed the
+CVE's own motivating PoC while still catching a generic JWT. The obvious fix — add `!`
+to the char class — was applied, and a "re-verified against the same 6-phrase benign
+corpus" check was run and passed, because none of those 6-7 phrases contain `!` combined
+with a digit. **That check was vacuous, not reassuring**, and a pre-merge adversarial
+review (4 finder angles + one-vote verify) found it FALSE-POSITIVES on real text the
+un-widened, 16,259-server-validated pattern never matched: webpack's real loader-chaining
+syntax (`Bearer style-loader!css-loader!v2`), a PEP-440-style version string right after
+the word "Bearer", and — the closest parallel to the sibling signature's own AWS
+`AKIAIOSFODNN7EXAMPLE` carve-out — Salesforce's OWN documentation explaining the
+`<org-id>!<signature>` token FORMAT with an example token, i.e. prose about a shape, not
+a leaked secret. The review also found the widened pattern double-fires alongside
+`credential-egress-in-response` on any vendor-prefixed token disclosed with a literal
+`Bearer ` prefix (e.g. `Bearer ghp_...`) — low-severity (both findings redact correctly,
+both resolve to the same `warn` action) but undocumented at the time.
+
+**Fixed by reverting the `!` widening entirely**, matching #56/#57's precedent: prefer a
+narrower, already-validated, unmodified pattern over an unmeasured widening. The shipped
+pattern is now byte-identical to `scanner/patterns.ts`'s SECRET_PATTERNS "Bearer token"
+entry — zero local modification, zero new FP surface. **Accepted, stated cost:** the
+CVE's own literal PoC token (with `!`) now scores `pass` against this signature; the
+signature still generalizes to the majority shape this vulnerability class takes outside
+Salesforce's own token format (JWTs, opaque session tokens). The vendor-prefix overlap
+with `credential-egress-in-response` is documented as accepted redundancy, not fixed —
+excluding it would require this signature to hardcode and maintain the sibling's own
+vendor-prefix list, which is more state than the log noise it would save. Also fixed: a
+stale comment on `credential-egress-in-response` still said "Generic Bearer ... are the
+SUSPECT tier and are DEFERRED" — now false since this same commit ships exactly that;
+corrected to name only bare-JWT/40-char-base64 as still deferred (in both
+`signatures.ts` and `docs/SIGNATURES.md`, which had the identical stale line).
+
+**Lesson for future detectors reusing a validated pattern into a new context: measuring
+against the SAME small corpus the original fix was validated against tells you nothing
+about a WIDENING you just introduced — it only proves the widening didn't break what the
+corpus already covered.** A widening needs its own adversarial pass, not a re-run of the
+old one.
+
+**Known gap, same as #50/#51/#52 (TODOS #55):** no tag/base64 decode-and-rescan — but
+this signature goes through the regular `inspectMessage` regex pipeline (unlike the
+bespoke key+value walkers #50–#52 use), so it already gets both decode-and-rescan passes
+for free (now covered by a dedicated test); #55 does not apply here.
 
 ## #54 — no signature detects HTML/script-tag injection or renderer-targeted code-execution payloads in `tool_response` (P2, open)
 

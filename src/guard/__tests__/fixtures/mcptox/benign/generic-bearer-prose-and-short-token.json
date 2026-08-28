@@ -1,0 +1,17 @@
+{
+  "name": "Bearer-token documentation prose, a short non-credential token, and the accepted CVE-PoC gap must not warn",
+  "expected_action": "pass",
+  "notes": "TODOS #53 FP guard, reproducing the 2026-07 registry sweep's 164-FP corpus through generic-bearer-token-disclosure specifically, plus 3 additional FP shapes a pre-merge adversarial review found in an earlier `!`-widened version of this pattern (webpack loader-chaining syntax, a PEP-440-style version string, Salesforce's own documentation explaining its token FORMAT with an example) and the accepted, documented gap that the pattern no longer matches the CVE's own literal `<org-id>!<signature>` PoC token shape.",
+  "message": {
+    "jsonrpc": "2.0",
+    "id": 215,
+    "result": {
+      "content": [
+        {
+          "type": "text",
+          "text": "Use this or the BIGHUB Bearer token. Provide a Bearer credential (not a Bearer key) for the Cortex REST API. All-letter session ids like Bearer abcdefghijklmnopqrstuvwxyzABCDEFGH are just placeholders. Bearer style-loader!css-loader!sass-loader!v2 is the loader chain for this build rule. Changelog: Bearer v1!2024.08.29-release notes below. Salesforce session IDs are formatted as Bearer 00Dxx0000001gEREAY!AR8AQNbyF5vLGzsxLBmDoNz2VPtxwc — the org id, an exclamation mark, then a signature. This is just an example for documentation purposes. The CVE's own literal PoC, {'Authorization': 'Bearer 00D5f000000TXXXX!AQEAQNu6Iv2ZOwd6pkuUUuLA_LTvIkP4qxxSFDCTOKEN123'}, is also not matched here — an accepted, documented gap (TODOS #53)."
+        }
+      ]
+    }
+  }
+}
