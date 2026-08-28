@@ -1,0 +1,19 @@
+{
+  "name": "Benign namespace-scoped tool_call_args, plus *_name-suffixed fields that are excluded from cli-flag-injection-in-identifier-arg entirely",
+  "expected_action": "pass",
+  "notes": "TODOS #52 FP guard. A plain namespace, and multiple *_name-suffixed fields (a k8s resourceName reproducing the CVE advisory's own PoC value, a ticket-title-shaped task_name mentioning a flag, and a free-text command field) must never trip cli-flag-injection-in-identifier-arg — a pre-merge adversarial review found `name` inclusion produced real false positives on exactly these shapes, so `name` is excluded from the key scope entirely (see cli-flag-injection-args.ts's module doc comment and TODOS #57).",
+  "message": {
+    "jsonrpc": "2.0",
+    "id": 110,
+    "method": "tools/call",
+    "params": {
+      "name": "get_pod_logs",
+      "arguments": {
+        "namespace": "kube-system",
+        "resourceName": "my-database --address=0.0.0.0",
+        "task_name": "Add --dry-run support to sync command",
+        "command": "kubectl get pods --all-namespaces -o wide"
+      }
+    }
+  }
+}

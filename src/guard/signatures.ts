@@ -430,6 +430,28 @@ export const OWASP_MCP_TOP_10: readonly Signature[] = [
       "field, mute via `mcpm guard mute query-control-syntax-in-identifier-arg`.",
   },
   {
+    // TODOS #52 — cli-flag-injection-in-identifier-arg. STRUCTURAL key+value
+    // detector (detectCliFlagInjectionArgs in cli-flag-injection-args.ts), same
+    // shape as shell-metachar-in-identifier-arg / query-control-syntax-in-
+    // identifier-arg above — this entry carries NO patterns and exists only so
+    // the id is recognized by `guard mute cli-flag-injection-in-identifier-arg`,
+    // `guard list-signatures`, and policy signature_overrides.
+    id: "cli-flag-injection-in-identifier-arg",
+    category: "MCP-ARGUMENT-INJECTION",
+    severity: "critical",
+    description:
+      "A tools/call argument named like a bare namespace or opaque identifier contains an embedded `--`-prefixed CLI flag token (CVE-2026-39884 shape)",
+    target: "tool_call_args",
+    patterns: [],
+    remediation:
+      "A tool call argument named like a bare namespace or opaque identifier " +
+      "contains a `--`-prefixed CLI flag token (e.g. `--address=0.0.0.0`). A real, " +
+      "disclosed CVE reaches this shape when the argument is whitespace-split into a " +
+      "shell command, letting the embedded flag override intended behavior. If this " +
+      "tool legitimately accepts flag-shaped text in this field, mute via " +
+      "`mcpm guard mute cli-flag-injection-in-identifier-arg`.",
+  },
+  {
     // unicode-tag-concealment — the tag-block PRESENCE floor on the carriers H2
     // deliberately skips (tool_response / tool_call_args / retrieved data, and
     // sampling_prompt by re-tagging). Emitted inline by detectTagConcealment from

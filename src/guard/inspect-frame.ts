@@ -21,6 +21,7 @@ import { inspectMessage, ACTION_RANK, worstAction } from "./patterns.js";
 import { detectExfilParams } from "./exfil-params.js";
 import { detectShellMetacharArgs } from "./shell-metachar-args.js";
 import { detectQueryControlArgs } from "./query-control-args.js";
+import { detectCliFlagInjectionArgs } from "./cli-flag-injection-args.js";
 import { OWASP_MCP_TOP_10 } from "./signatures.js";
 import type { InspectFinding, InspectResult } from "./types.js";
 
@@ -135,11 +136,11 @@ export function inspectServerInitiated(msg: JSONRPCMessage): InspectResult | nul
  * The pattern/structural detectors that apply regardless of which direction a
  * frame travels: the OWASP regex catalog, detectExfilParams (self-guards on
  * `result.tools` — a no-op on anything else), and detectShellMetacharArgs +
- * detectQueryControlArgs (both self-guard on a `tools/call` request — a no-op
- * on anything else). No caller-side gating needed. reduce(mergeInspect) over
- * an array (rather than nested calls) so adding a future detector (TODOS #52
- * is the same key+value shape) is a one-line array entry, not a growing nest
- * of merges.
+ * detectQueryControlArgs + detectCliFlagInjectionArgs (all three self-guard on
+ * a `tools/call` request — a no-op on anything else). No caller-side gating
+ * needed. reduce(mergeInspect) over an array (rather than nested calls) so
+ * adding a future detector is a one-line array entry, not a growing nest of
+ * merges.
  *
  * Deliberately EXCLUDES inspectServerInitiated: that check is only valid on
  * the child->parent direction (a server sending sampling/createMessage or
@@ -157,6 +158,7 @@ export function inspectStatelessDetectors(msg: JSONRPCMessage): InspectResult {
     detectExfilParams(msg),
     detectShellMetacharArgs(msg),
     detectQueryControlArgs(msg),
+    detectCliFlagInjectionArgs(msg),
   ].reduce(mergeInspect);
 }
 
