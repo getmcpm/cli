@@ -460,6 +460,7 @@ Independent 2026 evidence for each thing the guard does, so you can check the pr
 - `docs/GUARD.md` — full command reference
 - `docs/SIGNATURES.md` — signature catalog + how to contribute new ones
 - `docs/POLICY.md` — `~/.mcpm/guard-policy.yaml` reference
+- `docs/owasp-mcp-mapping.md` — every mcpm mechanism mapped to an OWASP MCP Top 10 (beta) category, with an honest gap list for what's not covered
 - `docs/VISION.md` — where the project is going (thesis, horizons, doctrine)
 
 ## Agent mode
