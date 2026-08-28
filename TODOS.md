@@ -1553,22 +1553,50 @@ generic 40-char base64 with no `Bearer ` anchor: the CVE only needs the Bearer-p
 shape, and those two carry meaningfully higher FP risk with no concrete CVE motivating
 them yet.
 
-**One character had to be added on top of the reused pattern, found by testing against
-the CVE's own PoC rather than a generic token.** A real Salesforce session id/access
+**A one-character widening was tried, measured by adversarial review, and reverted —
+this is the load-bearing lesson of this entry.** A real Salesforce session id/access
 token — the exact shape this CVE discloses — is `<15-char org id>!<signature>`; the
-literal `!` broke the reused pattern's contiguous token-char run before the 20-char/digit
-requirement could be satisfied, so the first cut of this signature missed the CVE's own
-motivating PoC while still catching a generic JWT. Added `!` to the character class
-(a local widening in this signature's own copy, not in the shared Tier-1 pattern, so the
-Tier-1 scanner's already-shipped behavior is untouched) and re-verified against the same
-6-phrase benign corpus that produced the 164-FP incident — none of those phrases have a
-digit or reach 20 chars regardless of which punctuation chars the class admits, so the
-widening costs nothing on that corpus.
+reused pattern's char class lacks `!`, so the first cut of this signature missed the
+CVE's own motivating PoC while still catching a generic JWT. The obvious fix — add `!`
+to the char class — was applied, and a "re-verified against the same 6-phrase benign
+corpus" check was run and passed, because none of those 6-7 phrases contain `!` combined
+with a digit. **That check was vacuous, not reassuring**, and a pre-merge adversarial
+review (4 finder angles + one-vote verify) found it FALSE-POSITIVES on real text the
+un-widened, 16,259-server-validated pattern never matched: webpack's real loader-chaining
+syntax (`Bearer style-loader!css-loader!v2`), a PEP-440-style version string right after
+the word "Bearer", and — the closest parallel to the sibling signature's own AWS
+`AKIAIOSFODNN7EXAMPLE` carve-out — Salesforce's OWN documentation explaining the
+`<org-id>!<signature>` token FORMAT with an example token, i.e. prose about a shape, not
+a leaked secret. The review also found the widened pattern double-fires alongside
+`credential-egress-in-response` on any vendor-prefixed token disclosed with a literal
+`Bearer ` prefix (e.g. `Bearer ghp_...`) — low-severity (both findings redact correctly,
+both resolve to the same `warn` action) but undocumented at the time.
+
+**Fixed by reverting the `!` widening entirely**, matching #56/#57's precedent: prefer a
+narrower, already-validated, unmodified pattern over an unmeasured widening. The shipped
+pattern is now byte-identical to `scanner/patterns.ts`'s SECRET_PATTERNS "Bearer token"
+entry — zero local modification, zero new FP surface. **Accepted, stated cost:** the
+CVE's own literal PoC token (with `!`) now scores `pass` against this signature; the
+signature still generalizes to the majority shape this vulnerability class takes outside
+Salesforce's own token format (JWTs, opaque session tokens). The vendor-prefix overlap
+with `credential-egress-in-response` is documented as accepted redundancy, not fixed —
+excluding it would require this signature to hardcode and maintain the sibling's own
+vendor-prefix list, which is more state than the log noise it would save. Also fixed: a
+stale comment on `credential-egress-in-response` still said "Generic Bearer ... are the
+SUSPECT tier and are DEFERRED" — now false since this same commit ships exactly that;
+corrected to name only bare-JWT/40-char-base64 as still deferred (in both
+`signatures.ts` and `docs/SIGNATURES.md`, which had the identical stale line).
+
+**Lesson for future detectors reusing a validated pattern into a new context: measuring
+against the SAME small corpus the original fix was validated against tells you nothing
+about a WIDENING you just introduced — it only proves the widening didn't break what the
+corpus already covered.** A widening needs its own adversarial pass, not a re-run of the
+old one.
 
 **Known gap, same as #50/#51/#52 (TODOS #55):** no tag/base64 decode-and-rescan — but
 this signature goes through the regular `inspectMessage` regex pipeline (unlike the
 bespoke key+value walkers #50–#52 use), so it already gets both decode-and-rescan passes
-for free; #55 does not apply here.
+for free (now covered by a dedicated test); #55 does not apply here.
 
 ## #54 — no signature detects HTML/script-tag injection or renderer-targeted code-execution payloads in `tool_response` (P2, open)
 

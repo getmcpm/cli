@@ -659,13 +659,35 @@ describe("patterns: generic Bearer-token disclosure (TODOS #53)", () => {
   });
   const SIG_ID = "generic-bearer-token-disclosure";
 
-  test("warns (forwards, not blocks) on the CVE-2026-25650 shape (a live Salesforce session token)", () => {
+  test("warns (forwards, not blocks) on the CVE-2026-25650 shape generalized to a non-Salesforce session token", () => {
+    // The CVE (MCP-Salesforce get_record) discloses a live Authorization: Bearer
+    // header; this reproduces the general vulnerability class (an unchecked
+    // argument echoing back the client's own bearer token) without Salesforce's
+    // own `<org-id>!<signature>` format, which this signature deliberately does
+    // NOT match — see "accepted, documented gap" below.
     const r = inspectMessage(
-      resp("{'Authorization': 'Bearer 00D5f000000TXXXX!AQEAQNu6Iv2ZOwd6pkuUUuLA_LTvIkP4qxxSFDCTOKEN123'}"),
+      resp("{'Authorization': 'Bearer sess_a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8g9h0'}"),
       OWASP_MCP_TOP_10,
     );
     expect(r.action).toBe("warn");
     expect(r.findings.some((f) => f.signature_id === SIG_ID)).toBe(true);
+  });
+
+  // Accepted, documented gap (see the module doc comment on this signature in
+  // signatures.ts and TODOS #53): an earlier version widened the character
+  // class with `!` specifically to match a real Salesforce session id
+  // (`<15-char org id>!<signature>`, this CVE's own literal PoC value). A
+  // pre-merge adversarial review measured that widening and found it
+  // false-positives on real benign text (webpack loader chaining, PEP-440
+  // version strings, Salesforce's own documentation explaining the token
+  // format) that the un-widened pattern never matched. The `!` was removed;
+  // the CVE's own exact PoC token is a known, accepted miss.
+  test("does NOT catch the CVE's own literal PoC token shape (accepted gap, TODOS #53)", () => {
+    const r = inspectMessage(
+      resp("{'Authorization': 'Bearer 00D5f000000TXXXX!AQEAQNu6Iv2ZOwd6pkuUUuLA_LTvIkP4qxxSFDCTOKEN123'}"),
+      OWASP_MCP_TOP_10,
+    );
+    expect(r.findings.some((f) => f.signature_id === SIG_ID)).toBe(false);
   });
 
   test("warns on a real JWT bearer token literal", () => {
@@ -710,6 +732,55 @@ describe("patterns: generic Bearer-token disclosure (TODOS #53)", () => {
   test("does NOT warn on an all-letter >=20-char token (digit requirement; accepted recall boundary)", () => {
     const r = inspectMessage(resp("Bearer abcdefghijklmnopqrstuvwxyzABCDEFGH"), OWASP_MCP_TOP_10);
     expect(r.findings.some((f) => f.signature_id === SIG_ID)).toBe(false);
+  });
+
+  // Regression pin for the FP class an earlier `!`-widened version of this
+  // pattern introduced (found by pre-merge adversarial review, not by the
+  // 6-phrase corpus above — none of those phrases contain `!`). All three
+  // would have false-positived under the widened class; none does under the
+  // shipped, un-widened one.
+  test("does NOT warn on webpack loader-chaining syntax mentioning 'Bearer'", () => {
+    const r = inspectMessage(
+      resp("Bearer style-loader!css-loader!sass-loader!v2 is the loader chain for this rule."),
+      OWASP_MCP_TOP_10,
+    );
+    expect(r.findings.some((f) => f.signature_id === SIG_ID)).toBe(false);
+  });
+
+  test("does NOT warn on a PEP-440-style version string after the word 'Bearer'", () => {
+    const r = inspectMessage(resp("Changelog: Bearer v1!2024.08.29-release notes below."), OWASP_MCP_TOP_10);
+    expect(r.findings.some((f) => f.signature_id === SIG_ID)).toBe(false);
+  });
+
+  test("does NOT warn on Salesforce documentation explaining the token FORMAT with an example", () => {
+    const r = inspectMessage(
+      resp(
+        "Salesforce session IDs are formatted as Bearer 00Dxx0000001gEREAY!AR8AQNbyF5vLGzsxLBmDoNz2VPtxwc " +
+          "— the org id, an exclamation mark, then a signature. This is just an example for documentation purposes.",
+      ),
+      OWASP_MCP_TOP_10,
+    );
+    expect(r.findings.some((f) => f.signature_id === SIG_ID)).toBe(false);
+  });
+
+  // The vendor-prefixed overlap the review flagged: not a bug (both findings
+  // are redacted, both resolve to `warn`), but pinned so the behavior is
+  // deliberate and documented rather than accidental.
+  test("a vendor-prefixed token disclosed with a Bearer prefix fires BOTH this and credential-egress-in-response (documented overlap)", () => {
+    const r = inspectMessage(resp("Authorization: Bearer ghp_A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q7r8"), OWASP_MCP_TOP_10);
+    const ids = r.findings.map((f) => f.signature_id);
+    expect(ids).toContain(SIG_ID);
+    expect(ids).toContain("credential-egress-in-response");
+    expect(r.action).toBe("warn");
+  });
+
+  test("gets decode-and-rescan for free (base64-encoded generic bearer token in a response)", () => {
+    const b64 = (s: string): string => Buffer.from(s, "utf8").toString("base64");
+    const secret = "Authorization: Bearer sess_a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8g9h0";
+    const r = inspectMessage(resp(`leaked: ${b64(secret)}`), OWASP_MCP_TOP_10);
+    const f = r.findings.find((fi) => fi.signature_id === SIG_ID && fi.decoded === true);
+    expect(f).toBeDefined();
+    expect(r.action).toBe("warn");
   });
 });
 

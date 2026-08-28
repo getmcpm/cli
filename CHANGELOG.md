@@ -28,14 +28,35 @@ published section (it happened to #170).
   credential" (both short, digit-free) while still catching real JWTs and opaque session
   tokens.
 
-  Testing against the CVE's own PoC (not a generic token) found one gap in the reused
+  Testing against the CVE's own PoC (not a generic token) found a gap in the reused
   pattern: a real Salesforce session id is `<15-char org id>!<signature>`, and the literal
   `!` broke the contiguous token-char run before the length/digit requirement could be
   satisfied — so the first cut caught a generic JWT but missed the CVE's own motivating
-  shape. Added `!` to this signature's own copy of the character class (the shared
-  Tier-1 pattern is untouched) and re-verified against the same 6-phrase benign corpus
-  that produced the 164-FP incident — none of those phrases reach 20 characters or
-  contain a digit regardless of which punctuation the class admits.
+  shape. `!` was added to this signature's own copy of the character class and
+  "re-verified" against the same 6-phrase benign corpus that produced the 164-FP incident
+  — which passed, but only because none of those phrases contain `!` combined with a
+  digit, not because the widening was actually safe.
+
+  **A pre-merge adversarial review measured the widening itself (not just re-run the old
+  corpus) and found it false-positives on real text the un-widened pattern never
+  matched**: webpack's own loader-chaining syntax (`Bearer style-loader!css-loader!v2`),
+  a PEP-440-style version string immediately after the word "Bearer", and — the closest
+  parallel to this catalog's own AWS `AKIAIOSFODNN7EXAMPLE` carve-out — Salesforce's own
+  documentation explaining the `<org-id>!<signature>` format with an example token, i.e.
+  prose about a shape, not a leaked secret. It also found the widened pattern double-fires
+  alongside `credential-egress-in-response` on any vendor-prefixed token disclosed with a
+  literal `Bearer ` prefix (low-severity — both findings redact correctly and both resolve
+  to `warn` — but undocumented).
+
+  **The `!` widening was reverted.** The shipped pattern is now byte-identical to
+  `scanner/patterns.ts`'s already registry-sweep-validated regex, with zero local
+  modification. Accepted, stated cost: the CVE's own literal PoC token (with `!`) now
+  scores `pass` against this signature; it still generalizes to the majority shape this
+  vulnerability class takes outside Salesforce's own format (JWTs, opaque session
+  tokens). Also fixed: a stale comment on `credential-egress-in-response` (and an
+  identical line in `docs/SIGNATURES.md`) still said generic Bearer disclosure was
+  deferred to the "suspect tier" — false as of this same commit; corrected to name only
+  bare-JWT/40-char-base64 as still deferred.
 
   Unlike #50–#52, this signature runs through the regular `inspectMessage` regex pipeline
   rather than a bespoke key+value walker, so it already gets both existing decode-and-

@@ -1,9 +1,9 @@
 {
-  "name": "Generic Bearer session token leaked via a tool response (CVE-2026-25650 shape)",
+  "name": "Generic Bearer session token leaked via a tool response (CVE-2026-25650 shape, generalized)",
   "category": "MCP-CREDENTIAL-EXFIL",
   "expected_action": "warn",
   "expected_signature_id": "generic-bearer-token-disclosure",
-  "notes": "TODOS #53. CVE-2026-25650 (smn2gnt/MCP-Salesforce get_record): an unchecked object_name argument reaches getattr(sf_client.sf, object_name); object_name=\"headers\" returns the live client's own Authorization: Bearer <session token> header dict verbatim in the tool response text. No vendor-specific prefix, so this is a lower-confidence signature distinct from credential-egress-in-response's prefix-anchored patterns. Token is a synthetic, pattern-shaped value.",
+  "notes": "TODOS #53. CVE-2026-25650 (smn2gnt/MCP-Salesforce get_record): an unchecked object_name argument reaches getattr(sf_client.sf, object_name); object_name=\"headers\" returns the live client's own Authorization: Bearer <session token> header dict verbatim in the tool response text. No vendor-specific prefix, so this is a lower-confidence signature distinct from credential-egress-in-response's prefix-anchored patterns. Token is a synthetic, pattern-shaped value generalized to a non-Salesforce session-token shape (underscore + hex) rather than Salesforce's own `<org-id>!<signature>` format — a pre-merge adversarial review found widening the character class to match that literal `!`-bearing format false-positived on real benign text (webpack loader chaining, PEP-440 version strings, Salesforce's own docs explaining the format). See the benign fixture generic-bearer-prose-and-short-token.json for the FP regressions, and TODOS #53 for the accepted gap (the CVE's own literal PoC token is no longer matched).",
   "message": {
     "jsonrpc": "2.0",
     "id": 214,
@@ -11,7 +11,7 @@
       "content": [
         {
           "type": "text",
-          "text": "{'Authorization': 'Bearer 00D5f000000TXXXX!AQEAQNu6Iv2ZOwd6pkuUUuLA_LTvIkP4qxxSFDCTOKEN123', 'Sforce-Call-Options': 'client=mcp-salesforce'}"
+          "text": "{'Authorization': 'Bearer sess_a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8g9h0', 'Sforce-Call-Options': 'client=mcp-salesforce'}"
         }
       ]
     }
