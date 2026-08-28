@@ -8,6 +8,22 @@ _Add entries here, never under a stamped version_ — a release commit renames t
 heading, and a branch that wrote beneath it merges without conflict straight into a
 published section (it happened to #170).
 
+### Added
+
+- **`docs/owasp-mcp-mapping.md`** — every mcpm detection/enforcement mechanism mapped
+  to an OWASP MCP Top 10 (beta) category, pinned to commit `165fe0f78ef104459237b4a8e0f6e78db9b02391`
+  (2026-07-29) of `OWASP/www-project-mcp-top-10` so the mapping stays reproducible as
+  the beta list gets renamed/renumbered. Explicitly disambiguates this from mcpm's own
+  internal `OWASP-MCP-1`/`2`/`7` catalog tags, which are leftover labels from a
+  different, earlier "v0.1" draft and do not correspond to the current beta numbering.
+  Coverage is honest rather than padded: MCP02 (privilege escalation via scope creep)
+  gets only narrow partial credit via the existing `initialize`-handshake
+  capability-drift check, and MCP07 (auth/authz), MCP09 (shadow server governance),
+  and MCP10 (cross-session context isolation) are stated as real, unaddressed gaps —
+  deliberately NOT mapping mcpm's own cross-server tool-shadowing (name-collision)
+  check to MCP09, since the two are different concepts that only share a word.
+  Docs-only; no runtime behavior change.
+
 ### Security
 
 - **New signature: `generic-bearer-token-disclosure` — warns on a generic `Bearer <token>`
