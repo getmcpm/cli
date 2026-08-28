@@ -1466,7 +1466,7 @@ left open rather than special-cased further.
 and-rescan TAG-block/base64-concealed values either — it's a second instance of the same
 bespoke-key+value-detector architecture gap, not a new one.
 
-## #52 — no signature detects CLI-flag / argument injection via delimiter-split arguments (P2, open)
+## #52 — ~~no signature detects CLI-flag / argument injection via delimiter-split arguments~~ DONE (unreleased)
 
 **Found:** 2026-08-23, same external-corpus measurement as #50.
 
@@ -1481,14 +1481,45 @@ be a bare resource identifier; the advisory's PoC is `resourceName: "my-database
 on all interfaces, exposing an internal database to the network (CVSS 8.3 HIGH).
 Verified against shipped 0.30.0: the real PoC payload scores `pass`, no findings.
 
-**What:** a signature flagging a `--`-prefixed (or platform-appropriate single-dash)
-token embedded inside a tool argument whose schema/description implies a plain resource
-name or identifier — i.e. the argument contains what looks like a second, hidden CLI
-flag.
+**Shipped:** `cli-flag-injection-in-identifier-arg`, 16th catalog entry, same key-first
+structural design as #50/#51 (shares `tool-call-args-walk.ts`). Blocks a whitespace-
+anchored `--`-prefixed flag token (`--address=0.0.0.0`) embedded in a `namespace`/`id`/
+`identifier`/`uuid`/`slug`-suffixed argument.
 
-**FP risk.** Some tools legitimately accept flag-shaped strings as pass-through data
-(e.g. relaying user-authored config text). Scope to arguments described as
-identifiers/names rather than free-text/config fields to avoid FPs.
+**The FP-risk warning this entry itself carried turned out to be exactly right, and
+measuring it (not just reading it) is what closed the gap.** The first implementation
+included `name` in scope — reasoning: the CVE's own vulnerable argument is
+`resourceName`, and "no real name contains a literal ` --word` substring." A pre-merge
+adversarial review (4 finder angles + one-vote verify) measured that claim and found it
+FALSE, with five independently-reproduced real shapes, all through the SAME root cause
+(a `*_name`-suffixed key's last-token-only classification has no way to tell a strict
+identifier field from a free-text title/label field): a ticket/PR/task title mentioning a
+flag by name (`task_name: "Add --dry-run support to sync command"`, lifted verbatim from
+this project's own commit history), a compound `*_name` key whose OTHER token already
+marks it a CLI-passthrough field (`flag_name: "--dry-run"`), a freeform cloud-resource
+"Name" tag with an appended operational note (`resource_name: "prod-db-01
+--do-not-delete"` — structurally IDENTICAL to the CVE's own PoC shape), npm's own
+documented `<script> -- <flags>` passthrough convention under a `*_name` key, and a
+descriptive filename mentioning a flag. Notably, the dedicated benign-corpus FP-measure
+phase (46 realistic identifier-shaped values, zero FPs) did NOT catch any of these —
+it tested "is this identifier value safe," not "is this title/label-shaped value under a
+`*_name` key safe," which is where all five real FPs live. **Lesson for future
+detectors in this family: a benign corpus must include title/label/description-shaped
+values under every candidate key, not just identifier-shaped ones — the value's SEMANTIC
+role (identifier vs. freeform label) is often only knowable from a key's OTHER tokens,
+not its last one.**
+
+Fixed by excluding `name` from the key scope entirely, matching #50/#51's precedent. This
+is not a narrower version of the same coverage — it is a real, accepted gap: the
+advisory's own literal PoC (via `resourceName`) now scores `pass`. Filed as #57 rather
+than left implicit. The same vulnerable code path (the CVE's tool concatenates BOTH
+`resourceName` and `namespace`) is still caught via `namespace`, which structurally
+cannot hold the ambiguous shape `name` can — a k8s namespace is a short DNS-label token
+by convention, never a multi-word phrase. Mutation-tested: reintroducing `name` to the
+suffix set makes all 14 new regression tests fail red, confirming the exclusion is
+load-bearing, not decorative.
+
+**Known gap, same as #50/#51 (TODOS #55):** no tag/base64 decode-and-rescan.
 
 ## #53 — `credential-egress-in-response` is prefix-anchored and misses generic Bearer-token disclosure (P2, open)
 
@@ -1559,8 +1590,9 @@ leaf through **two decode-and-rescan passes** before giving up: `inspectTagEncod
 (Unicode TAG-block "ASCII smuggling", TODOS #31) and `inspectDecoded` (F10
 Detector-B, bounded base64/base64url). A **bespoke structural detector** that walks a
 frame's own KEYS+VALUES directly instead of going through `stringLeaves`/the
-signature/pattern list — `detectExfilParams` (F5), `detectShellMetacharArgs` (#50), and
-now `detectQueryControlArgs` (#51) — never passes its VALUES through either decode
+signature/pattern list — `detectExfilParams` (F5), `detectShellMetacharArgs` (#50),
+`detectQueryControlArgs` (#51), and now `detectCliFlagInjectionArgs` (#52) — never
+passes its VALUES through either decode
 pass, because those passes are wired into `inspectMessage`'s per-leaf loop, not into a
 standalone value check. Both `shell-metachar-args.ts` and `query-control-args.ts` call
 `normalizeForMatch(value)` alone, which **strips** TAG-block characters
@@ -1626,3 +1658,45 @@ corpus — plausibly matching `|` only under suffixes where it can NEVER be legi
 (`number`/`num`/`id`/`uuid`), while leaving `path`/`slug`/`namespace` exempt. That is a
 per-key pattern matrix, so it needs its own design pass and its own corpus, which is why
 it was not improvised during a release audit.
+
+## #57 — CVE-2026-39884's own PoC (via `resourceName`) is not detected (P2, open)
+
+**Found:** 2026-08-28, pre-merge adversarial review of #52's
+`cli-flag-injection-in-identifier-arg` implementation — by MEASURING the detector's key
+scope against realistic *title/label*-shaped values under `*_name` keys, not just
+identifier-shaped ones.
+
+#52's first implementation included `name` in its key scope alongside `namespace`/`id`/
+`identifier`/`uuid`/`slug`, reasoning that "no real name contains a literal ` --word`
+substring." Measured, that claim is false: a `*_name`-suffixed argument is just as
+commonly a human-readable title/label field (a ticket, PR, task, pipeline, job, or build
+name; a freeform cloud-resource "Name" tag with an appended operational note) as it is a
+strict machine identifier, and there is no regex-level way to tell them apart — a benign
+`resource_name: "prod-db-01 --do-not-delete"` is structurally IDENTICAL to the CVE's own
+injection shape (a single-token prefix, a space, then a `--word` token). Five real FP
+shapes were reproduced against the shipped detector; see the #52 entry above and
+`cli-flag-injection-args.ts`'s module doc comment for the full list.
+
+`name` was removed from the key scope entirely (matching #50/#51's own precedent), which
+closes all five measured FP classes but means the CVE advisory's own literal PoC —
+`resourceName: "my-database --address=0.0.0.0"` — now scores `pass`, no findings. The
+SAME vulnerable code path is still caught via `namespace`, which the advisory names as an
+equally vulnerable argument on the same tool, and which cannot hold the ambiguous
+title/label shape `name` can (a k8s namespace is a short DNS-label token by convention,
+never a multi-word phrase) — but a server exploitable ONLY through `resourceName`, with a
+tool that doesn't also expose a vulnerable `namespace`-shaped argument, is not covered.
+
+**What this costs, stated plainly:** the same accepted-narrowing shape as #56 — a wrong
+BLOCK on a block-capable carrier is the failure mode this project has repeatedly judged
+worse than a miss, so the detector is deliberately narrower than the CVE's full PoC
+surface rather than risk the demonstrated FP class.
+
+**To close it:** would need a VALUE-shape discriminator that distinguishes a bare
+identifier from a title/label/annotation (e.g. rejecting multi-word values, or requiring
+the flag-bearing suffix to be the ENTIRE remainder of the string) — but the two
+concrete counterexamples that motivated this entry (`"guard --confine"` as a task name;
+`"prod-db-01 --do-not-delete"` as a resource tag) are both single-token-prefix-then-flag,
+structurally indistinguishable from the CVE's own PoC by any generic shape heuristic.
+This is not a "needs more engineering" gap the way #56 is — it may be irreducible at the
+structural level, requiring either tool-specific schema awareness (out of scope for this
+key+value walker family) or acceptance as a permanent, documented limitation.

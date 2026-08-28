@@ -8,6 +8,42 @@ _Add entries here, never under a stamped version_ — a release commit renames t
 heading, and a branch that wrote beneath it merges without conflict straight into a
 published section (it happened to #170).
 
+### Security
+
+- **New signature: `cli-flag-injection-in-identifier-arg` — blocks a `--`-prefixed CLI
+  flag token embedded in a `tools/call` argument shaped like a bare namespace or opaque
+  identifier.** CVE-2026-39884 (Flux159/mcp-server-kubernetes `port_forward`)
+  string-concatenates `resourceName`/`namespace` into a `kubectl` command, then
+  whitespace-splits it before `spawn()` — every OTHER tool in the same codebase uses the
+  safe array-based `execFileSync(argsArray)` pattern. The advisory's own PoC
+  (`resourceName: "my-database --address=0.0.0.0"`) turns a normally localhost-only
+  port-forward into one bound on all interfaces (CVSS 8.3 HIGH). Same key-first design as
+  #50/#51 (the new detector, 16th catalog entry, shares their argument-tree walker):
+  only tests the VALUE when the key canonicalizes to `namespace`/`id`/`identifier`/
+  `uuid`/`slug`.
+
+  A pre-merge adversarial review (4 independent finder angles + one-vote verify) measured
+  an earlier version that also scoped `name` — reasoning that "no real name contains a
+  literal ` --word` substring" — and found that claim FALSE, with five independently
+  reproduced real shapes: a ticket/PR/task title mentioning a flag by name (`task_name:
+  "Add --dry-run support to sync command"`, lifted verbatim from this project's own
+  commit history), a compound `*_name` key that is itself a CLI-passthrough field
+  (`flag_name: "--dry-run"`), a freeform cloud-resource "Name" tag with an appended
+  operational note (`resource_name: "prod-db-01 --do-not-delete"` — structurally
+  identical to the CVE's own PoC shape), npm's own documented `<script> -- <flags>`
+  passthrough convention under a `*_name` key, and a descriptive filename mentioning a
+  flag. A dedicated 46-value benign-corpus measurement of identifier-shaped values found
+  zero false positives and did not catch any of these — the corpus tested the wrong
+  slice of the value space (identifiers, not titles/labels under a `*_name` key).
+
+  `name` was removed from the key scope entirely, matching #50/#51's own precedent. This
+  is an accepted narrowing, not a bug fix with no cost: the advisory's own literal PoC
+  (via `resourceName`) now scores `pass`. The same vulnerable code path is still caught
+  via `namespace` (an equally vulnerable argument per the advisory, and one that cannot
+  hold the ambiguous title/label shape `name` can). Filed as TODOS #57.
+
+  Closes TODOS #52.
+
 ## [0.31.0] - 2026-08-28
 
 ### Fixed

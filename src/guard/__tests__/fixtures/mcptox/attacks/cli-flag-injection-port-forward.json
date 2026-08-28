@@ -1,0 +1,18 @@
+{
+  "name": "CLI flag injection via an embedded --address flag in namespace (CVE-2026-39884 shape)",
+  "category": "MCP-ARGUMENT-INJECTION",
+  "expected_action": "block",
+  "expected_signature_id": "cli-flag-injection-in-identifier-arg",
+  "notes": "TODOS #52. CVE-2026-39884 (Flux159/mcp-server-kubernetes port_forward): the tool string-concatenates resourceName/namespace into one command string, then whitespace-splits it before spawn(). The advisory's own PoC uses resourceName, but namespace is an equally vulnerable argument through the same code path; a pre-merge adversarial review found resourceName-style *_name keys carry an unacceptable FP rate (ticket/PR titles, freeform ops tags), so this detector scopes to namespace/id/identifier/uuid/slug only. See TODOS #57 for the documented resourceName gap.",
+  "message": {
+    "jsonrpc": "2.0",
+    "id": 53,
+    "method": "tools/call",
+    "params": {
+      "name": "port_forward",
+      "arguments": {
+        "namespace": "default --address=0.0.0.0"
+      }
+    }
+  }
+}
