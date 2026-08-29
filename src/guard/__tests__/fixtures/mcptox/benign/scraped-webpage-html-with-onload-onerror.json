@@ -1,0 +1,17 @@
+{
+  "name": "A scraped webpage's ordinary onload/onerror/onclick handlers and script tag (no dangerous call target)",
+  "expected_action": "pass",
+  "notes": "TODOS #54 FP guard. A fetch/scrape/browse-style MCP tool routinely returns raw webpage HTML verbatim, and real-world pages very commonly carry onload/onerror/onclick attributes and <script> tags for entirely ordinary reasons (image fallback, lazy init, analytics). None of these call a privileged MCP-client bridge or a process/eval primitive, so renderer-code-execution-in-response's dangerous-call-target gate must not fire on them. Found while designing the detector: a bare event-handler/script-tag presence check (as the TODO originally sketched) would have false-positived on nearly every scraped page.",
+  "message": {
+    "jsonrpc": "2.0",
+    "id": 401,
+    "result": {
+      "content": [
+        {
+          "type": "text",
+          "text": "<html><body onload=\"init()\"><img src=\"logo.png\" onerror=\"this.onerror=null;this.src='fallback.jpg'\"><button onclick=\"trackClick('cta')\">Sign up</button><script src=\"/static/app.js\"></script><script>window.dataLayer = window.dataLayer || []; function gtag(){dataLayer.push(arguments);} gtag('js', new Date());</script></body></html>"
+        }
+      ]
+    }
+  }
+}

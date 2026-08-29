@@ -1,0 +1,17 @@
+{
+  "name": "Documentation prose mentioning onerror and electron.mcp.activate without any actual HTML tag",
+  "expected_action": "pass",
+  "notes": "TODOS #54 FP guard — the class the TODO itself flagged: a tool response (e.g. from a docs/Q&A/code-explainer tool) can legitimately discuss these exact tokens in prose without any active rendering context (no '<tag ...>' syntax at all). renderer-code-execution-in-response requires the dangerous call to sit inside an actual HTML tag's attribute value or a <script> body, so bare prose must not match.",
+  "message": {
+    "jsonrpc": "2.0",
+    "id": 403,
+    "result": {
+      "content": [
+        {
+          "type": "text",
+          "text": "The onerror attribute lets you run JavaScript when an image fails to load, similar to how a plugin might expose a bridge and call something like electron.mcp.activate() from a handler. This is a common pattern in older tutorials and should generally be avoided in favor of addEventListener."
+        }
+      ]
+    }
+  }
+}

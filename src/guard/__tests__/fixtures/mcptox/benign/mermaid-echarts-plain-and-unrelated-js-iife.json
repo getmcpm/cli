@@ -1,0 +1,17 @@
+{
+  "name": "Plain mermaid diagram, plain echarts option data, and an unrelated JS IIFE in its own (non-mermaid/echarts) fence",
+  "expected_action": "pass",
+  "notes": "TODOS #54 FP guard. A diagram/chart-rendering tool's ordinary output (declarative graph edges; a plain data-only echarts option object) must not match the fence+eval-idiom shape. Also proves the mermaid/echarts fence-type restriction is load-bearing: an entirely unrelated, completely benign JS code snippet using the classic (function(){...})() module pattern — extremely common in real code samples — sits in its own ```js fence in the SAME response text and must not be bridged into a false match just because a mermaid fence appears earlier in the same message.",
+  "message": {
+    "jsonrpc": "2.0",
+    "id": 402,
+    "result": {
+      "content": [
+        {
+          "type": "text",
+          "text": "```mermaid\ngraph TD\nA-->B\nB-->C\n```\n\n```echarts\n{title: {text: 'Sales'}, series: [{type: 'bar', data: [1,2,3]}]}\n```\n\nHere is an example utility using the module pattern:\n\n```js\n(function () {\n  var counter = 0;\n  window.increment = function () { counter += 1; return counter; };\n})();\n```"
+        }
+      ]
+    }
+  }
+}
