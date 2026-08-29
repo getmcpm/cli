@@ -1,0 +1,17 @@
+{
+  "name": "Legitimate ECharts idioms that use function syntax with no electron.mcp bridge call — a formatter rehydrated via new Function, and option data computed via an IIFE",
+  "expected_action": "pass",
+  "notes": "TODOS #54 FP guard, added after a pre-merge adversarial review (release-gate regression, not just a unit test). ECharts option objects routinely carry callback fields (formatter, tooltip.formatter) that a 'restore saved dashboard' MCP tool persists as source text and reconstructs via new Function(argNames, body) at render time, and computing option data inline via a self-invoking function is an equally standard idiom. An earlier version of this signature gated shape 3 on new Function(/IIFE SYNTAX ALONE with no call-target requirement, on the false premise that legitimate diagram/option content never contains a function definition -- that premise is false for ECharts specifically. The shipped signature instead requires the literal electron.mcp.activate(/electron.mcp.addServer( bridge call anywhere in the fence, which neither of these legitimate idioms contains.",
+  "message": {
+    "jsonrpc": "2.0",
+    "id": 404,
+    "result": {
+      "content": [
+        {
+          "type": "text",
+          "text": "```echarts\noption.tooltip.formatter = new Function(\"params\", \"return params.value;\");\n```\n\n```echarts\noption = (function () {\n  var data = [1, 2, 3];\n  return { series: [{ type: 'bar', data: data }] };\n})();\n```"
+        }
+      ]
+    }
+  }
+}

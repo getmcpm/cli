@@ -1598,7 +1598,7 @@ this signature goes through the regular `inspectMessage` regex pipeline (unlike 
 bespoke key+value walkers #50–#52 use), so it already gets both decode-and-rescan passes
 for free (now covered by a dedicated test); #55 does not apply here.
 
-## #54 — no signature detects HTML/script-tag injection or renderer-targeted code-execution payloads in `tool_response` (P2, open)
+## #54 — ~~no signature detects HTML/script-tag injection or renderer-targeted code-execution payloads in `tool_response`~~ DONE (unreleased)
 
 **Found:** 2026-08-23, same external-corpus measurement as #50.
 
@@ -1626,6 +1626,104 @@ access" FP class from the 2026-07-12 sweep, which flagged the word "injection" i
 prompt-tooling descriptions. Likely needs to require the payload sit inside an ACTIVE
 rendering context (an HTML tag with an event-handler attribute set to a call expression,
 not a bare keyword match) rather than a substring scan.
+
+**Shipped as `renderer-code-execution-in-response`** (`src/guard/signatures.ts`), `high`
+severity (→ warn, never block on its own), `redact: true`. Three structural shapes share
+one signature id, ALL gated on the same literal, disclosed bridge call
+(`electron.mcp.activate(`/`electron.mcp.addServer(`): (1) an HTML tag with a generic
+`on[a-z]+` event-handler attribute whose VALUE contains the bridge call; (2) a
+`<script>...</script>` body (bounded, never crossing a `</script>`, quote-aware tag-open)
+containing the bridge call; (3) a `` ```mermaid``/```echarts `` fence containing the bridge
+call ANYWHERE in its body. Verified against both GHSA PoCs verbatim (GHSA-5hpf-p8fw-j349,
+GHSA-wg3x-7c26-97wj) — both `warn`.
+
+**First cut's FP risk was bigger than the one this entry named, and a pre-merge adversarial
+review (28 CONFIRMED findings, 5 finder angles + skeptical verify) caught it before merge.**
+The first shipped design gated shapes 1-2 on a broader alternation — `electron.mcp.*` plus
+generic escape-hatch tokens `child_process`/`require(`/`exec(`/`spawn(`/`eval(`/
+`new Function(`, meant to "generalize the tripwire to a plausible other vulnerable client" —
+and gated shape 3 on `new Function(`/IIFE SYNTAX ALONE with no call-target requirement at
+all, on the premise that "legitimate diagram/option content never contains a function
+definition." The review found BOTH premises false, with concrete, executed reproductions:
+the generic-token gate false-positived on an MDN reference page for the `Function`
+constructor, a Node.js "run a shell command" tutorial's embedded RunKit sandbox, a CTF
+writeup's canonical `onerror=eval(atob(...))` teaching example, and an AppSec-training
+article's `onmouseover` XSS demonstration; the ungated fence shape false-positived on
+ECharts SPECIFICALLY, where formatter callbacks persisted via `new Function(...)` and
+option data computed via a self-invoking function are both standard, documented idioms —
+meaning a legitimate "generate an ECharts dashboard" MCP tool would have warned on a
+meaningful share of its own normal output. The generic tokens also didn't reliably
+generalize to some OTHER client in the first place: a genuinely different Electron-embedded
+MCP client would expose its OWN differently-named bridge (which the fixed allowlist can't
+help with either way), and `require`/`child_process` aren't even reachable from a properly
+context-isolated Electron renderer — which is exactly why these clients expose a narrow
+bridge like `electron.mcp.*` instead of raw Node access.
+
+**Closed by narrowing to the literal bridge call in ALL THREE shapes, not by adding more
+tokens.** `ELECTRON_MCP_BRIDGE_CALL` = `electron.mcp.(activate|addServer)(`, with `\s*`
+tolerating whitespace-only spacing and a required trailing `(` so a bare reference
+(`console.log(electron.mcpDocsUrl)`) doesn't match either — a second review finding, since
+the first cut's `electron.mcp` alternative had no requirement that the property actually be
+called. Requiring only the bridge call for shape 3 (dropping the IIFE/`new Function(` syntax
+match entirely) is not just safer but MORE complete: the vulnerable `parseOption` wraps the
+whole fence body in `new Function('return {' + body + '}')()`, so a bridge call placed
+directly as an object-literal property VALUE — no function wrapper at all — executes
+identically, which the shipped IIFE-syntax-matching design would have missed. This is an
+honest, CVE-grounded tripwire rather than a speculative net: a different client's own
+differently-named bridge, HTML-entity-encoding the dot (`electron&#46;mcp&#46;activate`),
+bracket/computed-property access (`window['electron']['mcp']['activate']`), and alias
+indirection across two separate tool_response messages all evade it — accepted, documented,
+and pinned as regression tests rather than chased with more pattern complexity, the same
+"tripwire not defense" scope as `exfil-param-in-schema`'s "a renamed param evades it."
+
+**Two regex-correctness bugs and one missing-redaction bug, also caught by the same review,
+also fixed pre-merge.** (1) The event-handler shape's unquoted-value alternative excluded
+only whitespace/`>`, so when a real, harmless quoted attribute abutted an unrelated quoted
+attribute with no separating space, the match could fall through the closing quote into the
+NEXT attribute's value and fire on a bridge call that was never inside the tested
+attribute's own value — fixed with a `(?!["'])` guard. (2) The `<script>`-tag-open matcher
+used a naive `[^>]*`, so a `>` legitimately embedded inside a quoted attribute value (a URL,
+a JSON blob) was treated as the tag's own close, which could push a REAL bridge call just
+past the 2000-char body-scan budget and cause a missed detection — fixed with a quote-aware
+tag-open matcher (`(?:"[^"]*"|'[^']*'|[^>"'])*`). (3) The signature shipped with no `redact`
+flag, unlike every other tool_response credential signature in this file — because shapes
+2-3's lazily-bounded match walks forward from the tag/fence open to the first bridge-call
+token, `match[0]` (and therefore the logged excerpt) could include any secret-shaped text an
+attacker's injected script legitimately placed there first (e.g. exfiltrating a credential
+it just read), landing UNREDACTED in `guard-events.jsonl` and the public `guard inspect`
+seam even while a co-firing `credential-egress-in-response` finding on the SAME leaf
+correctly redacted the identical secret — silently defeating the redaction guarantee this
+carrier provides elsewhere. Fixed by adding `redact: true`.
+
+**Regex construction, not a parser.** All three patterns use bounded lazy quantifiers
+(`{0,4000}?`/`{0,2000}?`) with a `(?!` guard against crossing a fence/tag boundary, rather
+than an unbounded scan — measured against multi-hundred-KB adversarial padding (many
+near-miss `electron.mcp.`-prefixed non-matches) with sub-millisecond timing, the same ReDoS
+discipline as the scanner's bounded base64 pattern (v0.20.0). Severity is `high`/warn, not
+`critical`/block: a documentation/CVE-lookup tool can legitimately return prose QUOTING this
+exact literal call (a GHSA/NVD advisory explaining the vulnerability) — an accepted,
+documented residual the review confirmed by execution rather than one this signature tries
+to special-case away, the same "ambiguous but real" tier as `credential-egress-in-response`,
+and the project's own repeated lesson that a wrong BLOCK on a block-capable carrier is the
+failure direction this project has repeatedly judged worse than a miss (v0.29.0 / v0.31.0).
+
+Like #50/#51/#52, this is a regular pattern-based catalog signature (not a bespoke
+key+value detector), so it rides `inspectMessage`'s existing tag/base64 decode-and-rescan
+passes for free — verified with dedicated tests for all three shapes (the review also
+flagged that the first cut's single decode test only exercised shape 1) — and is NOT an
+instance of the #55 gap.
+
+**Process note.** The pre-merge review's 5 finder angles + skeptical verify returned 28
+CONFIRMED findings against a signature that had already been self-designed with real care
+(three FP classes anticipated, ReDoS-tested, dogfooded against both live CVE PoCs before
+review). None of that self-review caught the ECharts formatter/IIFE premise being false, the
+missing `redact` flag, or either regex-correctness bug — all four were found by angles
+explicitly tasked with trying to break the design (an FP-hunter scoped to the ungated shape
+specifically, a regex-correctness reviewer hand-tracing the construction, an
+architecture-integration reviewer reading the actual redaction code path) rather than
+re-checking the cases the author already had in mind. Every finding was independently
+re-verified by actually running the extracted regex against the concrete example in Node
+before being trusted, not merely reasoned about abstractly.
 
 ## #55 — bespoke key+value detectors don't get tag/base64 decode-and-rescan (P2, open)
 

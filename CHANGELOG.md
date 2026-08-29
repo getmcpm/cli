@@ -81,6 +81,80 @@ published section (it happened to #170).
 
   Closes TODOS #53.
 
+- **New signature: `renderer-code-execution-in-response` — warns on HTML/script content
+  in a tool response calling the electron.mcp privileged IPC bridge.**
+  Closes two real, disclosed CVEs in the same MCP client (nanbingxyz/5ire): CVE-2025-68669
+  (a Mermaid renderer initialized with `securityLevel: 'loose'` lets an
+  `<img src=x onerror=...>` tag inside a diagram node call the privileged `electron.mcp`
+  IPC bridge) and CVE-2026-22793 (an ECharts markdown-fence plugin runs `new Function()`
+  on the fenced block's own content, letting the same bridge call be reached with no
+  wrapper needed at all). Both PoCs, taken verbatim from their GHSA advisories, scored
+  `pass` against shipped 0.31.0. Ships as the 18th catalog entry, `high` severity (→ warn,
+  not block), `redact: true`, independently muteable.
+
+  **This shipped after a pre-merge adversarial review (5 finder angles + skeptical verify)
+  found 28 CONFIRMED defects in the first cut and forced a substantial narrowing before
+  merge — the review is the headline here, not a footnote.** The first design gated the
+  event-handler/`<script>`-tag shapes on a broad alternation (`electron.mcp.*` plus generic
+  escape-hatch tokens `child_process`/`require(`/`exec(`/`spawn(`/`eval(`/`new Function(`)
+  and gated a third, diagram-fence shape on `new Function(`/IIFE SYNTAX ALONE with no call
+  requirement at all, on the premise that legitimate diagram/chart content never contains a
+  function definition. Measured (not merely read), both premises were false: the generic
+  tokens false-positived on an MDN reference page for the `Function` constructor, a Node.js
+  "run a shell command" tutorial's embedded RunKit sandbox, a CTF writeup's canonical
+  `onerror=eval(atob(...))` teaching example, and an AppSec-training article's `onmouseover`
+  XSS demonstration; the ungated fence shape false-positived on ECharts specifically, where
+  formatter callbacks persisted via `new Function(...)` and option data computed via an IIFE
+  are both standard, documented idioms — a legitimate chart-generation MCP tool would have
+  warned on a meaningful share of its own normal output. The generic tokens also weren't
+  buying real cross-client coverage: a different Electron-embedded MCP client would expose
+  its own differently-named bridge regardless, and `require`/`child_process` aren't even
+  reachable from a properly context-isolated Electron renderer — which is exactly why these
+  clients expose a narrow bridge like `electron.mcp.*` instead of raw Node access.
+
+  **Narrowed to the literal, disclosed bridge call
+  (`electron.mcp.activate(`/`electron.mcp.addServer(`) in ALL THREE shapes**, an honest
+  CVE-grounded tripwire rather than a speculative net — the same "a renamed target evades
+  this" scope as F5's exfil-sigil detector. Dropping the IIFE/`new Function(` syntax
+  requirement for the fence shape is not just safer but MORE complete: the vulnerable
+  `parseOption` wraps the entire fence body in `new Function('return {' + body + '}')()`, so
+  a bridge call placed directly as an object-literal property value — no function wrapper at
+  all — executes identically, which the IIFE-syntax-matching design would have missed
+  entirely. Accepted, documented, pinned-as-tests evasion gaps: HTML-entity-encoding the dot,
+  bracket/computed-property access, alias indirection across two tool_response messages, and
+  a different client's own bridge name all evade this literal-substring gate — the same
+  tension every regex-based signature in this catalog accepts.
+
+  **The same review also caught two regex-correctness bugs and one missing-redaction bug.**
+  (1) The event-handler shape's unquoted-value branch could fall through a real attribute's
+  closing quote into an adjacent, unrelated attribute's value when the two abutted with no
+  separating whitespace, firing on a bridge call that was never inside the tested attribute
+  at all — fixed with a `(?!["'])` guard. (2) The `<script>`-tag-open matcher used a naive
+  `[^>]*`, so a `>` legitimately embedded in a quoted attribute value (a URL, a JSON blob)
+  was mistaken for the tag's own close, which could push a REAL bridge call just past the
+  2000-char body-scan budget and cause a missed detection — fixed with a quote-aware
+  tag-open matcher. (3) The signature shipped with no `redact` flag, unlike every other
+  tool_response credential signature in this file: because the `<script>`/fence shapes'
+  lazily-bounded match walks forward to the first bridge-call token, the logged excerpt
+  could include any secret-shaped text an attacker's injected script placed there first,
+  landing UNREDACTED in `guard-events.jsonl` and the public `guard inspect` seam even while
+  a co-firing `credential-egress-in-response` finding on the SAME leaf correctly redacted the
+  identical secret. Fixed with `redact: true`.
+
+  All three patterns still use bounded lazy quantifiers with a "does not cross a fence/tag
+  boundary" guard rather than an unbounded scan, matching the scanner's bounded base64
+  ReDoS discipline (v0.20.0). Severity stays `high`/warn rather than `critical`/block: a
+  documentation/CVE-lookup tool can legitimately return prose QUOTING this exact literal
+  call (a GHSA/NVD advisory explaining the vulnerability) — an accepted, execution-confirmed
+  residual, the same "ambiguous but real" tier as `credential-egress-in-response`.
+
+  Like #50–#53, this runs through the regular `inspectMessage` regex pipeline, so it
+  already gets both decode-and-rescan passes (Unicode TAG-block, base64/base64url) for
+  free — verified with dedicated tests for all three shapes (the review flagged that the
+  first cut's single decode test only exercised one of them).
+
+  Closes TODOS #54.
+
 - **New signature: `cli-flag-injection-in-identifier-arg` — blocks a `--`-prefixed CLI
   flag token embedded in a `tools/call` argument shaped like a bare namespace or opaque
   identifier.** CVE-2026-39884 (Flux159/mcp-server-kubernetes `port_forward`)

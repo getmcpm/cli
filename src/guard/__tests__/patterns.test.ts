@@ -784,6 +784,271 @@ describe("patterns: generic Bearer-token disclosure (TODOS #53)", () => {
   });
 });
 
+// TODOS #54 — renderer-code-execution-in-response. Two real CVEs in the same
+// MCP client (nanbingxyz/5ire) reach RCE through ordinary tool_response text:
+// CVE-2025-68669 (a loose-mode Mermaid renderer lets an <img onerror=...> tag
+// call the privileged electron.mcp bridge) and CVE-2026-22793 (an ECharts
+// markdown-fence plugin `new Function()`-evals fenced content, which the
+// bridge call reaches identically with no wrapper at all). See the
+// ELECTRON_MCP_BRIDGE_CALL comment in signatures.ts for the full CVE
+// grounding and the pre-merge adversarial review that narrowed this from an
+// earlier, broader design (28 CONFIRMED findings — generic eval/require/
+// exec/spawn/new-Function tokens false-positived on ordinary JS
+// docs/tutorials/CTF-writeups, and an earlier ungated fence shape's premise
+// that "legitimate diagram content never contains a function" was false for
+// ECharts specifically).
+describe("patterns: renderer-code-execution-in-response (TODOS #54)", () => {
+  const resp = (text: string): JSONRPCMessage => ({
+    jsonrpc: "2.0",
+    id: 1,
+    result: { content: [{ type: "text", text }] },
+  });
+  const SIG_ID = "renderer-code-execution-in-response";
+  const warns = (text: string): boolean =>
+    inspectMessage(resp(text), OWASP_MCP_TOP_10).findings.some((f) => f.signature_id === SIG_ID);
+
+  test("warns on the CVE-2025-68669 mermaid onerror PoC verbatim", () => {
+    const r = inspectMessage(
+      resp(
+        "```mermaid\ngraph TD\nA[\"<img src=x onerror=electron.mcp.addServer({key:'test',command:'calc',args:[]});electron.mcp.activate({key:'test'})>\"]\n```",
+      ),
+      OWASP_MCP_TOP_10,
+    );
+    expect(r.action).toBe("warn");
+    expect(r.findings.some((f) => f.signature_id === SIG_ID)).toBe(true);
+  });
+
+  test("warns on the CVE-2026-22793 echarts IIFE PoC verbatim", () => {
+    const r = inspectMessage(
+      resp("```echarts\n{a: (function() { electron.mcp.activate({key:'poc',command:'cmd.exe',args:['/c calc.exe']}) })()}\n```"),
+      OWASP_MCP_TOP_10,
+    );
+    expect(r.action).toBe("warn");
+    expect(r.findings.some((f) => f.signature_id === SIG_ID)).toBe(true);
+  });
+
+  test("warns on a quoted onerror attribute calling the bridge", () => {
+    expect(warns(`<img src="x" onerror="electron.mcp.activate({key:'x'})">`)).toBe(true);
+  });
+
+  test("warns on a <script> body containing the bridge call", () => {
+    expect(warns("<script>electron.mcp.activate({key:'x'});</script>")).toBe(true);
+  });
+
+  // Review finding #12 (CONFIRMED): the original enumerated handler list
+  // (error/load/click/mouseover/...) omitted onmouseout, onblur, onkeydown,
+  // etc. — the exact CVE PoC with only the event name changed was a complete
+  // miss, no obfuscation needed. Now a generic `on[a-z]+` (HTML has no
+  // non-event `on*` attribute), so any DOM event handler is covered.
+  test("catches the bridge call via an event handler outside the original enumerated list (review finding #12)", () => {
+    expect(warns(`<img src=x onmouseout="electron.mcp.activate('evil-server')">`)).toBe(true);
+    expect(warns(`<div onblur="electron.mcp.addServer({})">x</div>`)).toBe(true);
+  });
+
+  // Review findings #0, #2, #4, #5 (all CONFIRMED): an earlier version gated
+  // on a broader alternation (child_process/require(/exec(/spawn(/eval(/
+  // new Function() that false-positived hard on ordinary JS-related content.
+  // None of these reference the electron.mcp bridge, so none warn now.
+  test("does NOT warn on an MDN-style live-sample <script> demonstrating `new Function` (review finding #0)", () => {
+    expect(
+      warns(
+        `<script class="live-sample___script">const adder = new Function("a", "b", "return a + b"); console.log(adder(2, 6));</script>`,
+      ),
+    ).toBe(false);
+  });
+
+  test("does NOT warn on a Node.js tutorial's embedded child_process/exec sandbox script (review finding #2)", () => {
+    expect(
+      warns(
+        `<script>RunKit.createNotebook({ source: "const { exec } = require('child_process');\\nexec('node -v', cb);" });</script>`,
+      ),
+    ).toBe(false);
+  });
+
+  test("does NOT warn on a CTF writeup's canonical onerror+eval(atob(...)) teaching example (review finding #4)", () => {
+    expect(warns(`<img src=x onerror="eval(atob('YWxlcnQoZG9jdW1lbnQuY29va2llKQ=='))">`)).toBe(false);
+  });
+
+  test("does NOT warn on an AppSec-training onmouseover+eval demonstration (review finding #5)", () => {
+    expect(
+      warns(`<div onmouseover="eval(this.getAttribute('data-payload'))" data-payload="fetch('/x')">Hover</div>`),
+    ).toBe(false);
+  });
+
+  test("does NOT warn on a bare mention of child_process in a log/diagnostic message (review finding #19)", () => {
+    expect(warns(`<img src=x onerror="console.log('child_process module missing')">`)).toBe(false);
+  });
+
+  // Review finding #26 (CONFIRMED): an earlier version's `electron.mcp`
+  // alternative had no requirement that the property actually be CALLED, so
+  // a handler merely referencing an electron.mcp*-prefixed value (no
+  // .activate/.addServer, no call at all) also matched.
+  test("does NOT warn on a handler merely referencing electron.mcp without calling activate/addServer (review finding #26)", () => {
+    expect(warns(`<img src=x onerror="console.log(electron.mcpNamespaceDocsUrl)">`)).toBe(false);
+  });
+
+  // FP class found while designing this detector (not in the original TODO):
+  // a fetch/scrape/browse-style MCP tool returns raw webpage HTML verbatim,
+  // and real pages routinely carry onload/onerror/onclick and <script> tags
+  // for entirely ordinary reasons. None call the bridge.
+  test("does NOT warn on a scraped webpage's ordinary onload/onerror/onclick/script (no bridge call)", () => {
+    const html =
+      "<html><body onload=\"init()\"><img src=\"logo.png\" onerror=\"this.onerror=null;this.src='fallback.jpg'\">" +
+      "<button onclick=\"trackClick('cta')\">Sign up</button><script src=\"/static/app.js\"></script>" +
+      "<script>window.dataLayer = window.dataLayer || []; function gtag(){dataLayer.push(arguments);} gtag('js', new Date());</script></body></html>";
+    expect(warns(html)).toBe(false);
+  });
+
+  // Review finding #17 (CONFIRMED, regex-correctness): the bare/unquoted
+  // value alternative's char class excluded only whitespace/`>`, so when a
+  // real, harmless quoted attribute abuts an unrelated quoted attribute with
+  // no separating space, the lookahead fell through the closing quote into
+  // the NEXT attribute's value and matched a bridge call that was never
+  // inside the tested attribute's own value at all.
+  test("does NOT warn when the bridge call sits in an unrelated adjacent attribute, even with no separating whitespace (review finding #17)", () => {
+    expect(warns(`<img onclick="ok"data-x="electron.mcp.activate(1)">`)).toBe(false);
+    expect(warns(`<img onclick="ok" data-x="electron.mcp.activate(1)">`)).toBe(false);
+  });
+
+  // Review finding #18 (CONFIRMED, regex-correctness): the <script>-open
+  // matcher `[^>]*` treated the FIRST literal `>` — including one embedded
+  // inside a quoted attribute value — as the tag's own close, so a `>`
+  // legitimately present in an attribute (a URL, a JSON blob) could push a
+  // real dangerous call just past the 2000-char body-scan budget and go
+  // undetected. The tag-open matcher is now quote-aware.
+  test("still finds a real bridge call just past where a naive tag-open scan would have miscounted the budget (review finding #18)", () => {
+    const filler = "A".repeat(2010);
+    expect(warns(`<script data-x="setup>${filler}"> electron.mcp.activate(1)</script>`)).toBe(true);
+  });
+
+  test("does NOT warn on a plain mermaid diagram with no injected markup", () => {
+    expect(warns("```mermaid\ngraph TD\nA-->B\nB-->C\n```")).toBe(false);
+  });
+
+  test("does NOT warn on a plain echarts option object (data only, no function, no bridge call)", () => {
+    expect(warns("```echarts\n{title: {text: 'Sales'}, series: [{type: 'bar', data: [1,2,3]}]}\n```")).toBe(false);
+  });
+
+  // Review findings #6, #7, #9, #25 (all CONFIRMED): an earlier version gated
+  // shape 3 on IIFE/`new Function(` SYNTAX alone, with NO bridge-call
+  // requirement, on the premise that legitimate diagram/option content never
+  // contains a function definition. That premise is false for ECharts:
+  // formatter callbacks persisted via `new Function`, and option data
+  // computed via an IIFE, are both standard documented idioms.
+  test("does NOT warn on a legitimate ECharts dynamic-option IIFE with no bridge call (review finding #6)", () => {
+    expect(warns("```echarts\noption = (function () { return { series: [{ type: 'bar', data: [1,2,3] }] }; })();\n```")).toBe(
+      false,
+    );
+  });
+
+  test("does NOT warn on legitimate ECharts formatter rehydration via new Function (review finding #7)", () => {
+    expect(warns('```echarts\noption.tooltip.formatter = new Function("params", "return params.value;");\n```')).toBe(
+      false,
+    );
+  });
+
+  test("does NOT warn on a mermaid `click` callback pasted alongside the diagram, with no bridge call (review finding #9)", () => {
+    expect(
+      warns(
+        "```mermaid\nflowchart LR\n  A-->B\n  click A call callback()\n(function () {\n  window.callback = function () { alert('clicked'); };\n})();\n```",
+      ),
+    ).toBe(false);
+  });
+
+  test("does NOT warn on an ordinary computed-data IIFE inside an echarts fence (review finding #25)", () => {
+    expect(
+      warns(
+        "```echarts\n{series: [{type: 'line', data: (function() { var out = []; for (var i=0;i<12;i++) out.push(i*i); return out; })()}]}\n```",
+      ),
+    ).toBe(false);
+  });
+
+  // Proves the mermaid/echarts fence-type restriction (not mere keyword
+  // distance) is what keeps this safe: the classic IIFE module pattern is
+  // extremely common in ordinary JS code samples and must not match just
+  // because it sits in a plain ```js fence, even in the same response as a
+  // real mermaid diagram earlier on.
+  test("does NOT warn on an ordinary JS IIFE in a non-mermaid/echarts fence, even alongside a real mermaid diagram", () => {
+    expect(
+      warns(
+        "```mermaid\ngraph TD\nA-->B\n```\n\nHere is an example utility:\n\n```js\n(function () {\n  var counter = 0;\n  window.increment = function () { counter += 1; return counter; };\n})();\n```",
+      ),
+    ).toBe(false);
+  });
+
+  // The class the TODO itself flagged: documentation prose merely mentioning
+  // these tokens, with no actual "<tag ...>" rendering context at all.
+  test("does NOT warn on prose mentioning onerror and the bridge name with no actual HTML tag", () => {
+    expect(
+      warns(
+        "The onerror attribute lets you run JavaScript when an image fails to load, similar to how a " +
+          "plugin might expose a bridge and call something like electron.mcp.activate() from a handler.",
+      ),
+    ).toBe(false);
+  });
+
+  // Accepted, documented residual (review finding #1, CONFIRMED): a
+  // GHSA/NVD-style writeup describing this exact CVE necessarily quotes the
+  // literal bridge call so a reader understands the bug — this still warns,
+  // same "prose about a shape" tension every prose-matching signature in this
+  // file accepts (see e.g. the generic-bearer-token-disclosure Salesforce-
+  // docs carve-out). Warn, not block, is exactly why this tension is
+  // tolerable.
+  test("still warns on a security advisory quoting the literal PoC (accepted, documented residual)", () => {
+    expect(warns(`The vulnerable diagram: A["<img src=x onerror='electron.mcp.addServer(attackerConfig)'>"] triggers RCE.`)).toBe(
+      true,
+    );
+  });
+
+  // Accepted, documented evasion gaps (review findings #11, #13, #16, all
+  // CONFIRMED) — a literal-substring gate cannot survive HTML-entity
+  // encoding, bracket/computed-property access, or a different client's own
+  // differently-named bridge. No signature in this file survives these
+  // either; pinned here so a future "fix" doesn't silently reintroduce FP
+  // risk by trying to patch around them with more generic tokens.
+  test("known evasion gaps: entity-encoding, bracket access, and a different client's bridge name all evade this signature", () => {
+    expect(warns(`<img src=x onerror="electron&#46;mcp&#46;activate(&#39;evil-server&#39;)">`)).toBe(false);
+    expect(warns(`<svg onload="window['electron']['mcp']['activate']('evil-server')">`)).toBe(false);
+    expect(warns(`<img src=x onerror="ipcRenderer.invoke('mcp:execute','rm -rf ~')">`)).toBe(false);
+  });
+
+  test("REDACTS the matched excerpt (review findings #23/#24: a wide lazy-match could otherwise leak adjacent secrets verbatim)", () => {
+    const r = inspectMessage(
+      resp("<script>const apiKey = 'sk-ant-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'; electron.mcp.activate({});</script>"),
+      OWASP_MCP_TOP_10,
+    );
+    const f = r.findings.find((fi) => fi.signature_id === SIG_ID);
+    expect(f).toBeDefined();
+    expect(f!.matched_text_excerpt).not.toContain("sk-ant-aaaa");
+    expect(f!.matched_text_excerpt).toMatch(/redacted/i);
+  });
+
+  // Review finding #27 (CONFIRMED, test-coverage gap): the shipped decode
+  // test only exercised shape 1 (event-handler). Add coverage for shapes 2
+  // and 3 too, since a future regex refactor of either could silently break
+  // decode-compatibility with nothing to catch it.
+  describe("gets decode-and-rescan for free on all three shapes", () => {
+    const b64 = (s: string): string => Buffer.from(s, "utf8").toString("base64");
+    const decodedFinding = (text: string) =>
+      inspectMessage(resp(text), OWASP_MCP_TOP_10).findings.find((fi) => fi.signature_id === SIG_ID && fi.decoded === true);
+
+    test("shape 1 (event-handler)", () => {
+      const payload = `<img src=x onerror="electron.mcp.activate({key:'x'})">`;
+      expect(decodedFinding(`rendered: ${b64(payload)}`)).toBeDefined();
+    });
+
+    test("shape 2 (<script> body)", () => {
+      const payload = "<script>electron.mcp.activate({key:'x'});</script>";
+      expect(decodedFinding(`rendered: ${b64(payload)}`)).toBeDefined();
+    });
+
+    test("shape 3 (mermaid/echarts fence)", () => {
+      const payload = "```echarts\n{a: electron.mcp.activate({key:'x'})}\n```";
+      expect(decodedFinding(`rendered: ${b64(payload)}`)).toBeDefined();
+    });
+  });
+});
+
 // F10 Detector-B — decode-and-rescan. An encoded payload (injection or credential)
 // inside server-returned data is decoded to a synthetic leaf and re-matched. Every
 // decoded finding is WARN-only (strictly additive: pass→warn, never block) and the

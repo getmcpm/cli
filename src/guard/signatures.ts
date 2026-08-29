@@ -41,6 +41,59 @@ const SOLICIT_VERB =
 const solicits = (noun: string): RegExp =>
   new RegExp(`${SOLICIT_VERB}[\\s\\S]{0,40}(?:${noun})`, "i");
 
+// ── TODOS #54 renderer-code-execution: privileged-bridge call gate ───────────
+// Two real, disclosed CVEs in the same MCP client (nanbingxyz/5ire) reach RCE
+// through ordinary tool_response TEXT that a malicious/compromised server
+// controls: CVE-2025-68669 (a `securityLevel: 'loose'` Mermaid renderer lets an
+// `<img onerror=...>` tag inside a diagram node call the privileged
+// `electron.mcp.activate` IPC bridge) and CVE-2026-22793 (an ECharts
+// markdown-fence plugin `new Function()`-evals the fenced block's content,
+// reaching the same bridge via a self-invoking function expression).
+//
+// A bare keyword/substring scan for "onerror=" or "new Function(" is
+// unacceptably FP-prone in ways well beyond the "documentation prose" class
+// this entry originally flagged. A pre-merge adversarial review (28 CONFIRMED
+// findings) MEASURED an earlier version of this signature that gated on a
+// broader `DANGEROUS_CALL_TARGETS` alternation (adding `child_process`,
+// `require(`, `exec(`, `spawn(`, `eval(`, `new Function(` alongside the
+// literal bridge) and found it false-positives on: an MDN reference page for
+// the `Function` constructor, a Node.js "run a shell command" tutorial's
+// embedded RunKit sandbox, a CTF writeup's canonical `onerror=eval(atob(...))`
+// teaching example, an AppSec-training article's `onmouseover` XSS
+// demonstration — and, worse, a THIRD (fence-scoped, ungated) shape that
+// assumed "a legitimate mermaid/echarts fence never contains a function
+// definition," which is simply FALSE for ECharts: formatter callbacks
+// persisted via `new Function(...)` and option data computed via an IIFE are
+// both standard, documented ECharts idioms, so that shape warned on a
+// meaningful share of any legitimate chart-generation tool's own output.
+//
+// None of those generic tokens even reliably generalized to some OTHER
+// vulnerable client the way this comment originally hoped — a genuinely
+// different Electron-embedded MCP client would expose its OWN differently-
+// named bridge (evasion the fixed allowlist can't help with either way), and
+// `require`/`child_process` calls are not even reachable from a properly
+// context-isolated Electron renderer in the first place, which is exactly why
+// clients expose a narrow bridge like `electron.mcp.*` instead. So the gate is
+// narrowed to ONLY the literal, disclosed bridge call — `electron.mcp.activate(`
+// / `electron.mcp.addServer(`, with `\s*` tolerating whitespace-only spacing —
+// an honest, CVE-grounded tripwire rather than a speculative net. A real
+// onload/onerror handler in the wild calls things like `this.src=...`,
+// `console.log(...)`, or an app-specific `init()`; none of that matches.
+//
+// ACCEPTED, DOCUMENTED GAPS (measured, not merely asserted, during the same
+// review): HTML-entity-encoding the dot (`electron&#46;mcp&#46;activate`),
+// bracket/computed-property access (`window['electron']['mcp']['activate']`),
+// alias indirection across two tool_response messages, and — most
+// fundamentally — a different MCP client's own differently-named bridge, all
+// evade this literal-substring gate. This project has no cross-message
+// dataflow correlation (a documented V2 item) and no signature anywhere in
+// this file survives HTML-entity/bracket-notation obfuscation, so this
+// signature is not worse than its siblings on that axis; it is an honest
+// "tripwire not defense" for the two disclosed CVEs' own literal shape, the
+// same scope discipline as F5's exfil-sigil detector ("a renamed param evades
+// it").
+const ELECTRON_MCP_BRIDGE_CALL = "electron\\s*\\.\\s*mcp\\s*\\.\\s*(?:activate|addServer)\\s*\\(";
+
 export const OWASP_MCP_TOP_10: readonly Signature[] = [
   {
     id: "owasp-mcp-2-instruction-injection-in-response",
@@ -557,5 +610,103 @@ export const OWASP_MCP_TOP_10: readonly Signature[] = [
       "technique. Outside an emoji subdivision flag these do not occur in real text. " +
       "Inspect the server's output; if legitimate (rare), mute via " +
       "`mcpm guard mute unicode-tag-concealment`.",
+  },
+  {
+    // TODOS #54 — renderer-code-execution-in-response. See the
+    // ELECTRON_MCP_BRIDGE_CALL comment above for the full CVE grounding, the
+    // pre-merge adversarial review's 28 findings, and why this gate is
+    // narrower than an earlier draft. Three structural shapes share one
+    // signature id, all requiring the SAME literal bridge-call gate:
+    //
+    //  1. An HTML tag with an inline event-handler attribute (a generic
+    //     `\son[a-z]+\s*=`, not an enumerated handler list — HTML has no
+    //     non-event `on*` attribute, and this closes a review-found gap where
+    //     `onmouseout`/`onblur`/etc. weren't on the original enumerated list)
+    //     whose VALUE contains the bridge call — the CVE-2025-68669 shape.
+    //     Value-scoped via a lookahead so the token must be INSIDE the
+    //     attribute's own value; the bare/unquoted branch additionally
+    //     requires `(?!["'])` so it cannot fall through past a real quoted
+    //     value into an ADJACENT attribute when the two abut with no
+    //     separating whitespace (review-found regex-correctness bug).
+    //  2. A <script>...</script> block whose body (bounded to 2000 chars,
+    //     never crossing a closing </script>) contains the bridge call. The
+    //     tag-open matcher is quote-aware (`(?:"[^"]*"|'[^']*'|[^>"'])*`) so a
+    //     literal `>` inside a quoted attribute value can't be mistaken for
+    //     the tag's own close and misalign where the 2000-char body budget
+    //     starts counting from (review-found: this could push a real call
+    //     just past the budget, causing a missed detection).
+    //  3. A markdown code fence tagged `mermaid` or `echarts` (the two plugin
+    //     types both disclosed CVEs abuse) containing the bridge call
+    //     ANYWHERE in the fence body — the CVE-2026-22793 shape. An earlier
+    //     draft instead matched `new Function(`/IIFE syntax with NO call
+    //     gate, on the premise that legitimate diagram/option content never
+    //     contains a function definition; the review found that premise FALSE
+    //     for ECharts specifically (formatter callbacks persisted via
+    //     `new Function(...)`, option data computed via an IIFE, are both
+    //     standard documented idioms) and, independently, that requiring
+    //     IIFE/`new Function(` syntax at all was unnecessarily narrow: the
+    //     vulnerable `parseOption` wraps the ENTIRE fence body in
+    //     `new Function('return {' + body + '}')()`, so a bridge call placed
+    //     directly as an object-literal property value (no wrapper at all)
+    //     executes identically. Requiring only the bridge call is both safer
+    //     (fixes the ECharts false-positive class) and strictly more complete.
+    //
+    // All three regexes use bounded lazy quantifiers ({0,4000}?/{0,2000}?)
+    // with a `(?!` "does not cross a fence/tag-close boundary" guard rather
+    // than an unbounded `[\s\S]*` scan — measured against multi-hundred-KB
+    // adversarial padding (including many non-matching `electron.mcp.`-prefixed
+    // near-misses) with no backtracking blowup (sub-millisecond).
+    //
+    // Severity is `high` (→ warn, forward + log, never block on its own): a
+    // documentation/CVE-lookup tool can legitimately return prose QUOTING this
+    // exact literal call (a GHSA/NVD advisory explaining the vulnerability) —
+    // an accepted, low-frequency residual the review confirmed and this
+    // signature does not try to special-case away, the same "ambiguous but
+    // real" tier as credential-egress-in-response, and the project's own
+    // repeated lesson that a wrong BLOCK on a block-capable carrier is the
+    // worse failure direction (v0.29.0 / v0.31.0).
+    //
+    // `redact: true` — a review finding (not merely FP/evasion) caught that
+    // shapes 2-3's lazily-bounded match can capture arbitrary attacker-placed
+    // text between the tag/fence open and the bridge call verbatim into the
+    // excerpt (e.g. a secret the injected script reads before exfiltrating
+    // it), which would otherwise land unredacted in guard-events.jsonl and the
+    // public `guard inspect` seam even while a co-firing credential signature
+    // on the SAME leaf correctly redacts it — silently defeating the
+    // redaction guarantee tool_response carries elsewhere in this file.
+    id: "renderer-code-execution-in-response",
+    category: "MCP-RENDERER-CODE-EXECUTION",
+    severity: "high",
+    redact: true,
+    description:
+      "HTML/script content in a tool response calling the electron.mcp privileged IPC bridge (CVE-2025-68669, CVE-2026-22793 shape)",
+    target: "tool_response",
+    patterns: [
+      new RegExp(
+        "<[a-zA-Z][\\w-]*\\b[^<>]*?\\son[a-z]+\\s*=\\s*" +
+          `(?:"(?=[^"]*(?:${ELECTRON_MCP_BRIDGE_CALL}))[^"]*"` +
+          `|'(?=[^']*(?:${ELECTRON_MCP_BRIDGE_CALL}))[^']*'` +
+          `|(?!["'])(?=[^\\s>]*(?:${ELECTRON_MCP_BRIDGE_CALL}))[^\\s>]*)` +
+          "[^<>]*>",
+        "i",
+      ),
+      new RegExp(
+        `<script\\b(?:"[^"]*"|'[^']*'|[^>"'])*>(?:(?!</script>)[\\s\\S]){0,2000}?(?:${ELECTRON_MCP_BRIDGE_CALL})`,
+        "i",
+      ),
+      new RegExp(
+        "```\\s*(?:mermaid|echarts)\\b(?:(?!```)[\\s\\S]){0,4000}?(?:" + ELECTRON_MCP_BRIDGE_CALL + ")",
+        "i",
+      ),
+    ],
+    remediation:
+      "A tool response contained HTML/script content calling the electron.mcp privileged IPC " +
+      "bridge (electron.mcp.activate(...) / electron.mcp.addServer(...)) — either from an " +
+      "inline HTML event-handler attribute, a <script> body, or a mermaid/echarts diagram " +
+      "fence. Two real, disclosed CVEs (CVE-2025-68669, CVE-2026-22793) reach RCE this way in " +
+      "a vulnerable client renderer. This was forwarded with a warning, not blocked, because a " +
+      "documentation or CVE-lookup tool can legitimately return prose quoting this exact call. " +
+      "If this tool legitimately returns such content, mute via " +
+      "`mcpm guard mute renderer-code-execution-in-response`.",
   },
 ];
