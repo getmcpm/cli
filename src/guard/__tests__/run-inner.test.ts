@@ -490,10 +490,15 @@ describe("isToolsListChangedNotification (H4 list_changed arm predicate)", () =>
     // A real list_changed arrives → arm (exactly what inspectChild does on a true predicate).
     const notif = { jsonrpc: "2.0", method: "notifications/tools/list_changed" } as JSONRPCMessage;
     if (isToolsListChangedNotification(notif)) state.revalidationArmed = true;
-    // The announced follow-up legitimately differs → classified (no pin here), NOT F3-blocked.
+    // The announced follow-up legitimately differs, but it MUTATED a tool this
+    // session had already seen (no pin here) — #58: NOT F3-blocked (armed), but
+    // no longer a blank check either. It is tiered against the session's
+    // first-seen baseline (classifyFieldDrift); only the description changed
+    // here, so it degrades to a cosmetic WARN rather than passing silently.
     const followup = inspectForDriftSync(toolsListMsg("read", "v2"), "srv", pins, state);
-    expect(followup.action).toBe("pass");
-    expect(followup.findings).toHaveLength(0);
+    expect(followup.action).toBe("warn");
+    expect(followup.findings).toHaveLength(1);
+    expect(followup.findings[0]?.signature_id).toBe("schema-drift-cosmetic");
     // Single-shot: a SECOND unannounced change reverts to the strict F3 block.
     const second = inspectForDriftSync(toolsListMsg("read", "v3"), "srv", pins, state);
     expect(second.action).toBe("block");

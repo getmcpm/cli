@@ -68,6 +68,20 @@ export function diffToolDefinition(
 }
 
 /**
+ * The H4 tiering RULE itself, shared by {@link classifyDrift} (against a
+ * durable disk pin) and {@link classifyFieldDrift} (#58, against a
+ * session-only baseline): description-only change → cosmetic; anything
+ * touching schema and/or annotations (or a coarse no-baseline comparison) →
+ * security.
+ */
+function tierChangedFields(changed: ChangedField[]): DriftClass {
+  if (changed.length === 1 && changed[0] === "description") {
+    return { kind: "cosmetic", changedFields: changed };
+  }
+  return { kind: "security", changedFields: changed };
+}
+
+/**
  * Classify a drift (PRECONDITION, caller-enforced: pinned.current_hash !== null
  * and the live whole-hash already differs from it).
  *
@@ -81,11 +95,19 @@ export function classifyDrift(pinned: PinEntry, liveFields: FieldHashes): DriftC
   if (pinned.field_hashes === undefined) {
     return { kind: "security", changedFields: [] };
   }
-  const changed = diffToolDefinition(pinned.field_hashes, liveFields);
-  if (changed.length === 1 && changed[0] === "description") {
-    return { kind: "cosmetic", changedFields: changed };
-  }
-  return { kind: "security", changedFields: changed };
+  return tierChangedFields(diffToolDefinition(pinned.field_hashes, liveFields));
+}
+
+/**
+ * #58 (Deadbugz): the SAME H4 tiering rule as {@link classifyDrift}, but
+ * against a SESSION-observed field-hash baseline instead of a durable disk
+ * pin. Used by the armed same-session `list_changed` re-validation path
+ * (run-inner.ts) — its baseline is "what this tool looked like the first
+ * time this session saw it", which exists even for a server that has never
+ * been guarded before (no pin on disk yet to classify against).
+ */
+export function classifyFieldDrift(baseline: FieldHashes, liveFields: FieldHashes): DriftClass {
+  return tierChangedFields(diffToolDefinition(baseline, liveFields));
 }
 
 /** Strip control + ANSI escape sequences from tool/server names (security F9). */

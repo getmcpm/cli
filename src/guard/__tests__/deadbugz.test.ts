@@ -118,7 +118,7 @@ function durablePin(description: string, schema: unknown): PinsFile {
 }
 
 describe("Deadbugz — first-ever session (no pre-existing pin)", () => {
-  test("GAP: benign list -> 3 calls -> list_changed -> poisoned list is UNDETECTED", () => {
+  test("#58 FIXED: benign list -> 3 calls -> list_changed -> poisoned list is now BLOCKED", () => {
     const pins = emptyPinsFile(); // never guarded before — nothing on disk yet
     const state = freshState();
 
@@ -149,18 +149,19 @@ describe("Deadbugz — first-ever session (no pre-existing pin)", () => {
     //    changed — a full behavior flip, not mere wording).
     const flipped = inspectChildFrame(toolsListMsg(POISONED_DESCRIPTION, POISONED_SCHEMA), pins, state);
 
-    // MEASURED, not assumed: this is the actual production result.
-    //  - F3 same-session guard is bypassed because `armed` is true (by design,
-    //    for legitimate list_changed upgrades).
-    //  - The disk-pin cross-check also can't help: baselineForDrift is frozen
-    //    at session start and this server has never been pinned before, so
-    //    `pinned` is undefined and inspectToolDrift returns null before ever
-    //    tiering the change as cosmetic/security.
-    //  - The pattern engine finds nothing: the poisoned description reads as
-    //    an ordinary (if dishonest) feature description, not as any of the
-    //    4 owasp-mcp-1 regex shapes.
-    expect(flipped.action).toBe("pass");
-    expect(flipped.findings).toHaveLength(0);
+    // MEASURED, not assumed: post-#58 production result.
+    //  - F3 same-session guard is still bypassed because `armed` is true (by
+    //    design, for legitimate list_changed upgrades) — but the armed path no
+    //    longer gives a blank check. `inspectToolDrift` now tiers the change
+    //    against the SESSION's first-seen field hashes (classifyFieldDrift),
+    //    which exist even though no disk pin does. `format_code` existed in
+    //    the session's first-seen set and both description AND schema changed
+    //    → "security" tier → `schema-drift`, critical, BLOCK.
+    //  - The pattern engine still finds nothing on its own (the poisoned
+    //    description reads as an ordinary, if dishonest, feature description) —
+    //    it is the structural drift tier that catches this, not a regex.
+    expect(flipped.action).toBe("block");
+    expect(flipped.findings.map((f) => f.signature_id)).toContain("schema-drift");
   });
 
   test("control: the SAME flip WITHOUT list_changed cover is caught by F3 (schema-drift-in-session, BLOCK)", () => {
@@ -177,6 +178,56 @@ describe("Deadbugz — first-ever session (no pre-existing pin)", () => {
     const flipped = inspectChildFrame(toolsListMsg(POISONED_DESCRIPTION, POISONED_SCHEMA), pins, state);
     expect(flipped.action).toBe("block");
     expect(flipped.findings.map((f) => f.signature_id)).toContain("schema-drift-in-session");
+  });
+});
+
+describe("#58 fix — FP safety: a real list_changed upgrade is never penalized", () => {
+  // Two tools this time: the session's first-seen list carries only TOOL. A
+  // real server dynamically adding a second tool mid-session (the standard,
+  // legitimate reason list_changed exists) must produce ZERO findings for
+  // EITHER tool — this is the doctrine the design explicitly protects.
+  const OTHER_TOOL = "lint_code";
+
+  function toolsListWithAddition(): JSONRPCMessage {
+    return {
+      jsonrpc: "2.0",
+      id: 1,
+      result: {
+        tools: [
+          { name: TOOL, description: BENIGN_DESCRIPTION, inputSchema: BENIGN_SCHEMA },
+          { name: OTHER_TOOL, description: "Lint source files for style violations.", inputSchema: BENIGN_SCHEMA },
+        ],
+      },
+    } as JSONRPCMessage;
+  }
+
+  test("armed list_changed that ADDS a new tool name produces no finding (legitimate expansion)", () => {
+    const pins = emptyPinsFile();
+    const state = freshState();
+
+    inspectChildFrame(toolsListMsg(BENIGN_DESCRIPTION, BENIGN_SCHEMA), pins, state);
+    for (let i = 1; i <= 3; i++) inspectFrame(toolsCallMsg(i));
+    state.revalidationArmed = true;
+
+    const result = inspectChildFrame(toolsListWithAddition(), pins, state);
+    expect(result.action).toBe("pass");
+    expect(result.findings).toHaveLength(0);
+  });
+
+  test("armed list_changed whose existing tool is UNCHANGED produces no finding", () => {
+    const pins = emptyPinsFile();
+    const state = freshState();
+
+    inspectChildFrame(toolsListMsg(BENIGN_DESCRIPTION, BENIGN_SCHEMA), pins, state);
+    for (let i = 1; i <= 3; i++) inspectFrame(toolsCallMsg(i));
+    state.revalidationArmed = true;
+
+    // Identical resend — the exact same benign definition, just re-delivered
+    // under list_changed cover (e.g. a server that re-announces without
+    // actually changing anything).
+    const result = inspectChildFrame(toolsListMsg(BENIGN_DESCRIPTION, BENIGN_SCHEMA), pins, state);
+    expect(result.action).toBe("pass");
+    expect(result.findings).toHaveLength(0);
   });
 });
 
