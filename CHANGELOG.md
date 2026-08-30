@@ -8,6 +8,8 @@ _Add entries here, never under a stamped version_ — a release commit renames t
 heading, and a branch that wrote beneath it merges without conflict straight into a
 published section (it happened to #170).
 
+## [0.32.0] - 2026-08-31
+
 ### Added
 
 - **`docs/owasp-mcp-mapping.md`** — every mcpm detection/enforcement mechanism mapped
