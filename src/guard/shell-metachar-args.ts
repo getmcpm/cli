@@ -28,22 +28,27 @@
  * suffixes here are not exposed to. Revisit `name` alongside TODOS #51/#52,
  * which need the same key-classification with a benign-corpus pass first.
  *
- * KNOWN GAP (documented, not fixed here — TODOS #40 already flags the general
- * class): this detector matches against `normalizeForMatch(value)` alone,
- * which STRIPS Unicode TAG-block characters (PATTERN_BREAKERS) rather than
- * decoding and re-scanning them the way `inspectMessage`'s tag/base64
- * decode-and-rescan passes do for the regular signature catalog. A shell-
- * metacharacter payload concealed via TAG-block "ASCII smuggling" or base64
- * inside an identifier-shaped argument value evades this detector. Closing it
- * needs the same decode-and-rescan machinery `inspectMessage` uses (a
- * multi-round-hardened piece of infrastructure — see the TAG-concealment
- * history in CLAUDE.md), applied to a bespoke key+value walker rather than a
- * signature/pattern list; out of scope for this slice. Filed as TODOS #55.
+ * TODOS #55 (closed here): a value passed to `matchesShellMetachar` alone
+ * only sees `normalizeForMatch(value)`, which STRIPS Unicode TAG-block
+ * characters (PATTERN_BREAKERS) rather than decoding them — so a payload
+ * concealed via TAG-block "ASCII smuggling" was erased, not revealed, and
+ * this detector never got the tag-decode-and-rescan pass `inspectMessage`
+ * runs for the regular signature catalog on every carrier including
+ * `tool_call_args`. Fixed by reusing `inspectTagEncoded` directly (one
+ * synthetic `Signature` wrapping this detector's own pattern list) rather
+ * than re-deriving its multi-round-hardened decode/mask/concealment-surplus
+ * logic (TODOS #31/#34) — see `detectShellMetacharArgs` below.
+ *
+ * base64 decode-and-rescan is deliberately NOT added: the regular catalog
+ * doesn't run it on `tool_call_args` either (`DECODE_TARGETS` in patterns.ts
+ * excludes it — F10 Detector-B's threat model is a server encoding a payload
+ * into its OWN response, not an argument value), so omitting it here is
+ * parity with the catalog, not a gap.
  */
 
 import type { JSONRPCMessage } from "@modelcontextprotocol/sdk/types.js";
-import type { InspectFinding, InspectResult } from "./types.js";
-import { normalizeForMatch, truncate, worstAction } from "./patterns.js";
+import type { InspectFinding, InspectResult, Signature } from "./types.js";
+import { inspectTagEncoded, normalizeForMatch, truncate, worstAction } from "./patterns.js";
 import { canonicalizeKey } from "./key-canon.js";
 import { stringArgLeaves, toolCallArguments } from "./tool-call-args-walk.js";
 
@@ -141,6 +146,20 @@ function makeFinding(toolName: string, key: string, value: string): InspectFindi
   };
 }
 
+// Wraps this detector's own pattern list as a Signature so `inspectTagEncoded`
+// can be reused verbatim (TODOS #55) instead of re-deriving its decode/mask/
+// concealment-surplus logic. `description` is unused outside the catalog
+// proper; `id` is what dedup and event logging key on.
+const SIGNATURE: Signature = {
+  id: SHELL_METACHAR_ARG_SIGNATURE_ID,
+  category: "MCP-COMMAND-INJECTION",
+  severity: "critical",
+  description: SHELL_METACHAR_ARG_SIGNATURE_ID,
+  target: "tool_call_args",
+  patterns: SHELL_METACHAR_PATTERNS,
+  remediation: REMEDIATION,
+};
+
 /**
  * Inspect a `tools/call` request for shell-metacharacter syntax in an
  * identifier-shaped argument. A no-op (pass) on every other frame shape.
@@ -151,8 +170,30 @@ export function detectShellMetacharArgs(msg: JSONRPCMessage): InspectResult {
 
   const findings: InspectFinding[] = [];
   for (const { key, value } of stringArgLeaves(call.args)) {
-    if (isIdentifierLikeArgKey(key) && matchesShellMetachar(value)) {
+    if (!isIdentifierLikeArgKey(key)) continue;
+    if (matchesShellMetachar(value)) {
       findings.push(makeFinding(call.toolName, key, value));
+    }
+    // TAG-block decode-and-rescan (TODOS #55), run UNCONDITIONALLY —
+    // not only when the plain match above missed. matchesShellMetachar only
+    // sees the STRIPPED value, so a payload concealed with Unicode tag
+    // characters is invisible to it; inspectTagEncoded decodes tag runs IN
+    // PLACE and compares occurrence counts against a masked view (TODOS
+    // #31/#34) — reused here rather than re-implemented. Running it even
+    // after a plain match reports a SEPARATE concealed occurrence a value
+    // can carry alongside a visible one (e.g. a visible `;` plus an
+    // independently tag-concealed backtick) — an early `continue` here
+    // would silently drop that a concealment attempt was ALSO present. The
+    // raw value is included in the excerpt (not just the bare matched
+    // delimiter inspectTagEncoded returns) so an operator sees the same
+    // context the plain-match finding above shows.
+    for (const f of inspectTagEncoded(value, [SIGNATURE], "tool_call_args")) {
+      findings.push({
+        ...f,
+        matched_text_excerpt: truncate(
+          `argument "${key}" of tool "${call.toolName}": ${value} (${f.matched_text_excerpt})`,
+        ),
+      });
     }
   }
   if (findings.length === 0) return PASS;

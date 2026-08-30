@@ -158,6 +158,49 @@ describe("detectQueryControlArgs", () => {
   });
 });
 
+// ───────────────────────── TODOS #55 — TAG-block decode-and-rescan ─────────────────────────
+
+/** Encode ASCII into the tag block: U+E0020–U+E007E mirror 0x20–0x7E. */
+const tag = (s: string): string =>
+  [...s].map((c) => String.fromCodePoint((c.codePointAt(0) ?? 0) + 0xe0000)).join("");
+
+describe("TAG-block decode-and-rescan (TODOS #55)", () => {
+  test("a TAG-concealed pipe-rescope payload in table_name → block", () => {
+    const r = detectQueryControlArgs(
+      toolCall("get_table_schema", { table_name: `sensitive_data${tag(" | project Secret")}` }),
+    );
+    expect(r.action).toBe("block");
+    expect(r.findings[0]?.signature_id).toBe(QUERY_CONTROL_ARG_SIGNATURE_ID);
+    expect(r.findings[0]?.matched_text_excerpt).toContain("table_name");
+    expect(r.findings[0]?.matched_text_excerpt).toContain("decoded:unicode-tag");
+  });
+
+  test("a concealed payload in a NON-scoped key (query) still passes", () => {
+    const r = detectQueryControlArgs(toolCall("run_query", { query: tag(" | project Secret") }));
+    expect(r.action).toBe("pass");
+  });
+
+  test("a benign hyphenated database name with an unrelated tag character → pass", () => {
+    const scotlandFlag = `${"\u{1F3F4}"}${tag("gbsct")}${"\u{E007F}"}`;
+    const r = detectQueryControlArgs(toolCall("t", { database: `prod-${scotlandFlag}-eu-west` }));
+    expect(r.action).toBe("pass");
+  });
+
+  test("a benign table name with no tag characters is unaffected", () => {
+    const r = detectQueryControlArgs(toolCall("get_table_schema", { table_name: "customers" }));
+    expect(r.action).toBe("pass");
+  });
+
+  test("a visible query-control match AND a separately-concealed one are BOTH reported", () => {
+    const r = detectQueryControlArgs(
+      toolCall("t", { table: `orders;DROP TABLE orders${tag(" | project Secret")}` }),
+    );
+    expect(r.action).toBe("block");
+    expect(r.findings.length).toBeGreaterThanOrEqual(2);
+    expect(r.findings.some((f) => f.matched_text_excerpt.includes("decoded:unicode-tag"))).toBe(true);
+  });
+});
+
 describe("catalog wiring", () => {
   test("query-control-syntax-in-identifier-arg is in the catalog with empty patterns", () => {
     const entry = OWASP_MCP_TOP_10.find((s) => s.id === QUERY_CONTROL_ARG_SIGNATURE_ID);

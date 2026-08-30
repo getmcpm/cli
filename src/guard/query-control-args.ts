@@ -25,14 +25,17 @@
  * shape both CVE PoCs need. `name` alone is DELIBERATELY EXCLUDED (same
  * reasoning as #50) — a bare display-name field is not in scope here.
  *
- * KNOWN GAP (TODOS #55, same as #50): this detector matches against
- * `normalizeForMatch(value)` alone, which strips rather than decodes
- * Unicode TAG-block / base64 concealment. Not fixed here.
+ * TODOS #55 (closed here, same fix as #50): the plain match alone only sees
+ * `normalizeForMatch(value)`, which strips rather than decodes Unicode
+ * TAG-block characters, so a concealed query-control payload was erased
+ * before matching. Fixed by reusing `inspectTagEncoded` via one synthetic
+ * `Signature` — see `detectQueryControlArgs` below and #50's module doc
+ * comment for why base64 decode-and-rescan is deliberately not added.
  */
 
 import type { JSONRPCMessage } from "@modelcontextprotocol/sdk/types.js";
-import type { InspectFinding, InspectResult } from "./types.js";
-import { normalizeForMatch, truncate, worstAction } from "./patterns.js";
+import type { InspectFinding, InspectResult, Signature } from "./types.js";
+import { inspectTagEncoded, normalizeForMatch, truncate, worstAction } from "./patterns.js";
 import { canonicalizeKey } from "./key-canon.js";
 import { stringArgLeaves, toolCallArguments } from "./tool-call-args-walk.js";
 
@@ -127,6 +130,19 @@ function makeFinding(toolName: string, key: string, value: string): InspectFindi
   };
 }
 
+// Wraps this detector's own pattern list as a Signature so `inspectTagEncoded`
+// can be reused verbatim (TODOS #55) instead of re-deriving its decode/mask/
+// concealment-surplus logic.
+const SIGNATURE: Signature = {
+  id: QUERY_CONTROL_ARG_SIGNATURE_ID,
+  category: "MCP-QUERY-INJECTION",
+  severity: "critical",
+  description: QUERY_CONTROL_ARG_SIGNATURE_ID,
+  target: "tool_call_args",
+  patterns: QUERY_CONTROL_PATTERNS,
+  remediation: REMEDIATION,
+};
+
 /**
  * Inspect a `tools/call` request for query-control syntax in a
  * resource-identifier-shaped argument. A no-op (pass) on every other frame
@@ -138,8 +154,21 @@ export function detectQueryControlArgs(msg: JSONRPCMessage): InspectResult {
 
   const findings: InspectFinding[] = [];
   for (const { key, value } of stringArgLeaves(call.args)) {
-    if (isQueryScopedArgKey(key) && matchesQueryControlSyntax(value)) {
+    if (!isQueryScopedArgKey(key)) continue;
+    if (matchesQueryControlSyntax(value)) {
       findings.push(makeFinding(call.toolName, key, value));
+    }
+    // TAG-block decode-and-rescan (TODOS #55), run UNCONDITIONALLY, not only
+    // when the plain match above missed — see #50's detector for the full
+    // rationale (a value can carry both a visible AND a separately-concealed
+    // occurrence) and why the raw value is folded into the excerpt.
+    for (const f of inspectTagEncoded(value, [SIGNATURE], "tool_call_args")) {
+      findings.push({
+        ...f,
+        matched_text_excerpt: truncate(
+          `argument "${key}" of tool "${call.toolName}": ${value} (${f.matched_text_excerpt})`,
+        ),
+      });
     }
   }
   if (findings.length === 0) return PASS;

@@ -626,7 +626,10 @@ When helping with this project:
 - Trust assessment is a core feature, not an afterthought
 - We are OSS-first — avoid design decisions that require proprietary lock-in
 - Check `docs/ARCHITECTURE.md` for the detailed implementation plan
-- Check `TODOS.md` for blockers and deferred work
+- Blockers and deferred work are tracked in the maintainer's private research notes
+  (Obsidian, `mcpm/` folder — deliberately not in this repo; moved out of the
+  repo's `TODOS.md` on 2026-08-31). `docs/ROADMAP.md` remains the public strategic
+  layer checked into this repo.
 - The official MCP Registry API v0.1 is at `registry.modelcontextprotocol.io`
 - V1 is local-first: no server infrastructure, JSON files in `~/.mcpm/`
 - Immutable data patterns: always return new objects, never mutate
