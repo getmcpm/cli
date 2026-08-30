@@ -21,9 +21,26 @@
  * unowned package name is gone and that an unset variable spawns nothing.
  *
  * Invariant Labs' mcp-scan itself is distributed on PyPI (and since 2026-03 is
- * a redirect package for `snyk-agent-scan`), never on npm. Wiring that tool's
- * real CLI — it scans client config files, not registry server names — is
- * tracked as follow-up work, not silently assumed here.
+ * a redirect package for `snyk-agent-scan`), never on npm.
+ *
+ * 2026-08-31: `snyk-agent-scan` was evaluated as a candidate for this seam
+ * (backlog #32) and does NOT fit — confirmed against its README/CLI/JSON-output
+ * docs, not assumed. Two independent mismatches, either one disqualifying:
+ * (1) its CLI (`snyk-agent-scan scan [CONFIG_FILE...]`) auto-discovers and
+ * scans installed agent CONFIG FILES, with no mode to hand it a single
+ * not-yet-installed registry coordinate the way `scanTier2` calls scanners
+ * here; for MCP entries it actively CONNECTS TO AND STARTS the stdio server
+ * from the config to retrieve live tool descriptions, which conflicts with
+ * mcpm's install-then-verify design at the two call sites (install/lock) where
+ * this runs before the user has committed to installing. (2) it requires a
+ * Snyk account + `SNYK_TOKEN` and sends component data to Snyk's Analysis API
+ * by default — not the local-only posture "a scanner you already installed"
+ * implies. Its JSON output is also path-keyed and nested
+ * (`{path: {servers:[...], issues:[...]}}`), not the flat `{findings:[...]}`
+ * this module parses — moot given the input mismatch. See the CLAUDE.md
+ * 2026-08-31 decision row for the full evaluation. No known candidate meets
+ * this seam's bar today (bare-identifier input, fully local, flat findings
+ * output); this file's contract is the target shape, not something to bend.
  */
 
 import type { Finding } from "./tier1.js";
