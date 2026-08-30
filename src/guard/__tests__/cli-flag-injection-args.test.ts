@@ -156,6 +156,51 @@ describe("detectCliFlagInjectionArgs", () => {
   });
 });
 
+// ───────────────────────── TODOS #55 — TAG-block decode-and-rescan ─────────────────────────
+
+/** Encode ASCII into the tag block: U+E0020–U+E007E mirror 0x20–0x7E. */
+const tag = (s: string): string =>
+  [...s].map((c) => String.fromCodePoint((c.codePointAt(0) ?? 0) + 0xe0000)).join("");
+
+describe("TAG-block decode-and-rescan (TODOS #55)", () => {
+  test("a TAG-concealed --address flag in namespace → block", () => {
+    const r = detectCliFlagInjectionArgs(
+      toolCall("port_forward", { namespace: `default${tag(" --address=0.0.0.0")}` }),
+    );
+    expect(r.action).toBe("block");
+    expect(r.findings[0]?.signature_id).toBe(CLI_FLAG_INJECTION_ARG_SIGNATURE_ID);
+    expect(r.findings[0]?.matched_text_excerpt).toContain("namespace");
+    expect(r.findings[0]?.matched_text_excerpt).toContain("decoded:unicode-tag");
+  });
+
+  test("a concealed flag in a NON-scoped key (resourceName) still passes", () => {
+    const r = detectCliFlagInjectionArgs(
+      toolCall("port_forward", { resourceName: `my-database${tag(" --address=0.0.0.0")}` }),
+    );
+    expect(r.action).toBe("pass");
+  });
+
+  test("a benign namespace with an unrelated tag character → pass", () => {
+    const scotlandFlag = `${"\u{1F3F4}"}${tag("gbsct")}${"\u{E007F}"}`;
+    const r = detectCliFlagInjectionArgs(toolCall("t", { namespace: `default-${scotlandFlag}` }));
+    expect(r.action).toBe("pass");
+  });
+
+  test("a benign namespace with no tag characters is unaffected", () => {
+    const r = detectCliFlagInjectionArgs(toolCall("port_forward", { namespace: "default" }));
+    expect(r.action).toBe("pass");
+  });
+
+  test("a visible flag AND a separately-concealed one are BOTH reported", () => {
+    const r = detectCliFlagInjectionArgs(
+      toolCall("port_forward", { namespace: `default --address=0.0.0.0${tag(" --insecure")}` }),
+    );
+    expect(r.action).toBe("block");
+    expect(r.findings.length).toBeGreaterThanOrEqual(2);
+    expect(r.findings.some((f) => f.matched_text_excerpt.includes("decoded:unicode-tag"))).toBe(true);
+  });
+});
+
 describe("catalog wiring", () => {
   test("cli-flag-injection-in-identifier-arg is in the catalog with empty patterns", () => {
     const entry = OWASP_MCP_TOP_10.find((s) => s.id === CLI_FLAG_INJECTION_ARG_SIGNATURE_ID);

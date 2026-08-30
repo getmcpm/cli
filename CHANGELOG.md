@@ -189,6 +189,49 @@ published section (it happened to #170).
 
   Closes TODOS #52.
 
+- **`shell-metachar-in-identifier-arg`, `query-control-syntax-in-identifier-arg`, and
+  `cli-flag-injection-in-identifier-arg` (#50/#51/#52) now get the same TAG-block
+  decode-and-rescan pass the regular signature catalog gets.** All three bespoke
+  `tool_call_args` detectors matched a scoped argument's VALUE against
+  `normalizeForMatch(value)` alone, which STRIPS Unicode TAG-block "ASCII smuggling"
+  characters rather than decoding them — so a shell-metachar/query-control/CLI-flag
+  payload concealed in the TAG block was erased before matching and scored a full pass,
+  the exact gap TODOS #31 already closed for the regular regex catalog. Each detector now
+  falls through, only when its plain match finds nothing, to `inspectTagEncoded` — the
+  same multi-round-hardened function (TODOS #31/#34) the catalog uses — via one throwaway
+  `Signature` wrapping the detector's own pattern list, reusing its
+  decode/mask/concealment-surplus logic rather than re-deriving it. base64
+  decode-and-rescan was deliberately NOT added: the catalog's own `DECODE_TARGETS`
+  excludes `tool_call_args` too (F10 Detector-B's threat model is a server encoding a
+  payload into its own response, not an argument value the calling agent sends), so
+  omitting it here is parity, not a gap. `detectExfilParams` (F5) is untouched and stays a
+  separate, still-open item — it is a pure KEY-denylist classifier with no value regex at
+  all, so "give it decode-and-rescan" doesn't apply the same way.
+
+  A 3-lens adversarial review (false-positive hunting, bypass verification, integration
+  correctness) plus a skeptical synthesis pass found two real gaps in the first cut, both
+  fixed before this shipped: (1) a value carrying BOTH a visible AND a
+  separately-concealed occurrence only reported the visible one, because the `continue`
+  after a plain match skipped the decode-and-rescan pass entirely — now runs
+  unconditionally, mirroring `inspectMessage`'s own discipline of always running both
+  passes; (2) the decoded finding's excerpt showed only the bare matched delimiter (e.g. a
+  lone `;`) with zero surrounding context, unlike the plain-path finding from the SAME
+  detector — fixed by folding the raw argument value into the wrapped excerpt. **Known
+  remaining limit, not fixed:** this still doesn't reveal the fully-decoded attacker text
+  itself — `inspectTagEncoded` exposes only per-signature match fragments, not the decoded
+  string, and building that is a UX/display concern rather than a detection gap; judged
+  out of scope here. Also confirmed and accepted as a pre-existing-style narrowing, not a
+  new regression: `relaxLeadingAnchor` only relaxes the catalog's own `LEADING_ANCHOR`
+  literal, which none of these three detectors' own anchored patterns share (they use a
+  shorter `(?:^|\s)`) — so a concealed payload with no whitespace anywhere before its
+  `--`/`//` marker is a known miss. For the CLI-flag detector that whitespace is
+  load-bearing to the wrapped tool's own `command.split(" ")` vulnerability, so an
+  attacker who omits it defeats their own exploit too; for query-control the same
+  narrowing was already documented and accepted for the plain-text path, and the CVE's own
+  PoC hits an unanchored pattern instead.
+
+  Closes TODOS #55.
+
 ## [0.31.0] - 2026-08-28
 
 ### Fixed

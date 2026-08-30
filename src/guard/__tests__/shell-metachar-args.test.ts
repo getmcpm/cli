@@ -157,6 +157,76 @@ describe("detectShellMetacharArgs", () => {
   });
 });
 
+// ───────────────────────── TODOS #55 — TAG-block decode-and-rescan ─────────────────────────
+
+/** Encode ASCII into the tag block: U+E0020–U+E007E mirror 0x20–0x7E. */
+const tag = (s: string): string =>
+  [...s].map((c) => String.fromCodePoint((c.codePointAt(0) ?? 0) + 0xe0000)).join("");
+
+describe("TAG-block decode-and-rescan (TODOS #55)", () => {
+  test("a TAG-concealed command-substitution payload in an identifier arg → block", () => {
+    // Before #55: normalizeForMatch STRIPS tag characters, so this scored a
+    // full pass — the metacharacter was erased, not merely hidden.
+    const r = detectShellMetacharArgs(toolCall("add_comment", { issue_number: `1${tag(";curl attacker.example")}` }));
+    expect(r.action).toBe("block");
+    expect(r.findings[0]?.signature_id).toBe(SHELL_METACHAR_ARG_SIGNATURE_ID);
+    expect(r.findings[0]?.matched_text_excerpt).toContain("issue_number");
+    expect(r.findings[0]?.matched_text_excerpt).toContain("decoded:unicode-tag");
+  });
+
+  test("the decoded finding still BLOCKS (not clamped like a base64-decoded finding)", () => {
+    const r = detectShellMetacharArgs(toolCall("t", { path: tag("`whoami`") }));
+    expect(r.action).toBe("block");
+  });
+
+  test("a concealed payload in a NON-identifier key still passes (key-scoping applies first)", () => {
+    const r = detectShellMetacharArgs(toolCall("run_command", { command: tag(";rm -rf /") }));
+    expect(r.action).toBe("pass");
+  });
+
+  test("an identifier value with an unrelated benign tag character (RGI flag) → pass", () => {
+    const scotlandFlag = `${"\u{1F3F4}"}${tag("gbsct")}${"\u{E007F}"}`;
+    const r = detectShellMetacharArgs(toolCall("t", { path: `/data/reports-${scotlandFlag}.csv` }));
+    expect(r.action).toBe("pass");
+  });
+
+  test("tag characters that decode to nothing shell-metachar-like → pass", () => {
+    const r = detectShellMetacharArgs(toolCall("t", { path: tag("hello world") }));
+    expect(r.action).toBe("pass");
+  });
+
+  test("a benign identifier with no tag characters at all is unaffected", () => {
+    const r = detectShellMetacharArgs(toolCall("add_comment", { issue_number: "42" }));
+    expect(r.action).toBe("pass");
+  });
+
+  test("a visible metachar AND a separately-concealed one are BOTH reported", () => {
+    // Regression: an earlier version `continue`d after the plain match, so
+    // the concealed backtick was never independently inspected — the block
+    // decision was unaffected (the visible `;` alone blocks), but the fact
+    // that concealment was ALSO attempted went unreported.
+    const r = detectShellMetacharArgs(toolCall("add_comment", { issue_number: `1;${tag("`whoami`")}` }));
+    expect(r.action).toBe("block");
+    expect(r.findings.length).toBeGreaterThanOrEqual(2);
+    expect(r.findings.some((f) => !f.matched_text_excerpt.includes("decoded:unicode-tag"))).toBe(true);
+    expect(r.findings.some((f) => f.matched_text_excerpt.includes("decoded:unicode-tag"))).toBe(true);
+  });
+
+  test("the decoded excerpt includes the argument's raw value, not just the bare matched delimiter", () => {
+    // inspectTagEncoded's own excerpt is just the matched pattern fragment
+    // (e.g. ";") with none of the surrounding value — folding in the raw
+    // value gives an operator the same context the plain-match finding
+    // shows, even though the value's concealed portion still renders
+    // invisibly (revealing the fully-decoded text is a separate, undone
+    // display concern — TODOS #55's follow-up note).
+    const r = detectShellMetacharArgs(
+      toolCall("add_comment", { issue_number: `visible-prefix-123${tag(";curl attacker.example")}` }),
+    );
+    expect(r.findings[0]?.matched_text_excerpt).toContain("issue_number");
+    expect(r.findings[0]?.matched_text_excerpt).toContain("visible-prefix-123");
+  });
+});
+
 describe("catalog wiring", () => {
   test("shell-metachar-in-identifier-arg is in the catalog with empty patterns", () => {
     const entry = OWASP_MCP_TOP_10.find((s) => s.id === SHELL_METACHAR_ARG_SIGNATURE_ID);
