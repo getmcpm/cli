@@ -24,6 +24,14 @@ published section (it happened to #170).
   check to MCP09, since the two are different concepts that only share a word.
   Docs-only; no runtime behavior change.
 
+### Changed
+
+- **`TODOS.md` moved out of the repo.** Deferred-work/backlog tracking now lives in the
+  maintainer's private research notes, with `docs/ROADMAP.md` staying the public
+  strategic layer, as CLAUDE.md now documents. `TODOS #N` references throughout this
+  changelog and `docs/SIGNATURES.md` are stable identifiers into that backlog, kept for
+  continuity with earlier releases; they no longer resolve to a file in this repo.
+
 ### Security
 
 - **New signature: `generic-bearer-token-disclosure` — warns on a generic `Bearer <token>`
@@ -197,8 +205,8 @@ published section (it happened to #170).
   characters rather than decoding them — so a shell-metachar/query-control/CLI-flag
   payload concealed in the TAG block was erased before matching and scored a full pass,
   the exact gap TODOS #31 already closed for the regular regex catalog. Each detector now
-  falls through, only when its plain match finds nothing, to `inspectTagEncoded` — the
-  same multi-round-hardened function (TODOS #31/#34) the catalog uses — via one throwaway
+  additionally runs `inspectTagEncoded` — the same multi-round-hardened function (TODOS
+  #31/#34) the catalog uses — unconditionally on every scoped value, via one throwaway
   `Signature` wrapping the detector's own pattern list, reusing its
   decode/mask/concealment-surplus logic rather than re-deriving it. base64
   decode-and-rescan was deliberately NOT added: the catalog's own `DECODE_TARGETS`
