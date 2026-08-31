@@ -8,6 +8,44 @@ _Add entries here, never under a stamped version_ — a release commit renames t
 heading, and a branch that wrote beneath it merges without conflict straight into a
 published section (it happened to #170).
 
+## [0.34.0] - 2026-08-31
+
+### Fixed
+
+- **`BaseAdapter.read()` no longer blind-casts a malformed server config entry.**
+  Each entry is now Zod-validated; one that fails (e.g. `args` as a string
+  instead of `string[]`, from a hand-edited or IDE-mangled config) is dropped
+  via an injectable `onSkip(name)` callback — same seam as `scanner/tier2.ts`'s
+  `onWarn` — instead of silently corrupting a downstream transform such as
+  guard's tool-wrap logic. `mcpm list`/`mcpm doctor`/`guard status`/the MCP
+  `mcpm_list`/`mcpm_audit` tools all now surface a dropped entry (via a
+  warning, a `DoctorIssue`, a new `malformed` status, or a `skipped` field on
+  the tool result, respectively) instead of it silently vanishing.
+- **`mcpm remove`/`disable`/`enable`/`install` can still target a malformed
+  entry.** A first pass at the fix above broke exactly the self-repair path a
+  user reaches for after seeing the new warning — their presence pre-checks
+  used the now-filtered `read()`, while the underlying config-adapter methods
+  still operate on the raw config and would still find the entry. Found and
+  fixed via a second adversarial review pass before merge.
+- **`setServerDisabled()` no longer corrupts a non-object raw entry into
+  char-indexed keys.** A raw entry that isn't a plain object (e.g. a bare
+  string) used to be spread unconditionally; it now fails with a clear error
+  instead — the same class of bug the `read()` fix above exists to prevent,
+  one level up.
+- **`pins.json`'s stored hashes are now shape-validated**
+  (`sha256:` + 64 lowercase hex), closing a gap where a structurally
+  garbage hash (right type, wrong shape) passed the schema outright and could
+  silently corrupt drift comparisons.
+- **`mcpm guard pause --for X --off` no longer lets `--off` silently win** —
+  passing both now errors before either takes effect.
+- Added the missing direct test for the relay's 64MB buffer-cap DoS guard.
+
+### Changed
+
+- Documented that the `tool_response` inspection carrier matches any
+  JSON-RPC response, not only `tools/call` replies (was intentional but
+  undocumented).
+
 ## [0.33.0] - 2026-08-31
 
 ### Security
