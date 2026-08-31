@@ -8,8 +8,32 @@ _Add entries here, never under a stamped version_ — a release commit renames t
 heading, and a branch that wrote beneath it merges without conflict straight into a
 published section (it happened to #170).
 
+## [0.33.0] - 2026-08-31
+
 ### Security
 
+- **Closed a first-session runtime-gated rug-pull bypass (TODOS #58, the "Deadbugz" class).**
+  Pillar Security disclosed an active MCP supply-chain campaign: a server behaves
+  benignly for the first few `tools/call` requests, then flips its `tools/list` and
+  `prompts/get` responses to instruct the agent to seek SSH keys, AWS credentials,
+  shell history, and Kubernetes config — using the legitimate
+  `notifications/tools/list_changed` notification to get the poisoned definitions
+  applied. Reproduced the exact multi-frame sequence through the real relay building
+  blocks and measured it, rather than assuming coverage: on a **first-ever session**
+  (no pre-existing disk pin), the flip was completely UNDETECTED. H4's
+  `list_changed` re-validation arm — designed so a legitimate upstream upgrade isn't
+  blocked — correctly bypasses the F3 same-session guard, but a never-before-guarded
+  server has no disk pin to fall back on either, so nothing replaced it; the pattern
+  engine also found nothing, since the poisoned wording reads as an added feature,
+  not any of the four `owasp-mcp-1` regex shapes. Fixed by tiering an EXISTING tool's
+  change (when armed) against the session's own first-seen field hashes, using the
+  same H4 doctrine the durable-pin path already applies: a description-only change
+  is a cosmetic warn, a schema/annotations change blocks. A brand-new tool name
+  added via `list_changed` still produces no finding, preserving the legitimate-
+  addition case the arming exists for. **Residual, undocumented until now:** the
+  `prompts/get` channel has no drift/pin mechanism at all — it is a structural no-op
+  for this check and `prompt_content` is warn-only regardless, so a poisoned prompt
+  template delivered this way still has no block-tier coverage.
 - **New signature: `owasp-mcp-1-tool-annotation-injection` (TODOS #16) — a tool's
   annotations (`title`, or any custom field a server adds; annotations is an
   unconstrained JSON object) carrying instruction-shaped text now blocks the same
