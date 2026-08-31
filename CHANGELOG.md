@@ -8,6 +8,37 @@ _Add entries here, never under a stamped version_ — a release commit renames t
 heading, and a branch that wrote beneath it merges without conflict straight into a
 published section (it happened to #170).
 
+### Security
+
+- **New signature: `owasp-mcp-1-tool-annotation-injection` (TODOS #16) — a tool's
+  annotations (`title`, or any custom field a server adds; annotations is an
+  unconstrained JSON object) carrying instruction-shaped text now blocks the same
+  way a poisoned `description` already does.** The `tool_annotations` inspection
+  target was wired into the pattern engine from v0.5.0 but had no signature using it
+  until now — a tool-poisoning payload placed in annotations instead of the
+  description bypassed every description-only check. Reuses the same patterns as
+  `owasp-mcp-1-tool-description-injection` (now factored into one shared array).
+  Published `mcpm guard inspect` verdicts change `pass` → `block` for this new
+  class, the same shape prior releases (#153, #180) have numbered MINOR for.
+  Catalog is 19 entries.
+
+### Fixed
+
+- **`readPins` no longer fails closed on its own in-flight write (TODOS #24).**
+  `writePins` finalizes via two sequential atomic renames under one lock —
+  `pins.json`, then its `pins.json.integrity` sidecar. A reader landing in that
+  gap saw new content next to the still-stale sidecar and threw
+  `PinsIntegrityError`, misreading an in-flight write as tamper; with the guard's
+  fail-closed pins-read path (`run-inner.ts`), that meant `process.exit(1)` on
+  relay startup. `readPins` now retries the read+compare briefly (4 attempts,
+  20ms apart) before raising — a genuine tamper or a crash mid-write still
+  reproduces on every attempt. Also closes a related unlocked race in
+  `resetIntegrity`, found during review: it read `pins.json` and wrote the
+  sidecar with no lock at all, so a concurrent `writePins` could interleave and
+  leave a permanent mismatch retries can never clear (both files individually
+  legitimate, just from two different writers); it now takes the same lock
+  `writePins` holds.
+
 ## [0.32.0] - 2026-08-31
 
 ### Added

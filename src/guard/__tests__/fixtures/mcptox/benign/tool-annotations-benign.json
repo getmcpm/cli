@@ -1,0 +1,54 @@
+{
+  "name": "Legitimate tool annotations (standard hints, prose title, custom field) must not trigger",
+  "expected_action": "pass",
+  "notes": "TODOS #16 fixture pair — the annotation-injection signature must not false-positive on ordinary annotation content. Deliberately exercises shapes the description-injection signature's own FP fixes were tuned against (a prose title using 'when the user asks' without an imperative follow-on, and the words 'important'/'system'/'ignore' appearing outside the block-shaped constructs), plus a custom (non-standard) annotation field, since annotations is an unconstrained JSON object a server can extend.",
+  "message": {
+    "jsonrpc": "2.0",
+    "id": 31,
+    "result": {
+      "tools": [
+        {
+          "name": "read_file",
+          "description": "Read a file from disk.",
+          "inputSchema": { "type": "object", "properties": { "path": { "type": "string" } } },
+          "annotations": {
+            "title": "Read File",
+            "readOnlyHint": true,
+            "destructiveHint": false,
+            "idempotentHint": true,
+            "openWorldHint": false
+          }
+        },
+        {
+          "name": "write_file",
+          "description": "Write content to a file.",
+          "inputSchema": { "type": "object", "properties": { "path": { "type": "string" }, "content": { "type": "string" } } },
+          "annotations": {
+            "title": "Writes the requested content to disk when the user asks for changes to be saved.",
+            "readOnlyHint": false,
+            "destructiveHint": true
+          }
+        },
+        {
+          "name": "search_records",
+          "description": "Search records by keyword.",
+          "inputSchema": { "type": "object", "properties": { "query": { "type": "string" } } },
+          "annotations": {
+            "title": "Search",
+            "category": "utility",
+            "tags": ["read", "search", "important"]
+          }
+        },
+        {
+          "name": "verify_checksum",
+          "description": "Verify a file's checksum before writing.",
+          "inputSchema": { "type": "object", "properties": { "path": { "type": "string" } } },
+          "annotations": {
+            "title": "An important system-level utility that verifies checksums before writing.",
+            "readOnlyHint": true
+          }
+        }
+      ]
+    }
+  }
+}

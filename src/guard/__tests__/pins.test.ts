@@ -38,6 +38,7 @@ import {
   type HandshakePinEntry,
 } from "../pins.js";
 import { _resetCachedStorePath } from "../../store/index.js";
+import { fileSha } from "../store-integrity.js";
 
 let tmpHome: string;
 let originalHome: string | undefined;
@@ -374,12 +375,118 @@ describe("readPins / writePins", () => {
     expect(readFileSync(sidecar, "utf-8")).toMatch(/^sha256:[0-9a-f]{64}$/);
   });
 
+  // TODOS #24 (review finding): resetIntegrity used to take NO lock, so a
+  // concurrent writePins could rename pins.json to content B and its sidecar
+  // to sha(B) while resetIntegrity sat between its own read and sidecar
+  // write — leaving a permanent mismatch readPins's retries could never clear
+  // (both files individually legitimate, just from two different writers).
+  // resetIntegrity now takes the SAME lock writePins holds; proving it
+  // reuses the "hold the lock directory" technique from the writePins
+  // interruption test above rather than actually racing two real writers.
+  test("resetIntegrity takes the write lock — a held lock blocks it", async () => {
+    await writePins(emptyPinsFile());
+    const filePath = path.join(tmpHome, ".mcpm", "pins.json");
+    mkdirSync(`${filePath}.lock`);
+    try {
+      await expect(resetIntegrity()).rejects.toThrow();
+    } finally {
+      rmSync(`${filePath}.lock`, { recursive: true, force: true });
+    }
+  });
+
   test("readPins throws PinsIntegrityError when pins.json is tampered with", async () => {
     await writePins(emptyPinsFile());
     // Modify pins.json behind the sidecar's back.
     const filePath = path.join(tmpHome, ".mcpm", "pins.json");
     writeFileSync(filePath, '{"format_version": 1, "servers": {"evil": {}}}\n');
     await expect(readPins()).rejects.toBeInstanceOf(PinsIntegrityError);
+  });
+
+  // TODOS #24: writePins finalizes via two SEQUENTIAL atomic renames (content,
+  // then sidecar). A reader landing between them used to see new content next
+  // to the still-old sidecar and fail closed with PinsIntegrityError — an
+  // in-flight write misread as tamper. readPins now retries briefly before
+  // raising.
+  test("readPins retries through the writePins content/sidecar rename gap instead of failing closed", async () => {
+    await writePins(emptyPinsFile());
+    const filePath = path.join(tmpHome, ".mcpm", "pins.json");
+    const sidecarPath = path.join(tmpHome, ".mcpm", "pins.json.integrity");
+
+    const contentB = '{"format_version": 1, "servers": {"fs": {}}}\n';
+    // Simulate: writePins's first rename (content) has landed, its second
+    // rename (sidecar) has not — the sidecar still matches the OLD content.
+    writeFileSync(filePath, contentB);
+    const timer = setTimeout(() => {
+      try {
+        writeFileSync(sidecarPath, fileSha(contentB));
+      } catch {
+        // The test already resolved/rejected and cleaned up tmpHome — nothing to do.
+      }
+    }, 10);
+
+    try {
+      const pins = await readPins();
+      expect(pins.servers.fs).toEqual({});
+    } finally {
+      clearTimeout(timer);
+    }
+  });
+
+  // Pins the property the fix actually depends on: readPins must re-read BOTH
+  // pins.json and the sidecar on every attempt, not just the sidecar. A
+  // content read hoisted out of the retry loop would still pass the test
+  // above (it only ever changes the sidecar), so this drives content itself
+  // to a DIFFERENT value mid-retry — a hoisted implementation would keep
+  // comparing the stale content against the fresh sidecar and time out into
+  // PinsIntegrityError instead of resolving.
+  test("readPins re-reads pins.json itself on every retry attempt, not just the sidecar", async () => {
+    await writePins(emptyPinsFile());
+    const filePath = path.join(tmpHome, ".mcpm", "pins.json");
+    const sidecarPath = path.join(tmpHome, ".mcpm", "pins.json.integrity");
+
+    const contentStale = '{"format_version": 1, "servers": {"stale": {}}}\n';
+    const contentFresh = '{"format_version": 1, "servers": {"fresh": {}}}\n';
+    writeFileSync(filePath, contentStale);
+    const timer = setTimeout(() => {
+      try {
+        writeFileSync(filePath, contentFresh);
+        writeFileSync(sidecarPath, fileSha(contentFresh));
+      } catch {
+        // The test already resolved/rejected and cleaned up tmpHome — nothing to do.
+      }
+    }, 10);
+
+    try {
+      const pins = await readPins();
+      expect(pins.servers.fresh).toEqual({});
+      expect(pins.servers.stale).toBeUndefined();
+    } finally {
+      clearTimeout(timer);
+    }
+  });
+
+  // A mismatch observed on an early attempt must not be silently cleared by a
+  // LATER attempt finding the file gone — that would let a brief tamper
+  // window "heal itself" into a clean first-run read instead of surfacing.
+  test("readPins does not clear an observed mismatch when pins.json disappears mid-retry", async () => {
+    await writePins(emptyPinsFile());
+    const filePath = path.join(tmpHome, ".mcpm", "pins.json");
+    // Tamper: swap content behind the sidecar's back (never fixed) — then the
+    // file disappears partway through the retry window.
+    writeFileSync(filePath, '{"format_version": 1, "servers": {"evil": {}}}\n');
+    const timer = setTimeout(() => {
+      try {
+        rmSync(filePath, { force: true });
+      } catch {
+        // The test already resolved/rejected and cleaned up tmpHome — nothing to do.
+      }
+    }, 10);
+
+    try {
+      await expect(readPins()).rejects.toBeInstanceOf(PinsIntegrityError);
+    } finally {
+      clearTimeout(timer);
+    }
   });
 
   test("readPins with no sidecar (first-run) succeeds without integrity check", async () => {
