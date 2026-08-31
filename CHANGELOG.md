@@ -8,6 +8,8 @@ _Add entries here, never under a stamped version_ — a release commit renames t
 heading, and a branch that wrote beneath it merges without conflict straight into a
 published section (it happened to #170).
 
+## [0.33.0] - 2026-08-31
+
 ### Security
 
 - **Closed a first-session runtime-gated rug-pull bypass (TODOS #58, the "Deadbugz" class).**
