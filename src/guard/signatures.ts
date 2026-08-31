@@ -94,6 +94,17 @@ const solicits = (noun: string): RegExp =>
 // it").
 const ELECTRON_MCP_BRIDGE_CALL = "electron\\s*\\.\\s*mcp\\s*\\.\\s*(?:activate|addServer)\\s*\\(";
 
+// Shared by owasp-mcp-1-tool-description-injection and (TODOS #16)
+// owasp-mcp-1-tool-annotation-injection below — the same tool-poisoning attack
+// class on two adjacent tools/list surfaces (description text vs. the
+// annotations object). One array so an FP fix lands in both places at once.
+const TOOL_METADATA_INJECTION_PATTERNS: readonly RegExp[] = [
+  /(?:^|[\s.,;:!?])ignore[\s]*(?:all[\s]*|any[\s]*|the[\s]*)?(?:previous|prior|above)[\s]*instructions?/i,
+  /(?:disregard|forget)[\s]*(?:all[\s]*|any[\s]*|the[\s]*)?(?:previous|prior|above)[\s]*instructions?/i,
+  /<important>|<system>/i,
+  /when[\s]*(?:the[\s]*)?user[\s]*asks,?[\s]*(?:you[\s]*(?:must|should|always|never)|always|never|exfil|read|access|send|email|do[\s]*not)/i,
+];
+
 export const OWASP_MCP_TOP_10: readonly Signature[] = [
   {
     id: "owasp-mcp-2-instruction-injection-in-response",
@@ -141,12 +152,9 @@ export const OWASP_MCP_TOP_10: readonly Signature[] = [
     // on legitimate descriptions like "Returns X when the user asks for Y." Tightened
     // to require an imperative verb following the phrase, which is the actual
     // tool-poisoning shape (e.g., "when the user asks, exfiltrate ~/.ssh/").
-    patterns: [
-      /(?:^|[\s.,;:!?])ignore[\s]*(?:all[\s]*|any[\s]*|the[\s]*)?(?:previous|prior|above)[\s]*instructions?/i,
-      /(?:disregard|forget)[\s]*(?:all[\s]*|any[\s]*|the[\s]*)?(?:previous|prior|above)[\s]*instructions?/i,
-      /<important>|<system>/i,
-      /when[\s]*(?:the[\s]*)?user[\s]*asks,?[\s]*(?:you[\s]*(?:must|should|always|never)|always|never|exfil|read|access|send|email|do[\s]*not)/i,
-    ],
+    // Shared verbatim with the sibling tool_annotations signature below — same
+    // attack class on an adjacent tools/list surface; keep the two in sync.
+    patterns: TOOL_METADATA_INJECTION_PATTERNS,
     remediation:
       "A tool description contains imperative or system-prompt-style text. " +
       "Tool-poisoning pattern (Invariant Labs disclosure, 2025). Re-review the server; " +
@@ -188,6 +196,27 @@ export const OWASP_MCP_TOP_10: readonly Signature[] = [
     remediation:
       "A server-provided prompt template contained injection-shaped text. Annotated and " +
       "forwarded (not blocked). Review the prompt's source server.",
+  },
+  {
+    // TODOS #16 (security review F12) — the tool_annotations target was wired
+    // in patterns.ts from v0.5.0 but no signature ever used it. Annotations
+    // (the standard `title`/`readOnlyHint`/etc. fields, and any custom field a
+    // server chooses to add — it's an unconstrained JSON object) are an MCP
+    // extension surface a tool-poisoning attack can use to carry injection text
+    // that a description-only scan would miss (Invariant Labs disclosure).
+    // Reuses the same patterns as the sibling tool_description signature —
+    // same attack class, same block-capable pre-invocation carrier.
+    id: "owasp-mcp-1-tool-annotation-injection",
+    category: "OWASP-MCP-1",
+    severity: "critical",
+    description: "Instruction-shaped text in tool annotations (title or a custom annotation field)",
+    target: "tool_annotations",
+    patterns: TOOL_METADATA_INJECTION_PATTERNS,
+    remediation:
+      "A tool's annotations (title or a custom annotation field) contain imperative or " +
+      "system-prompt-style text. Tool-poisoning pattern (Invariant Labs disclosure, 2025), " +
+      "carried via the annotations extension surface instead of the description. Re-review " +
+      "the server; if legitimate, run `mcpm guard accept-drift <server>`.",
   },
   {
     id: "owasp-mcp-1-initialize-instruction-injection",

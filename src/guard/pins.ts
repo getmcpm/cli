@@ -24,6 +24,11 @@
  * #19. Any mismatch on read refuses to use the pin file until the user runs
  * `mcpm guard reset-integrity`.
  *
+ * writePins finalizes via two sequential renames (content, then sidecar) —
+ * see its own doc comment. readPins retries a mismatch briefly (TODOS #24)
+ * so a reader landing in that window doesn't fail closed on an in-flight
+ * write; a real tamper or a crash mid-write still reproduces every attempt.
+ *
  * Two-target scope: install-time capture writes captured_via:"install".
  * If install-time spawn fails (OAuth, network), a placeholder entry with
  * current_hash:null + captured_via:"first-session" is written; the next
@@ -275,6 +280,18 @@ async function integrityPath(): Promise<string> {
   return path.join(await getStorePath(), INTEGRITY_FILENAME);
 }
 
+// writePins renames pins.json, THEN renames the sidecar (two separate atomic
+// writes under one lock — see writePins). A reader landing in that gap sees
+// new content next to the still-old sidecar and would otherwise fail closed
+// on an in-flight write, not tamper (TODOS #24). Retry briefly before raising:
+// the gap spans the second writeFileAtomic call's own several awaited fs ops
+// (lstat + unlink-stale-tmp + write + rename — see store-integrity.ts), so
+// 4 attempts × 20ms is generous headroom over it, not a single event-loop
+// turn. A genuine mismatch (tamper, or a crash mid-write) still reproduces on
+// every attempt.
+const INTEGRITY_RETRY_ATTEMPTS = 4;
+const INTEGRITY_RETRY_DELAY_MS = 20;
+
 /**
  * Read the pin file + verify its integrity sidecar. Returns an empty pins
  * file if pins.json does not exist (first-run). Throws PinsIntegrityError
@@ -285,32 +302,54 @@ export async function readPins(): Promise<PinsFile> {
   const filePath = await pinsPath();
   const sidecarPath = await integrityPath();
 
-  let content: string;
-  try {
-    content = await readFile(filePath, "utf-8");
-  } catch (err) {
-    if ((err as NodeJS.ErrnoException).code === "ENOENT") return emptyPinsFile();
-    throw err;
-  }
+  let content = "";
+  let mismatch: { expected: string; actual: string } | null = null;
 
-  // If the sidecar exists, it must match. If the sidecar is missing, treat as
-  // first-run — write a fresh sidecar on the next writePins.
-  let sidecar: string | null = null;
-  try {
-    sidecar = (await readFile(sidecarPath, "utf-8")).trim();
-  } catch (err) {
-    if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
-  }
-  if (sidecar !== null) {
-    const actual = fileSha(content);
-    if (actual !== sidecar) {
-      throw new PinsIntegrityError(
-        `pins.json integrity check failed (expected ${sidecar}, got ${actual}). ` +
-          `If you intentionally modified ~/.mcpm/pins.json (e.g., copied between machines), ` +
-          `run \`mcpm guard reset-integrity\`. Otherwise, review ~/.mcpm/guard-events.jsonl ` +
-          `for unauthorized activity.`,
-      );
+  for (let attempt = 0; attempt < INTEGRITY_RETRY_ATTEMPTS; attempt++) {
+    try {
+      content = await readFile(filePath, "utf-8");
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === "ENOENT") {
+        // A genuine first-run (no mismatch ever observed) is a clean empty
+        // read. A file that DISAPPEARS after an earlier attempt already saw a
+        // mismatch is more suspicious than a plain first-run — don't let its
+        // absence silently clear that mismatch; fall through to the throw
+        // below instead of granting a clean slate.
+        if (mismatch === null) return emptyPinsFile();
+        break;
+      }
+      throw err;
     }
+
+    // If the sidecar exists, it must match. If the sidecar is missing, treat as
+    // first-run — write a fresh sidecar on the next writePins.
+    let sidecar: string | null = null;
+    try {
+      sidecar = (await readFile(sidecarPath, "utf-8")).trim();
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
+    }
+    if (sidecar === null) {
+      mismatch = null;
+      break;
+    }
+    const actual = fileSha(content);
+    if (actual === sidecar) {
+      mismatch = null;
+      break;
+    }
+    mismatch = { expected: sidecar, actual };
+    if (attempt < INTEGRITY_RETRY_ATTEMPTS - 1) {
+      await new Promise((resolve) => setTimeout(resolve, INTEGRITY_RETRY_DELAY_MS));
+    }
+  }
+  if (mismatch !== null) {
+    throw new PinsIntegrityError(
+      `pins.json integrity check failed (expected ${mismatch.expected}, got ${mismatch.actual}). ` +
+        `If you intentionally modified ~/.mcpm/pins.json (e.g., copied between machines), ` +
+        `run \`mcpm guard reset-integrity\`. Otherwise, review ~/.mcpm/guard-events.jsonl ` +
+        `for unauthorized activity.`,
+    );
   }
 
   // The sidecar guarantees byte integrity; Zod guarantees the SHAPE. Anything
@@ -393,9 +432,8 @@ export async function writePins(pins: PinsFile): Promise<void> {
 export async function resetIntegrity(): Promise<boolean> {
   const filePath = await pinsPath();
   const sidecarPath = await integrityPath();
-  let content: string;
   try {
-    content = await readFile(filePath, "utf-8");
+    await readFile(filePath, "utf-8");
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code === "ENOENT") {
       // Nothing to reset; remove any stale sidecar.
@@ -404,12 +442,29 @@ export async function resetIntegrity(): Promise<boolean> {
     }
     throw err;
   }
-  // Route the sidecar write through the same hardened atomic writer used by
-  // writePins (assertNotSymlink + stale-.tmp unlink + {flag:"wx"}). A bare
-  // writeFile(`${sidecarPath}.tmp`) + rename would follow a pre-placed symlink
-  // at the sidecar (or its .tmp), redirecting the write onto an attacker-chosen
-  // path — the exact gap the PR closed for the main pins/policy writes.
-  await writeFileAtomic(sidecarPath, fileSha(content), "pins");
+
+  // TODOS #24 (review finding): take the SAME lock writePins holds. Without
+  // it, a concurrent writePins can rename pins.json to content B and its
+  // sidecar to sha(B) while this function is between its own read and sidecar
+  // write — leaving pins.json at B but the sidecar at sha(A), a permanent
+  // mismatch readPins's retries can never clear (both files are individually
+  // legitimate, just from two different writers). Re-read AFTER acquiring the
+  // lock so the hash always matches whatever is on disk at write time.
+  const release = await lockfile.lock(filePath, {
+    retries: { retries: 5, minTimeout: 10, maxTimeout: 200 },
+    stale: 5_000,
+  });
+  try {
+    const content = await readFile(filePath, "utf-8");
+    // Route the sidecar write through the same hardened atomic writer used by
+    // writePins (assertNotSymlink + stale-.tmp unlink + {flag:"wx"}). A bare
+    // writeFile(`${sidecarPath}.tmp`) + rename would follow a pre-placed symlink
+    // at the sidecar (or its .tmp), redirecting the write onto an attacker-chosen
+    // path — the exact gap the PR closed for the main pins/policy writes.
+    await writeFileAtomic(sidecarPath, fileSha(content), "pins");
+  } finally {
+    await release();
+  }
   return true;
 }
 
