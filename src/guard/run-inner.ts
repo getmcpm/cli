@@ -21,7 +21,13 @@ import {
   inspectServerInitiated,
 } from "./inspect-frame.js";
 import { startRelay, buildSafeEnv, type GuardEvent } from "./relay.js";
-import { inspectForDrift, inspectHandshakeForDrift, classifyDrift, buildDriftFinding } from "./drift.js";
+import {
+  inspectForDrift,
+  inspectHandshakeForDrift,
+  classifyDrift,
+  classifyFieldDrift,
+  buildDriftFinding,
+} from "./drift.js";
 import { readPins, writePins } from "./pins.js";
 import { readPolicy, expireStale, PolicyIntegrityError, type GuardPolicyFile } from "./policy.js";
 import { appendEvent } from "./event-log.js";
@@ -268,6 +274,7 @@ export async function runInner(parsed: RunInnerArgs): Promise<number> {
     firstHashes: new Map(),
     revalidationArmed: false,
     handshakeSeenHash: null,
+    firstFieldHashes: new Map(),
   };
 
   // FROZEN session-start baseline. The off-thread refresh may keep reassigning
@@ -532,6 +539,7 @@ import {
   handshakeCapabilityKeys,
   hashHandshake,
   lookupHandshake,
+  type FieldHashes,
   type PinsFile,
 } from "./pins.js";
 import {
@@ -550,11 +558,21 @@ import {
  * `handshakeSeenHash` is the H5 same-session guard: `initialize` should happen
  * once, so a SECOND initialize result whose whole-hash differs is anomalous and
  * warns (`handshake-drift-in-session`) — never blocks.
+ *
+ * `firstFieldHashes` is #58 (Deadbugz): per-field hashes captured at the SAME
+ * moments as `firstHashes` (first sight / armed rebaseline). It is the
+ * baseline the ARMED same-session revalidation path tiers an EXISTING tool's
+ * mutation against (H4: description-only = cosmetic, schema/annotations =
+ * security) — closing the gap where a never-pinned server's `list_changed`
+ * cover let a mutated tool through with zero findings. Optional + lazily
+ * created (mirrors PinEntry.field_hashes' additive-optional precedent) so
+ * pre-#58 state literals still compile.
  */
 export interface SessionDriftState {
   firstHashes: Map<string, string>;
   revalidationArmed: boolean;
   handshakeSeenHash: string | null;
+  firstFieldHashes?: Map<string, FieldHashes>;
 }
 
 function sanitizeLabel(s: string): string {
@@ -630,17 +648,49 @@ function inspectToolDrift(
   const serverPins = Object.hasOwn(baseline.servers, serverName) ? baseline.servers[serverName] : undefined;
   const pinned = serverPins && Object.hasOwn(serverPins, toolName) ? serverPins[toolName] : undefined;
 
+  const newDescriptionExcerpt =
+    typeof tool.description === "string" ? sanitizeForTerminal(tool.description, 80) : undefined;
+
   // SECURITY F3: same-session bypass check. If we've already seen a hash for
   // (server, tool) this session, a subsequent differing tools/list is a rug-pull
   // attempt — UNLESS `armed` (an announced list_changed legitimately changes
   // definitions). When armed we skip F3 and rebaseline instead.
   const sessionKey = `${serverName}::${toolName}`;
   const firstSeen = state.firstHashes.get(sessionKey);
+  const firstSeenFields = state.firstFieldHashes?.get(sessionKey);
   if (!armed && firstSeen !== undefined && firstSeen !== liveWhole) {
     return inSessionDriftFinding(serverName, toolName, firstSeen, liveWhole);
   }
+
+  // #58 (Deadbugz): `armed` exists so a server can legitimately ADD tools via
+  // list_changed — that's why F3 above is skipped. It must not also give a
+  // blank check to MUTATE a tool this session has already seen: that is the
+  // Deadbugz mechanism (benign list -> list_changed -> poisoned list), and for
+  // a server's first-ever session there is no disk pin below to catch it
+  // either. Tier the change with the same H4 doctrine the disk-pin path uses
+  // (classifyFieldDrift mirrors classifyDrift), against the session's
+  // first-seen field hashes. A brand-new tool name (firstSeenFields
+  // undefined) is unaffected — no finding — which is what keeps a real
+  // list_changed addition zero-FP.
+  let armedMutationFinding: InspectFinding | null = null;
+  if (armed && firstSeen !== undefined && firstSeen !== liveWhole && firstSeenFields !== undefined) {
+    armedMutationFinding = buildDriftFinding({
+      cls: classifyFieldDrift(firstSeenFields, liveFields),
+      safeServer: sanitizeLabel(serverName),
+      safeTool: sanitizeLabel(toolName),
+      expected: firstSeen,
+      actual: liveWhole,
+      newDescriptionExcerpt,
+    });
+  }
+
   // Record on first sight, or rebaseline when an announced list_changed armed us.
-  if (firstSeen === undefined || armed) state.firstHashes.set(sessionKey, liveWhole);
+  if (firstSeen === undefined || armed) {
+    state.firstHashes.set(sessionKey, liveWhole);
+    (state.firstFieldHashes ??= new Map()).set(sessionKey, liveFields);
+  }
+
+  if (armedMutationFinding !== null) return armedMutationFinding;
 
   if (!pinned || pinned.current_hash === null) return null;
   if (liveWhole === pinned.current_hash) return null;
@@ -650,8 +700,6 @@ function inspectToolDrift(
   // cosmetic warn, carry a sanitized + truncated NEW description so the
   // guard-events.jsonl entry is self-contained for review.
   const cls = classifyDrift(pinned, liveFields);
-  const newDescriptionExcerpt =
-    typeof tool.description === "string" ? sanitizeForTerminal(tool.description, 80) : undefined;
   return buildDriftFinding({
     cls,
     safeServer: sanitizeLabel(serverName),
