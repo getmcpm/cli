@@ -154,7 +154,7 @@ describe("statusAcrossClients — marks unguarded servers visibly (H9 A.5)", () 
 
     const status = await statusAcrossClients(deps);
     const servers = status.clients[0]?.servers ?? [];
-    expect(servers).toContainEqual({ name: "fs-mcp", wrapped: true, unguarded: false });
-    expect(servers).toContainEqual({ name: "http-mcp", wrapped: false, unguarded: true });
+    expect(servers).toContainEqual({ name: "fs-mcp", wrapped: true, unguarded: false, malformed: false });
+    expect(servers).toContainEqual({ name: "http-mcp", wrapped: false, unguarded: true, malformed: false });
   });
 });

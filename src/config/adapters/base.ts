@@ -10,8 +10,27 @@
 
 import { readFile, writeFile, rename, mkdir, lstat, unlink } from "fs/promises";
 import path from "path";
+import { z } from "zod";
 import type { ClientId } from "../paths.js";
 import type { ConfigAdapter, McpServerEntry } from "./index.js";
+import { sanitizeForTerminal } from "../../guard/sanitize.js";
+
+// #23: read() used to cast `raw[rootKey]` straight to Record<string, McpServerEntry>
+// with only an object/array check on the CONTAINER. A per-entry shape mismatch
+// from hand-edited or IDE-mangled config — e.g. `args: "bad"` instead of
+// `["bad"]` — passed through untouched: downstream code that spreads `args`
+// (the guard wrap transform) would iterate the STRING's characters instead of
+// array elements. z.looseObject preserves any extra fields a client writes on
+// an entry (matches the pre-existing spread-copy behavior for well-formed
+// entries); only entries that fail the known-field shapes are dropped.
+const McpServerEntrySchema = z.looseObject({
+  command: z.string().optional(),
+  args: z.array(z.string()).optional(),
+  env: z.record(z.string(), z.string()).optional(),
+  url: z.string().optional(),
+  headers: z.record(z.string(), z.string()).optional(),
+  disabled: z.boolean().optional(),
+});
 
 export abstract class BaseAdapter implements ConfigAdapter {
   abstract readonly clientId: ClientId;
@@ -130,14 +149,44 @@ export abstract class BaseAdapter implements ConfigAdapter {
   // ConfigAdapter implementation
   // ---------------------------------------------------------------------------
 
-  async read(configPath: string): Promise<Record<string, McpServerEntry>> {
+  async read(
+    configPath: string,
+    // #23 follow-up (adversarial review): a bare stderr write is invisible to
+    // callers that build a STRUCTURED report over the skip (guard/orchestrator.ts's
+    // `skipped` list, commands/doctor.ts's DoctorIssue) and un-mockable from the
+    // ~15 call sites, incl. two inside the MCP server surface (server/handlers.ts).
+    // Injectable — same seam as scanner/tier2.ts's onWarn — so a caller can route
+    // the skip into its own reporting instead of (or in addition to) stderr.
+    // Default preserves the original stderr-warning behavior for every caller
+    // that doesn't opt in.
+    // #23 follow-up (adversarial review): name is config-supplied (attacker-
+    // controllable) and reaches the real terminal via this default — sanitize
+    // it the same way doctor.ts/guard's cli.ts already do for this class of
+    // value, so a name like `srv\x1b]0;evil\x07` can't inject terminal escapes.
+    onSkip: (name: string) => void = (name) =>
+      process.stderr.write(
+        `mcpm: skipping malformed server entry "${sanitizeForTerminal(name)}" in ${configPath} ` +
+          `(${this.clientId}): does not match the expected shape.\n`,
+      ),
+  ): Promise<Record<string, McpServerEntry>> {
     const raw = await this.readRaw(configPath);
     const servers = raw[this.rootKey];
     if (servers == null || typeof servers !== "object" || Array.isArray(servers)) {
       return {};
     }
-    // Return a shallow copy — callers may not mutate our internal state.
-    return { ...(servers as Record<string, McpServerEntry>) };
+    const out: Record<string, McpServerEntry> = {};
+    for (const [name, entry] of Object.entries(servers as Record<string, unknown>)) {
+      const parsed = McpServerEntrySchema.safeParse(entry);
+      if (parsed.success) {
+        out[name] = parsed.data;
+      } else {
+        // #23: skip rather than propagate a malformed entry — better an
+        // absent server than one silently corrupting a downstream transform
+        // (e.g. spreading a string `args` char-by-char in guard/wrap.ts).
+        onSkip(name);
+      }
+    }
+    return out;
   }
 
   async addServer(
@@ -195,7 +244,7 @@ export abstract class BaseAdapter implements ConfigAdapter {
 
   async setServerDisabled(configPath: string, name: string, disabled: boolean): Promise<void> {
     const raw = await this.readRaw(configPath);
-    const existing = (raw[this.rootKey] ?? {}) as Record<string, McpServerEntry>;
+    const existing = (raw[this.rootKey] ?? {}) as Record<string, unknown>;
 
     if (!Object.prototype.hasOwnProperty.call(existing, name)) {
       throw new Error(
@@ -203,15 +252,32 @@ export abstract class BaseAdapter implements ConfigAdapter {
       );
     }
 
-    const entry = { ...existing[name] };
+    // #23 follow-up (adversarial review): this used to spread `existing[name]`
+    // unconditionally. For a raw entry that is not a plain object (e.g. a bare
+    // string — the exact shape read() now drops elsewhere in this class), the
+    // object spread iterates its characters ({"0":"a","1":"b",...}), silently
+    // corrupting the entry — the same class of bug #23 exists to prevent, one
+    // level up. Fail loudly instead: this can't be safely merged/toggled.
+    const rawEntry = existing[name];
+    if (rawEntry === null || typeof rawEntry !== "object" || Array.isArray(rawEntry)) {
+      throw new Error(
+        `Server "${name}" in ${this.clientId} config is not a valid object — cannot toggle. ` +
+          `Fix the entry by hand, or run "mcpm remove ${name}" to clear it.`,
+      );
+    }
+
+    const entry: McpServerEntry = { ...(rawEntry as McpServerEntry) };
     if (disabled) {
       entry.disabled = true;
     } else {
       delete entry.disabled;
     }
 
+    // Sibling entries are passed through unchanged (same as before this
+    // guard was added) — only the entry actually being toggled (`entry`,
+    // just validated above) is shape-checked.
     const updatedServers: Record<string, McpServerEntry> = {
-      ...existing,
+      ...(existing as Record<string, McpServerEntry>),
       [name]: entry,
     };
 

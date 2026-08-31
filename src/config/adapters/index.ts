@@ -33,8 +33,15 @@ export interface McpServerEntry {
 export interface ConfigAdapter {
   readonly clientId: ClientId;
 
-  /** Read all MCP server entries from the config file. */
-  read(configPath: string): Promise<Record<string, McpServerEntry>>;
+  /**
+   * Read all MCP server entries from the config file. An entry that fails
+   * shape validation is dropped rather than propagated; `onSkip` (name) is
+   * called for each drop — defaults to a stderr warning (see BaseAdapter).
+   */
+  read(
+    configPath: string,
+    onSkip?: (name: string) => void,
+  ): Promise<Record<string, McpServerEntry>>;
 
   /**
    * Add a new server entry. Throws if the server name already exists

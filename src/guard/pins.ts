@@ -135,9 +135,16 @@ const FieldHashesSchema = z.object({
   schema: z.string(),
   annotations: z.string(),
 });
+// #25: every hash this module writes is produced by hashToolDefinition (or the
+// accept-drift `--new-hash` flag, which is validated against this same shape —
+// see guard/drift.ts). A structurally-valid-but-garbage string like "garbage"
+// previously passed PinEntrySchema as a bare z.string(), silently corrupting
+// drift comparisons downstream. Fail closed on shape instead.
+export const HASH_REGEX = /^sha256:[0-9a-f]{64}$/;
+const HashSchema = z.string().regex(HASH_REGEX);
 const PinEntrySchema = z.object({
-  current_hash: z.string().nullable(),
-  previous_hashes: z.array(z.string()),
+  current_hash: HashSchema.nullable(),
+  previous_hashes: z.array(HashSchema),
   captured_at: z.string(),
   captured_via: z.enum(["install", "first-session", "backfill"]),
   signature_list_version: z.string(),
@@ -153,8 +160,8 @@ const HandshakeFieldHashesSchema = z.object({
   serverName: z.string(),
 });
 const HandshakePinEntrySchema = z.object({
-  current_hash: z.string(),
-  previous_hashes: z.array(z.string()),
+  current_hash: HashSchema,
+  previous_hashes: z.array(HashSchema),
   captured_at: z.string(),
   captured_via: z.enum(["install", "first-session", "backfill"]),
   signature_list_version: z.string(),

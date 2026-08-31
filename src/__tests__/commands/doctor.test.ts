@@ -153,6 +153,30 @@ describe("doctorHandler — config validity", () => {
     expect(allOutput).toMatch(/malformed|invalid|parse|error/i);
   });
 
+  // #23 follow-up: a per-entry shape failure inside read() previously
+  // vanished with no DoctorIssue at all — only a whole-file JSON parse
+  // failure (the shouldThrow case above) was reported. mcpm_doctor (the MCP
+  // tool surface) has no stderr channel to fall back on, so this must be a
+  // structured issue, not just a warning line.
+  it("reports a per-entry shape failure as a malformed-config issue", async () => {
+    const adapter: ConfigAdapter = {
+      clientId: "claude-desktop",
+      read: vi.fn().mockImplementation(async (_path: string, onSkip?: (name: string) => void) => {
+        onSkip?.("broken-server");
+        return {};
+      }),
+      addServer: vi.fn().mockResolvedValue(undefined),
+      removeServer: vi.fn().mockResolvedValue(undefined),
+    };
+    const deps = makeHealthyDeps({ getAdapter: vi.fn().mockReturnValue(adapter) });
+
+    const model = await buildDoctorModel(deps);
+
+    expect(model.ok).toBe(false);
+    const issue = model.issues.find((i) => i.message.includes("broken-server"));
+    expect(issue?.kind).toBe("malformed-config");
+  });
+
   it("does not attempt to list servers for non-existent configs", async () => {
     const adapter = makeAdapter("vscode", {});
     const deps = makeHealthyDeps({

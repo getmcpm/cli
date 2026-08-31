@@ -150,12 +150,20 @@ export async function buildDoctorModel(deps: DoctorModelDeps): Promise<DoctorMod
   const { getAdapter, getConfigPath, checkConfigExists, execCheck } = deps;
 
   // 1. Read each known client's config.
+  const skippedEntries: { clientId: ClientId; name: string }[] = [];
   const reads = await Promise.all(
     CLIENT_IDS.map(async (clientId): Promise<{ clientId: ClientId; read: ClientRead }> => {
       const exists = await checkConfigExists(clientId);
       if (!exists) return { clientId, read: { exists: false, malformed: false, servers: null } };
       try {
-        const servers = await getAdapter(clientId).read(getConfigPath(clientId));
+        // #23 follow-up: a per-entry shape failure inside read() previously
+        // vanished with no DoctorIssue — only a whole-file parse failure (the
+        // catch below) was reported. Route it into `issues` too, the same
+        // "surface it, don't overclaim health" discipline D7 built this model
+        // around (mcpm_doctor has no stderr channel to fall back on).
+        const servers = await getAdapter(clientId).read(getConfigPath(clientId), (name) => {
+          skippedEntries.push({ clientId, name });
+        });
         return { clientId, read: { exists: true, malformed: false, servers } };
       } catch {
         return { clientId, read: { exists: true, malformed: true, servers: null } };
@@ -163,7 +171,10 @@ export async function buildDoctorModel(deps: DoctorModelDeps): Promise<DoctorMod
     })
   );
 
-  const issues: DoctorIssue[] = [];
+  const issues: DoctorIssue[] = skippedEntries.map(({ clientId, name }) => ({
+    kind: "malformed-config",
+    message: `Server "${name}" in ${CLIENT_LABELS[clientId]} config does not match the expected shape — skipped.`,
+  }));
 
   const clients: DoctorClientHealth[] = reads.map(({ clientId, read }) => {
     const label = CLIENT_LABELS[clientId];
@@ -335,7 +346,11 @@ export function renderDoctorText(model: DoctorModel, output: (text: string) => v
     output("");
     output("Issues:");
     for (const issue of model.issues) {
-      output(`  ⚠ ${issue.message}`);
+      // #23 follow-up (adversarial review): a malformed-config issue embeds a
+      // config-supplied (attacker-influenceable) server name in its message.
+      // Sanitize at render time, matching the secrets list above — the raw
+      // message is kept in the model for --json/--report/MCP consumers.
+      output(`  ⚠ ${sanitizeForTerminal(issue.message)}`);
     }
     output("");
     output("Critical issues found. Run the commands above to resolve them.");

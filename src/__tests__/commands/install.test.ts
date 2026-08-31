@@ -558,6 +558,33 @@ describe("handleInstall — --force flag", () => {
     ).resolves.not.toThrow();
     expect(adapter.addServer).toHaveBeenCalled();
   });
+
+  // #23 follow-up (adversarial review): read() drops an entry that fails
+  // shape validation, but addServer()'s raw already-exists check would still
+  // find it — AFTER env-var prompting and (in keychain mode) secret
+  // persistence has already happened. Catch it at the Step 5 pre-check too,
+  // before any of that runs.
+  it("throws for a server present but malformed, before prompting for env vars", async () => {
+    const adapter: ConfigAdapter = {
+      clientId: "claude-desktop",
+      read: vi.fn().mockImplementation(async (_path: string, onSkip?: (name: string) => void) => {
+        onSkip?.("io.github.test/my-server");
+        return {};
+      }),
+      addServer: vi.fn().mockResolvedValue(undefined),
+      removeServer: vi.fn().mockResolvedValue(undefined),
+    };
+    const promptEnvVars = vi.fn().mockResolvedValue({});
+    const deps = makeDeps({
+      getAdapter: vi.fn().mockReturnValue(adapter),
+      promptEnvVars,
+    });
+
+    await expect(
+      handleInstall("io.github.test/my-server", {}, deps)
+    ).rejects.toThrow(/already install/i);
+    expect(promptEnvVars).not.toHaveBeenCalled();
+  });
 });
 
 // ---------------------------------------------------------------------------

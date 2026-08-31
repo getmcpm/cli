@@ -139,10 +139,22 @@ async function printEnableDryRun(opts: EnableOpts): Promise<void> {
     if (opts.client !== undefined && c.clientId !== opts.client) continue;
     const candidates = c.servers.filter((s) => {
       if (opts.server !== undefined && s.name !== opts.server) return false;
-      return !s.wrapped;
+      // A malformed entry can't actually be wrapped (the real enable path
+      // routes it to `skipped`, never `transforms`) — exclude it here too.
+      return !s.wrapped && !s.malformed;
     });
     opts.write(`  ${CLIENT_LABELS[c.clientId]}: would wrap ${candidates.length} server(s)\n`);
-    for (const s of candidates) opts.write(`    + ${s.name}\n`);
+    for (const s of candidates) opts.write(`    + ${sanitize(s.name)}\n`);
+    // A malformed entry is excluded from `candidates` above, but the real
+    // enable path DOES report it (in `skipped`) — show it here too so the
+    // dry-run preview doesn't under-report vs what enable actually does.
+    const malformed = c.servers.filter((s) => {
+      if (opts.server !== undefined && s.name !== opts.server) return false;
+      return s.malformed;
+    });
+    for (const s of malformed) {
+      opts.write(`    ⚠ MALFORMED ${sanitize(s.name)} (will be skipped, not wrapped)\n`);
+    }
   }
 }
 
@@ -479,6 +491,11 @@ async function warnUnresolvablePlaceholders(opts: DisableOpts): Promise<void> {
     if (opts.client !== undefined && clientId !== opts.client) continue;
     let entries;
     try {
+      // #23 follow-up (adversarial review, not wired): a malformed entry is
+      // invisible to this advisory placeholder scan too — a real gap, but
+      // the reachable case is narrow (a keychain placeholder inside an
+      // otherwise-malformed entry) and this warning is best-effort by design
+      // ("cannot turn an otherwise-successful disable into a failure").
       entries = await getAdapter(clientId).read(getConfigPath(clientId));
     } catch (err) {
       // A missing config is expected; surface anything else (permissions,
@@ -604,7 +621,15 @@ function printStatus(status: StatusReport, opts: CommandIO): void {
     for (const s of c.servers) {
       // H9: a url/HTTP-transport server cannot be wrapped — mark it UNGUARDED
       // distinctly rather than letting it read as a plain unwrapped stdio server.
-      const marker = s.wrapped ? "+" : s.unguarded ? "⚠ UNGUARDED" : "·";
+      // #23 follow-up: a config entry that failed shape validation gets its
+      // own marker too, rather than silently missing from this list.
+      const marker = s.malformed
+        ? "⚠ MALFORMED"
+        : s.wrapped
+          ? "+"
+          : s.unguarded
+            ? "⚠ UNGUARDED"
+            : "·";
       opts.write(`    ${marker} ${sanitize(s.name)}\n`);
     }
   }

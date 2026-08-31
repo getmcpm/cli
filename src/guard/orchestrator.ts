@@ -181,7 +181,15 @@ export interface StatusReport {
     // H9: `unguarded` is true for a URL/HTTP-transport server (no command) that
     // the relay cannot wrap. Surfaced distinctly so status output never implies
     // an unwrappable server is "just unwrapped" (a coverage gap, not a toggle).
-    readonly servers: ReadonlyArray<{ name: string; wrapped: boolean; unguarded: boolean }>;
+    readonly servers: ReadonlyArray<{
+      name: string;
+      wrapped: boolean;
+      unguarded: boolean;
+      // #23 follow-up: a config entry that failed shape validation (read()
+      // dropped it) — surfaced here rather than silently missing from the
+      // wrapped/unwrapped counts (H9: coverage gaps must be visible).
+      malformed: boolean;
+    }>;
     readonly error?: string;
   }[];
   readonly totalWrapped: number;
@@ -194,18 +202,33 @@ export async function statusAcrossClients(deps: OrchestratorDeps): Promise<Statu
     targetClients.map(async (clientId) => {
       try {
         const adapter = deps.getAdapter(clientId);
-        const entries = await adapter.read(deps.getConfigPath(clientId));
-        const servers = Object.entries(entries).map(([name, entry]) => ({
-          name,
-          wrapped: isWrapped(entry),
-          // A non-stdio (url-transport) entry has no command — it cannot be
-          // wrapped, so even when "not wrapped" it is specifically UNGUARDED.
-          unguarded: !isWrapped(entry) && !entry.command,
-        }));
+        const malformedNames: string[] = [];
+        const entries = await adapter.read(deps.getConfigPath(clientId), (name) => {
+          malformedNames.push(name);
+        });
+        const servers = [
+          ...Object.entries(entries).map(([name, entry]) => ({
+            name,
+            wrapped: isWrapped(entry),
+            // A non-stdio (url-transport) entry has no command — it cannot be
+            // wrapped, so even when "not wrapped" it is specifically UNGUARDED.
+            unguarded: !isWrapped(entry) && !entry.command,
+            malformed: false,
+          })),
+          ...malformedNames.map((name) => ({
+            name,
+            wrapped: false,
+            unguarded: false,
+            malformed: true,
+          })),
+        ];
         return {
           clientId,
           wrapped: servers.filter((s) => s.wrapped).length,
-          unwrapped: servers.filter((s) => !s.wrapped).length,
+          // A malformed entry is neither wrapped nor a normal unwrapped
+          // server — excluded from both counts so it doesn't inflate
+          // "unwrapped" as if it were a readable, guardable server.
+          unwrapped: servers.filter((s) => !s.wrapped && !s.malformed).length,
           servers,
         };
       } catch (err) {
@@ -266,9 +289,21 @@ async function planForClient(
   consentedUnguarded: readonly string[],
 ): Promise<ClientPlan> {
   const adapter = deps.getAdapter(clientId);
+  const skipped: { name: string; reason: string }[] = [];
+  const unguarded: { name: string; reason: string }[] = [];
   let entries: Record<string, McpServerEntry>;
   try {
-    entries = await adapter.read(deps.getConfigPath(clientId));
+    // #23 follow-up: a malformed entry is invisible to the loop below (read()
+    // drops it) — route it into the SAME `skipped` reporting as every other
+    // skip reason, instead of letting it vanish with only a stderr line (H9:
+    // coverage gaps must be surfaced loudly, never silently). Respect
+    // serverFilter the same way the loop below does — otherwise `--server foo`
+    // reports an UNRELATED malformed entry `bar` that the user never targeted
+    // (adversarial review finding).
+    entries = await adapter.read(deps.getConfigPath(clientId), (name) => {
+      if (serverFilter !== undefined && name !== serverFilter) return;
+      skipped.push({ name, reason: "malformed config entry (does not match the expected shape)" });
+    });
   } catch (err) {
     return {
       clientId,
@@ -281,8 +316,6 @@ async function planForClient(
   }
 
   const transforms: { name: string; nextEntry: McpServerEntry }[] = [];
-  const skipped: { name: string; reason: string }[] = [];
-  const unguarded: { name: string; reason: string }[] = [];
   const consentedSet = new Set(consentedUnguarded);
 
   for (const [name, entry] of Object.entries(entries)) {
