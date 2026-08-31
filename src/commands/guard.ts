@@ -5,7 +5,7 @@
  * mute, unmute, pause, cleanup, list-signatures, reset-integrity, run --inner.
  */
 
-import { Command } from "commander";
+import { Command, Option } from "commander";
 import type { ClientId } from "../config/paths.js";
 import { CLIENT_IDS } from "../config/paths.js";
 
@@ -209,7 +209,11 @@ export function registerGuardCommand(program: Command): void {
   guard
     .command("pause")
     .description("Pause all guard inspection (relay continues forwarding without scanning)")
-    .option("--for <duration>", "duration: 30s, 5m, 1h, 24h, 7d (default: 10m)")
+    .addOption(
+      new Option("--for <duration>", "duration: 30s, 5m, 1h, 24h, 7d (default: 10m)").conflicts(
+        "off",
+      ),
+    )
     .option("--off", "lift any active pause")
     .action(async (opts: { for?: string; off?: boolean }) => {
       const { readPolicy, writePolicy, setPausedUntil, parseDuration, isoOffsetFromNow } =

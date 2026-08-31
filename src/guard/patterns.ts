@@ -90,6 +90,17 @@ function targetSubtree(msg: JSONRPCMessage, target: SignatureTarget): unknown {
       // tools/call response → result.content, result.structuredContent, AND the
       // JSON-RPC error object. Injection placed in structuredContent or an error
       // message would otherwise evade every tool_response signature. (security #16)
+      //
+      // #21: unlike tool_call_args/tool_description/tool_annotations below, this
+      // branch does NOT gate on which request's method prompted the response
+      // (a JSON-RPC response carries no `method` to check against). It matches
+      // `result.content`/`result.structuredContent`/`error` on ANY response
+      // message, regardless of origin — a resources/read or prompts/get reply
+      // that happens to carry a `content`/`structuredContent`/`error` field is
+      // ALSO scanned here, in addition to its own narrower carrier
+      // (resource_content / prompt_content). Intentional: it's the same
+      // fail-open-scoping tradeoff as the decode-and-rescan carriers — a missed
+      // response is worse than an extra, harmless re-scan of the same text.
       const error = (msg as { error?: unknown }).error ?? null;
       if ("result" in msg) {
         const result = (msg as { result?: { content?: unknown; structuredContent?: unknown } }).result;

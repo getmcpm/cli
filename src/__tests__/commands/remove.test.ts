@@ -87,7 +87,13 @@ describe("removeHandler — server found in one client", () => {
       getAdapter: vi.fn().mockReturnValue(adapter),
     });
     await removeHandler("my-server", {}, deps);
-    expect(adapter.read).toHaveBeenCalledWith("/fake/claude-desktop/config.json");
+    // #23 follow-up: read() also receives an onSkip callback now (used to
+    // detect a present-but-malformed target entry) — assert the config path,
+    // not the callback's identity.
+    expect(adapter.read).toHaveBeenCalledWith(
+      "/fake/claude-desktop/config.json",
+      expect.any(Function),
+    );
   });
 
   it("asks for confirmation before removing", async () => {
@@ -190,6 +196,36 @@ describe("removeHandler — server not found in any client", () => {
     });
     await removeHandler("ghost-server", {}, deps).catch(() => {});
     expect(deps.removeFromStore).not.toHaveBeenCalled();
+  });
+});
+
+// #23 follow-up: BaseAdapter.read() now drops an entry that fails Zod shape
+// validation instead of returning it — read()'s own presence check
+// (`hasOwnProperty(servers, name)`) can no longer see it. Without also
+// listening for the onSkip callback, `mcpm remove` would report a present
+// (but malformed) entry as "not found" and refuse to remove it — the exact
+// server a user runs `remove` to clean up.
+describe("removeHandler — server present but malformed (#23)", () => {
+  it("still finds + removes a server whose entry failed shape validation", async () => {
+    const adapter: ConfigAdapter = {
+      clientId: "claude-desktop",
+      // Mirrors BaseAdapter.read(): a malformed entry is absent from the
+      // returned map, but its name is reported via onSkip.
+      read: vi.fn().mockImplementation(async (_path: string, onSkip?: (name: string) => void) => {
+        onSkip?.("broken-server");
+        return {};
+      }),
+      addServer: vi.fn().mockResolvedValue(undefined),
+      removeServer: vi.fn().mockResolvedValue(undefined),
+    };
+    const deps = makeDeps({ getAdapter: vi.fn().mockReturnValue(adapter) });
+
+    await removeHandler("broken-server", {}, deps);
+
+    expect(adapter.removeServer).toHaveBeenCalledWith(
+      "/fake/claude-desktop/config.json",
+      "broken-server",
+    );
   });
 });
 

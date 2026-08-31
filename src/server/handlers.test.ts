@@ -363,6 +363,33 @@ describe("handleList", () => {
     const r = result as { servers: unknown[] };
     expect(r.servers).toHaveLength(0);
   });
+
+  // #23 follow-up (adversarial review): read()'s default onSkip writes to
+  // stderr, which this stdio MCP surface's calling agent never sees — no
+  // other channel exists. Must surface in the result instead.
+  it("surfaces a malformed entry in the result instead of silently omitting it", async () => {
+    const adapter = {
+      clientId: "cursor",
+      read: vi.fn().mockImplementation(async (_path: string, onSkip?: (name: string) => void) => {
+        onSkip?.("broken-mcp");
+        return { good: { command: "npx", args: ["-y", "srv"] } };
+      }),
+      addServer: vi.fn(),
+      removeServer: vi.fn(),
+    };
+    const deps = makeDeps({ getAdapter: vi.fn().mockReturnValue(adapter) });
+
+    const result = await handleList({}, deps);
+    const r = result as { servers: Array<{ name: string }>; skipped?: Array<{ name: string; client: string }> };
+    expect(r.servers).toHaveLength(1);
+    expect(r.skipped).toEqual([{ name: "broken-mcp", client: "cursor" }]);
+  });
+
+  it("omits the skipped field entirely when nothing was dropped", async () => {
+    const deps = makeDeps();
+    const result = await handleList({}, deps);
+    expect("skipped" in (result as object)).toBe(false);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -453,6 +480,34 @@ describe("handleAudit", () => {
     const r = result as { results: Array<{ name: string; trustScore: TrustScore }> };
     expect(r.results).toHaveLength(1);
     expect(r.results[0].trustScore.score).toBe(72);
+  });
+
+  // #23 follow-up (adversarial review): same reasoning as handleList — a
+  // server invalid to mcpm but valid to the client would otherwise vanish
+  // from the audit with zero signal to the calling agent.
+  it("surfaces a malformed entry in the result instead of silently excluding it from the audit", async () => {
+    const entry = makeEntry("io.github.acme/srv");
+    const adapter = {
+      clientId: "cursor",
+      read: vi.fn().mockImplementation(async (_path: string, onSkip?: (name: string) => void) => {
+        onSkip?.("broken-mcp");
+        return { "io.github.acme/srv": { command: "npx", args: [] } };
+      }),
+      addServer: vi.fn(),
+      removeServer: vi.fn(),
+    };
+    const deps = makeDeps({
+      getAdapter: vi.fn().mockReturnValue(adapter),
+      registryGetServer: vi.fn().mockResolvedValue(entry),
+    });
+
+    const result = await handleAudit(deps);
+    const r = result as {
+      results: Array<{ name: string }>;
+      skipped?: Array<{ name: string; client: string }>;
+    };
+    expect(r.results).toHaveLength(1);
+    expect(r.skipped).toEqual([{ name: "broken-mcp", client: "cursor" }]);
   });
 });
 

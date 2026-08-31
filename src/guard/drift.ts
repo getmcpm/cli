@@ -21,6 +21,7 @@ import { worstAction } from "./patterns.js";
 import { sanitizeForTerminal } from "./sanitize.js";
 import {
   PinsIntegrityError,
+  HASH_REGEX,
   hashToolDefinition,
   fieldHashesOf,
   handshakeFieldHashesOf,
@@ -570,7 +571,7 @@ export function applyAcceptDrift(
   // current_hash to null which creates an unbounded "accept anything next"
   // window an attacker could race into. The user copies the hash from the
   // block-message remediation string.
-  if (options.newHash === undefined || !/^sha256:[0-9a-f]{64}$/.test(options.newHash)) {
+  if (options.newHash === undefined || !HASH_REGEX.test(options.newHash)) {
     throw new Error(
       `accept-drift requires --new-hash <sha256:...> (or --remove to drop the pin). ` +
         `Copy the hash from the block message remediation field.`,

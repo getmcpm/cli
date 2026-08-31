@@ -331,11 +331,17 @@ export async function handleList(
 ): Promise<object> {
   const clients = await resolveClients(args.client, deps);
   const servers: Array<{ name: string; client: string; command: string }> = [];
+  // #23 follow-up (adversarial review): the default onSkip writes to stderr,
+  // which is invisible to the calling agent on this stdio MCP surface — there
+  // is no other channel. Surface it in the result instead.
+  const skipped: Array<{ name: string; client: string }> = [];
 
   for (const clientId of clients) {
     const adapter = deps.getAdapter(clientId);
     const configPath = deps.getConfigPath(clientId);
-    const installed = await adapter.read(configPath);
+    const installed = await adapter.read(configPath, (name) => {
+      skipped.push({ name, client: clientId });
+    });
 
     for (const [name, entry] of Object.entries(installed)) {
       const command = formatMcpEntryCommand(entry, "unknown");
@@ -343,7 +349,7 @@ export async function handleList(
     }
   }
 
-  return { servers };
+  return skipped.length > 0 ? { servers, skipped } : { servers };
 }
 
 export async function handleRemove(
@@ -381,11 +387,18 @@ export async function handleRemove(
 export async function handleAudit(deps: ServerDeps): Promise<object> {
   const clients = await deps.detectClients();
   const results: Array<{ name: string; client: string; trustScore: TrustScore }> = [];
+  // #23 follow-up (adversarial review): surfaced in the result for the same
+  // reason as handleList — stderr is invisible to the calling agent, and a
+  // server invalid to mcpm but valid to the client would otherwise be silently
+  // excluded from the audit.
+  const skipped: Array<{ name: string; client: string }> = [];
 
   for (const clientId of clients) {
     const adapter = deps.getAdapter(clientId);
     const configPath = deps.getConfigPath(clientId);
-    const installed = await adapter.read(configPath);
+    const installed = await adapter.read(configPath, (name) => {
+      skipped.push({ name, client: clientId });
+    });
 
     for (const name of Object.keys(installed)) {
       try {
@@ -402,7 +415,7 @@ export async function handleAudit(deps: ServerDeps): Promise<object> {
     }
   }
 
-  return { results };
+  return skipped.length > 0 ? { results, skipped } : { results };
 }
 
 export async function handleDoctor(deps: ServerDeps): Promise<object> {

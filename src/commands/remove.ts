@@ -67,9 +67,16 @@ export async function removeHandler(
   for (const clientId of installedClients) {
     const adapter = getAdapter(clientId);
     const configPath = getConfigPath(clientId);
-    const servers = await adapter.read(configPath);
+    // #23 follow-up: read() drops an entry that fails shape validation, but
+    // removeServer() operates on the raw config and would still find + remove
+    // it — without this, a malformed entry (the exact thing a user reaches
+    // for `remove` to clean up) reports "not found" and can't be removed.
+    let sawTarget = false;
+    const servers = await adapter.read(configPath, (skippedName) => {
+      if (skippedName === name) sawTarget = true;
+    });
 
-    if (Object.prototype.hasOwnProperty.call(servers, name)) {
+    if (Object.prototype.hasOwnProperty.call(servers, name) || sawTarget) {
       clientsWithServer.push(clientId);
     }
   }

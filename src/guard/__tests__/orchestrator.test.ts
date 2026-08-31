@@ -188,8 +188,134 @@ describe("statusAcrossClients", () => {
     const status = await statusAcrossClients(deps);
     expect(status.totalWrapped).toBe(1);
     expect(status.totalUnwrapped).toBe(1);
-    expect(status.clients[0]?.servers).toContainEqual({ name: "fs-mcp", wrapped: true, unguarded: false });
-    expect(status.clients[0]?.servers).toContainEqual({ name: "git-mcp", wrapped: false, unguarded: false });
+    expect(status.clients[0]?.servers).toContainEqual({ name: "fs-mcp", wrapped: true, unguarded: false, malformed: false });
+    expect(status.clients[0]?.servers).toContainEqual({ name: "git-mcp", wrapped: false, unguarded: false, malformed: false });
+  });
+
+  // #23 follow-up: a config entry that fails read()'s shape validation must
+  // not silently vanish from status — it gets its own `malformed: true`
+  // marker, and is excluded from both wrapped/unwrapped counts (it's neither).
+  test("surfaces a malformed entry distinctly, excluded from wrapped/unwrapped counts", async () => {
+    const goodState: Record<string, McpServerEntry> = { "fs-mcp": { command: "x" } };
+    const adapter: ConfigAdapter = {
+      clientId: "cursor",
+      async read(_path, onSkip) {
+        onSkip?.("broken-mcp");
+        return { ...goodState };
+      },
+      async addServer() { throw new Error("not used"); },
+      async removeServer() { throw new Error("not used"); },
+      async setServerDisabled() { throw new Error("not used"); },
+      async replaceServer() { throw new Error("not used"); },
+    };
+    const deps = makeDeps({ cursor: adapter });
+
+    const status = await statusAcrossClients(deps);
+    expect(status.totalWrapped).toBe(0);
+    expect(status.totalUnwrapped).toBe(1); // fs-mcp only — broken-mcp excluded
+    expect(status.clients[0]?.servers).toContainEqual({
+      name: "broken-mcp",
+      wrapped: false,
+      unguarded: false,
+      malformed: true,
+    });
+  });
+});
+
+// #23 follow-up: a malformed entry must be reported via the SAME `skipped`
+// coverage mechanism as every other enable-time skip reason, not silently
+// dropped with only a stderr line (H9: coverage gaps must be surfaced loudly).
+describe("enableGuardAcrossClients — malformed entry (#23)", () => {
+  test("a malformed entry appears in the skip report, not silently missing", async () => {
+    const adapter: ConfigAdapter = {
+      clientId: "cursor",
+      async read(_path, onSkip) {
+        onSkip?.("broken-mcp");
+        return {};
+      },
+      async addServer() { throw new Error("not used"); },
+      async removeServer() { throw new Error("not used"); },
+      async setServerDisabled() { throw new Error("not used"); },
+      async replaceServer() { throw new Error("not used"); },
+    };
+    const deps = makeDeps({ cursor: adapter });
+
+    const summary = await enableGuardAcrossClients(deps);
+
+    expect(summary.totalChanged).toBe(0);
+    expect(summary.totalSkipped).toBe(1);
+    const server = summary.clients[0]?.servers.find((s) => s.name === "broken-mcp");
+    expect(server?.status).toBe("skipped");
+    expect(server?.reason).toMatch(/malformed/i);
+  });
+
+  // Adversarial review finding: the malformed-entry onSkip push originally
+  // ignored `serverFilter`, so `--server foo` reported an UNRELATED malformed
+  // entry the user never targeted.
+  test("--server filter excludes an unrelated malformed entry from the report", async () => {
+    const adapter: ConfigAdapter = {
+      clientId: "cursor",
+      async read(_path, onSkip) {
+        onSkip?.("unrelated-broken");
+        return { foo: { command: "node", args: ["x.js"] } };
+      },
+      async addServer() { throw new Error("not used"); },
+      async removeServer() { throw new Error("not used"); },
+      async setServerDisabled() { throw new Error("not used"); },
+      async replaceServer(_p, name, entry) { void name; void entry; },
+    };
+    const deps = makeDeps({ cursor: adapter });
+
+    const summary = await enableGuardAcrossClients(deps, { server: "foo" });
+
+    expect(summary.totalSkipped).toBe(0);
+    expect(summary.clients[0]?.servers.some((s) => s.name === "unrelated-broken")).toBe(false);
+  });
+
+  // --server DOES still target it when it's the requested name.
+  test("--server filter still surfaces the malformed entry when it IS the target", async () => {
+    const adapter: ConfigAdapter = {
+      clientId: "cursor",
+      async read(_path, onSkip) {
+        onSkip?.("broken-mcp");
+        return {};
+      },
+      async addServer() { throw new Error("not used"); },
+      async removeServer() { throw new Error("not used"); },
+      async setServerDisabled() { throw new Error("not used"); },
+      async replaceServer() { throw new Error("not used"); },
+    };
+    const deps = makeDeps({ cursor: adapter });
+
+    const summary = await enableGuardAcrossClients(deps, { server: "broken-mcp" });
+
+    expect(summary.totalSkipped).toBe(1);
+    expect(summary.clients[0]?.servers.some((s) => s.name === "broken-mcp")).toBe(true);
+  });
+
+  // disableGuardAcrossClients shares planForClient with enable (only `action`
+  // differs) — confirm the malformed-entry routing works on that path too,
+  // not just enable.
+  test("disableGuardAcrossClients also routes a malformed entry into the skip report", async () => {
+    const adapter: ConfigAdapter = {
+      clientId: "cursor",
+      async read(_path, onSkip) {
+        onSkip?.("broken-mcp");
+        return {};
+      },
+      async addServer() { throw new Error("not used"); },
+      async removeServer() { throw new Error("not used"); },
+      async setServerDisabled() { throw new Error("not used"); },
+      async replaceServer() { throw new Error("not used"); },
+    };
+    const deps = makeDeps({ cursor: adapter });
+
+    const summary = await disableGuardAcrossClients(deps);
+
+    expect(summary.totalSkipped).toBe(1);
+    const server = summary.clients[0]?.servers.find((s) => s.name === "broken-mcp");
+    expect(server?.status).toBe("skipped");
+    expect(server?.reason).toMatch(/malformed/i);
   });
 });
 

@@ -1160,6 +1160,15 @@ async function handleStrictRemoval(
   for (const clientId of clients) {
     const adapter = deps.getAdapter(clientId);
     const configPath = deps.getPath(clientId);
+    // #23 follow-up (adversarial review, not wired): an entry that fails
+    // read()'s shape validation is invisible here too, so a malformed,
+    // undeclared entry survives --strict with only a stderr line — the
+    // "installed state now matches mcpm.yaml" claim isn't fully honored.
+    // Deliberately left as the DEFAULT (stderr-only) onSkip rather than fully
+    // wired: --strict's job is DELETION, and the fail-safe direction (never
+    // delete something read() couldn't validate) is the one this project
+    // has consistently chosen elsewhere (v0.29.0's Math.min row) — worth a
+    // dedicated pass, not a rushed change to a destructive path.
     const installed = await adapter.read(configPath);
 
     for (const name of Object.keys(installed)) {

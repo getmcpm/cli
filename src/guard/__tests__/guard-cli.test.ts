@@ -155,3 +155,16 @@ describe("mcpm guard run --inner argv parsing through Commander", () => {
     expect(runInnerCalls[0]?.args).toEqual(["--inspect", "/some/server.js", "--port", "8080"]);
   });
 });
+
+// #28: `--off` silently won over `--for` when both were passed (no `.conflicts`
+// declared), so a typo'd `pause --for 5m --off` looked like it started a 5-minute
+// pause but actually cleared any existing one. Commander's own conflict check
+// runs during argv parsing, before the action (and its guard-policy.yaml I/O)
+// — so this stays a pure argv-parsing assertion, like the tests above.
+describe("mcpm guard pause — --for/--off are mutually exclusive (#28)", () => {
+  test("passing both --for and --off is rejected before the action runs", async () => {
+    await expect(
+      runArgv(["guard", "pause", "--for", "5m", "--off"]),
+    ).rejects.toThrow(/cannot be used with/);
+  });
+});

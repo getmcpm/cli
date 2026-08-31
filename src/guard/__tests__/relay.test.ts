@@ -580,6 +580,142 @@ describe("startRelay — child-spawn failure fails closed (H9 B.2)", () => {
     expect(fakeChild.stdout.destroyed).toBe(true);
   });
 
+  // #20: the buffer-cap DoS guard (MAX_BUFFER_BYTES, relay.ts) lived entirely
+  // inside the c8-ignored wireDirection function with no direct test — the
+  // malformed-frame test above exercises the SAME subprocess-path seam but not
+  // this branch. A malicious/misbehaving child can withhold the newline
+  // delimiter indefinitely to grow the relay's buffer unboundedly; this proves
+  // the cap actually trips, using the same fakeChild + spawnChild test seam
+  // (no real subprocess forked).
+  test("a child withholding the newline delimiter past 64MB is torn down as a block, not buffered forever", async () => {
+    const fakeChild = makeFakeChild();
+    const parentIn = new PassThrough();
+    const parentOut = new PassThrough();
+
+    let parentOutBytes = 0;
+    parentOut.on("data", (c: Buffer) => {
+      parentOutBytes += c.byteLength;
+    });
+
+    const events: GuardEvent[] = [];
+    startRelay({
+      command: "x",
+      args: [],
+      parentIn,
+      parentOut,
+      onEvent: (e) => events.push(e),
+      spawnChild: () => fakeChild,
+    });
+
+    // One newline-free write past the 64MB cap — no JSON-RPC frame ever
+    // completes, so this is purely the buffer-cap branch, not the parser.
+    const oversized = "x".repeat(64 * 1024 * 1024 + 1);
+    expect(() => fakeChild.stdout.write(oversized)).not.toThrow();
+    await new Promise((r) => setImmediate(r));
+    await new Promise((r) => setImmediate(r));
+
+    const block = events.find((e) => e.action === "block");
+    expect(block).toBeDefined();
+    expect(block?.direction).toBe("child->parent");
+    // Empty findings distinguishes the buffer-cap branch from the
+    // malformed-frame branch (which carries a "malformed-frame" finding).
+    expect(block?.findings).toEqual([]);
+    // The findings:[] discriminator above is only reliable if this is the
+    // ONE block event — pin that directly rather than relying on it by
+    // accident of an unrelated invariant elsewhere (logEvent).
+    expect(events.filter((e) => e.action === "block")).toHaveLength(1);
+    // Fail closed: none of the oversized payload reached the client.
+    expect(parentOutBytes).toBe(0);
+    // Source torn down so no further uninspected bytes can flow.
+    expect(fakeChild.stdout.destroyed).toBe(true);
+  });
+
+  // #20 follow-up (test-coverage review): the cap test above has no negative
+  // control — mutation-verified, shrinking MAX_BUFFER_BYTES to 1024 left
+  // every relay test green. A guard that sits inline on every MCP frame must
+  // not false-block a legitimate large response.
+  test("a single well-formed frame comfortably under the 64MB cap is forwarded, not blocked", async () => {
+    const fakeChild = makeFakeChild();
+    const parentIn = new PassThrough();
+    const parentOut = new PassThrough();
+
+    let parentOutBytes = 0;
+    parentOut.on("data", (c: Buffer) => {
+      parentOutBytes += c.byteLength;
+    });
+
+    const events: GuardEvent[] = [];
+    startRelay({
+      command: "x",
+      args: [],
+      parentIn,
+      parentOut,
+      onEvent: (e) => events.push(e),
+      spawnChild: () => fakeChild,
+    });
+
+    // 1MB payload — "large" but comfortably under the 64MB cap.
+    const bigResponse = makeResponse(1, "x".repeat(1024 * 1024));
+    fakeChild.stdout.write(serializeMessage(bigResponse));
+    await new Promise((r) => setImmediate(r));
+    await new Promise((r) => setImmediate(r));
+
+    expect(events.some((e) => e.action === "block")).toBe(false);
+    expect(parentOutBytes).toBeGreaterThan(1024 * 1024);
+  });
+
+  // #20 follow-up (test-coverage review): mutation-verified, deleting the
+  // `bufferedBytes = 0` reset-on-consumed-frame (relay.ts) also left every
+  // existing relay test green. Without that reset, a long-lived session whose
+  // CUMULATIVE traffic crosses 64MB — entirely normal complete, well-formed
+  // frames — would be torn down as a false DoS block. This pins the reset.
+  test("many complete frames whose CUMULATIVE bytes exceed 64MB are all forwarded, not blocked", async () => {
+    const fakeChild = makeFakeChild();
+    const parentIn = new PassThrough();
+    const parentOut = new PassThrough();
+
+    let parentOutBytes = 0;
+    parentOut.on("data", (c: Buffer) => {
+      parentOutBytes += c.byteLength;
+    });
+
+    const events: GuardEvent[] = [];
+    startRelay({
+      command: "x",
+      args: [],
+      parentIn,
+      parentOut,
+      onEvent: (e) => events.push(e),
+      spawnChild: () => fakeChild,
+    });
+
+    // 100 complete, individually-under-cap frames (~700KB each), each written
+    // in its OWN `.write()` call — cumulative total well past 64MB, but no
+    // single write (and so no single 'data' event, confirmed via a PassThrough
+    // probe: one write = one data event, regardless of size) is anywhere near
+    // the cap on its own. This mirrors how a real child's stdout — piped
+    // through an OS pipe with a small buffer — actually delivers data,
+    // unlike a single giant write which would arrive as one oversized chunk
+    // and trip the cap for a reason that has nothing to do with this test.
+    // Each frame is fully consumed (newline-terminated) before the next
+    // arrives, so only the per-frame reset — not a smaller per-write cap —
+    // protects this from a false block.
+    const FRAME_COUNT = 100;
+    const PAYLOAD_SIZE = 700 * 1024;
+    let totalWritten = 0;
+    for (let i = 0; i < FRAME_COUNT; i++) {
+      const frame = serializeMessage(makeResponse(i, "y".repeat(PAYLOAD_SIZE)));
+      totalWritten += frame.length;
+      fakeChild.stdout.write(frame);
+      await new Promise((r) => setImmediate(r));
+    }
+    expect(totalWritten).toBeGreaterThan(64 * 1024 * 1024);
+    await new Promise((r) => setImmediate(r));
+
+    expect(events.some((e) => e.action === "block")).toBe(false);
+    expect(parentOutBytes).toBeGreaterThan(64 * 1024 * 1024);
+  });
+
   test("after spawn-failure the child stdout is destroyed — no late bytes reach parentOut", async () => {
     const fakeChild = makeFakeChild();
     const parentOut = new PassThrough();

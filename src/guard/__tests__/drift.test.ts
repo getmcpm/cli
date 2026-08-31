@@ -370,6 +370,20 @@ describe("applyAcceptDrift", () => {
     expect(() => applyAcceptDrift(pins, "fs", { newHash: "not-a-hash" })).toThrow(/--new-hash/);
   });
 
+  // #25 follow-up (test-coverage review): --new-hash is user-pasted from a
+  // block-message remediation string — the most likely place a near-miss
+  // arrives. "not-a-hash" above only proves the prefix is checked; each case
+  // here isolates one clause of the shared HASH_REGEX.
+  test.each([
+    ["too short", "sha256:" + "a".repeat(63)],
+    ["trailing garbage", "sha256:" + "a".repeat(64) + "x"],
+    ["uppercase hex", "sha256:" + "A".repeat(64)],
+    ["non-hex character", "sha256:" + "g".repeat(64)],
+  ])("--new-hash rejects a near-miss: %s", (_label, newHash) => {
+    const pins = emptyPinsFile();
+    expect(() => applyAcceptDrift(pins, "fs", { newHash })).toThrow(/--new-hash/);
+  });
+
   test("non-existent server with --remove is a no-op", () => {
     const pins = emptyPinsFile();
     const next = applyAcceptDrift(pins, "nope", { remove: true });

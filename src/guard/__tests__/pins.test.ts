@@ -346,7 +346,7 @@ describe("readPins / writePins", () => {
   test("write → read round-trip preserves data", async () => {
     let pins = emptyPinsFile();
     pins = upsertToolPin(pins, "fs", "read", {
-      current_hash: "sha256:abc",
+      current_hash: "sha256:" + "a".repeat(64),
       previous_hashes: [],
       captured_at: "2026-05-17T00:00:00Z",
       captured_via: "install",
@@ -354,7 +354,7 @@ describe("readPins / writePins", () => {
     });
     await writePins(pins);
     const back = await readPins();
-    expect(back.servers.fs?.read?.current_hash).toBe("sha256:abc");
+    expect(back.servers.fs?.read?.current_hash).toBe("sha256:" + "a".repeat(64));
   });
 
   test("writePins also writes the integrity sidecar", async () => {
@@ -514,7 +514,7 @@ describe("readPins / writePins", () => {
 
     let pins = emptyPinsFile();
     pins = upsertToolPin(pins, "fs", "read", {
-      current_hash: "sha256:abc",
+      current_hash: "sha256:" + "a".repeat(64),
       previous_hashes: [],
       captured_at: "2026-07-02T00:00:00Z",
       captured_via: "install",
@@ -589,6 +589,94 @@ describe("readPins / writePins", () => {
     writeFileSync(
       path.join(dir, "pins.json"),
       '{"format_version": 1, "servers": {"fs": {"read": {"current_hash": "sha256:x"}}}}',
+      { mode: 0o600 },
+    );
+    await expect(readPins()).rejects.toThrow(/invalid structure/);
+  });
+
+  // #25: a structurally-valid-but-garbage current_hash ("garbage" — right type,
+  // wrong shape) used to pass PinEntrySchema outright (bare z.string()) and
+  // would silently corrupt drift comparisons downstream. Otherwise-complete
+  // entry so this isolates the hash-shape check from the missing-fields one above.
+  test("readPins rejects a structurally-valid-but-garbage current_hash", async () => {
+    const dir = path.join(tmpHome, ".mcpm");
+    mkdirSync(dir, { recursive: true, mode: 0o700 });
+    writeFileSync(
+      path.join(dir, "pins.json"),
+      JSON.stringify({
+        format_version: PINS_FORMAT_VERSION,
+        servers: {
+          fs: {
+            read: {
+              current_hash: "garbage",
+              previous_hashes: [],
+              captured_at: "2026-05-17T00:00:00Z",
+              captured_via: "install",
+              signature_list_version: "v0.5.0",
+            },
+          },
+        },
+      }),
+      { mode: 0o600 },
+    );
+    await expect(readPins()).rejects.toThrow(/invalid structure/);
+  });
+
+  // #25 follow-up (test-coverage review): the "garbage" fixture above only
+  // proves the `sha256:` PREFIX is checked — mutation-verified, replacing the
+  // whole HASH_REGEX with the bare prefix `/^sha256:/` still passed every
+  // existing test. Each case below isolates ONE clause of
+  // /^sha256:[0-9a-f]{64}$/ so a regression in just that clause fails.
+  test.each([
+    ["too short (63 hex chars)", "sha256:" + "a".repeat(63)],
+    ["too long / trailing garbage after 64 hex chars", "sha256:" + "a".repeat(64) + "x"],
+    ["uppercase hex (real npm/openssl output shape, but not this format)", "sha256:" + "A".repeat(64)],
+    ["non-hex character", "sha256:" + "g".repeat(64)],
+  ])("readPins rejects a near-miss current_hash: %s", async (_label, hash) => {
+    const dir = path.join(tmpHome, ".mcpm");
+    mkdirSync(dir, { recursive: true, mode: 0o700 });
+    writeFileSync(
+      path.join(dir, "pins.json"),
+      JSON.stringify({
+        format_version: PINS_FORMAT_VERSION,
+        servers: {
+          fs: {
+            read: {
+              current_hash: hash,
+              previous_hashes: [],
+              captured_at: "2026-05-17T00:00:00Z",
+              captured_via: "install",
+              signature_list_version: "v0.5.0",
+            },
+          },
+        },
+      }),
+      { mode: 0o600 },
+    );
+    await expect(readPins()).rejects.toThrow(/invalid structure/);
+  });
+
+  // Same shape check applies inside previous_hashes — a tampered/truncated
+  // history entry must also fail closed, not just the live current_hash.
+  test("readPins rejects a garbage entry inside previous_hashes", async () => {
+    const dir = path.join(tmpHome, ".mcpm");
+    mkdirSync(dir, { recursive: true, mode: 0o700 });
+    writeFileSync(
+      path.join(dir, "pins.json"),
+      JSON.stringify({
+        format_version: PINS_FORMAT_VERSION,
+        servers: {
+          fs: {
+            read: {
+              current_hash: "sha256:" + "a".repeat(64),
+              previous_hashes: ["garbage"],
+              captured_at: "2026-05-17T00:00:00Z",
+              captured_via: "install",
+              signature_list_version: "v0.5.0",
+            },
+          },
+        },
+      }),
       { mode: 0o600 },
     );
     await expect(readPins()).rejects.toThrow(/invalid structure/);

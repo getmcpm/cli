@@ -647,8 +647,16 @@ export async function handleInstall(
     for (const clientId of targetClients) {
       const adapter = getAdapter(clientId);
       const configPath = getConfigPath(clientId);
-      const existing = await adapter.read(configPath);
-      if (Object.prototype.hasOwnProperty.call(existing, name)) {
+      // #23 follow-up (adversarial review): read() drops an entry that fails
+      // shape validation, but addServer() checks the RAW config and would
+      // still throw "already exists" for it — AFTER Step 6b has already
+      // persisted keychain secrets and possibly written earlier clients.
+      // Catch it here too, before any of that happens.
+      let sawTarget = false;
+      const existing = await adapter.read(configPath, (skippedName) => {
+        if (skippedName === name) sawTarget = true;
+      });
+      if (Object.prototype.hasOwnProperty.call(existing, name) || sawTarget) {
         throw new Error(
           `Server '${name}' is already installed in ${clientId}. Use --force to overwrite.`
         );

@@ -61,16 +61,27 @@ export async function handleToggleServer(
   for (const clientId of clients) {
     const adapter = getAdapter(clientId);
     const configPath = getConfigPath(clientId);
-    const servers: Record<string, McpServerEntry> = await adapter.read(configPath);
+    // #23 follow-up: read() drops an entry that fails shape validation, but
+    // setServerDisabled() operates on the raw config and would still find it.
+    let sawTarget = false;
+    const servers: Record<string, McpServerEntry> = await adapter.read(configPath, (skippedName) => {
+      if (skippedName === name) sawTarget = true;
+    });
 
-    if (!Object.prototype.hasOwnProperty.call(servers, name)) {
-      continue;
-    }
-
-    const isCurrentlyDisabled = servers[name].disabled === true;
-    if (isCurrentlyDisabled === disabled) {
-      alreadyDone.push(clientId);
-    } else {
+    if (Object.prototype.hasOwnProperty.call(servers, name)) {
+      const isCurrentlyDisabled = servers[name].disabled === true;
+      if (isCurrentlyDisabled === disabled) {
+        alreadyDone.push(clientId);
+      } else {
+        toToggle.push({ clientId, configPath });
+      }
+    } else if (sawTarget) {
+      // A malformed entry can't be classified as already-disabled/enabled —
+      // always attempt the toggle. setServerDisabled() rejects a raw entry
+      // that isn't a plain object rather than corrupting it, so this either
+      // toggles cleanly (a well-typed field just failed some OTHER check) or
+      // fails loudly with a clear "not a valid object" error — never silent
+      // corruption.
       toToggle.push({ clientId, configPath });
     }
   }
