@@ -8,6 +8,8 @@ _Add entries here, never under a stamped version_ — a release commit renames t
 heading, and a branch that wrote beneath it merges without conflict straight into a
 published section (it happened to #170).
 
+## [0.34.1] - 2026-09-01
+
 ### Fixed
 
 - **A never-pinned server's first-ever `tools/list` now waits for its pin
