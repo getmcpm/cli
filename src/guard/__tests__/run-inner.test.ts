@@ -1222,3 +1222,183 @@ describe("runInner — inspectParentRequest wiring (TODOS #50)", () => {
     expect(result.action).toBe("pass");
   });
 });
+
+// ─────────── Issue #27: first-ever tools/list is held for the pin write ───────────
+//
+// Same "capture the real relay-bound callback" pattern as TODOS #50 above,
+// applied to inspectChildResponse. Proves inspectChild itself — not just
+// wireDirection's plumbing (relay.test.ts covers that) — returns a Promise
+// only for the FIRST tools/list of a never-pinned server, and that the
+// Promise doesn't resolve until the pin write has actually been called.
+describe("runInner — inspectChildResponse pin-commit wait (issue #27)", () => {
+  let capturedInspectChildResponse:
+    | ((msg: JSONRPCMessage) => InspectResult | Promise<InspectResult>)
+    | undefined;
+  let writePinsCalls: PinsFile[];
+  let releaseWrite: (() => void) | undefined;
+  let writeGate: Promise<void>;
+
+  const toolsList = (name: string, description: string): JSONRPCMessage =>
+    ({
+      jsonrpc: "2.0",
+      id: 1,
+      result: { tools: [{ name, description }] },
+    }) as JSONRPCMessage;
+
+  beforeEach(() => {
+    vi.resetModules();
+    capturedInspectChildResponse = undefined;
+    writePinsCalls = [];
+    writeGate = new Promise((resolve) => {
+      releaseWrite = resolve;
+    });
+
+    vi.doMock("../pins.js", async () => {
+      const actual = await vi.importActual<typeof import("../pins.js")>("../pins.js");
+      return {
+        ...actual,
+        readPins: async (): Promise<PinsFile> => actual.emptyPinsFile(),
+        writePins: async (pins: PinsFile): Promise<void> => {
+          writePinsCalls.push(pins);
+          await writeGate;
+        },
+      };
+    });
+    vi.doMock("../policy.js", async () => {
+      const actual = await vi.importActual<typeof import("../policy.js")>("../policy.js");
+      return { ...actual, readPolicy: async () => ({}) };
+    });
+    vi.doMock("../relay.js", async () => {
+      const actual = await vi.importActual<typeof import("../relay.js")>("../relay.js");
+      return {
+        ...actual,
+        startRelay: (opts: {
+          inspectChildResponse?: (msg: JSONRPCMessage) => InspectResult | Promise<InspectResult>;
+        }) => {
+          capturedInspectChildResponse = opts.inspectChildResponse;
+          return { child: {} as never, exit: Promise.resolve(0) };
+        },
+      };
+    });
+  });
+
+  afterEach(() => {
+    vi.resetModules();
+    vi.doUnmock("../pins.js");
+    vi.doUnmock("../policy.js");
+    vi.doUnmock("../relay.js");
+  });
+
+  const runInnerArgs = {
+    serverName: "victim",
+    command: "node",
+    args: ["server.js"],
+    declaredEnvKeys: [] as string[],
+  };
+
+  test("first tools/list for a never-pinned server is held until the pin write commits", async () => {
+    const { runInner } = await import("../run-inner.js");
+    await runInner(runInnerArgs);
+    expect(capturedInspectChildResponse).toBeDefined();
+
+    const decision = capturedInspectChildResponse!(toolsList("read", "v1"));
+    expect(decision).toBeInstanceOf(Promise);
+
+    let settled = false;
+    void (decision as Promise<InspectResult>).then(() => {
+      settled = true;
+    });
+
+    // Flush every currently-queued microtask. The chain runs all the way up
+    // to the gated writePins call and stops there — it needs an external
+    // resolve — so this proves the hold, not just "hasn't happened yet".
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(writePinsCalls).toHaveLength(1);
+    expect(settled).toBe(false);
+
+    releaseWrite!();
+    const result = await decision;
+    expect(settled).toBe(true);
+    expect(result.action).toBe("pass");
+  });
+
+  test("a second tools/list in the same session is NOT held (fire-and-forget, once per session per server)", async () => {
+    releaseWrite!(); // don't gate this test — writes commit immediately
+    const { runInner } = await import("../run-inner.js");
+    await runInner(runInnerArgs);
+
+    const first = capturedInspectChildResponse!(toolsList("read", "v1"));
+    expect(first).toBeInstanceOf(Promise);
+    await first;
+
+    const second = capturedInspectChildResponse!(toolsList("read", "v1"));
+    expect(second).not.toBeInstanceOf(Promise);
+    expect((second as InspectResult).action).toBe("pass");
+  });
+
+  test("a server already pinned at session start is never held", async () => {
+    vi.doMock("../pins.js", async () => {
+      const actual = await vi.importActual<typeof import("../pins.js")>("../pins.js");
+      const fields = { description: "v1" };
+      const pins = actual.upsertToolPin(actual.emptyPinsFile(), "victim", "read", {
+        current_hash: actual.hashToolDefinition(fields),
+        previous_hashes: [],
+        captured_at: "2026-05-17T00:00:00Z",
+        captured_via: "install",
+        signature_list_version: "v0.5.0",
+        field_hashes: actual.fieldHashesOf(fields),
+      });
+      return {
+        ...actual,
+        readPins: async (): Promise<PinsFile> => pins,
+        writePins: async (p: PinsFile): Promise<void> => {
+          writePinsCalls.push(p);
+        },
+      };
+    });
+
+    const { runInner } = await import("../run-inner.js");
+    await runInner(runInnerArgs);
+
+    const result = capturedInspectChildResponse!(toolsList("read", "v1"));
+    expect(result).not.toBeInstanceOf(Promise);
+    expect((result as InspectResult).action).toBe("pass");
+  });
+
+  // Review finding: `hasToolsList` matches `{tools:[]}` too, but inspectForDrift
+  // is a no-op on an empty (or all-nameless) list — nothing gets pinned. The
+  // one-shot hold must not be spent on a frame that pins nothing, or the REAL
+  // list that follows would go straight back to fire-and-forget.
+  test("an empty tools/list does not burn the one-shot hold — the next, real list is still held", async () => {
+    const { runInner } = await import("../run-inner.js");
+    await runInner(runInnerArgs);
+
+    const emptyList = { jsonrpc: "2.0", id: 1, result: { tools: [] } } as unknown as JSONRPCMessage;
+    const empty = capturedInspectChildResponse!(emptyList);
+    expect(empty).not.toBeInstanceOf(Promise);
+    expect(writePinsCalls).toHaveLength(0);
+
+    const real = capturedInspectChildResponse!(toolsList("read", "v1"));
+    expect(real).toBeInstanceOf(Promise);
+
+    releaseWrite!();
+    await real;
+    expect(writePinsCalls).toHaveLength(1);
+  });
+
+  test("a tools/list whose entries all lack a string name does not burn the one-shot hold either", async () => {
+    const { runInner } = await import("../run-inner.js");
+    await runInner(runInnerArgs);
+
+    const namelessList = {
+      jsonrpc: "2.0",
+      id: 1,
+      result: { tools: [{ description: "no name field" }] },
+    } as unknown as JSONRPCMessage;
+    const nameless = capturedInspectChildResponse!(namelessList);
+    expect(nameless).not.toBeInstanceOf(Promise);
+
+    const real = capturedInspectChildResponse!(toolsList("read", "v1"));
+    expect(real).toBeInstanceOf(Promise);
+  });
+});

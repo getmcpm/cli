@@ -8,6 +8,29 @@ _Add entries here, never under a stamped version_ — a release commit renames t
 heading, and a branch that wrote beneath it merges without conflict straight into a
 published section (it happened to #170).
 
+### Fixed
+
+- **A never-pinned server's first-ever `tools/list` now waits for its pin
+  write to be attempted (and confirmed, or loudly warned about) before
+  reaching the client (TODOS #27).** Previously the frame was forwarded as
+  soon as the synchronous drift check passed — there being no on-disk pin yet
+  to compare against — while the actual pin write happened off-thread,
+  fire-and-forget. A crash or kill in that gap left nothing on disk, so the
+  next launch looked like *another* first session, with no baseline left to
+  catch a swapped tool definition against. Only the first tools/list this
+  session that can actually produce a pin, for a never-pinned server, is held
+  (one extra round-trip) — an empty or nameless list can't burn that one
+  chance; every later tools/list (already covered by the in-memory
+  same-session `firstHashes` cache, #58) and any already-pinned server stay
+  immediate, as before. A held write that still fails silently (the
+  underlying write is deliberately best-effort, same as every other pin
+  write) now logs a `PIN-COMMIT-UNCONFIRMED` warning instead of the hold
+  passing as though it had succeeded. Two related relay-level hardenings
+  landed alongside it: a rejecting inspection callback no longer wedges that
+  direction of the relay forever (it now fails closed on that one message and
+  keeps draining), and a message already in flight when the buffer-cap/
+  malformed-frame guard trips is no longer forwarded after that teardown.
+
 ## [0.34.0] - 2026-08-31
 
 ### Fixed
