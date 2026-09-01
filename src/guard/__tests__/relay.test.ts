@@ -744,3 +744,118 @@ describe("startRelay — child-spawn failure fails closed (H9 B.2)", () => {
     expect(parentOutBytes).toBe(0);
   });
 });
+
+// ─────────── Issue #27: wireDirection awaits a Promise-returning inspect ───────────
+//
+// run-inner.ts's inspectChild holds the first-ever tools/list for a
+// never-pinned server until its pin write commits, by returning a Promise
+// instead of a plain InspectResult (see InspectFn's doc comment). These tests
+// exercise that seam directly at the wireDirection level (not via run-inner.ts)
+// using the same fakeChild + spawnChild pattern as the buffer-cap/malformed-
+// frame tests above — proving the relay actually withholds the frame, and that
+// a later message can't jump ahead of one still awaiting its verdict.
+describe("wireDirection — Promise-returning inspect (issue #27)", () => {
+  test("a child response is held until its Promise-returning inspect resolves", async () => {
+    const fakeChild = makeFakeChild();
+    const parentOut = new PassThrough();
+    const outBuffer = new ReadBuffer();
+    const received: JSONRPCMessage[] = [];
+    let parentOutBytes = 0;
+    parentOut.on("data", (c: Buffer) => {
+      parentOutBytes += c.byteLength;
+      outBuffer.append(c);
+      let msg = outBuffer.readMessage();
+      while (msg !== null) {
+        received.push(msg);
+        msg = outBuffer.readMessage();
+      }
+    });
+
+    let release: (() => void) | undefined;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+
+    startRelay({
+      command: "x",
+      args: [],
+      parentIn: new PassThrough(),
+      parentOut,
+      spawnChild: () => fakeChild,
+      inspectChildResponse: async (): Promise<InspectResult> => {
+        await gate;
+        return { action: "pass", findings: [] };
+      },
+    });
+
+    const msg = makeResponse(1, "held");
+    fakeChild.stdout.write(serializeMessage(msg));
+
+    // Give the pending promise every opportunity to (incorrectly) forward
+    // before it's released.
+    await new Promise((r) => setImmediate(r));
+    await new Promise((r) => setImmediate(r));
+    expect(parentOutBytes).toBe(0);
+
+    release!();
+    await new Promise((r) => setImmediate(r));
+    expect(received).toEqual([msg]);
+  });
+
+  test("a message arriving while a prior one still awaits inspect is never forwarded ahead of it", async () => {
+    const fakeChild = makeFakeChild();
+    const parentOut = new PassThrough();
+    const outBuffer = new ReadBuffer();
+    const received: JSONRPCMessage[] = [];
+    parentOut.on("data", (c: Buffer) => {
+      outBuffer.append(c);
+      let msg = outBuffer.readMessage();
+      while (msg !== null) {
+        received.push(msg);
+        msg = outBuffer.readMessage();
+      }
+    });
+
+    let release: (() => void) | undefined;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let calls = 0;
+
+    startRelay({
+      command: "x",
+      args: [],
+      parentIn: new PassThrough(),
+      parentOut,
+      spawnChild: () => fakeChild,
+      // Only the FIRST call returns a Promise (matching production: only the
+      // first-ever tools/list is held, everything after is synchronous — see
+      // inspectChild in run-inner.ts). A second call that resolved via ANOTHER
+      // Promise would re-enter the async branch and could mask a dispatch/
+      // drain ordering bug behind two coincidentally-serialized awaits; making
+      // it genuinely synchronous is what lets this test actually catch one.
+      inspectChildResponse: (): InspectResult | Promise<InspectResult> => {
+        calls++;
+        if (calls === 1) return gate.then((): InspectResult => ({ action: "pass", findings: [] }));
+        return { action: "pass", findings: [] };
+      },
+    });
+
+    const first = makeResponse(1, "first");
+    const second = makeResponse(2, "second");
+    fakeChild.stdout.write(serializeMessage(first));
+    fakeChild.stdout.write(serializeMessage(second));
+
+    await new Promise((r) => setImmediate(r));
+    await new Promise((r) => setImmediate(r));
+    // The second frame must not even be INSPECTED yet, let alone forwarded —
+    // otherwise a later message could race ahead of the one still pending.
+    expect(received).toEqual([]);
+    expect(calls).toBe(1);
+
+    release!();
+    await new Promise((r) => setImmediate(r));
+    await new Promise((r) => setImmediate(r));
+    expect(received).toEqual([first, second]);
+  });
+});

@@ -283,7 +283,22 @@ export async function runInner(parsed: RunInnerArgs): Promise<number> {
   // retroactively launder a drift.
   const baselineForDrift = pinsSnapshot;
 
-  const inspectChild = (msg: JSONRPCMessage): InspectResult => {
+  // Issue #27: this server has no pin on disk AT ALL as of session start — the
+  // "closing the last same-session-unprotected window" case below only applies
+  // to it. Combined with `firstToolsListPinAwaited`, this scopes the pin-commit
+  // wait to exactly one tools/list frame per session per server; a server that
+  // is already pinned is compared against that pin immediately (no wait needed).
+  // Known residual gap (not a regression — same scope the backlog item named):
+  // a PLACEHOLDER entry (`current_hash: null`, from a failed install-time
+  // capture) still counts as "has a pin" here and is never held, and a brand-
+  // new tool added to an ALREADY-pinned server is first-session-captured
+  // fire-and-forget same as before — neither is covered by the in-memory
+  // `firstHashes` cache either, since that only guards a name it has already
+  // seen this session.
+  const neverPinnedThisServer = !Object.hasOwn(baselineForDrift.servers, parsed.serverName);
+  let firstToolsListPinAwaited = false;
+
+  const inspectChild = (msg: JSONRPCMessage): InspectResult | Promise<InspectResult> => {
     if (pausedUntilFuture) return { action: "pass", findings: [] };
 
     // H4: a server→client list_changed notification ARMS single-shot
@@ -308,19 +323,46 @@ export async function runInner(parsed: RunInnerArgs): Promise<number> {
     // `method` not `result`, so neither drift branch below applies to it.
     const statelessResult = inspectFrame(msg);
     let driftResult: InspectResult = { action: "pass", findings: [] };
+    // Issue #27: set only for a tools/list frame — the off-thread refresh +
+    // first-session pin capture, factored out so the branch below can either
+    // fire it (existing behavior) or await it once before returning.
+    let commitPin: (() => Promise<void>) | null = null;
+    // Issue #27 (review finding): an empty/nameless tools/list (`{tools:[]}`,
+    // or every entry missing a string `name`) makes inspectForDrift a no-op —
+    // nothing gets pinned. Only a frame that can actually PRODUCE a pin is
+    // allowed to consume the one-shot hold below; otherwise a malformed or
+    // slow-starting server's first frame would burn it and the REAL list that
+    // follows would go straight back to fire-and-forget.
+    let canProducePin = false;
 
     if (hasToolsList(msg)) {
       driftResult = inspectForDriftSync(msg, parsed.serverName, baselineForDrift, sessionState);
+      canProducePin = hasNameableTool(msg);
 
       // Off-thread: refresh snapshot + apply first-session pin capture.
-      void (async () => {
+      commitPin = async () => {
         await inspectForDrift(msg, parsed.serverName, {
           read: () => readPins().catch(() => pinsSnapshot),
           write: writePins,
           signatureListVersion: SIGNATURE_LIST_VERSION,
         });
         pinsSnapshot = await readPins().catch(() => pinsSnapshot);
-      })();
+        // Issue #27 (review finding): inspectForDrift's own write is
+        // best-effort — it swallows a write failure (drift.ts) so drift
+        // detection degrades gracefully rather than blocking the session.
+        // That is the right default everywhere else it's used, but it means
+        // this specific write — the one the hold below exists to make
+        // durable — can silently fail with nothing to show for the wait.
+        // Confirm it actually landed and warn (don't block) if it didn't.
+        if (canProducePin && !allNameableToolsPinned(msg, parsed.serverName, pinsSnapshot)) {
+          process.stderr.write(
+            `[mcpm-guard] PIN-COMMIT-UNCONFIRMED ${safeName}: could not confirm the ` +
+              `first-session tools/list pin was persisted to ~/.mcpm/pins.json. A crash ` +
+              `before a future write succeeds would leave this session's tool definitions ` +
+              `unpinned. Review ~/.mcpm/guard-events.jsonl and re-check with \`mcpm guard status\`.\n`,
+          );
+        }
+      };
     } else if (isInitializeResult(msg)) {
       // H5: handshake-drift inspection (capabilities + identity). WARN-tier —
       // never blocks (blocking an initialize result kills the session). The sync
@@ -338,7 +380,27 @@ export async function runInner(parsed: RunInnerArgs): Promise<number> {
       })();
     }
 
-    return applyPolicy(mergeInspect(statelessResult, driftResult), policy);
+    const result = applyPolicy(mergeInspect(statelessResult, driftResult), policy);
+    if (commitPin === null) return result;
+
+    // Issue #27: the FIRST tools/list this session that can actually produce a
+    // pin for a NEVER-pinned server is held until its pin write is attempted
+    // and confirmed (warned if it can't be) — otherwise the frame reaches the
+    // client (and whatever it's shown gets trusted) before there is any disk
+    // record of what that was; a crash/kill in that gap would make the NEXT
+    // launch look like another first session, with no baseline left to catch a
+    // swapped definition against. Every later tools/list this session is
+    // already covered by the in-memory `firstHashes` same-session cache
+    // (SECURITY F3 / #58), so it stays fire-and-forget — one extra round-trip,
+    // once per session per server. `firstToolsListPinAwaited` is set ONLY on
+    // the branch that actually holds — an empty/nameless list must not burn
+    // the one-shot opportunity (review finding).
+    if (neverPinnedThisServer && !firstToolsListPinAwaited && canProducePin) {
+      firstToolsListPinAwaited = true;
+      return commitPin().then(() => result);
+    }
+    void commitPin();
+    return result;
   };
 
   const inspectParent = (msg: JSONRPCMessage): InspectResult => {
@@ -737,6 +799,46 @@ export function isToolsListChangedNotification(msg: JSONRPCMessage): boolean {
   // A notification has no `result` (and no `id`); guard against a crafted frame
   // that pairs the method with a result.
   return !("result" in msg);
+}
+
+/**
+ * Issue #27: true if `msg`'s tools/list result contains at least one entry
+ * with a string `name` — i.e., inspectForDrift (drift.ts) will actually
+ * attempt to pin something from this frame, rather than being a no-op
+ * (`{tools:[]}`, or every entry missing a usable name). Only a frame that can
+ * produce a pin is allowed to consume the one-shot session hold in
+ * inspectChild — review found an empty/malformed first tools/list burned it
+ * on nothing, leaving the REAL list that followed unprotected.
+ */
+export function hasNameableTool(msg: JSONRPCMessage): boolean {
+  const result = (msg as { result?: { tools?: unknown } }).result;
+  const tools = Array.isArray(result?.tools) ? result.tools : [];
+  return tools.some(
+    (t) => t !== null && typeof t === "object" && typeof (t as { name?: unknown }).name === "string",
+  );
+}
+
+/**
+ * Issue #27: true if every named tool in `msg`'s tools/list result now has a
+ * non-null `current_hash` pin for `serverName` in `pins`. inspectForDrift's
+ * own write is deliberately best-effort — it swallows a write failure so
+ * drift detection degrades gracefully rather than blocking the session — but
+ * that leaves the ONE caller that needs the guarantee (the held first
+ * tools/list) with no way to tell "committed" from "silently didn't" without
+ * this check.
+ */
+export function allNameableToolsPinned(msg: JSONRPCMessage, serverName: string, pins: PinsFile): boolean {
+  const result = (msg as { result?: { tools?: unknown } }).result;
+  const tools = Array.isArray(result?.tools) ? result.tools : [];
+  const serverPins = Object.hasOwn(pins.servers, serverName) ? pins.servers[serverName] : undefined;
+  for (const t of tools) {
+    if (t === null || typeof t !== "object") continue;
+    const name = (t as { name?: unknown }).name;
+    if (typeof name !== "string") continue;
+    const pinned = serverPins && Object.hasOwn(serverPins, name) ? serverPins[name] : undefined;
+    if (!pinned || pinned.current_hash === null) return false;
+  }
+  return true;
 }
 
 // ---------------------------------------------------------------------------

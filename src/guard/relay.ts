@@ -21,7 +21,24 @@ import { ReadBuffer, serializeMessage } from "@modelcontextprotocol/sdk/shared/s
 import type { JSONRPCMessage } from "@modelcontextprotocol/sdk/types.js";
 import type { InspectResult } from "./types.js";
 
-export type InspectFn = (msg: JSONRPCMessage) => InspectResult;
+/**
+ * Issue #27: an InspectFn may return a Promise instead of a plain InspectResult
+ * for ONE rare case — a server's first-ever tools/list this session, held until
+ * its pin write commits (see run-inner.ts). Every other call stays synchronous;
+ * `wireDirection` (the production subprocess path) only pays the await cost
+ * when it actually gets handed a Promise. `startInProcessRelay` (unit
+ * tests/demo) does NOT support this — see `SyncInspectFn` below.
+ */
+export type InspectFn = (msg: JSONRPCMessage) => InspectResult | Promise<InspectResult>;
+
+/**
+ * Duck-typed rather than `instanceof Promise`: InspectFn is exported, so a
+ * caller in a different realm (e.g. a vm context) could hand back a foreign
+ * thenable that fails an `instanceof` check yet still needs awaiting.
+ */
+function isThenable(value: InspectResult | Promise<InspectResult>): value is Promise<InspectResult> {
+  return typeof (value as { then?: unknown }).then === "function";
+}
 
 // ---------------------------------------------------------------------------
 // Block response synthesis
@@ -274,13 +291,22 @@ export function startRelay(opts: RelayOptions): RelayHandle {
 // In-process relay (unit tests + demo)
 // ---------------------------------------------------------------------------
 
+/**
+ * Unlike `wireDirection` (the production subprocess path), this harness does
+ * not await a Promise-returning InspectFn — no production caller ever hands
+ * one to `startInProcessRelay` (only `run-inner.ts`'s `inspectChild` can
+ * return one, issue #27, and it is wired exclusively through `startRelay`).
+ * Typed as sync-only so that stays true at compile time, not just by convention.
+ */
+type SyncInspectFn = (msg: JSONRPCMessage) => InspectResult;
+
 export interface InProcessRelayOptions {
   readonly parentIn: Readable;
   readonly parentOut: Writable;
   /** Synthetic responder — receives parent's message, returns child's response (or null for notifications). */
   readonly respond: (msg: JSONRPCMessage) => JSONRPCMessage | null;
-  readonly inspectChildResponse?: InspectFn;
-  readonly inspectParentRequest?: InspectFn;
+  readonly inspectChildResponse?: SyncInspectFn;
+  readonly inspectParentRequest?: SyncInspectFn;
   readonly onEvent?: (event: GuardEvent) => void;
   /**
    * H7: server-stdin analogue. When a server-INITIATED request (pushed via
@@ -317,7 +343,7 @@ export function startInProcessRelay(opts: InProcessRelayOptions): InProcessRelay
   const inspectAndWrite = (
     msg: JSONRPCMessage,
     direction: GuardEvent["direction"],
-    inspect: InspectFn | undefined,
+    inspect: SyncInspectFn | undefined,
   ): boolean => {
     const decision = inspect?.(msg);
     logEvent(decision, direction, opts.onEvent);
@@ -383,8 +409,15 @@ export function startInProcessRelay(opts: InProcessRelayOptions): InProcessRelay
 // Shared wiring (subprocess-side: byte-level pass-through with inspection)
 // ---------------------------------------------------------------------------
 
-/* c8 ignore start — only called by startRelay (subprocess path); the
- * inspection + block logic is mirrored in startInProcessRelay which IS unit-tested. */
+/* c8 ignore start — only called by startRelay (subprocess path); most of the
+ * inspection + block logic is mirrored in startInProcessRelay which IS
+ * unit-tested. Issue #27's Promise-returning-inspect branch (`drain`'s
+ * `isThenable` path) has NO mirror there — `startInProcessRelay` is typed
+ * sync-only (`SyncInspectFn`) since no production caller ever routes an async
+ * inspect fn through it — so that branch is covered separately, directly
+ * against `wireDirection` via the fakeChild/spawnChild seam (relay.test.ts,
+ * "wireDirection — Promise-returning inspect (issue #27)"), not by the
+ * startInProcessRelay mirror this ignore block otherwise relies on. */
 interface DirectionWiring {
   readonly source: Readable;
   readonly target: (bytes: string) => void;
@@ -407,6 +440,113 @@ interface DirectionWiring {
 function wireDirection(w: DirectionWiring): void {
   const buffer = new ReadBuffer();
   let bufferedBytes = 0;
+  // Issue #27: true while a Promise-returning inspect() (the rare first-ever
+  // tools/list pin-commit wait) is outstanding. `drain` bails out immediately
+  // when set, so a later "data" event can never read + forward the NEXT
+  // message ahead of the one still awaiting its verdict; the await's own
+  // `.then` calls `drain()` again to pick up wherever it left off.
+  let awaiting = false;
+
+  const dispatch = (msg: JSONRPCMessage, decision: InspectResult): void => {
+    if (decision.action === "block") {
+      logEvent(decision, w.direction, w.onEvent);
+      // Drop the message; synthesize an error response back to the parent
+      // when the original carries an id. Parent->child blocks may leave the
+      // IDE waiting on a request — synthesized error responses cover the
+      // common (id-bearing) case; notifications have no reply channel.
+      const errResp = makeBlockResponse(msg, decision);
+      if (errResp !== null) {
+        // H7 two-part invariant: on a replyToOrigin block we (a) write the
+        // error to the request's ORIGIN via replyToSource — NOT parentOut —
+        // and (b) DO NOT forward the request (the forward lives ONLY in the
+        // else branch below). So the client sink receives nothing for this id:
+        // no error AND no forwarded request. Otherwise keep the legacy routing
+        // (error → client / parentOut).
+        if (decision.replyToOrigin === true) w.replyToSource(serializeMessage(errResp));
+        else w.parentOut.write(serializeMessage(errResp));
+      }
+    } else {
+      logEvent(decision, w.direction, w.onEvent);
+      w.target(serializeMessage(msg));
+    }
+  };
+
+  const drain = (): void => {
+    if (awaiting) return;
+    let msg: JSONRPCMessage | null;
+    try {
+      msg = buffer.readMessage();
+    } catch {
+      // A malformed / non-JSON-RPC line (startup banner, garbage, valid-JSON
+      // that isn't a JSON-RPC frame) makes the SDK parse throw. Mirror the
+      // buffer-cap branch: emit a RELAY block event and tear the source down —
+      // NO bytes forwarded (the throw is before any target write) — instead of
+      // letting it propagate as an uncaughtException and crash the guard.
+      w.onEvent?.(malformedFrameEvent(w.direction));
+      w.source.destroy();
+      return;
+    }
+    while (msg !== null) {
+      bufferedBytes = 0; // reset on every consumed frame
+      const maybeDecision = w.inspect?.(msg) ?? { action: "pass", findings: [] };
+      if (isThenable(maybeDecision)) {
+        // Issue #27: stop draining synchronously — resume via `drain()` once
+        // the awaited decision lands, so a message already buffered (or one
+        // that arrives mid-await) can't be forwarded out of order ahead of it.
+        awaiting = true;
+        const current = msg;
+        maybeDecision.then(
+          (decision) => {
+            awaiting = false;
+            // Review finding: a buffer-cap/malformed-frame teardown can land
+            // WHILE this was pending — don't forward a message whose source
+            // has since been destroyed (that teardown's own "NO bytes
+            // forwarded" invariant would otherwise be violated by a message
+            // that had already passed inspection before the cap tripped).
+            if (!w.source.destroyed) dispatch(current, decision);
+            drain();
+          },
+          (err: unknown) => {
+            // Review finding: an inspect() REJECTION previously left
+            // `awaiting` stuck true forever — every later message on this
+            // direction silently stopped forwarding, with no crash and no
+            // log line. Fail closed on the one message instead: block it
+            // (same synthetic-error path as a normal block verdict) and keep
+            // draining everything after it.
+            awaiting = false;
+            if (!w.source.destroyed) {
+              dispatch(current, {
+                action: "block",
+                findings: [
+                  {
+                    signature_id: "inspect-rejected",
+                    category: "RELAY",
+                    severity: "critical",
+                    target: "tool_response",
+                    matched_text_excerpt: err instanceof Error ? err.message : String(err),
+                    remediation:
+                      "An inspection callback rejected while evaluating this frame; it was " +
+                      "dropped (fail-closed) instead of forwarded uninspected.",
+                  },
+                ],
+              });
+            }
+            drain();
+          },
+        );
+        return;
+      }
+      dispatch(msg, maybeDecision);
+      try {
+        msg = buffer.readMessage();
+      } catch {
+        w.onEvent?.(malformedFrameEvent(w.direction));
+        w.source.destroy();
+        return;
+      }
+    }
+  };
+
   w.source.on("data", (chunk: Buffer) => {
     bufferedBytes += chunk.byteLength;
     if (bufferedBytes > MAX_BUFFER_BYTES) {
@@ -426,51 +566,7 @@ function wireDirection(w: DirectionWiring): void {
       return;
     }
     buffer.append(chunk);
-    let msg: JSONRPCMessage | null;
-    try {
-      msg = buffer.readMessage();
-    } catch {
-      // A malformed / non-JSON-RPC line (startup banner, garbage, valid-JSON
-      // that isn't a JSON-RPC frame) makes the SDK parse throw. Mirror the
-      // buffer-cap branch: emit a RELAY block event and tear the source down —
-      // NO bytes forwarded (the throw is before any target write) — instead of
-      // letting it propagate as an uncaughtException and crash the guard.
-      w.onEvent?.(malformedFrameEvent(w.direction));
-      w.source.destroy();
-      return;
-    }
-    while (msg !== null) {
-      bufferedBytes = 0; // reset on every consumed frame
-      const decision = w.inspect?.(msg);
-      if (decision?.action === "block") {
-        logEvent(decision, w.direction, w.onEvent);
-        // Drop the message; synthesize an error response back to the parent
-        // when the original carries an id. Parent->child blocks may leave the
-        // IDE waiting on a request — synthesized error responses cover the
-        // common (id-bearing) case; notifications have no reply channel.
-        const errResp = makeBlockResponse(msg, decision);
-        if (errResp !== null) {
-          // H7 two-part invariant: on a replyToOrigin block we (a) write the
-          // error to the request's ORIGIN via replyToSource — NOT parentOut —
-          // and (b) DO NOT forward the request (the forward lives ONLY in the
-          // else branch below). So the client sink receives nothing for this id:
-          // no error AND no forwarded request. Otherwise keep the legacy routing
-          // (error → client / parentOut).
-          if (decision.replyToOrigin === true) w.replyToSource(serializeMessage(errResp));
-          else w.parentOut.write(serializeMessage(errResp));
-        }
-      } else {
-        logEvent(decision, w.direction, w.onEvent);
-        w.target(serializeMessage(msg));
-      }
-      try {
-        msg = buffer.readMessage();
-      } catch {
-        w.onEvent?.(malformedFrameEvent(w.direction));
-        w.source.destroy();
-        return;
-      }
-    }
+    drain();
   });
   w.source.on("end", () => {
     w.targetEnd();
