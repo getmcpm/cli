@@ -19,14 +19,24 @@
  *    `format_code`. The relay's stateful path deliberately EXCLUDES such pairs
  *    from drift comparison (a spec-legal `Read`/`read` pair must never
  *    hard-block a real server), so this warn is what keeps the shape visible.
- * 2. NON-CONFORMING NAME — a name outside SEP-986's charset
- *    (`/^[A-Za-z0-9._-]{1,128}$/`, enforced by the SDK's toolNameValidation).
- *    This is the complement to the fold, not a duplicate of it: the confusable
- *    table is scoped (Cyrillic/Greek look-alikes), so out-of-table homoglyphs
- *    like `ԝrite_file` (U+051D) or `ɡet_user` (U+0261) survive canonicalization
- *    — but they cannot survive a charset check. Measured 0 false positives:
- *    863/863 tool names across 53 real public and hosted MCP servers are pure
- *    ASCII within this charset (see research/name-canon/).
+ * 2. DECEPTIVE CHARACTERS — a name containing an invisible character
+ *    (zero-width, bidi, soft hyphen, BOM, Unicode TAG) or MIXING Latin letters
+ *    with another script. This is the complement to the fold, not a duplicate
+ *    of it: the confusable table is scoped (Cyrillic/Greek look-alikes), so
+ *    out-of-table homoglyphs like `ԝrite_file` (Armenian U+051D) or `ɡet_user`
+ *    (U+0261) survive canonicalization — but neither survives a mixed-script
+ *    test, because impersonating an ASCII name requires sitting among ASCII
+ *    letters.
+ *
+ *    An earlier version flagged any name outside SEP-986's charset
+ *    (`/^[A-Za-z0-9._-]{1,128}$/`). A pre-release review found REAL servers that
+ *    trip it with no deceptive intent — NetApp's ONTAP MCP shipped
+ *    `"Create CIFS Share"`, AdCP registers `tasks/get` as a compatibility
+ *    alias, and Chinese-language servers name every tool in Han script — each
+ *    of which would have drawn a finding accusing the publisher of homoglyph
+ *    impersonation. A space, a slash, or a wholly non-Latin name impersonates
+ *    nothing; only invisibles and mixed script do. The narrower rule keeps every
+ *    look-alike class the review swept while dropping those false positives.
  *
  * Both are WARN tier (severity `high`). A wrong BLOCK on a tools/list bricks the
  * whole server, and a case-only pair is spec-legal even though no observed
@@ -42,10 +52,30 @@ import { worstAction } from "./patterns.js";
 import type { InspectFinding, InspectResult } from "./types.js";
 
 export const CONFUSABLE_TOOL_NAME_SIGNATURE_ID = "tool-name-confusable-duplicate";
-export const NONCONFORMING_TOOL_NAME_SIGNATURE_ID = "tool-name-non-conforming";
+export const DECEPTIVE_TOOL_NAME_SIGNATURE_ID = "tool-name-deceptive-characters";
 
-/** SEP-986 (MCP SDK `TOOL_NAME_REGEX`): tool names are case-sensitive ASCII. */
-const SEP986_TOOL_NAME = /^[A-Za-z0-9._-]{1,128}$/;
+/**
+ * Invisible / formatting characters: zero-width, bidi controls, soft hyphen,
+ * BOM, and the Unicode TAG block. None of these render, so their only effect in
+ * a NAME is to make two different names look identical.
+ */
+const INVISIBLE_CHARS =
+  /[\u00AD\u200B-\u200F\u202A-\u202E\u2060-\u2064\u206A-\u206F\uFEFF]|[\u{E0000}-\u{E007F}]/u;
+
+/**
+ * A name that mixes Latin letters with letters from another script is the
+ * classic homoglyph tell (`fоrmat_code` = Latin + one Cyrillic о). A name
+ * written ENTIRELY in another script impersonates nothing — see the FP note on
+ * the detector below.
+ */
+function isMixedScript(name: string): boolean {
+  if (!/[A-Za-z]/.test(name)) return false;
+  for (const ch of name) {
+    if (ch.charCodeAt(0) < 128) continue;
+    if (/\p{L}|\p{M}/u.test(ch)) return true;
+  }
+  return false;
+}
 
 const PASS: InspectResult = { action: "pass", findings: [] };
 
@@ -99,19 +129,24 @@ export function detectConfusableToolNames(msg: JSONRPCMessage): InspectResult {
     });
   }
 
-  // 2. names outside the SEP-986 charset
+  // 2. names built to be misread
   for (const name of names) {
-    if (SEP986_TOOL_NAME.test(name)) continue;
+    const invisible = INVISIBLE_CHARS.test(name);
+    if (!invisible && !isMixedScript(name)) continue;
     findings.push({
-      signature_id: NONCONFORMING_TOOL_NAME_SIGNATURE_ID,
+      signature_id: DECEPTIVE_TOOL_NAME_SIGNATURE_ID,
       category: "OWASP-MCP-1",
       severity: "high",
       target: "tool_description",
       matched_text_excerpt: sanitizeForTerminal(name, 64),
-      remediation:
-        `Tool name "${sanitizeForTerminal(name, 64)}" is outside the MCP tool-name charset ` +
-        `([A-Za-z0-9._-], max 128). Invisible or non-Latin characters in a name are a ` +
-        `known way to impersonate a trusted tool. Report it to the server's publisher.`,
+      remediation: invisible
+        ? `Tool name "${sanitizeForTerminal(name, 64)}" contains an invisible character ` +
+          `(zero-width, bidi control, or Unicode TAG). Such a character does not render, ` +
+          `so its only effect is to make this name look identical to another one. ` +
+          `Report it to the server's publisher.`
+        : `Tool name "${sanitizeForTerminal(name, 64)}" mixes Latin letters with letters ` +
+          `from another script — the standard way to build a look-alike of a trusted tool ` +
+          `name (e.g. a Cyrillic "о" for an ASCII "o"). Report it to the server's publisher.`,
     });
   }
 

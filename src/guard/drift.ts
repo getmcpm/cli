@@ -135,30 +135,84 @@ function sanitizeLabel(s: string): string {
  * Writes still use the raw name (see upsertToolPin), so the store stays
  * human-readable and byte-compatible with every earlier release.
  */
+/**
+ * Safe pin lookup using Object.hasOwn — defeats `__proto__` / `constructor`
+ * shenanigans (security F13) — resolving a CONFUSABLE tool name onto the pin it
+ * impersonates (TODOS #58 residual).
+ *
+ * Exact raw key FIRST: the identity path for every conforming name, so an
+ * existing pins.json keeps resolving byte-for-byte — no migration, no
+ * PINS_FORMAT_VERSION bump. Only with no exact hit do we fall back to the
+ * canonical form, so a `Format_Code` / Cyrillic `fоrmat_code` / zero-width twin
+ * is compared against the pin it is imitating instead of being filed as a new
+ * tool. Writes still use the raw name (upsertToolPin), so the store stays
+ * human-readable and byte-compatible with every earlier release.
+ *
+ * `ambiguous` (two stored keys folding together, and no exact hit) is reported
+ * rather than silently resolved OR silently ignored. Guessing could compare a
+ * tool against a sibling's baseline and manufacture drift; returning "not
+ * pinned" would fail OPEN — an adversarial review found that a server can plant
+ * two canonically-colliding names in its first-ever list, after which every
+ * confusable spelling of that tool would permanently read as a brand-new tool.
+ * The caller turns this state into a finding.
+ */
+export type ToolPinLookup =
+  | { readonly kind: "exact"; readonly key: string; readonly entry: PinEntry }
+  | { readonly kind: "canonical"; readonly key: string; readonly entry: PinEntry }
+  | { readonly kind: "ambiguous" }
+  | { readonly kind: "none" };
+
+/**
+ * canonical name -> the stored raw keys that fold to it, built ONCE per pins
+ * object. Without this the fallback re-canonicalizes every stored key on every
+ * exact-miss: measured 4.3 s of synchronous relay time for a server with 3000
+ * pinned tools whose names all changed, against a p99 budget of 3.1 ms. Keyed
+ * on the frozen PinsFile sub-object's identity, so a re-read (which builds new
+ * objects) rebuilds naturally and a stale index cannot outlive its store.
+ */
+const canonIndexCache = new WeakMap<object, Map<string, string[]>>();
+
+function canonIndex(server: Record<string, PinEntry>): Map<string, string[]> {
+  const hit = canonIndexCache.get(server);
+  if (hit !== undefined) return hit;
+  const index = new Map<string, string[]>();
+  for (const key of Object.keys(server)) {
+    const canon = canonicalToolName(key);
+    const bucket = index.get(canon);
+    if (bucket === undefined) index.set(canon, [key]);
+    else bucket.push(key);
+  }
+  canonIndexCache.set(server, index);
+  return index;
+}
+
 export function lookupToolPin(
   server: Record<string, PinEntry> | undefined,
   toolName: string,
-): { key: string; entry: PinEntry } | undefined {
-  if (server === undefined) return undefined;
+  opts?: { readonly exactOnly?: boolean },
+): ToolPinLookup {
+  if (server === undefined) return { kind: "none" };
   if (Object.hasOwn(server, toolName)) {
     const entry = server[toolName];
-    if (entry !== undefined) return { key: toolName, entry };
+    if (entry !== undefined) return { kind: "exact", key: toolName, entry };
   }
-  const canon = canonicalToolName(toolName);
+  if (opts?.exactOnly === true) return { kind: "none" };
+  const keys = canonIndex(server).get(canonicalToolName(toolName));
+  if (keys === undefined) return { kind: "none" };
   let found: { key: string; entry: PinEntry } | undefined;
-  for (const key of Object.keys(server)) {
-    if (canonicalToolName(key) !== canon) continue;
+  for (const key of keys) {
     const entry = server[key];
     if (entry === undefined) continue;
-    if (found !== undefined) return undefined; // ambiguous — refuse to guess
+    if (found !== undefined) return { kind: "ambiguous" };
     found = { key, entry };
   }
-  return found;
+  return found === undefined ? { kind: "none" } : { kind: "canonical", ...found };
 }
 
 function lookupPin(pins: PinsFile, serverName: string, toolName: string): PinEntry | undefined {
   if (!Object.hasOwn(pins.servers, serverName)) return undefined;
-  return lookupToolPin(pins.servers[serverName], toolName)?.entry;
+  const r = lookupToolPin(pins.servers[serverName], toolName);
+  return r.kind === "exact" || r.kind === "canonical" ? r.entry : undefined;
 }
 
 /**
@@ -187,8 +241,20 @@ export function buildDriftFinding(args: {
    * does not pass it.
    */
   newDescriptionExcerpt?: string;
+  /**
+   * The key this tool's pin is actually STORED under, when the live name only
+   * resolved to it canonically (a look-alike spelling). `accept-drift --tool`
+   * looks the key up exactly, so the remediation must name the stored key or it
+   * hands the user a command that silently does nothing (review).
+   */
+  pinnedAs?: string;
 }): InspectFinding {
   const { cls, safeServer, safeTool, expected, actual, newDescriptionExcerpt } = args;
+  const target = args.pinnedAs ?? safeTool;
+  const alias =
+    args.pinnedAs !== undefined && args.pinnedAs !== safeTool
+      ? ` This name is a look-alike of the pinned tool "${args.pinnedAs}", which is the name to pass to \`--tool\`.`
+      : "";
   if (cls.kind === "cosmetic") {
     const fields = cls.changedFields.join(",");
     const newExcerpt = newDescriptionExcerpt ? ` new="${newDescriptionExcerpt}"` : "";
@@ -201,7 +267,7 @@ export function buildDriftFinding(args: {
       remediation:
         `Tool "${safeTool}" ${fields} wording changed since install — a non-blocking ` +
         `change (schema + annotations unchanged).${newExcerpt ? ` New wording:${newExcerpt}.` : ""} ` +
-        `If intended, run \`mcpm guard accept-drift ${safeServer} --tool ${safeTool} --new-hash ${actual}\` to silence it.`,
+        `If intended, run \`mcpm guard accept-drift ${safeServer} --tool ${target} --new-hash ${actual}\` to silence it.${alias}`,
     };
   }
   const fields = cls.changedFields.length > 0 ? cls.changedFields.join(",") : "definition";
@@ -213,8 +279,8 @@ export function buildDriftFinding(args: {
     matched_text_excerpt: `${safeTool}: ${fields} changed (${expected.slice(7, 19)}… → ${actual.slice(7, 19)}…)`,
     remediation:
       `Tool "${safeTool}" schema changed since install (rug-pull suspected). ` +
-      `If this is a legitimate server upgrade, run \`mcpm guard accept-drift ${safeServer} --tool ${safeTool} --new-hash ${actual}\` ` +
-      `(or \`--remove\` to drop the pin entirely).`,
+      `If this is a legitimate server upgrade, run \`mcpm guard accept-drift ${safeServer} --tool ${target} --new-hash ${actual}\` ` +
+      `(or \`--remove\` to drop the pin entirely).${alias}`,
   };
 }
 
@@ -596,6 +662,12 @@ export function applyAcceptDrift(
     if (options.toolName !== undefined) {
       const server = pins.servers[serverName];
       if (!server) return pins;
+      // Destructuring a MISSING key still builds a new object, so the caller's
+      // `next !== pins` change-detection reported "removed" while removing
+      // nothing — the false-success class v0.12.1's dogfood exists to catch,
+      // and newly reachable now that a canonically-resolved block can name a
+      // tool whose pin is stored under a different spelling (review).
+      if (!Object.hasOwn(server, options.toolName)) return pins;
       const { [options.toolName]: _r, ...rest } = server;
       return { ...pins, servers: { ...pins.servers, [serverName]: rest } };
     }

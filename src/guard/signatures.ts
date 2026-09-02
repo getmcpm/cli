@@ -616,7 +616,7 @@ export const OWASP_MCP_TOP_10: readonly Signature[] = [
       "`mcpm guard mute cli-flag-injection-in-identifier-arg`.",
   },
   {
-    // tool-name-confusable-duplicate / tool-name-non-conforming — emitted by
+    // tool-name-confusable-duplicate / tool-name-deceptive-characters — emitted by
     // detectConfusableToolNames (tool-name-confusable.ts) from a NAME comparison,
     // not the regex engine, so like the structural entries above these carry NO
     // patterns and exist so the ids are recognized by `guard mute`,
@@ -637,20 +637,21 @@ export const OWASP_MCP_TOP_10: readonly Signature[] = [
       "`mcpm guard mute tool-name-confusable-duplicate`.",
   },
   {
-    id: "tool-name-non-conforming",
+    id: "tool-name-deceptive-characters",
     category: "OWASP-MCP-1",
     severity: "high",
     description:
-      "A tool name falls outside the MCP tool-name charset [A-Za-z0-9._-] (SEP-986) — the out-of-table homoglyph / invisible-character class",
+      "A tool name contains an invisible character, or mixes Latin with another script — the out-of-table homoglyph class the confusable table cannot fold",
     target: "tool_description",
     patterns: [],
     remediation:
-      "A tool name contains a character outside the MCP tool-name charset " +
-      "([A-Za-z0-9._-], max 128). Invisible or non-Latin characters in a NAME are a " +
-      "known way to impersonate a trusted tool, and they are not folded by the " +
-      "guard's scoped confusable table. Report it to the server's publisher. If this " +
-      "server legitimately uses such names, mute via " +
-      "`mcpm guard mute tool-name-non-conforming`.",
+      "A tool name contains an invisible character (zero-width, bidi, Unicode TAG), " +
+      "or mixes Latin letters with letters from another script. Both are ways to build " +
+      "a name that looks identical to a trusted tool's, and neither is folded by the " +
+      "guard's scoped confusable table. A name written wholly in one non-Latin script " +
+      "impersonates nothing and is NOT flagged. Report it to the server's publisher. " +
+      "If this server legitimately uses such names, mute via " +
+      "`mcpm guard mute tool-name-deceptive-characters`.",
   },
   {
     // unicode-tag-concealment — the tag-block PRESENCE floor on the carriers H2

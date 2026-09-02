@@ -47,10 +47,27 @@ published section (it happened to #170).
 
   Net effect: the **replace** form of the attack (the twin replaces the trusted
   tool — the Deadbugz shape) now BLOCKS; the **co-existence** form (twin beside
-  the tool it imitates) WARNS instead of passing silently. Two tools in one list
-  whose names canonicalize together are excluded from the drift comparison and
-  from every cache/pin write, so a spec-legal `Read`/`read` pair cannot
-  hard-block a real server and neither twin can poison the other's baseline.
+  the tool it imitates) WARNS instead of passing silently.
+
+  Two tools in one list whose names canonicalize together fall back to **raw**
+  keying — and an exact-only pin lookup — for the rest of the session, so a
+  spec-legal `Read`/`read` pair keeps two independent baselines and cannot
+  hard-block a real server. A pre-release adversarial review is why it works
+  that way: the first design *excluded* such a collision group from inspection,
+  and because the group always contains the incumbent, appending one throwaway
+  ASCII case-variant beside a real tool removed **that tool** from drift
+  inspection — measured, five critical blocks became zero and the exact Deadbugz
+  sequence returned to `pass`. The published suite missed it because every test
+  poisoned the twin and left the incumbent benign. Raw keying preserves the
+  zero-FP property without ever taking a tool out of inspection.
+
+  The same review found a second, subtler fail-open: a server can advertise two
+  canonically-colliding names in its **first-ever** list, which the capture path
+  pins under both raw keys; every confusable spelling of that tool would then
+  resolve ambiguously and read as a brand-new tool on every future session. An
+  ambiguous pin match with no exact hit is therefore now a critical finding
+  rather than "not pinned" — measured cost zero, since no surveyed server has
+  any within-server canonical collision to begin with.
 
 - **A tool's `name` is now an inspected carrier.** `tool_description` extracts
   `[description, title, inputSchema]` and `tool_annotations` extracts
@@ -58,18 +75,35 @@ published section (it happened to #170).
   in a tool NAME was completely silent, not even a warn, while the same
   character in a description warned. Two new warn-tier catalog entries (19 → 21)
   cover it: `tool-name-confusable-duplicate` for the co-existence shape above,
-  and `tool-name-non-conforming` for a name outside SEP-986's charset. The
-  second is the complement to the fold, not a duplicate of it — the confusable
-  table is a scoped Cyrillic/Greek subset, so out-of-table look-alikes such as
-  `ԝrite_file` (Armenian U+051D) or `ɡet_user` (U+0261) survive canonicalization
-  but cannot survive a charset check, at zero measured false positives. Both are
+  and `tool-name-deceptive-characters` for a name carrying an invisible
+  character or mixing Latin with another script. The second is the complement to
+  the fold, not a duplicate of it — the confusable table is a scoped
+  Cyrillic/Greek subset, so out-of-table look-alikes such as `ԝrite_file`
+  (Armenian U+051D) or `ɡet_user` (U+0261) survive canonicalization, but
+  impersonating an ASCII name means sitting among ASCII letters, which a
+  mixed-script test sees. That rule replaced a plain SEP-986 charset check after
+  review found **real** servers it would have accused of homoglyph
+  impersonation: NetApp's ONTAP MCP shipped `"Create CIFS Share"`, AdCP
+  registers `tasks/get` as a compatibility alias, and Chinese-language servers
+  name every tool in Han script. A space, a slash, or a wholly non-Latin name
+  impersonates nothing. Be precise about what the check buys, too: a swept
+  sample of sixteen look-alike classes confirms it makes **every** such twin
+  visible, but it reports at **warn**, so where an in-table homoglyph now BLOCKS
+  the replace form via the canonical key, an out-of-table one is forwarded with
+  a warning. An improvement on the previous silent `pass`, not parity with the
+  block. Both are
   emitted by a **stateless** detector, so they are reachable through
   `mcpm guard inspect` and the published benchmark corpus, not only through the
   relay (the v0.27.0 parity lesson), and both ship with fixtures so the release
   gate and mcp-guardbench can see them.
 
   **Known residuals, unchanged by this release:** a poisoned definition under a
-  wholly *different* name is still a legitimate addition by design; `prompts/get`
+  wholly *different* name is still a legitimate addition by design — and that
+  includes pure-ASCII look-alikes the fold deliberately does not touch
+  (`forrnat_code` for `format_code`, `f0rmat_code`, or `format-code`), since
+  folding those would merge the separator and character distinctions real
+  servers use as conventions; the content signatures do not fire on the
+  realistic Deadbugz wording either, so those spellings pass silently; `prompts/get`
   still has no drift or pin mechanism (evaluated for this release and deferred —
   a `prompts/list` pin would hash the template metadata the campaign leaves
   untouched, not the rendered messages it actually poisons); and a single cold

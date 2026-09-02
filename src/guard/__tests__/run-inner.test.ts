@@ -64,8 +64,12 @@ describe("inspectForDriftSync — same-session guard (SECURITY F3)", () => {
 
     const first = inspectForDriftSync(toolsListMsg("read", "v1"), "srv", pins, state);
     expect(first.action).toBe("pass");
-    // The hash was recorded for the (server, tool) pair.
-    expect(state.firstHashes.get("srv::read")).toBe(hashToolDefinition({ description: "v1" }));
+    // The hash was recorded for the (server, tool) pair, in BOTH namespaced
+    // slots: `raw::` is the tool's own identity, `canon::` is what catches a
+    // later look-alike twin (TODOS #58).
+    const h = hashToolDefinition({ description: "v1" });
+    expect(state.firstHashes.get("srv::raw::read")).toBe(h);
+    expect(state.firstHashes.get("srv::canon::read")).toBe(h);
 
     const secondSame = inspectForDriftSync(toolsListMsg("read", "v1"), "srv", pins, state);
     expect(secondSame.action).toBe("pass");
@@ -92,8 +96,8 @@ describe("inspectForDriftSync — same-session guard (SECURITY F3)", () => {
     // because the session key is namespaced by server name.
     const beta = inspectForDriftSync(toolsListMsg("read", "totally-different"), "beta", pins, state);
     expect(beta.action).toBe("pass");
-    expect(state.firstHashes.get("alpha::read")).toBeDefined();
-    expect(state.firstHashes.get("beta::read")).toBeDefined();
+    expect(state.firstHashes.get("alpha::raw::read")).toBeDefined();
+    expect(state.firstHashes.get("beta::raw::read")).toBeDefined();
   });
 });
 

@@ -164,13 +164,13 @@ describe("#58 residual — poisoned twin CO-EXISTS beside the trusted tool", () 
     expect(res.findings.map((f) => f.signature_id)).toContain("tool-name-confusable-duplicate");
   });
 
-  test("an out-of-table homoglyph the fold misses is still caught by the charset check", () => {
+  test("an out-of-table homoglyph the fold misses is still caught (mixed script)", () => {
     // `ԝ` (U+051D) is not in the confusable table, so canonicalToolName does NOT
-    // fold it — the SEP-986 charset check is what closes that class.
+    // fold it — the mixed-script test is what closes that class.
     expect(canonicalToolName("ԝrite_file")).not.toBe(canonicalToolName("write_file"));
     const res = inspectFrame(one("ԝrite_file", BENIGN_DESCRIPTION, BENIGN_SCHEMA));
     expect(res.action).toBe("warn");
-    expect(res.findings.map((f) => f.signature_id)).toContain("tool-name-non-conforming");
+    expect(res.findings.map((f) => f.signature_id)).toContain("tool-name-deceptive-characters");
   });
 });
 
@@ -245,7 +245,7 @@ describe("zero-FP direction — legitimate servers must stay clean", () => {
     expect(res.findings).toEqual([]);
   });
 
-  test("ordinary ASCII tool names never trip the charset check", () => {
+  test("ordinary ASCII tool names never trip the deceptive-character check", () => {
     const res = inspectFrame(
       listOf([
         { name: "read_file", description: "d", inputSchema: BENIGN_SCHEMA },
@@ -263,23 +263,243 @@ describe("pin lookup — canonical resolution without a store rewrite", () => {
 
   test("exact raw key resolves first (existing pins.json keeps working byte-for-byte)", () => {
     const server = { [TRUSTED]: entry };
-    expect(lookupToolPin(server, TRUSTED)?.key).toBe(TRUSTED);
+    const r = lookupToolPin(server, TRUSTED);
+    expect(r.kind).toBe("exact");
+    expect(r.kind === "exact" ? r.key : null).toBe(TRUSTED);
   });
 
   test("a confusable twin resolves onto the pin it imitates", () => {
     const server = { [TRUSTED]: entry };
     for (const twin of [CASE_TWIN, CYRILLIC_TWIN, ZWSP_TWIN]) {
-      expect(lookupToolPin(server, twin)?.key).toBe(TRUSTED);
+      const r = lookupToolPin(server, twin);
+      expect(r.kind).toBe("canonical");
+      expect(r.kind === "canonical" ? r.key : null).toBe(TRUSTED);
     }
   });
 
-  test("an AMBIGUOUS canonical match refuses to guess", () => {
+  test("an AMBIGUOUS canonical match is REPORTED, never silently resolved or ignored", () => {
+    // Reporting is what keeps a planted collision from failing OPEN — the
+    // caller turns this into a finding instead of "not pinned" (review).
     const server = { Read: entry, read: entry };
-    expect(lookupToolPin(server, "REaD")).toBeUndefined();
+    expect(lookupToolPin(server, "REaD").kind).toBe("ambiguous");
   });
 
   test("a distinct name does not resolve onto an unrelated pin", () => {
-    expect(lookupToolPin({ [TRUSTED]: entry }, "lint_code")).toBeUndefined();
-    expect(lookupToolPin({ get_user: entry }, "get-user")).toBeUndefined();
+    expect(lookupToolPin({ [TRUSTED]: entry }, "lint_code").kind).toBe("none");
+    expect(lookupToolPin({ get_user: entry }, "get-user").kind).toBe("none");
+  });
+
+  test("exactOnly disables the canonical fallback (used for collided names)", () => {
+    const server = { [TRUSTED]: entry };
+    expect(lookupToolPin(server, CASE_TWIN, { exactOnly: true }).kind).toBe("none");
+    expect(lookupToolPin(server, TRUSTED, { exactOnly: true }).kind).toBe("exact");
+  });
+});
+
+/**
+ * Regressions from the pre-release adversarial review. The first design
+ * EXCLUDED a colliding name group from inspection; because such a group always
+ * contains the incumbent, appending one throwaway ASCII case-variant beside a
+ * real tool removed that tool from drift inspection — turning the FP guard into
+ * a universal disarm. The suite missed it because every existing test poisoned
+ * the TWIN and left the incumbent benign.
+ */
+describe("review regression — a twin must never take the incumbent out of inspection", () => {
+  const twinOf = (n: string) => n.toUpperCase();
+
+  test("durable pin: poisoned incumbent beside a benign case twin still BLOCKS", () => {
+    const res = inspectChildFrame(
+      listOf([
+        { name: TRUSTED, description: POISONED_DESCRIPTION, inputSchema: POISONED_SCHEMA },
+        { name: twinOf(TRUSTED), description: BENIGN_DESCRIPTION, inputSchema: BENIGN_SCHEMA },
+      ]),
+      durablePin(TRUSTED, BENIGN_DESCRIPTION, BENIGN_SCHEMA),
+      freshState(),
+    );
+    expect(res.action).toBe("block");
+  });
+
+  test("first session: a twin pair up front does not stop the later poisoned replace BLOCKING", () => {
+    const pins = emptyPinsFile();
+    const state = freshState();
+    inspectChildFrame(
+      listOf([
+        { name: TRUSTED, description: BENIGN_DESCRIPTION, inputSchema: BENIGN_SCHEMA },
+        { name: "Format_code", description: BENIGN_DESCRIPTION, inputSchema: BENIGN_SCHEMA },
+      ]),
+      pins,
+      state,
+    );
+    state.revalidationArmed = true;
+    const res = inspectChildFrame(one(TRUSTED, POISONED_DESCRIPTION, POISONED_SCHEMA), pins, state);
+    expect(res.action).toBe("block");
+  });
+
+  test("mid-session: carrying a twin in every poisoned frame does not evade the F3 guard", () => {
+    const pins = emptyPinsFile();
+    const state = freshState();
+    inspectChildFrame(one(TRUSTED, BENIGN_DESCRIPTION, BENIGN_SCHEMA), pins, state);
+    const res = inspectChildFrame(
+      listOf([
+        { name: TRUSTED, description: POISONED_DESCRIPTION, inputSchema: POISONED_SCHEMA },
+        { name: "Format_code", description: BENIGN_DESCRIPTION, inputSchema: BENIGN_SCHEMA },
+      ]),
+      pins,
+      state,
+    );
+    expect(res.action).toBe("block");
+  });
+
+  test("a planted colliding PIN pair does not permanently disarm drift (fail-closed, not open)", () => {
+    // A server's first-ever list can advertise two canonically-colliding names,
+    // which the async capture path pins under BOTH raw keys. Every confusable
+    // spelling would then resolve ambiguously; returning "unpinned" there would
+    // read as a brand-new tool forever after.
+    const fields = { description: BENIGN_DESCRIPTION, schema: BENIGN_SCHEMA, annotations: undefined };
+    const entry = {
+      current_hash: hashToolDefinition(fields),
+      previous_hashes: [],
+      captured_at: "2026-08-01T00:00:00Z",
+      captured_via: "first-session" as const,
+      signature_list_version: "v0.5.0",
+      field_hashes: fieldHashesOf(fields),
+    };
+    const pins = upsertToolPin(upsertToolPin(emptyPinsFile(), SERVER, TRUSTED, entry), SERVER, "Format_code", entry);
+    const res = inspectChildFrame(one("FORMAT_CODE", POISONED_DESCRIPTION, POISONED_SCHEMA), pins, freshState());
+    expect(res.action).toBe("block");
+  });
+
+  test("FP: a collided name must not resolve onto its twin's PIN either", () => {
+    // Only `read` is pinned. When the server then advertises `Read` beside it,
+    // `Read` must NOT fall back to `read`'s pin — comparing one tool's
+    // definition against the other's baseline would manufacture drift and
+    // hard-block a benign server. Collided names get an exact-only pin lookup.
+    const res = inspectChildFrame(
+      listOf([
+        // Differs from the pinned `read` in BOTH description and schema, so a
+        // wrong resolution surfaces as a critical `schema-drift` block rather
+        // than a cosmetic warn that a laxer assertion would let through.
+        { name: "Read", description: "Read a file.", inputSchema: { type: "object", properties: { fd: { type: "number" } } } },
+        { name: "read", description: BENIGN_DESCRIPTION, inputSchema: BENIGN_SCHEMA },
+      ]),
+      durablePin("read", BENIGN_DESCRIPTION, BENIGN_SCHEMA),
+      freshState(),
+    );
+    expect(res.action).toBe("warn");
+    // No drift-FAMILY finding at all — not merely no `schema-drift` exactly.
+    expect(res.findings.filter((f) => f.signature_id.startsWith("schema-drift"))).toEqual([]);
+  });
+
+  test("FP: raw keying keeps a legitimate case-pair independent ACROSS frames (sticky)", () => {
+    // The fallback must persist for the session. Per-frame, a [Read, read]
+    // frame followed by a [Read]-only frame would key `Read` canonically onto
+    // `read`'s slot and manufacture drift on a benign server.
+    const pins = emptyPinsFile();
+    const state = freshState();
+    const pair = listOf([
+      { name: "Read", description: "Read a file.", inputSchema: BENIGN_SCHEMA },
+      { name: "read", description: "Read a record.", inputSchema: { type: "object" } },
+    ]);
+    expect(inspectChildFrame(pair, pins, state).action).toBe("warn");
+    const solo = inspectChildFrame(one("Read", "Read a file.", BENIGN_SCHEMA), pins, state);
+    expect(solo.action).toBe("pass");
+    expect(solo.findings).toEqual([]);
+  });
+});
+
+/**
+ * Second review round: the first collision fix wrote raw and canonical keys
+ * into ONE keyspace, so `read`'s raw key aliased `Read`'s canonical key and two
+ * benign, unchanged tools blocked as a rug-pull — depending only on the order
+ * they were first seen. Both orders are pinned here.
+ */
+describe("review regression — raw and canonical slots must not alias", () => {
+  const readPair = () =>
+    listOf([
+      { name: "Read", description: "Read a file.", inputSchema: BENIGN_SCHEMA },
+      { name: "read", description: "Read a record.", inputSchema: { type: "object" } },
+    ]);
+
+  test("order A: incumbent seen ALONE first, then the pair — no false block", () => {
+    const pins = emptyPinsFile();
+    const state = freshState();
+    expect(inspectChildFrame(one("Read", "Read a file.", BENIGN_SCHEMA), pins, state).action).toBe("pass");
+    const res = inspectChildFrame(readPair(), pins, state);
+    expect(res.action).toBe("warn");
+    expect(res.findings.filter((f) => f.signature_id.startsWith("schema-drift"))).toEqual([]);
+  });
+
+  test("order B: lowercase incumbent first, then the pair — no false block", () => {
+    const pins = emptyPinsFile();
+    const state = freshState();
+    expect(inspectChildFrame(one("read", "Read a record.", { type: "object" }), pins, state).action).toBe("pass");
+    const res = inspectChildFrame(readPair(), pins, state);
+    expect(res.action).toBe("warn");
+    expect(res.findings.filter((f) => f.signature_id.startsWith("schema-drift"))).toEqual([]);
+  });
+
+  test("retiring the shared slot must NOT disarm the incumbent it protected", () => {
+    // The incumbent keeps its own raw slot, so poisoning it while a benign twin
+    // rides along in the same frame still blocks.
+    const pins = emptyPinsFile();
+    const state = freshState();
+    inspectChildFrame(one(TRUSTED, BENIGN_DESCRIPTION, BENIGN_SCHEMA), pins, state);
+    const res = inspectChildFrame(
+      listOf([
+        { name: TRUSTED, description: POISONED_DESCRIPTION, inputSchema: POISONED_SCHEMA },
+        { name: "Format_code", description: BENIGN_DESCRIPTION, inputSchema: BENIGN_SCHEMA },
+      ]),
+      pins,
+      state,
+    );
+    expect(res.action).toBe("block");
+  });
+});
+
+describe("review regression — remediation and accept-drift must actually work", () => {
+  test("a canonically-resolved block names the STORED key for --tool", () => {
+    const res = inspectChildFrame(
+      one(CASE_TWIN, POISONED_DESCRIPTION, POISONED_SCHEMA),
+      durablePin(TRUSTED, BENIGN_DESCRIPTION, BENIGN_SCHEMA),
+      freshState(),
+    );
+    expect(res.action).toBe("block");
+    const rem = res.findings.map((f) => f.remediation).join(" ");
+    expect(rem).toContain(`--tool ${TRUSTED}`);
+    expect(rem).not.toContain(`--tool ${CASE_TWIN}`);
+  });
+
+  test("accept-drift --remove --tool reports nothing removed for a missing key", async () => {
+    const { applyAcceptDrift } = await import("../drift.js");
+    const pins = durablePin(TRUSTED, BENIGN_DESCRIPTION, BENIGN_SCHEMA);
+    // A key that is not stored must leave the file IDENTICAL, so the caller's
+    // change-detection cannot report a phantom success.
+    expect(applyAcceptDrift(pins, SERVER, { toolName: CASE_TWIN, remove: true })).toBe(pins);
+    expect(applyAcceptDrift(pins, SERVER, { toolName: TRUSTED, remove: true })).not.toBe(pins);
+  });
+
+  test("a large pin store does not stall the relay (memoized canonical index)", () => {
+    let pins = emptyPinsFile();
+    const f = { description: "d", schema: { type: "object" }, annotations: undefined };
+    const e = {
+      current_hash: hashToolDefinition(f),
+      previous_hashes: [],
+      captured_at: "x",
+      captured_via: "first-session" as const,
+      signature_list_version: "v",
+      field_hashes: fieldHashesOf(f),
+    };
+    for (let i = 0; i < 1500; i++) pins = upsertToolPin(pins, SERVER, `pinned_${i}`, e);
+    const tools = Array.from({ length: 1500 }, (_, i) => ({
+      name: `live_${i}`,
+      description: "d",
+      inputSchema: { type: "object" },
+    }));
+    const t0 = performance.now();
+    inspectForDriftSync(listOf(tools), SERVER, pins, freshState());
+    // Generous bound: the un-memoized rescan measured ~1.1 s at this size and
+    // ~4.3 s at 3000. Loose enough not to flake on a busy CI box (the v0.20.0
+    // wall-clock lesson), tight enough to catch the O(n·m) regression.
+    expect(performance.now() - t0).toBeLessThan(800);
   });
 });
