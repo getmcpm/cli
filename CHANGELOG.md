@@ -8,6 +8,75 @@ _Add entries here, never under a stamped version_ — a release commit renames t
 heading, and a branch that wrote beneath it merges without conflict straight into a
 published section (it happened to #170).
 
+### Security
+
+- **Closed the tool-NAME evasion of the first-session rug-pull guard — the last
+  piece of TODOS #58, and the residual its own review recorded.** The
+  same-session drift cache (`run-inner.ts`) and the on-disk pin lookup
+  (`drift.ts`) both keyed a tool by its RAW `name` string. So a server flipping
+  its definitions under `notifications/tools/list_changed` cover could ship the
+  poisoned definition under a look-alike of the trusted name — `Format_Code`,
+  Cyrillic `fоrmat_code` (U+043E), or a zero-width character inside the name —
+  and the guard filed it as a brand-new tool: the "new name = legitimate
+  addition" carve-out that keeps a real mid-session tool addition zero-FP waved
+  it through with **zero findings**, whether the look-alike replaced the trusted
+  tool or sat beside it in the same list. Measured against the shipped v0.34.1
+  build, every one of those variants scored `pass` while the same-name control
+  blocked.
+
+  Both keyings now use `canonicalToolName` (NFKC + zero-width/TAG strip +
+  confusable fold + case-fold). The fold is deliberately **weaker** than the
+  existing `canonicalizeKey` used for schema property keys: it merges only
+  spellings that are visually indistinguishable, never the camelCase and
+  separator distinctions SEP-986 permits and real servers use as per-server
+  conventions (Notion ships `get-user`, Linear `get_user`) — folding those would
+  make a server's second, benign tool look like a mutation of its first and
+  hard-block it, the failure direction this project judges worse than a miss.
+  The rung was chosen by measurement, not argument: across 96 real server
+  snapshots / 944 distinct tool names it produces **zero within-server
+  collisions**, and because SEP-986 restricts names to `[A-Za-z0-9._-]` (863/863
+  surveyed names conform), the strip and fold can only ever alter a name that is
+  already outside the spec. The stronger separator/camel rungs also scored zero
+  — but *vacuously*: no surveyed server mixes naming styles, so that zero is an
+  absence of test input rather than evidence of safety.
+
+  Pin lookup resolves the exact raw key **first** and only then the canonical
+  form, so existing `pins.json` files keep resolving byte-for-byte — no
+  migration, no `PINS_FORMAT_VERSION` bump — and an ambiguous canonical match
+  refuses to guess rather than compare a tool against a sibling's baseline.
+
+  Net effect: the **replace** form of the attack (the twin replaces the trusted
+  tool — the Deadbugz shape) now BLOCKS; the **co-existence** form (twin beside
+  the tool it imitates) WARNS instead of passing silently. Two tools in one list
+  whose names canonicalize together are excluded from the drift comparison and
+  from every cache/pin write, so a spec-legal `Read`/`read` pair cannot
+  hard-block a real server and neither twin can poison the other's baseline.
+
+- **A tool's `name` is now an inspected carrier.** `tool_description` extracts
+  `[description, title, inputSchema]` and `tool_annotations` extracts
+  `annotations` — `name` was in neither, so a zero-width or homoglyph character
+  in a tool NAME was completely silent, not even a warn, while the same
+  character in a description warned. Two new warn-tier catalog entries (19 → 21)
+  cover it: `tool-name-confusable-duplicate` for the co-existence shape above,
+  and `tool-name-non-conforming` for a name outside SEP-986's charset. The
+  second is the complement to the fold, not a duplicate of it — the confusable
+  table is a scoped Cyrillic/Greek subset, so out-of-table look-alikes such as
+  `ԝrite_file` (Armenian U+051D) or `ɡet_user` (U+0261) survive canonicalization
+  but cannot survive a charset check, at zero measured false positives. Both are
+  emitted by a **stateless** detector, so they are reachable through
+  `mcpm guard inspect` and the published benchmark corpus, not only through the
+  relay (the v0.27.0 parity lesson), and both ship with fixtures so the release
+  gate and mcp-guardbench can see them.
+
+  **Known residuals, unchanged by this release:** a poisoned definition under a
+  wholly *different* name is still a legitimate addition by design; `prompts/get`
+  still has no drift or pin mechanism (evaluated for this release and deferred —
+  a `prompts/list` pin would hash the template metadata the campaign leaves
+  untouched, not the rendered messages it actually poisons); and a single cold
+  frame cannot express the stateful replace-form, which is why that half is
+  covered by the relay and by `tool-name-confusable.test.ts` rather than by the
+  corpus.
+
 ## [0.34.1] - 2026-09-01
 
 ### Fixed
