@@ -52,7 +52,11 @@ published section (it happened to #170).
   Two tools in one list whose names canonicalize together fall back to **raw**
   keying — and an exact-only pin lookup — for the rest of the session, so a
   spec-legal `Read`/`read` pair keeps two independent baselines and cannot
-  hard-block a real server. A pre-release adversarial review is why it works
+  hard-block a real server. The session cache namespaces its raw and canonical
+  slots rather than sharing one keyspace: `read`'s raw key is byte-identical to
+  `Read`'s canonical key, and an intermediate version of this fix aliased them,
+  blocking two benign unchanged tools as a rug-pull depending only on the order
+  they were first seen. A pre-release adversarial review is why it works
   that way: the first design *excluded* such a collision group from inspection,
   and because the group always contains the incumbent, appending one throwaway
   ASCII case-variant beside a real tool removed **that tool** from drift
@@ -68,6 +72,16 @@ published section (it happened to #170).
   ambiguous pin match with no exact hit is therefore now a critical finding
   rather than "not pinned" — measured cost zero, since no surveyed server has
   any within-server canonical collision to begin with.
+
+  Two more defects the same reviews caught, both in code this release adds: the
+  canonical fallback re-canonicalized every stored key on each exact miss, on
+  the relay's synchronous path — 4.3 s for a server with 3000 pinned tools
+  against a 3.1 ms budget, reachable benignly by a rename-heavy upgrade, so the
+  index is now built once per pins object (25 ms); and a canonically-resolved
+  block printed `accept-drift --tool <look-alike>`, a command that matches keys
+  exactly and therefore did nothing, while `--remove --tool <missing>` reported
+  "removed" having removed nothing. Remediation now names the key the pin is
+  stored under, and a missing key leaves the file untouched.
 
 - **A tool's `name` is now an inspected carrier.** `tool_description` extracts
   `[description, title, inputSchema]` and `tool_annotations` extracts
