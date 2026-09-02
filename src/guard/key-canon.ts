@@ -33,3 +33,37 @@ export function canonicalizeKey(rawKey: string): string {
     .replace(/[\s-]+/g, "_") // hyphens / whitespace → underscore
     .replace(/_{2,}/g, "_"); // collapse runs (a deliberate wrap stays a single `_`)
 }
+
+/**
+ * Canonical form of a tool NAME, for keying the same-session drift cache and
+ * the pin store (TODOS #58 residual, left open by #191's review).
+ *
+ * Deliberately a WEAKER fold than {@link canonicalizeKey}: normalizeForMatch
+ * (NFKC + zero-width/TAG strip + confusable fold) plus a case-fold, and NOTHING
+ * else. It must map only VISUALLY IDENTICAL spellings together — the concealed
+ * twin an attacker ships to ride the "new tool name = legitimate addition"
+ * carve-out — never spellings a human tells apart at a glance.
+ *
+ * Why not canonicalizeKey: its camelCase split and `[\s-]+`→`_` collapse fold
+ * `get-user`, `getUser` and `get_user` into one key. Those are SEP-986-legal,
+ * visibly distinct identifiers, and separator style is a live per-server
+ * convention (Notion ships `get-user`, Linear `get_user`) — folding them would
+ * make a server's second, benign tool look like a mutation of its first and
+ * hard-block it, the failure direction this project judges worst. They also buy
+ * nothing here: a `format-code` shipped beside `format_code` is visibly a
+ * different tool, which is exactly what the new-name carve-out is for.
+ *
+ * Measured before choosing this rung: over 96 real server snapshots / 944
+ * distinct tool names (53 public + hosted servers, 43 corpus snapshots), this
+ * fold produces ZERO within-server collisions, and SEP-986 (SDK 1.30.0
+ * `TOOL_NAME_REGEX = /^[A-Za-z0-9._-]{1,128}$/`, names case-sensitive) makes
+ * that near-structural: 863/863 real names are pure ASCII, so the zero-width
+ * strip and confusable fold can only ever alter a name that is ALREADY outside
+ * the spec charset. Case-fold is the one spec-legal distinction it merges, and
+ * no observed server exposes a case-only pair. The separator/camel rungs scored
+ * zero too, but VACUOUSLY — 0 of 96 servers mixes naming styles, so that zero is
+ * absence of test input, not evidence of safety. See research/name-canon/.
+ */
+export function canonicalToolName(rawName: string): string {
+  return normalizeForMatch(rawName).toLowerCase();
+}

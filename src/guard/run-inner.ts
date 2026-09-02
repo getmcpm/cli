@@ -27,6 +27,7 @@ import {
   classifyDrift,
   classifyFieldDrift,
   buildDriftFinding,
+  lookupToolPin,
 } from "./drift.js";
 import { readPins, writePins } from "./pins.js";
 import { readPolicy, expireStale, PolicyIntegrityError, type GuardPolicyFile } from "./policy.js";
@@ -36,6 +37,7 @@ import { loadProfile } from "./confine/store.js";
 import { isConfineBackendAvailable, wrapForConfinement } from "./confine/apply.js";
 import { decideConfine } from "./confine/decide.js";
 import type { ConfineProfile } from "./confine/profile.js";
+import { canonicalToolName } from "./key-canon.js";
 import { sanitizeForTerminal } from "./sanitize.js";
 import { resolveEnvPlaceholders } from "../store/keychain.js";
 import type { InspectFinding, InspectResult, Severity } from "./types.js";
@@ -662,8 +664,23 @@ export function inspectForDriftSync(
   const result = (msg as { result?: { tools?: unknown } }).result;
   const tools = Array.isArray(result?.tools) ? result.tools : [];
 
+  // TODOS #58 residual, FP guard. Two tools in ONE list whose names canonicalize
+  // together (a spec-legal `Read`/`read` pair, or an attacker's twin sitting
+  // beside the tool it imitates) would otherwise share a session cache slot: the
+  // second would be compared against the first's hashes, differ, and hard-BLOCK
+  // a legitimate server. Such names are excluded from the drift comparison AND
+  // from every cache/pin write, so neither can poison the other's baseline.
+  // They are not silently dropped — the stateless detector
+  // (tool-name-confusable.ts) warns on exactly this shape, on every surface
+  // including `mcpm guard inspect`. Net effect: the REPLACE form of the attack
+  // (twin replaces the trusted tool — the Deadbugz shape) blocks via the
+  // canonical key above; the CO-EXIST form warns instead of passing silently.
+  const duplicated = duplicateCanonicalNames(tools);
+
   const findings: InspectFinding[] = [];
   for (const rawTool of tools) {
+    const name = (rawTool as RawTool | null)?.name;
+    if (typeof name === "string" && duplicated.has(canonicalToolName(name))) continue;
     const finding = inspectToolDrift(rawTool, serverName, baseline, state, armed);
     if (finding !== null) findings.push(finding);
   }
@@ -671,6 +688,26 @@ export function inspectForDriftSync(
   // a cosmetic-only result is warn; any security finding makes it block.
   const action = worstAction(findings);
   return { action, findings };
+}
+
+/**
+ * Canonical tool names that appear more than once (under DIFFERENT raw
+ * spellings) in one tools/list. See the FP guard in inspectForDriftSync.
+ * A byte-identical name repeated twice is a malformed list, not a confusable
+ * pair, and is deliberately NOT treated as a duplicate here.
+ */
+function duplicateCanonicalNames(tools: readonly unknown[]): ReadonlySet<string> {
+  const seenRaw = new Map<string, string>();
+  const dupes = new Set<string>();
+  for (const t of tools) {
+    const name = (t as RawTool | null)?.name;
+    if (typeof name !== "string") continue;
+    const canon = canonicalToolName(name);
+    const prior = seenRaw.get(canon);
+    if (prior === undefined) seenRaw.set(canon, name);
+    else if (prior !== name) dupes.add(canon);
+  }
+  return dupes;
 }
 
 interface RawTool {
@@ -708,7 +745,9 @@ function inspectToolDrift(
 
   // SECURITY F13: lookup via Object.hasOwn to avoid prototype/constructor confusion.
   const serverPins = Object.hasOwn(baseline.servers, serverName) ? baseline.servers[serverName] : undefined;
-  const pinned = serverPins && Object.hasOwn(serverPins, toolName) ? serverPins[toolName] : undefined;
+  // Canonical-aware: a confusable/case twin of a pinned tool resolves to THAT
+  // pin instead of being filed as a brand-new tool (TODOS #58 residual).
+  const pinned = lookupToolPin(serverPins, toolName)?.entry;
 
   const newDescriptionExcerpt =
     typeof tool.description === "string" ? sanitizeForTerminal(tool.description, 80) : undefined;
@@ -717,7 +756,13 @@ function inspectToolDrift(
   // (server, tool) this session, a subsequent differing tools/list is a rug-pull
   // attempt — UNLESS `armed` (an announced list_changed legitimately changes
   // definitions). When armed we skip F3 and rebaseline instead.
-  const sessionKey = `${serverName}::${toolName}`;
+  // TODOS #58 residual: key by the CANONICAL name so a case / zero-width /
+  // homoglyph twin of an already-seen tool lands on that tool's baseline rather
+  // than on a fresh key. The raw name is kept for the finding text. Placed at
+  // the SHARED key derivation, not inside the armed branch, because the
+  // unarmed F3 guard below skips on `firstSeen === undefined` in exactly the
+  // same way — both paths were evadable.
+  const sessionKey = `${serverName}::${canonicalToolName(toolName)}`;
   const firstSeen = state.firstHashes.get(sessionKey);
   const firstSeenFields = state.firstFieldHashes?.get(sessionKey);
   if (!armed && firstSeen !== undefined && firstSeen !== liveWhole) {
@@ -835,7 +880,7 @@ export function allNameableToolsPinned(msg: JSONRPCMessage, serverName: string, 
     if (t === null || typeof t !== "object") continue;
     const name = (t as { name?: unknown }).name;
     if (typeof name !== "string") continue;
-    const pinned = serverPins && Object.hasOwn(serverPins, name) ? serverPins[name] : undefined;
+    const pinned = lookupToolPin(serverPins, name)?.entry;
     if (!pinned || pinned.current_hash === null) return false;
   }
   return true;

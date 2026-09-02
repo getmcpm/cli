@@ -19,6 +19,7 @@ import type { JSONRPCMessage } from "@modelcontextprotocol/sdk/types.js";
 import type { InspectFinding, InspectResult } from "./types.js";
 import { worstAction } from "./patterns.js";
 import { sanitizeForTerminal } from "./sanitize.js";
+import { canonicalToolName } from "./key-canon.js";
 import {
   PinsIntegrityError,
   HASH_REGEX,
@@ -116,12 +117,48 @@ function sanitizeLabel(s: string): string {
   return sanitizeForTerminal(s, 128);
 }
 
-/** Safe pin lookup using Object.hasOwn — defeats `__proto__` / `constructor` shenanigans (security F13). */
+/**
+ * Safe pin lookup using Object.hasOwn — defeats `__proto__` / `constructor`
+ * shenanigans (security F13) — resolving a CONFUSABLE tool name onto the pin it
+ * impersonates (TODOS #58 residual).
+ *
+ * Exact raw key first: that is the identity path for every conforming name, so
+ * an existing pins.json keeps resolving byte-for-byte and no migration or
+ * PINS_FORMAT_VERSION bump is needed. Only if there is no exact hit do we fall
+ * back to the canonical form, so a `Format_Code` / `fоrmat_code` (Cyrillic о) /
+ * zero-width twin is compared against the `format_code` pin it is imitating
+ * instead of being filed as a brand-new tool.
+ *
+ * An AMBIGUOUS canonical match (two stored keys folding to the same form) is
+ * left UNRESOLVED rather than guessing which pin the caller meant — guessing
+ * could compare a tool against a sibling's baseline and manufacture drift.
+ * Writes still use the raw name (see upsertToolPin), so the store stays
+ * human-readable and byte-compatible with every earlier release.
+ */
+export function lookupToolPin(
+  server: Record<string, PinEntry> | undefined,
+  toolName: string,
+): { key: string; entry: PinEntry } | undefined {
+  if (server === undefined) return undefined;
+  if (Object.hasOwn(server, toolName)) {
+    const entry = server[toolName];
+    if (entry !== undefined) return { key: toolName, entry };
+  }
+  const canon = canonicalToolName(toolName);
+  let found: { key: string; entry: PinEntry } | undefined;
+  for (const key of Object.keys(server)) {
+    if (canonicalToolName(key) !== canon) continue;
+    const entry = server[key];
+    if (entry === undefined) continue;
+    if (found !== undefined) return undefined; // ambiguous — refuse to guess
+    found = { key, entry };
+  }
+  return found;
+}
+
 function lookupPin(pins: PinsFile, serverName: string, toolName: string): PinEntry | undefined {
   if (!Object.hasOwn(pins.servers, serverName)) return undefined;
-  const server = pins.servers[serverName];
-  if (server === undefined || !Object.hasOwn(server, toolName)) return undefined;
-  return server[toolName];
+  return lookupToolPin(pins.servers[serverName], toolName)?.entry;
 }
 
 /**
