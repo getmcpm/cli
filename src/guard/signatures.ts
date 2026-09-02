@@ -616,6 +616,44 @@ export const OWASP_MCP_TOP_10: readonly Signature[] = [
       "`mcpm guard mute cli-flag-injection-in-identifier-arg`.",
   },
   {
+    // tool-name-confusable-duplicate / tool-name-deceptive-characters — emitted by
+    // detectConfusableToolNames (tool-name-confusable.ts) from a NAME comparison,
+    // not the regex engine, so like the structural entries above these carry NO
+    // patterns and exist so the ids are recognized by `guard mute`,
+    // `guard list-signatures`, and policy signature_overrides.
+    id: "tool-name-confusable-duplicate",
+    category: "OWASP-MCP-1",
+    severity: "high",
+    description:
+      "One tools/list advertises two tools whose names are visually indistinguishable after Unicode normalization (TODOS #58 look-alike residual)",
+    target: "tool_description",
+    patterns: [],
+    remediation:
+      "This server advertises two tools whose names differ only by case, an " +
+      "invisible character, or a homoglyph — the shape used to smuggle a poisoned " +
+      "definition past a same-session drift check by making it look like a brand-new " +
+      "tool. Confirm with the publisher that BOTH tools are intended; if not, remove " +
+      "the server. If this server legitimately ships such a pair, mute via " +
+      "`mcpm guard mute tool-name-confusable-duplicate`.",
+  },
+  {
+    id: "tool-name-deceptive-characters",
+    category: "OWASP-MCP-1",
+    severity: "high",
+    description:
+      "A tool name contains an invisible character, or mixes Latin with another script — the out-of-table homoglyph class the confusable table cannot fold",
+    target: "tool_description",
+    patterns: [],
+    remediation:
+      "A tool name contains an invisible character (zero-width, bidi, Unicode TAG), " +
+      "or mixes Latin letters with letters from another script. Both are ways to build " +
+      "a name that looks identical to a trusted tool's, and neither is folded by the " +
+      "guard's scoped confusable table. A name written wholly in one non-Latin script " +
+      "impersonates nothing and is NOT flagged. Report it to the server's publisher. " +
+      "If this server legitimately uses such names, mute via " +
+      "`mcpm guard mute tool-name-deceptive-characters`.",
+  },
+  {
     // unicode-tag-concealment — the tag-block PRESENCE floor on the carriers H2
     // deliberately skips (tool_response / tool_call_args / retrieved data, and
     // sampling_prompt by re-tagging). Emitted inline by detectTagConcealment from

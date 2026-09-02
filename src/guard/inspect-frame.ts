@@ -22,6 +22,7 @@ import { detectExfilParams } from "./exfil-params.js";
 import { detectShellMetacharArgs } from "./shell-metachar-args.js";
 import { detectQueryControlArgs } from "./query-control-args.js";
 import { detectCliFlagInjectionArgs } from "./cli-flag-injection-args.js";
+import { detectConfusableToolNames } from "./tool-name-confusable.js";
 import { OWASP_MCP_TOP_10 } from "./signatures.js";
 import type { InspectFinding, InspectResult } from "./types.js";
 
@@ -159,6 +160,7 @@ export function inspectStatelessDetectors(msg: JSONRPCMessage): InspectResult {
     detectShellMetacharArgs(msg),
     detectQueryControlArgs(msg),
     detectCliFlagInjectionArgs(msg),
+    detectConfusableToolNames(msg),
   ].reduce(mergeInspect);
 }
 
