@@ -598,6 +598,10 @@ export async function runInner(parsed: RunInnerArgs): Promise<number> {
 
 import {
   hashToolDefinition,
+  pinStillMatches,
+  legacyFieldHashCandidates,
+  handshakeStillMatches,
+  legacyHandshakeFieldCandidates,
   fieldHashesOf,
   handshakeFieldHashesOf,
   handshakeCapabilityKeys,
@@ -860,13 +864,15 @@ function inspectToolDrift(
   }
 
   if (!pinned || pinned.current_hash === null) return null;
-  if (liveWhole === pinned.current_hash) return null;
+  // #26: also accept the pre-NFC hash, so pins written before NFC folding do not
+  // read as drift on upgrade (a schema-side hash tiers as a hard block).
+  if (pinStillMatches(pinned.current_hash, liveWhole, fields)) return null;
 
   // Tier the drift by field (cosmetic description-only → warn; schema /
   // annotations / coarse → block). Same finding shapes as drift.ts. For a
   // cosmetic warn, carry a sanitized + truncated NEW description so the
   // guard-events.jsonl entry is self-contained for review.
-  const cls = classifyDrift(pinned, liveFields);
+  const cls = classifyDrift(pinned, liveFields, legacyFieldHashCandidates(fields));
   // Name the STORED key when the live name only resolved canonically: the
   // remediation prints `accept-drift --tool <name>`, and that command looks the
   // key up exactly, so printing the look-alike would hand the user a command
@@ -1002,9 +1008,11 @@ export function isInitializeResult(msg: JSONRPCMessage): boolean {
  *    (`handshake-drift-in-session`); a second IDENTICAL one is a no-op.
  *  - no handshake pin in the baseline → pass (first session; the async path
  *    captures off-thread).
- *  - live whole-hash === pinned.current_hash → pass.
- *  - live whole-hash ∈ pinned.previous_hashes → pass (warn-once: already surfaced).
- *  - else → classify + build warn findings.
+ *  - live whole-hash matches pinned.current_hash → pass. #26: "matches" means
+ *    {@link handshakeStillMatches}, so a pre-NFC pin over the same text counts.
+ *  - live whole-hash matches an entry in pinned.previous_hashes → pass
+ *    (warn-once: already surfaced). Same predicate, so warn-once survives upgrade.
+ *  - else → classify (with #26 per-dimension alternates) + build warn findings.
  */
 export function inspectHandshakeDriftSync(
   msg: JSONRPCMessage,
@@ -1029,11 +1037,14 @@ export function inspectHandshakeDriftSync(
 
   const pinned = lookupHandshake(baseline, serverName);
   if (pinned === undefined) return { action: "pass", findings: [] };
-  if (liveWhole === pinned.current_hash || pinned.previous_hashes.includes(liveWhole)) {
+  if (
+    handshakeStillMatches(pinned.current_hash, liveWhole, result) ||
+    pinned.previous_hashes.some((h) => handshakeStillMatches(h, liveWhole, result))
+  ) {
     return { action: "pass", findings: [] };
   }
 
-  const cls = classifyHandshakeDrift(pinned, liveFields, liveCapKeys);
+  const cls = classifyHandshakeDrift(pinned, liveFields, liveCapKeys, legacyHandshakeFieldCandidates(result));
   const findings = buildHandshakeDriftFinding({
     cls,
     safeServer: sanitizeLabel(serverName),

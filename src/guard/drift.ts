@@ -24,6 +24,10 @@ import {
   PinsIntegrityError,
   HASH_REGEX,
   hashToolDefinition,
+  pinStillMatches,
+  legacyFieldHashCandidates,
+  legacyHandshakeFieldCandidates,
+  handshakeStillMatches,
   fieldHashesOf,
   handshakeFieldHashesOf,
   handshakeCapabilityKeys,
@@ -60,12 +64,20 @@ export interface DriftClass {
 export function diffToolDefinition(
   pinned: FieldHashes | undefined,
   live: FieldHashes,
+  /**
+   * #26: alternative spellings of the LIVE field hashes, for a pin written
+   * before NFC folding. A field whose stored hash matches any of them is
+   * canonically equivalent to the live text, i.e. unchanged.
+   */
+  alternates: readonly FieldHashes[] = [],
 ): ChangedField[] {
   if (pinned === undefined) return [];
   const changed: ChangedField[] = [];
-  if (pinned.description !== live.description) changed.push("description");
-  if (pinned.schema !== live.schema) changed.push("schema");
-  if (pinned.annotations !== live.annotations) changed.push("annotations");
+  if (pinned.description !== live.description && !alternates.some((a) => a.description === pinned.description))
+    changed.push("description");
+  if (pinned.schema !== live.schema && !alternates.some((a) => a.schema === pinned.schema)) changed.push("schema");
+  if (pinned.annotations !== live.annotations && !alternates.some((a) => a.annotations === pinned.annotations))
+    changed.push("annotations");
   return changed;
 }
 
@@ -93,11 +105,16 @@ function tierChangedFields(changed: ChangedField[]): DriftClass {
  *  - schema and/or annotations (or any   → SECURITY (block: a capability change).
  *    multi-field change)
  */
-export function classifyDrift(pinned: PinEntry, liveFields: FieldHashes): DriftClass {
+export function classifyDrift(
+  pinned: PinEntry,
+  liveFields: FieldHashes,
+  /** #26: see {@link diffToolDefinition}. Omit for a same-build baseline. */
+  liveFieldAlternates: readonly FieldHashes[] = [],
+): DriftClass {
   if (pinned.field_hashes === undefined) {
     return { kind: "security", changedFields: [] };
   }
-  return tierChangedFields(diffToolDefinition(pinned.field_hashes, liveFields));
+  return tierChangedFields(diffToolDefinition(pinned.field_hashes, liveFields, liveFieldAlternates));
 }
 
 /**
@@ -310,9 +327,15 @@ export function classifyHandshakeDrift(
   pinned: HandshakePinEntry,
   liveFields: HandshakeFieldHashes,
   liveCapKeys: string[],
+  /** #26: alternative spellings of the LIVE dimension hashes, for a pre-NFC pin. */
+  liveFieldAlternates: readonly HandshakeFieldHashes[] = [],
 ): HandshakeDriftClass {
-  const capabilityChanged = pinned.field_hashes.capabilities !== liveFields.capabilities;
-  const identityChanged = pinned.field_hashes.serverName !== liveFields.serverName;
+  const capabilityChanged =
+    pinned.field_hashes.capabilities !== liveFields.capabilities &&
+    !liveFieldAlternates.some((a) => a.capabilities === pinned.field_hashes.capabilities);
+  const identityChanged =
+    pinned.field_hashes.serverName !== liveFields.serverName &&
+    !liveFieldAlternates.some((a) => a.serverName === pinned.field_hashes.serverName);
 
   const pinnedKeys = new Set(pinned.capability_keys);
   const liveKeys = new Set(liveCapKeys);
@@ -500,14 +523,14 @@ export async function inspectForDrift(
       continue;
     }
 
-    if (existing.current_hash !== liveHash) {
+    if (!pinStillMatches(existing.current_hash, liveHash, fields)) {
       // Drift. Classify by field (cosmetic vs security). Do NOT auto-re-pin —
       // the durable baseline only moves via an explicit `accept-drift`.
       driftedTools.push({
         toolName,
         expected: existing.current_hash,
         actual: liveHash,
-        cls: classifyDrift(existing, liveFields),
+        cls: classifyDrift(existing, liveFields, legacyFieldHashCandidates(fields)),
       });
     }
   }
@@ -625,7 +648,10 @@ export async function inspectHandshakeForDrift(
   }
 
   // Matches the durable baseline, or already surfaced once → no warn.
-  if (liveWhole === pinned.current_hash || pinned.previous_hashes.includes(liveWhole)) {
+  if (
+    handshakeStillMatches(pinned.current_hash, liveWhole, result) ||
+    pinned.previous_hashes.some((h) => handshakeStillMatches(h, liveWhole, result))
+  ) {
     return { action: "pass", findings: [] };
   }
 
@@ -638,7 +664,7 @@ export async function inspectHandshakeForDrift(
   };
   await deps.write(upsertHandshakePin(pins, serverName, updated)).catch(() => undefined);
 
-  const cls = classifyHandshakeDrift(pinned, liveFields, liveCapKeys);
+  const cls = classifyHandshakeDrift(pinned, liveFields, liveCapKeys, legacyHandshakeFieldCandidates(result));
   const findings = buildHandshakeDriftFinding({
     cls,
     safeServer: sanitizeLabel(serverName),
