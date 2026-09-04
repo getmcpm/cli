@@ -463,18 +463,31 @@ describe("handleList — unreadable entries (#59)", () => {
     expect(text).not.toContain("No MCP servers installed");
   });
 
-  it("surfaces them under --json, which has no stderr channel", async () => {
+  it("keeps --json a bare array and puts the notice on stderr", async () => {
+    // Flipping array->object only in the malformed case would break
+    // `JSON.parse(out).map(...)` exactly when things are already wrong.
     const lines: string[] = [];
-    const deps = {
-      detectClients: vi.fn().mockResolvedValue(["claude-desktop"]),
-      getAdapter: vi.fn().mockReturnValue(skipping(["broken"])),
-      getPath: vi.fn().mockReturnValue("/fake/path/config.json"),
-      output: (t: string) => lines.push(t),
-    } as unknown as ListDeps;
+    const errs: string[] = [];
+    const spy = vi
+      .spyOn(process.stderr, "write")
+      .mockImplementation((chunk: string | Uint8Array) => {
+        errs.push(String(chunk));
+        return true;
+      });
+    try {
+      const deps = {
+        detectClients: vi.fn().mockResolvedValue(["claude-desktop"]),
+        getAdapter: vi.fn().mockReturnValue(skipping(["broken"])),
+        getPath: vi.fn().mockReturnValue("/fake/path/config.json"),
+        output: (t: string) => lines.push(t),
+      } as unknown as ListDeps;
 
-    await handleList({ json: true }, deps);
-    const parsed = JSON.parse(lines[0]!);
-    expect(parsed.skipped).toEqual([{ name: "broken", client: "claude-desktop" }]);
+      await handleList({ json: true }, deps);
+      expect(Array.isArray(JSON.parse(lines[0]!))).toBe(true);
+      expect(errs.join("")).toContain("broken");
+    } finally {
+      spy.mockRestore();
+    }
   });
 
   it("keeps --json a bare array when nothing was skipped (shape unchanged)", async () => {

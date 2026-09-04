@@ -171,7 +171,7 @@ describe("handleSync — unreadable entries are not reported as missing", () => 
       { "claude-desktop": ["fs"] },
       cap.output,
     );
-    const result = await handleSync({ check: true }, deps);
+    const result = await handleSync({}, deps);
     expect(result.drift).toBe(true);
     expect(exitCodeFor(result, true)).toBe(2);
     // The summary must state a cause: "1 drifted (0 missing, 0 conflicts)" is
@@ -194,7 +194,10 @@ describe("handleSync — unreadable rendering details", () => {
     await handleSync({}, deps);
     expect(cap.text()).not.toMatch(/· orphan: in ;/);
     expect(cap.text()).toMatch(/also missing in cursor/);
-    expect(cap.text()).toMatch(/0 missing in ≥1 client/);
+    // The fact is stated ONCE in the body (folded into the ? line), but the
+    // summary sub-count must stay true to its own label: orphan IS missing
+    // from cursor, so "missing in >=1 client" is 1, not 0.
+    expect(cap.text()).toMatch(/1 missing in ≥1 client/);
   });
 
   it("prints a legend entry for the ? cell", async () => {
@@ -231,5 +234,42 @@ describe("handleSync — unreadable rendering details", () => {
     await handleSync({}, deps);
     expect(cap.text()).toContain("PWNED");
     expect(cap.text()).not.toContain("\u001b");
+  });
+});
+
+describe("handleSync — reporting must not be gated on the matrix (#59/H1)", () => {
+  it("names the entry when there is only ONE client, and still exits 2", async () => {
+    // `drifted` comes from the model, so --check exited 2 while the ONLY line
+    // printed was "nothing to compare across clients" — a CI failure whose own
+    // output said there was nothing to look at. Single client is the common
+    // desktop shape.
+    const cap = capture();
+    const deps = makeDepsWithMalformed({ "claude-desktop": {} }, { "claude-desktop": ["bad"] }, cap.output);
+    const result = await handleSync({}, deps);
+    expect(cap.text()).toContain("bad");
+    expect(cap.text()).toMatch(/does not match the expected shape/);
+    expect(exitCodeFor(result, true)).toBe(2);
+  });
+
+  it("names a client whose whole config is unparseable, and fails --check", async () => {
+    // Otherwise the LARGER failure is the quieter one: one mis-typed entry
+    // failed CI while an entirely broken config passed silently.
+    const cap = capture();
+    const deps: SyncDeps = {
+      detectClients: vi
+        .fn<() => Promise<ClientId[]>>()
+        .mockResolvedValue(["claude-desktop", "cursor"]),
+      getAdapter: vi.fn((id: ClientId) => ({
+        read:
+          id === "claude-desktop"
+            ? vi.fn().mockRejectedValue(new SyntaxError("Unexpected token"))
+            : vi.fn().mockResolvedValue({ fs: { command: "npx" } }),
+      })),
+      getPath: vi.fn().mockReturnValue("/mock/config.json"),
+      output: cap.output,
+    };
+    const result = await handleSync({}, deps);
+    expect(cap.text()).toMatch(/claude-desktop: config could not be read at all/);
+    expect(exitCodeFor(result, true)).toBe(2);
   });
 });

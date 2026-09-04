@@ -41,6 +41,14 @@ added or renamed — with one exception:
 
 - **`mcpm sync --json`** (the drift model) is **frozen** because CI consumes it
   alongside the exit-`2` contract above.
+  **Changed in 0.37.0 (#59), deliberately and not additively:** `ServerDrift`
+  gains `malformed` and `DriftModel` gains `unreadableClients`, but membership
+  of `servers[]` and the `drifted`/`inSync` counts also change — a server whose
+  entry failed shape validation used to be absent from the model entirely, and
+  a client whose config could not be parsed contributed nothing. `sync --check`
+  therefore now exits **2** where it previously exited **0** for a config mcpm
+  could not read. The old exit `0` was the bug: the gate reported "in sync"
+  over input it had never compared.
 
 The remaining `--json` shapes stabilize per-command as they are schema-typed and
 documented; until then, pin to the exit codes, not the field names.

@@ -26,6 +26,7 @@ import type { ConfigAdapter, McpServerEntry } from "../config/adapters/index.js"
 import { levelColor, levelLabel, extractRegistryMeta } from "../utils/format-trust.js";
 import { resolveInstallEntry } from "./install.js";
 import { stdoutOutput } from "../utils/output.js";
+import { sanitizeForTerminal } from "../guard/sanitize.js";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -71,7 +72,8 @@ async function readExistingEnv(
   getAdapter: UpdateDeps["getAdapter"],
   getConfigPath: UpdateDeps["getConfigPath"],
   clientId: ClientId,
-  name: string
+  name: string,
+  onNote: (message: string) => void
 ): Promise<Record<string, string> | undefined> {
   try {
     const adapter = getAdapter(clientId);
@@ -84,16 +86,43 @@ async function readExistingEnv(
     //
     // The fix is to recover the env, NOT to refuse the write. Overwriting a
     // mis-shaped entry with a freshly resolved one is the user's self-repair
-    // path — refusing it converts a self-healing case (a malformed entry with
-    // no env to lose) into a permanently stuck one. So the raw entry's `env`
-    // is parsed on its own, narrowly: nothing else from an unvalidated entry
-    // is read, and it is never spread.
+    // path; refusing it turns a self-healing case into a permanently stuck one.
+    //
+    // Recovery is PER KEY, not all-or-nothing. `env` is frequently the field
+    // that makes the entry invalid in the first place — a numeric port is the
+    // archetypal hand-edit — and parsing the whole record then rejects every
+    // key, destroying the API key beside the bad one. Only string-valued keys
+    // can be carried into a valid entry; any key that cannot is NAMED rather
+    // than dropped in silence.
     let recovered: Record<string, string> | undefined;
     const servers = await adapter.read(configPath, (skipped, raw) => {
-      if (skipped !== name) return;
+      if (skipped !== name) {
+        // Another malformed entry in the same config. Replacing the default
+        // onSkip suppressed its warning, so re-state it here rather than
+        // letting this command go quiet about it.
+        onNote(
+          `${clientId}: skipping malformed server entry "${sanitizeForTerminal(skipped)}" ` +
+            `(not updated)`
+        );
+        return;
+      }
       const env = (raw as { env?: unknown } | null | undefined)?.env;
-      const parsed = z.record(z.string(), z.string()).safeParse(env);
-      if (parsed.success) recovered = parsed.data;
+      if (env === null || typeof env !== "object" || Array.isArray(env)) return;
+      const kept: Record<string, string> = {};
+      const dropped: string[] = [];
+      for (const [k, v] of Object.entries(env as Record<string, unknown>)) {
+        if (typeof v === "string") kept[k] = v;
+        else dropped.push(k);
+      }
+      if (dropped.length > 0) {
+        onNote(
+          `${clientId}: env ${dropped.length === 1 ? "key" : "keys"} ` +
+            `${dropped.map((k) => `"${sanitizeForTerminal(k)}"`).join(", ")} ` +
+            `${dropped.length === 1 ? "is" : "are"} not a string and could not be carried over ` +
+            `— re-set ${dropped.length === 1 ? "it" : "them"} with the value quoted`
+        );
+      }
+      if (Object.keys(kept).length > 0) recovered = kept;
     });
     return servers[name]?.env ?? recovered;
   } catch {
@@ -287,7 +316,13 @@ export async function handleUpdate(
     for (const clientId of originalClients) {
       try {
         const rawEntry = resolveInstallEntry(entry, clientId);
-        const existingEnv = await readExistingEnv(getAdapter, getConfigPath, clientId, r.name);
+        const existingEnv = await readExistingEnv(
+          getAdapter,
+          getConfigPath,
+          clientId,
+          r.name,
+          (note) => clientErrors.push(note)
+        );
         const newEntry: McpServerEntry = {
           ...rawEntry,
           ...(existingEnv && Object.keys(existingEnv).length > 0

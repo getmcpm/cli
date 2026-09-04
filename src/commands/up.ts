@@ -20,6 +20,7 @@
  */
 
 import type { ClientId } from "../config/paths.js";
+import { sanitizeForTerminal } from "../guard/sanitize.js";
 import type { ConfigAdapter, McpServerEntry } from "../config/adapters/index.js";
 import type { ServerEntry } from "../registry/types.js";
 import type { Finding } from "../scanner/tier1.js";
@@ -1180,7 +1181,8 @@ async function handleStrictRemoval(
       });
       deps.recordResult?.({ name, status: "skipped" });
       deps.output(
-        `  • ${name}: not removed from ${clientId} — entry does not match the expected shape`
+        `  • ${sanitizeForTerminal(name)}: not removed from ${clientId} — ` +
+          `entry does not match the expected shape`
       );
     }
 

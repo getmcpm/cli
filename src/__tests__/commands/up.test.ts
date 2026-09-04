@@ -1111,6 +1111,27 @@ describe("handleUp --strict — malformed undeclared entry", () => {
     expect(recorded).toContainEqual({ name: "broken-extra", status: "skipped" });
   });
 
+  it("sanitizes a config-supplied name before it reaches the terminal", async () => {
+    const stackPath = await writeStackAndLock(basicStack, basicLock);
+    const adapter = makeAdapter();
+    (adapter.read as ReturnType<typeof vi.fn>).mockImplementation(
+      async (_p: string, onSkip?: (n: string) => void) => {
+        onSkip?.("ev\u001b]0;PWNED\u0007il");
+        return {};
+      }
+    );
+    const lines: string[] = [];
+    const deps = makeDeps({
+      getAdapter: vi.fn().mockReturnValue(adapter),
+      output: (t: string) => lines.push(t),
+    });
+
+    await handleUp({ stackFile: stackPath, strict: true, yes: true }, deps);
+
+    expect(lines.join("\n")).toContain("PWNED");
+    expect(lines.join("\n")).not.toContain("\u001b");
+  });
+
   it("says nothing about a DECLARED server whose entry is malformed", async () => {
     // --strict only reconciles servers absent from mcpm.yaml. Reporting a
     // declared one as "not in mcpm.yaml" would be a false statement.

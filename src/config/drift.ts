@@ -67,6 +67,12 @@ export interface ServerDrift {
 }
 
 export interface DriftModel {
+  /**
+   * #59: clients whose config could not be read AT ALL (missing or unparseable
+   * JSON). They contribute no servers and no `malformed` names, so without
+   * this a whole broken config is quieter than one mis-typed entry inside it.
+   */
+  readonly unreadableClients?: readonly ClientId[];
   /** Clients considered — those whose config was readable. Sorted. */
   readonly clients: readonly ClientId[];
   /** One entry per distinct server name, sorted by name. */
@@ -88,8 +94,16 @@ export interface DriftModel {
  * `diff` / `export`).
  */
 export async function collectClientStates(deps: DriftDeps): Promise<ClientState[]> {
+  return (await collectClientStatesWithErrors(deps)).states;
+}
+
+/** As `collectClientStates`, but also reports which clients could not be read. */
+export async function collectClientStatesWithErrors(
+  deps: DriftDeps
+): Promise<{ states: ClientState[]; unreadableClients: ClientId[] }> {
   const clients = await deps.detectClients();
   const states: ClientState[] = [];
+  const unreadableClients: ClientId[] = [];
   for (const clientId of clients) {
     try {
       const malformed: string[] = [];
@@ -98,10 +112,12 @@ export async function collectClientStates(deps: DriftDeps): Promise<ClientState[
         .read(deps.getPath(clientId), (name) => malformed.push(name));
       states.push({ clientId, servers, malformed });
     } catch {
-      // Skip unreadable clients (missing or malformed config).
+      // A config that is missing is ordinary; one that exists but cannot be
+      // parsed is a coverage gap the caller should be able to surface.
+      unreadableClients.push(clientId);
     }
   }
-  return states;
+  return { states, unreadableClients };
 }
 
 // ---------------------------------------------------------------------------

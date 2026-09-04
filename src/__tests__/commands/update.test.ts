@@ -687,6 +687,64 @@ describe("handleUpdate — malformed client entry must not silently wipe env", (
     expect(call[2].env?.LEAKED).toBeUndefined();
   });
 
+  it("keeps the string keys when env ITSELF is the malformed field", async () => {
+    // A numeric port is the archetypal hand-edit, and it is what makes the
+    // entry invalid. Parsing the whole env record then rejected EVERY key and
+    // destroyed the API key beside the bad one — the exact loss this fix
+    // exists to prevent, in the population it targets.
+    const adapter = makeAdapter("claude-desktop");
+    (adapter.read as ReturnType<typeof vi.fn>).mockImplementation(
+      readDropping({
+        "io.github.test/server-a": {
+          command: "npx",
+          args: ["-y", "@test/server"],
+          env: { API_KEY: "s3cret", PORT: 8080 },
+        },
+      })
+    );
+    const lines: string[] = [];
+    const deps = makeDeps({
+      getInstalledServers: vi.fn().mockResolvedValue([
+        makeInstalledServer({ name: "io.github.test/server-a", version: "1.0.0", clients: ["claude-desktop"] }),
+      ]),
+      getServer: vi.fn().mockResolvedValue(makeServerEntry("io.github.test/server-a", "1.1.0")),
+      getAdapter: vi.fn().mockReturnValue(adapter),
+      output: (t: string) => lines.push(t),
+    });
+
+    await handleUpdate({ yes: true }, deps);
+
+    const call = (adapter.addServer as ReturnType<typeof vi.fn>).mock.calls[0];
+    expect(call[2].env.API_KEY).toBe("s3cret");
+    expect(call[2].env.PORT).toBeUndefined();
+    // and the key that could not be carried is NAMED, not dropped in silence
+    expect(lines.join("\n")).toContain("PORT");
+  });
+
+  it("re-states the warning for an unrelated malformed neighbour", async () => {
+    // Replacing the default onSkip suppressed its stderr line, so `update`
+    // went silent about every OTHER broken entry in the same config.
+    const adapter = makeAdapter("claude-desktop");
+    (adapter.read as ReturnType<typeof vi.fn>).mockImplementation(
+      readDropping(
+        { "unrelated-bad": { command: "npx", args: "bad" } },
+        { "io.github.test/server-a": { command: "npx", args: ["-y", "@test/server"] } }
+      )
+    );
+    const lines: string[] = [];
+    const deps = makeDeps({
+      getInstalledServers: vi.fn().mockResolvedValue([
+        makeInstalledServer({ name: "io.github.test/server-a", version: "1.0.0", clients: ["claude-desktop"] }),
+      ]),
+      getServer: vi.fn().mockResolvedValue(makeServerEntry("io.github.test/server-a", "1.1.0")),
+      getAdapter: vi.fn().mockReturnValue(adapter),
+      output: (t: string) => lines.push(t),
+    });
+
+    await handleUpdate({ yes: true }, deps);
+    expect(lines.join("\n")).toContain("unrelated-bad");
+  });
+
   it("ignores a non-string-valued env on the raw entry (narrow parse)", async () => {
     const adapter = makeAdapter("claude-desktop");
     (adapter.read as ReturnType<typeof vi.fn>).mockImplementation(

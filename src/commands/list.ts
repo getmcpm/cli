@@ -51,6 +51,18 @@ interface ServerRow {
  * All dependencies are injected so the function is hermetically testable.
  * This command is strictly READ-ONLY — it never writes to any config file.
  */
+function writeSkipNotice(
+  malformed: ReadonlyArray<{ name: string; client: ClientId }>,
+  write: (text: string) => void
+): void {
+  write(
+    `mcpm: ${malformed.length} entr${malformed.length === 1 ? "y" : "ies"} could not be read ` +
+      `and ${malformed.length === 1 ? "is" : "are"} not listed: ` +
+      `${malformed.map((m) => `${sanitizeForTerminal(m.name)} (${m.client})`).join(", ")}. ` +
+      `Run \`mcpm doctor\` for details.\n`
+  );
+}
+
 export async function handleList(
   options: ListOptions,
   deps: ListDeps
@@ -95,13 +107,13 @@ export async function handleList(
       serverName,
       entry,
     }));
-    output(
-      JSON.stringify(
-        malformed.length > 0 ? { servers: jsonData, skipped: malformed } : jsonData,
-        null,
-        2
-      )
-    );
+    // #59: the skip notice goes to STDERR, not into the payload. Flipping the
+    // shape from a bare array to an object only in the malformed case would
+    // break `JSON.parse(out).map(...)` exactly when things are already wrong.
+    // (The MCP `mcpm_list` tool puts `skipped` in its result because that
+    // surface has no stderr an agent can see; the CLI does.)
+    if (malformed.length > 0) writeSkipNotice(malformed, process.stderr.write.bind(process.stderr));
+    output(JSON.stringify(jsonData, null, 2));
     return;
   }
 

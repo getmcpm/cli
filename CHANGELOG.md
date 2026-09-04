@@ -58,7 +58,9 @@ published section (it happened to #170).
 
 - **Config-supplied server names now reach the terminal sanitized in every new
   render site** (`sync`'s table, detail, conflict and missing lines; `diff`'s
-  unreadable line; `doctor`'s three cross-client branches; `list`'s warning).
+  unreadable line; `doctor`'s three cross-client branches; `list`'s warning;
+  `up --strict`'s not-removed line — the last of these was missed on the first
+  pass, while the CHANGELOG already claimed "every new render site").
   These names are arbitrary JSON keys from a file mcpm does not control;
   `base.ts` states the rule for exactly this value, and routing malformed names
   into these renderers is what newly exposed them. `--json` stays byte-faithful.
@@ -68,6 +70,17 @@ published section (it happened to #170).
   malformed entry named `toString`, `constructor` or `valueOf` read as
   already-exported and vanished from both the count and the file. It now uses
   the `Set` already in scope.
+
+- **`sync --check` reported a CI failure whose own output said there was
+  nothing to look at.** `renderDashboard` returns early for zero clients, one
+  client, or no servers, but `drifted` is computed from the model — so on the
+  common single-client desktop shape, `--check` exited 2 while printing only
+  "nothing to compare across clients", and the entry was named on neither
+  stream (the collector had replaced the stderr default). Unreadable entries
+  and unreadable client configs are now reported before every early return.
+  Relatedly, an entirely unparseable config used to pass `--check` silently
+  while one mis-typed entry inside it failed — the larger failure was the
+  quieter one; both now fail.
 
 ### Notes
 

@@ -23,7 +23,7 @@ import type { ClientId } from "../config/paths.js";
 import { sanitizeForTerminal } from "../guard/sanitize.js";
 import {
   buildDriftModel,
-  collectClientStates,
+  collectClientStatesWithErrors,
   type DriftDeps,
   type DriftModel,
   type ServerDrift,
@@ -52,9 +52,11 @@ export interface SyncResult {
 // ---------------------------------------------------------------------------
 
 export async function handleSync(options: SyncOptions, deps: SyncDeps): Promise<SyncResult> {
-  const states = await collectClientStates(deps);
-  const model = buildDriftModel(states);
-  const drift = model.drifted > 0;
+  const { states, unreadableClients } = await collectClientStatesWithErrors(deps);
+  const model = { ...buildDriftModel(states), unreadableClients };
+  // An entire unparseable config is a bigger coverage gap than one mis-typed
+  // entry inside it; without this the larger failure was the quieter one.
+  const drift = model.drifted > 0 || unreadableClients.length > 0;
 
   if (options.json) {
     deps.output(JSON.stringify(model, null, 2));
@@ -88,7 +90,39 @@ function cell(server: ServerDrift, clientId: ClientId): string {
   return "✓";
 }
 
+/** Unreadable entries and unreadable client configs — never gated on the matrix. */
+function renderUnreadable(model: DriftModel, output: (text: string) => void): void {
+  for (const s of model.servers.filter((x) => x.malformed.length > 0)) {
+    output(
+      `  ? ${sanitizeForTerminal(s.name)}: entry in ${s.malformed.join(", ")} does not match ` +
+        `the expected shape — cannot compare` +
+        // A malformed-only name has an EMPTY `present`, which the missing
+        // section rendered as "in ; missing in cursor". Say it once, here.
+        (s.present.length === 0 && s.absent.length > 0
+          ? `; also missing in ${s.absent.join(", ")}`
+          : "") +
+        ` (run \`mcpm doctor\` for details)`
+    );
+  }
+  for (const c of model.unreadableClients ?? []) {
+    output(`  ? ${c}: config could not be read at all — not compared`);
+  }
+  if (
+    model.servers.some((x) => x.malformed.length > 0) ||
+    (model.unreadableClients ?? []).length > 0
+  ) {
+    output("");
+  }
+}
+
 function renderDashboard(model: DriftModel, output: (text: string) => void): void {
+  // #59/H1: these must print BEFORE the early returns below. `drifted` is
+  // computed from the model, so `--check` exited 2 while the only line printed
+  // was "nothing to compare across clients" — a CI failure whose own output
+  // said there was nothing to look at, with the entry named on neither stream.
+  // Single-client is the common desktop shape, not a corner case.
+  renderUnreadable(model, output);
+
   if (model.clients.length === 0) {
     output("No client configs found. Install a server first (e.g. `mcpm install <name>`).");
     return;
@@ -122,29 +156,19 @@ function renderDashboard(model: DriftModel, output: (text: string) => void): voi
     }
   }
 
-  const unreadable = model.servers.filter((s) => s.malformed.length > 0);
-  if (unreadable.length > 0) {
-    output("");
-    for (const s of unreadable) {
-      output(
-        `  ? ${sanitizeForTerminal(s.name)}: entry in ${s.malformed.join(", ")} does not match ` +
-          `the expected shape — cannot compare` +
-          // #59: a malformed-only name has an EMPTY `present`, which the
-          // missing section below rendered as "in ; missing in cursor". Say it
-          // once, here, with the absent clients folded in.
-          (s.present.length === 0 && s.absent.length > 0
-            ? `; also missing in ${s.absent.join(", ")}`
-            : "") +
-          ` (run \`mcpm doctor\` for details)`
-      );
-    }
-  }
-
   // Exclude names already fully described above, or they are reported twice and
   // counted under "missing in ≥1 client" as well.
+  // Listed separately from the count below: a malformed-only name is fully
+  // described in the unreadable section (with "also missing in …"), so listing
+  // it again here would report one server twice.
   const missing = model.servers.filter(
     (s) => s.absent.length > 0 && !(s.present.length === 0 && s.malformed.length > 0)
   );
+  // ...but the SUMMARY sub-count must stay true to its own label.
+  const missingCount = model.servers.filter((s) => s.absent.length > 0).length;
+  const unreadableCount =
+    model.servers.filter((s) => s.malformed.length > 0).length +
+    (model.unreadableClients ?? []).length;
   if (missing.length > 0) {
     output("");
     for (const s of missing) {
@@ -161,11 +185,11 @@ function renderDashboard(model: DriftModel, output: (text: string) => void): voi
   // `inSync + drifted` partitions the servers; the parenthetical sub-counts can
   // overlap (a server can be both missing-somewhere and conflicting-elsewhere).
   output(
-    `${model.inSync} in sync · ${model.drifted} drifted (${missing.length} missing in ≥1 client, ` +
+    `${model.inSync} in sync · ${model.drifted} drifted (${missingCount} missing in ≥1 client, ` +
       `${conflicts.length} shape ${conflictWord}` +
       // #59: without this the line reads "1 drifted (0 missing, 0 conflicts)"
       // — a drift count with no stated cause.
-      (unreadable.length > 0 ? `, ${unreadable.length} unreadable` : "") +
+      (unreadableCount > 0 ? `, ${unreadableCount} unreadable` : "") +
       `)`,
   );
 }
