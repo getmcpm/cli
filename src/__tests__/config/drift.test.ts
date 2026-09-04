@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from "vitest";
 import {
   buildDriftModel,
-  collectClientStates,
+  collectClientStatesWithErrors,
   type ClientState,
   type DriftDeps,
 } from "../../config/drift.js";
@@ -136,7 +136,7 @@ describe("buildDriftModel", () => {
 });
 
 // ---------------------------------------------------------------------------
-// collectClientStates — I/O, injected
+// collectClientStatesWithErrors — I/O, injected
 // ---------------------------------------------------------------------------
 
 function makeDeps(overrides: Partial<DriftDeps> = {}): DriftDeps {
@@ -148,14 +148,14 @@ function makeDeps(overrides: Partial<DriftDeps> = {}): DriftDeps {
   };
 }
 
-describe("collectClientStates", () => {
+describe("collectClientStatesWithErrors", () => {
   it("returns one state per readable client", async () => {
     const deps = makeDeps({
       getAdapter: vi.fn((id: ClientId) => ({
         read: vi.fn().mockResolvedValue(id === "cursor" ? { fs: { command: "npx" } } : {}),
       })),
     });
-    const states = await collectClientStates(deps);
+    const states = (await collectClientStatesWithErrors(deps)).states;
     expect(states.map((s) => s.clientId)).toEqual(["claude-desktop", "cursor"]);
     expect(states[1]!.servers).toEqual({ fs: { command: "npx" } });
   });
@@ -169,7 +169,7 @@ describe("collectClientStates", () => {
             : vi.fn().mockResolvedValue({ ok: { command: "npx" } }),
       })),
     });
-    const states = await collectClientStates(deps);
+    const states = (await collectClientStatesWithErrors(deps)).states;
     expect(states.map((s) => s.clientId)).toEqual(["claude-desktop"]);
   });
 });
@@ -245,7 +245,7 @@ describe("buildDriftModel — malformed entries are not reported as absent", () 
   });
 });
 
-describe("collectClientStates — records malformed entry names", () => {
+describe("collectClientStatesWithErrors — records malformed entry names", () => {
   it("captures the names read() dropped, per client", async () => {
     const deps = makeDeps({
       getAdapter: vi.fn((id: ClientId) => ({
@@ -258,7 +258,7 @@ describe("collectClientStates — records malformed entry names", () => {
         }),
       })),
     });
-    const states = await collectClientStates(deps);
+    const states = (await collectClientStatesWithErrors(deps)).states;
     expect(states.find((s) => s.clientId === "cursor")!.malformed).toEqual(["broken"]);
     expect(states.find((s) => s.clientId === "claude-desktop")!.malformed).toEqual([]);
   });

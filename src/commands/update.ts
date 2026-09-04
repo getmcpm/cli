@@ -250,7 +250,7 @@ export async function handleUpdate(
   // Show available updates (non-JSON mode)
   if (!isJson) {
     output(chalk.bold("\nUpdates available:"));
-  for (const r of withUpdates) {
+    for (const r of withUpdates) {
       output(`  ${chalk.white(r.name)}: ${chalk.yellow(r.oldVersion)} → ${chalk.green(r.newVersion)}`);
     }
   }
@@ -282,13 +282,12 @@ export async function handleUpdate(
     { updated: boolean; trustScore: TrustScore; clientErrors: string[]; clientNotes: string[] }
   >();
 
-  // Perform updates
-    // #59: malformed entries seen in passing while reading configs, collected
-  // across the whole run and reported ONCE below — never per updated server,
-  // and never for a name this run updated itself.
-  // Keyed by name+client, not name: the same malformed name in two clients is
-  // two facts, and a name-only key silently dropped one of them (the reported
-  // client then depended on iteration order).
+  // Perform updates.
+  //
+  // #59: malformed entries seen in passing while reading configs, collected
+  // across the whole run and reported ONCE below rather than per updated
+  // server. Keyed by (client, name), not name: the same malformed name in two
+  // clients is two facts, and a name-only key silently dropped one of them.
   const neighbours = new Map<string, { name: string; clientId: ClientId }>();
   // The (client, name) pairs this run actually re-wrote. Suppression must be
   // keyed the same way the FACT is: `update` writes only to a server's own

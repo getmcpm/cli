@@ -16,8 +16,8 @@
  *   header KEY set. It NEVER compares env / header VALUES — those are secrets, and
  *   two clients legitimately hold the same key with a per-machine value.
  *
- * Exports: DriftDeps, ClientState, ServerDrift, DriftModel, collectClientStates,
- * buildDriftModel.
+ * Exports: DriftDeps, ClientState, ServerDrift, DriftModel,
+ * collectClientStatesWithErrors, buildDriftModel.
  */
 
 import type { ClientId } from "./paths.js";
@@ -93,11 +93,13 @@ export interface DriftModel {
  * broken config can't blind the whole cross-client view (same posture as
  * `diff` / `export`).
  */
-export async function collectClientStates(deps: DriftDeps): Promise<ClientState[]> {
-  return (await collectClientStatesWithErrors(deps)).states;
-}
-
-/** As `collectClientStates`, but also reports which clients could not be read. */
+/**
+ * Read each detected client's config into a `ClientState`, and report which
+ * clients could not be read at all. Never throws — one broken config must not
+ * blind the whole cross-client view — but the caller is told, because a config
+ * that exists and cannot be parsed is a bigger coverage gap than one mis-typed
+ * entry inside it, and used to be the quieter of the two.
+ */
 export async function collectClientStatesWithErrors(
   deps: DriftDeps
 ): Promise<{ states: ClientState[]; unreadableClients: ClientId[] }> {
