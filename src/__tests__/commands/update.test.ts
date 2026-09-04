@@ -746,7 +746,14 @@ describe("handleUpdate — malformed client entry must not silently wipe env", (
     });
 
     await handleUpdate({ yes: true }, deps);
-    expect(lines.join("\n")).not.toMatch(/srv-b.*not updated/);
+    const text = lines.join("\n");
+    // Assert on the EXACT rendering of an entry in the skipped report — the
+    // earlier /srv-b.*not updated/ could never match, because the report puts
+    // "not updated" BEFORE the names, so it passed with the bug live.
+    expect(text).not.toContain("srv-b (claude-desktop)");
+    expect(text).not.toMatch(/malformed entr(y was|ies were) skipped/);
+    // positive control: srv-b really was processed by this run
+    expect(text).toMatch(/Updated srv-b/);
   });
 
   it("reports an unrelated malformed neighbour ONCE, not once per server", async () => {
