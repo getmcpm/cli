@@ -173,3 +173,82 @@ describe("collectClientStates", () => {
     expect(states.map((s) => s.clientId)).toEqual(["claude-desktop"]);
   });
 });
+
+// ---------------------------------------------------------------------------
+// #59: an entry dropped by read()'s shape validation (#23, v0.34.0) used to be
+// indistinguishable from an entry that was never there — so `sync --check`
+// reported a client that HAS the server as "missing" it (a false drift claim
+// on a CI gate), or, when only one client had it, dropped the server from the
+// model entirely and counted the run clean.
+// ---------------------------------------------------------------------------
+
+describe("buildDriftModel — malformed entries are not reported as absent", () => {
+  it("reports a malformed entry as malformed, NOT missing, in that client", () => {
+    const entry: McpServerEntry = { command: "npx", args: ["fs"] };
+    const model = buildDriftModel([
+      { clientId: "claude-desktop", servers: { fs: entry }, malformed: ["fs"] },
+      state("cursor", { fs: { ...entry } }),
+    ]);
+    const fs = findServer(model, "fs");
+    // claude-desktop HAS this server — saying it is "missing in claude-desktop"
+    // is a false statement that sends the user to re-add a server they have.
+    expect(fs.absent).toEqual([]);
+    expect(fs.malformed).toEqual(["claude-desktop"]);
+  });
+
+  it("a malformed holder is excluded from the shape comparison", () => {
+    // The malformed entry's shape is exactly what we could not validate, so it
+    // must not manufacture a conflict against the good client.
+    const model = buildDriftModel([
+      { clientId: "claude-desktop", servers: {}, malformed: ["fs"] },
+      state("cursor", { fs: { command: "npx", args: ["fs"] } }),
+    ]);
+    const fs = findServer(model, "fs");
+    expect(fs.conflict).toBe(false);
+    expect(fs.present).toEqual(["cursor"]);
+  });
+
+  it("surfaces a server that is malformed in the ONLY client holding it", () => {
+    // Previously this vanished from the model: drifted 0, inSync 0, exit 0 —
+    // a clean CI pass over a config mcpm could not actually read.
+    const model = buildDriftModel([
+      { clientId: "claude-desktop", servers: {}, malformed: ["fs"] },
+      state("cursor", {}),
+    ]);
+    const fs = findServer(model, "fs");
+    expect(fs.malformed).toEqual(["claude-desktop"]);
+    expect(fs.present).toEqual([]);
+    // Not verifiable ⇒ not in-sync. `sync --check` must not report clean.
+    expect(model.inSync).toBe(0);
+    expect(model.drifted).toBe(1);
+  });
+
+  it("does not count a fully-verified stack as drifted (negative control)", () => {
+    const entry: McpServerEntry = { command: "npx", args: ["fs"] };
+    const model = buildDriftModel([
+      state("claude-desktop", { fs: entry }),
+      state("cursor", { fs: { ...entry } }),
+    ]);
+    expect(findServer(model, "fs").malformed).toEqual([]);
+    expect(model.drifted).toBe(0);
+  });
+});
+
+describe("collectClientStates — records malformed entry names", () => {
+  it("captures the names read() dropped, per client", async () => {
+    const deps = makeDeps({
+      getAdapter: vi.fn((id: ClientId) => ({
+        read: vi.fn().mockImplementation(async (_p: string, onSkip?: (n: string) => void) => {
+          if (id === "cursor") {
+            onSkip?.("broken");
+            return { ok: { command: "npx" } };
+          }
+          return { ok: { command: "npx" } };
+        }),
+      })),
+    });
+    const states = await collectClientStates(deps);
+    expect(states.find((s) => s.clientId === "cursor")!.malformed).toEqual(["broken"]);
+    expect(states.find((s) => s.clientId === "claude-desktop")!.malformed).toEqual([]);
+  });
+});

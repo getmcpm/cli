@@ -38,7 +38,6 @@ function makeAdapter(
   return {
     clientId,
     read: vi.fn().mockResolvedValue(servers),
-    read: vi.fn().mockResolvedValue(servers),
     addServer: vi.fn().mockResolvedValue(undefined),
     removeServer: vi.fn().mockResolvedValue(undefined),
   };

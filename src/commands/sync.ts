@@ -79,6 +79,9 @@ export function exitCodeFor(result: SyncResult, check: boolean | undefined): num
 // ---------------------------------------------------------------------------
 
 function cell(server: ServerDrift, clientId: ClientId): string {
+  // #59: check malformed BEFORE absent — the client holds this server, mcpm
+  // just could not read the entry. Rendering it as "·" claimed it was missing.
+  if (server.malformed.includes(clientId)) return "?";
   if (!server.present.includes(clientId)) return "·"; // absent
   if (server.conflict) return "≠"; // present but the clients disagree on shape
   return "✓";
@@ -105,13 +108,24 @@ function renderDashboard(model: DriftModel, output: (text: string) => void): voi
     table.push([server.name, ...model.clients.map((c) => cell(server, c))]);
   }
   output(table.toString());
-  output("  legend: ✓ present · absent ≠ shape conflict");
+  output("  legend: ✓ present · absent ≠ shape conflict ? unreadable entry");
 
   const conflicts = model.servers.filter((s) => s.conflict);
   if (conflicts.length > 0) {
     output("");
     for (const s of conflicts) {
       output(`  ≠ ${s.name}: differs on ${s.conflictFields!.join(", ")} (across ${s.present.join(", ")})`);
+    }
+  }
+
+  const unreadable = model.servers.filter((s) => s.malformed.length > 0);
+  if (unreadable.length > 0) {
+    output("");
+    for (const s of unreadable) {
+      output(
+        `  ? ${s.name}: entry in ${s.malformed.join(", ")} does not match the expected shape ` +
+          `— cannot compare (run \`mcpm doctor\` for details)`
+      );
     }
   }
 

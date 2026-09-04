@@ -218,8 +218,20 @@ export async function buildDoctorModel(deps: DoctorModelDeps): Promise<DoctorMod
   }
 
   // 4. Cross-client consistency (advisory — never an issue, never fails doctor).
+  // #59: carry the names read() dropped into the drift model too, so the
+  // cross-client view reports "unreadable entry" instead of "missing from this
+  // client" for a server the client demonstrably has. Each one already raises
+  // its own DoctorIssue above; this only stops the drift model contradicting it.
   const driftStates: ClientState[] = reads.flatMap(({ clientId, read }) =>
-    read.servers ? [{ clientId, servers: read.servers }] : []
+    read.servers
+      ? [
+          {
+            clientId,
+            servers: read.servers,
+            malformed: skippedEntries.filter((e) => e.clientId === clientId).map((e) => e.name),
+          },
+        ]
+      : []
   );
   const crossClient = driftStates.length >= 2 ? toCrossClient(driftStates) : null;
 

@@ -32,7 +32,6 @@ const VSCODE_SERVERS: Record<string, McpServerEntry> = {
 function makeMockAdapter(servers: Record<string, McpServerEntry> = {}) {
   return {
     read: vi.fn().mockResolvedValue(servers),
-    read: vi.fn().mockResolvedValue(servers),
     addServer: vi.fn(),
     removeServer: vi.fn(),
   };

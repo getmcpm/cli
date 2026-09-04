@@ -37,9 +37,6 @@ function makeAdapter(
     read: vi.fn().mockImplementation(() =>
       shouldThrow ? Promise.reject(new SyntaxError("Unexpected token")) : Promise.resolve(servers)
     ),
-    read: vi.fn().mockImplementation(() =>
-      shouldThrow ? Promise.reject(new SyntaxError("Unexpected token")) : Promise.resolve(servers)
-    ),
     addServer: vi.fn().mockResolvedValue(undefined),
     removeServer: vi.fn().mockResolvedValue(undefined),
   };

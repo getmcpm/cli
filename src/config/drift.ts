@@ -37,6 +37,15 @@ export interface DriftDeps {
 export interface ClientState {
   readonly clientId: ClientId;
   readonly servers: Record<string, McpServerEntry>;
+  /**
+   * #59: names this client's config DOES hold but which `read()` dropped for
+   * failing shape validation (#23). Kept separate from `servers` — the entry
+   * is unusable — but not discarded, because "we could not read it" and "it is
+   * not there" are different facts and only the second one is drift.
+   * Optional so a caller that has not collected them (older tests, callers
+   * predating #59) is simply treated as having none.
+   */
+  readonly malformed?: readonly string[];
 }
 
 export interface ServerDrift {
@@ -45,6 +54,12 @@ export interface ServerDrift {
   readonly present: readonly ClientId[];
   /** Clients (with readable configs) that lack this server. */
   readonly absent: readonly ClientId[];
+  /**
+   * Clients that hold this server in an entry `read()` could not validate.
+   * Deliberately disjoint from both `present` and `absent`: the client is not
+   * missing the server, and the entry cannot be compared against anything.
+   */
+  readonly malformed: readonly ClientId[];
   /** True when the `present` clients disagree on the server's shape. */
   readonly conflict: boolean;
   /** Which fields diverge among the `present` clients (only when conflict). */
@@ -77,8 +92,11 @@ export async function collectClientStates(deps: DriftDeps): Promise<ClientState[
   const states: ClientState[] = [];
   for (const clientId of clients) {
     try {
-      const servers = await deps.getAdapter(clientId).read(deps.getPath(clientId));
-      states.push({ clientId, servers });
+      const malformed: string[] = [];
+      const servers = await deps
+        .getAdapter(clientId)
+        .read(deps.getPath(clientId), (name) => malformed.push(name));
+      states.push({ clientId, servers, malformed });
     } catch {
       // Skip unreadable clients (missing or malformed config).
     }
@@ -130,13 +148,29 @@ export function buildDriftModel(states: readonly ClientState[]): DriftModel {
     }
   }
 
-  const servers: ServerDrift[] = [];
-  for (const name of [...byName.keys()].sort()) {
-    const holders = byName.get(name)!;
-    const present = holders.map((h) => h.clientId).sort();
-    const presentSet = new Set(present);
-    const absent = clients.filter((c) => !presentSet.has(c));
+  // #59: same, for names whose entry read() dropped. A malformed name may or
+  // may not also appear in byName (another client can hold a valid entry), so
+  // the two maps are unioned below rather than treated as alternatives.
+  const malformedByName = new Map<string, ClientId[]>();
+  for (const { clientId, malformed } of states) {
+    for (const name of malformed ?? []) {
+      malformedByName.set(name, [...(malformedByName.get(name) ?? []), clientId]);
+    }
+  }
 
+  const servers: ServerDrift[] = [];
+  for (const name of [...new Set([...byName.keys(), ...malformedByName.keys()])].sort()) {
+    const holders = byName.get(name) ?? [];
+    const present = holders.map((h) => h.clientId).sort();
+    const malformed = (malformedByName.get(name) ?? []).slice().sort();
+    // A client holding a malformed entry is NOT missing the server. Counting it
+    // as absent was a false statement that told the user to re-add a server
+    // they already have.
+    const accountedFor = new Set([...present, ...malformed]);
+    const absent = clients.filter((c) => !accountedFor.has(c));
+
+    // Only VALID entries are compared: the malformed one is precisely the shape
+    // we could not read, so it must not manufacture a conflict.
     const fields = holders.length > 1 ? divergingFields(holders.map((h) => h.entry)) : [];
     const conflict = fields.length > 0;
 
@@ -144,11 +178,18 @@ export function buildDriftModel(states: readonly ClientState[]): DriftModel {
       name,
       present,
       absent,
+      malformed,
       conflict,
       ...(conflict ? { conflictFields: fields } : {}),
     });
   }
 
-  const drifted = servers.filter((s) => s.absent.length > 0 || s.conflict).length;
+  // A server mcpm could not read is not a server it verified to be in sync, so
+  // it counts as drifted (`sync --check` exits 2). Deliberately NOT a new exit
+  // code: 2 already means "not clean, read the output", and the output now says
+  // which of the three reasons applies.
+  const drifted = servers.filter(
+    (s) => s.absent.length > 0 || s.conflict || s.malformed.length > 0
+  ).length;
   return { clients, servers, inSync: servers.length - drifted, drifted };
 }
