@@ -115,3 +115,56 @@ describe("exitCodeFor (the --check CI gate)", () => {
     expect(exitCodeFor(result(false), true)).toBe(0);
   });
 });
+
+// #59: drive read()'s onSkip the way the real BaseAdapter does for an entry
+// that fails shape validation, so the whole `sync` path (collect -> model ->
+// render) is exercised rather than a hand-built model.
+function makeDepsWithMalformed(
+  configs: Partial<Record<ClientId, Record<string, McpServerEntry>>>,
+  malformed: Partial<Record<ClientId, string[]>>,
+  output: (t: string) => void,
+): SyncDeps {
+  const ids = Object.keys(configs) as ClientId[];
+  return {
+    detectClients: vi.fn<() => Promise<ClientId[]>>().mockResolvedValue(ids),
+    getAdapter: vi.fn((id: ClientId) => ({
+      read: vi.fn().mockImplementation(async (_p: string, onSkip?: (n: string) => void) => {
+        for (const name of malformed[id] ?? []) onSkip?.(name);
+        return configs[id] ?? {};
+      }),
+    })),
+    getPath: vi.fn().mockReturnValue("/mock/config.json"),
+    output,
+  };
+}
+
+describe("handleSync — unreadable entries are not reported as missing", () => {
+  it("renders ? (not ·) for a client whose entry read() dropped", async () => {
+    const cap = capture();
+    const deps = makeDepsWithMalformed(
+      { "claude-desktop": {}, cursor: { fs: { command: "npx", args: ["fs"] } } },
+      { "claude-desktop": ["fs"] },
+      cap.output,
+    );
+    const result = await handleSync({}, deps);
+    const fs = result.model.servers.find((s) => s.name === "fs")!;
+    expect(fs.absent).toEqual([]);
+    expect(fs.malformed).toEqual(["claude-desktop"]);
+    expect(cap.text()).toContain("?");
+    // The false claim this fixes: it must NOT say the server is missing there.
+    expect(cap.text()).not.toMatch(/missing in claude-desktop/);
+    expect(cap.text()).toMatch(/does not match the expected shape/);
+  });
+
+  it("sets drift=true (exit 2) when the only holder's entry is unreadable", async () => {
+    const cap = capture();
+    const deps = makeDepsWithMalformed(
+      { "claude-desktop": {}, cursor: {} },
+      { "claude-desktop": ["fs"] },
+      cap.output,
+    );
+    const result = await handleSync({ check: true }, deps);
+    expect(result.drift).toBe(true);
+    expect(exitCodeFor(result, true)).toBe(2);
+  });
+});
