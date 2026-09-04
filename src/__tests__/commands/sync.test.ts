@@ -174,5 +174,8 @@ describe("handleSync — unreadable entries are not reported as missing", () => 
     const result = await handleSync({ check: true }, deps);
     expect(result.drift).toBe(true);
     expect(exitCodeFor(result, true)).toBe(2);
+    // The summary must state a cause: "1 drifted (0 missing, 0 conflicts)" is
+    // a drift count with nothing behind it.
+    expect(cap.text()).toMatch(/1 drifted \(.*1 unreadable\)/);
   });
 });

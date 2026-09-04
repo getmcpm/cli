@@ -285,6 +285,41 @@ describe("handleExport — unreadable entries", () => {
     }
   });
 
+  it("stays quiet when ANOTHER client supplied a readable copy of the same name", async () => {
+    // Found by dogfooding: warning "NOT in this export" about a server the
+    // export DOES contain (via the other client) is its own false statement.
+    const errs: string[] = [];
+    const spy = vi
+      .spyOn(process.stderr, "write")
+      .mockImplementation((chunk: string | Uint8Array) => {
+        errs.push(String(chunk));
+        return true;
+      });
+    try {
+      const deps = makeDeps({
+        detectClients: vi
+          .fn<() => Promise<ClientId[]>>()
+          .mockResolvedValue(["claude-desktop", "cursor"]),
+        getAdapter: vi.fn().mockImplementation((id: ClientId) =>
+          id === "claude-desktop"
+            ? {
+                read: vi
+                  .fn()
+                  .mockImplementation(async (_p: string, onSkip?: (n: string) => void) => {
+                    onSkip?.("shared");
+                    return {};
+                  }),
+              }
+            : makeAdapter({ shared: { command: "npx", args: ["-y", "shared"] } })
+        ),
+      });
+      await handleExport({} as ExportOptions, deps);
+      expect(errs.join("")).not.toMatch(/NOT in this export/);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
   it("writes nothing to stderr for a fully readable config (negative control)", async () => {
     const errs: string[] = [];
     const spy = vi

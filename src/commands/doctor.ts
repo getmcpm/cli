@@ -66,11 +66,17 @@ export interface DoctorRuntimeHealth {
 
 export interface DoctorDriftEntry {
   name: string;
-  kind: "conflict" | "absent";
+  kind: "conflict" | "absent" | "unreadable";
   present: string[];
   absent: string[];
   /** Present only for `kind: "conflict"`. */
   fields?: string[];
+  /**
+   * #59: clients holding this server in an entry read() could not validate.
+   * Kept out of both `present` and `absent` — the client is not missing the
+   * server, and the entry cannot be compared.
+   */
+  malformed?: string[];
 }
 
 export interface DoctorCrossClient {
@@ -264,12 +270,16 @@ function toCrossClient(states: ClientState[]): DoctorCrossClient {
         absent: [...server.absent],
         fields: server.conflictFields ? [...server.conflictFields] : undefined,
       });
-    } else if (server.absent.length > 0) {
+    } else if (server.absent.length > 0 || server.malformed.length > 0) {
+      // #59: a server whose ONLY holder has an unreadable entry has an empty
+      // `present`, which rendered as "in ; missing in cursor" — a broken line
+      // that also never mentioned the client actually holding it.
       entries.push({
         name: server.name,
-        kind: "absent",
+        kind: server.present.length === 0 && server.malformed.length > 0 ? "unreadable" : "absent",
         present: [...server.present],
         absent: [...server.absent],
+        ...(server.malformed.length > 0 ? { malformed: [...server.malformed] } : {}),
       });
     }
   }
@@ -322,8 +332,19 @@ export function renderDoctorText(model: DoctorModel, output: (text: string) => v
       for (const d of cc.drift) {
         if (d.kind === "conflict") {
           output(`  ⚠ ${d.name} — config differs (${d.fields!.join(", ")}) across ${d.present.join(", ")}`);
+        } else if (d.kind === "unreadable") {
+          output(
+            `  ⚠ ${d.name} — entry in ${d.malformed!.join(", ")} does not match the expected shape` +
+              (d.absent.length > 0 ? `; missing in ${d.absent.join(", ")}` : "")
+          );
         } else {
-          output(`  ⚠ ${d.name} — in ${d.present.join(", ")}; missing in ${d.absent.join(", ")}`);
+          output(
+            `  ⚠ ${d.name} — in ${d.present.join(", ")}` +
+              (d.malformed && d.malformed.length > 0
+                ? `; unreadable in ${d.malformed.join(", ")}`
+                : "") +
+              (d.absent.length > 0 ? `; missing in ${d.absent.join(", ")}` : "")
+          );
         }
       }
       output("  Run `mcpm sync --check` for the full matrix (advisory, not a failure).");

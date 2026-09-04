@@ -142,7 +142,12 @@ function renderDashboard(model: DriftModel, output: (text: string) => void): voi
   // `inSync + drifted` partitions the servers; the parenthetical sub-counts can
   // overlap (a server can be both missing-somewhere and conflicting-elsewhere).
   output(
-    `${model.inSync} in sync · ${model.drifted} drifted (${missing.length} missing in ≥1 client, ${conflicts.length} shape ${conflictWord})`,
+    `${model.inSync} in sync · ${model.drifted} drifted (${missing.length} missing in ≥1 client, ` +
+      `${conflicts.length} shape ${conflictWord}` +
+      // #59: without this the line reads "1 drifted (0 missing, 0 conflicts)"
+      // — a drift count with no stated cause.
+      (unreadable.length > 0 ? `, ${unreadable.length} unreadable` : "") +
+      `)`,
   );
 }
 

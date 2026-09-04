@@ -542,5 +542,32 @@ describe("buildDoctorModel — cross-client view agrees with the malformed-entry
       (d) => d.name === "fs" && d.absent.includes("claude-desktop")
     );
     expect(absentEntries).toEqual([]);
+    // Positive control: the entry must actually BE in the drift list, or the
+    // assertion above passes vacuously.
+    const fs = model.crossClient!.drift.find((d) => d.name === "fs");
+    expect(fs?.malformed).toEqual(["claude-desktop"]);
+  });
+
+  it("names the holding client when the ONLY holder's entry is unreadable", async () => {
+    // Found by dogfooding: this rendered as "in ; missing in cursor" — an empty
+    // present list, and no mention of the client that actually has the server.
+    const deps = makeHealthyDeps({
+      detectClients: vi.fn().mockResolvedValue(["claude-desktop", "cursor"] as ClientId[]),
+      getAdapter: vi.fn().mockImplementation((id: ClientId) => ({
+        clientId: id,
+        read: vi.fn().mockImplementation(async (_p: string, onSkip?: (n: string) => void) => {
+          if (id === "claude-desktop") onSkip?.("fs");
+          return {};
+        }),
+        addServer: vi.fn().mockResolvedValue(undefined),
+        removeServer: vi.fn().mockResolvedValue(undefined),
+      })),
+    });
+
+    const model = await buildDoctorModel(deps);
+    const fs = model.crossClient!.drift.find((d) => d.name === "fs")!;
+    expect(fs.kind).toBe("unreadable");
+    expect(fs.malformed).toEqual(["claude-desktop"]);
+    expect(fs.present).toEqual([]);
   });
 });

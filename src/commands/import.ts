@@ -236,12 +236,16 @@ export async function handleImport(
 
   // #59: report BEFORE the empty-result return below — "No existing MCP servers
   // found" is a false statement when the only entries present were unreadable.
-  if (unreadable.length > 0) {
+  // Only names NO client could supply are actually un-importable: a well-formed
+  // copy in another client makes the server importable regardless.
+  const importable = new Set(uniqueServers.map((s) => s.name));
+  const omitted = unreadable.filter((n) => !importable.has(n));
+  if (omitted.length > 0) {
     output(
       chalk.yellow(
-        `${unreadable.length} server ${unreadable.length === 1 ? "entry does" : "entries do"} ` +
+        `${omitted.length} server ${omitted.length === 1 ? "entry does" : "entries do"} ` +
           `not match the expected shape and cannot be imported: ` +
-          `${unreadable.map((n) => sanitizeForTerminal(n)).join(", ")}. ` +
+          `${omitted.map((n) => sanitizeForTerminal(n)).join(", ")}. ` +
           `Run \`mcpm doctor\` for details.`
       )
     );

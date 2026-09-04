@@ -159,6 +159,14 @@ export abstract class BaseAdapter implements ConfigAdapter {
     // the skip into its own reporting instead of (or in addition to) stderr.
     // Default preserves the original stderr-warning behavior for every caller
     // that doesn't opt in.
+    // #59 closed the remaining unwired callers: diff (a dropped entry was
+    // reported "missing"), export (silently absent from a stack file the user
+    // keeps), import (silently absent from the pick-list), sync/doctor's drift
+    // model (a client that HAS the server was reported as lacking it), update
+    // (the force re-write discarded the entry's env block), and up --strict
+    // (left behind while reporting a clean reconciliation). guard/cli.ts's two
+    // sites deliberately remain on this default — the orchestrator names the
+    // same entry in the same invocation; see the comments there.
     // #23 follow-up (adversarial review): name is config-supplied (attacker-
     // controllable) and reaches the real terminal via this default — sanitize
     // it the same way doctor.ts/guard's cli.ts already do for this class of

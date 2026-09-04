@@ -94,11 +94,16 @@ export async function handleExport(
     }
   }
 
-  if (unreadable.length > 0) {
+  // A name is only ABSENT from the export if no client contributed a readable
+  // entry for it — another client holding a well-formed copy makes the export
+  // complete, and saying otherwise is its own false statement (caught by
+  // dogfooding: cursor's good copy of a claude-desktop-malformed server).
+  const omitted = unreadable.filter((name) => !(name in servers));
+  if (omitted.length > 0) {
     process.stderr.write(
-      `mcpm: ${unreadable.length} server ${unreadable.length === 1 ? "entry" : "entries"} ` +
-        `could not be read and ${unreadable.length === 1 ? "is" : "are"} NOT in this export: ` +
-        `${unreadable.map((n) => sanitizeForTerminal(n)).join(", ")}. ` +
+      `mcpm: ${omitted.length} server ${omitted.length === 1 ? "entry" : "entries"} ` +
+        `could not be read and ${omitted.length === 1 ? "is" : "are"} NOT in this export: ` +
+        `${omitted.map((n) => sanitizeForTerminal(n)).join(", ")}. ` +
         `Run \`mcpm doctor\` for details.\n`
     );
   }
