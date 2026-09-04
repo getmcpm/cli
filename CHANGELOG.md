@@ -77,8 +77,8 @@ published section (it happened to #170).
 - **`export` dropped `Object.prototype`-named entries from its own warning.**
   The omission check used `name in servers` on an object literal, so a
   malformed entry named `toString`, `constructor` or `valueOf` read as
-  already-exported and vanished from both the count and the file. It now uses
-  the `Set` already in scope.
+  already-exported and vanished from the warning that exists to say it was
+  dropped. It now uses the `Set` already in scope.
 
 - **`sync --check` reported a CI failure whose own output said there was
   nothing to look at.** `renderDashboard` returns early for zero clients, one

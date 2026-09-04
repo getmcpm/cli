@@ -806,7 +806,9 @@ describe("handleUpdate — malformed client entry must not silently wipe env", (
     const call = (adapter.addServer as ReturnType<typeof vi.fn>).mock.calls[0];
     expect(Object.prototype.hasOwnProperty.call(call[2].env, "__proto__")).toBe(true);
     expect(call[2].env.OK).toBe("keep");
-    expect(({} as Record<string, unknown>).polluted).toBeUndefined();
+    // The real hazard is the prototype being REPLACED by the recovered value.
+    expect(Object.getPrototypeOf({})).toBe(Object.prototype);
+    expect(typeof ({} as Record<string, unknown>).toString).toBe("function");
   });
 
   it("names a non-object env instead of returning in silence", async () => {
@@ -829,6 +831,76 @@ describe("handleUpdate — malformed client entry must not silently wipe env", (
     // and an array env is never written out as {"0": ...}
     const call = (adapter.addServer as ReturnType<typeof vi.fn>).mock.calls[0];
     expect(call[2].env?.["0"]).toBeUndefined();
+  });
+
+  it("still reports an unrelated malformed entry under --json (via stderr)", async () => {
+    // --json has no field for it and stdout must stay parseable, so replacing
+    // read()'s stderr default emitted it NOWHERE — LESS visible than before
+    // this change, which is the class this whole PR exists to close.
+    const errs: string[] = [];
+    const spy = vi
+      .spyOn(process.stderr, "write")
+      .mockImplementation((chunk: string | Uint8Array) => {
+        errs.push(String(chunk));
+        return true;
+      });
+    try {
+      const adapter = makeAdapter("claude-desktop");
+      (adapter.read as ReturnType<typeof vi.fn>).mockImplementation(
+        readDropping(
+          { "never-installed": { command: "npx", args: "BAD" } },
+          { "srv-a": { command: "npx", args: ["-y", "a"] } }
+        )
+      );
+      const lines: string[] = [];
+      const deps = makeDeps({
+        getInstalledServers: vi.fn().mockResolvedValue([
+          makeInstalledServer({ name: "srv-a", version: "1.0.0", clients: ["claude-desktop"] }),
+        ]),
+        getServer: vi.fn().mockResolvedValue(makeServerEntry("srv-a", "1.1.0")),
+        getAdapter: vi.fn().mockReturnValue(adapter),
+        output: (t: string) => lines.push(t),
+      });
+
+      await handleUpdate({ yes: true, json: true }, deps);
+
+      expect(errs.join("")).toContain("never-installed");
+      // stdout must remain parseable JSON
+      expect(() => JSON.parse(lines.join(""))).not.toThrow();
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it("names EVERY client holding the same malformed entry, not just one", async () => {
+    // A name-only key dropped one of two facts, and which client got named
+    // depended on iteration order.
+    const adapter = makeAdapter("claude-desktop");
+    (adapter.read as ReturnType<typeof vi.fn>).mockImplementation(
+      readDropping(
+        { "never-installed": { command: "npx", args: "BAD" } },
+        { "srv-a": { command: "npx", args: ["-y", "a"] } }
+      )
+    );
+    const lines: string[] = [];
+    const deps = makeDeps({
+      getInstalledServers: vi.fn().mockResolvedValue([
+        makeInstalledServer({
+          name: "srv-a",
+          version: "1.0.0",
+          clients: ["claude-desktop", "cursor"],
+        }),
+      ]),
+      getServer: vi.fn().mockResolvedValue(makeServerEntry("srv-a", "1.1.0")),
+      getAdapter: vi.fn().mockReturnValue(adapter),
+      output: (t: string) => lines.push(t),
+    });
+
+    await handleUpdate({ yes: true }, deps);
+    const text = lines.join("\n");
+    expect(text).toContain("never-installed (claude-desktop)");
+    expect(text).toContain("never-installed (cursor)");
+    expect(text).toMatch(/2 other malformed entries/);
   });
 
   it("carries clientNotes into --json", async () => {

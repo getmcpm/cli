@@ -1153,7 +1153,11 @@ describe("handleUp --strict — malformed undeclared entry", () => {
 
     await handleUp({ stackFile: stackPath, strict: true, yes: true }, deps);
 
-    expect(lines.join("\n")).not.toMatch(/not in mcpm\.yaml.*does not match the expected shape/);
+    // NB: assert on `recorded` and on the rendered line separately. An earlier
+    // assertion here matched "not in mcpm.yaml", which lives only in
+    // `results[].message` and is never rendered on the strict-removal path —
+    // so it could not fail, whatever the code did.
+    expect(lines.join("\n")).not.toContain("io.github.test/server-a: not removed");
     expect(recorded).not.toContainEqual({
       name: "io.github.test/server-a",
       status: "skipped",

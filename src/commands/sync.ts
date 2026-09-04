@@ -43,7 +43,11 @@ export interface SyncDeps extends DriftDeps {
 
 export interface SyncResult {
   readonly model: DriftModel;
-  /** True iff at least one server is absent somewhere or has a shape conflict. */
+  /**
+   * True iff at least one server is absent somewhere, has a shape conflict, has
+   * an entry that failed shape validation, or a client's config could not be
+   * read at all — i.e. anything mcpm could not verify to be in sync.
+   */
   readonly drift: boolean;
 }
 

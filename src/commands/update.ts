@@ -286,7 +286,10 @@ export async function handleUpdate(
     // #59: malformed entries seen in passing while reading configs, collected
   // across the whole run and reported ONCE below — never per updated server,
   // and never for a name this run updated itself.
-  const neighbours = new Map<string, ClientId>();
+  // Keyed by name+client, not name: the same malformed name in two clients is
+  // two facts, and a name-only key silently dropped one of them (the reported
+  // client then depended on iteration order).
+  const neighbours = new Map<string, { name: string; clientId: ClientId }>();
 
   for (const r of withUpdates) {
     const entry = entryMap.get(r.name);
@@ -339,7 +342,7 @@ export async function handleUpdate(
           clientId,
           r.name,
           (note) => clientNotes.push(note),
-          (cid, skipped) => neighbours.set(skipped, cid)
+          (cid, skipped) => neighbours.set(`${cid}\u0000${skipped}`, { name: skipped, clientId: cid })
         );
         const newEntry: McpServerEntry = {
           ...rawEntry,
@@ -384,16 +387,19 @@ export async function handleUpdate(
   }
 
   const updatedNames = new Set(withUpdates.map((r) => r.name));
-  const unrelated = [...neighbours].filter(([name]) => !updatedNames.has(name));
-  if (unrelated.length > 0 && !isJson) {
-    output(
-      chalk.yellow(
-        `  ${unrelated.length} other malformed entr${unrelated.length === 1 ? "y was" : "ies were"} ` +
-          `skipped and not updated: ` +
-          `${unrelated.map(([n, c]) => `${sanitizeForTerminal(n)} (${c})`).join(", ")}. ` +
-          `Run \`mcpm doctor\` for details.`
-      )
-    );
+  const unrelated = [...neighbours].filter(([, entry]) => !updatedNames.has(entry.name));
+  if (unrelated.length > 0) {
+    const body =
+      `${unrelated.length} other malformed entr${unrelated.length === 1 ? "y was" : "ies were"} ` +
+      `skipped and not updated: ` +
+      `${unrelated.map(([, e]) => `${sanitizeForTerminal(e.name)} (${e.clientId})`).join(", ")}. ` +
+      `Run \`mcpm doctor\` for details.`;
+    // #59: --json has no field for this and stdout must stay parseable, so the
+    // notice goes to stderr — otherwise replacing read()'s stderr default
+    // emitted it NOWHERE, leaving a malformed entry LESS visible than before
+    // this PR. Same resolution list.ts uses for the same problem.
+    if (isJson) process.stderr.write(`mcpm: ${body}\n`);
+    else output(chalk.yellow(`  ${body}`));
   }
 
   if (isJson) {
