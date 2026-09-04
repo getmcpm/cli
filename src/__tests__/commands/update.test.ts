@@ -80,7 +80,6 @@ function makeAdapter(clientId: ClientId): ConfigAdapter {
   return {
     clientId,
     read: vi.fn().mockResolvedValue({}),
-    read: vi.fn().mockResolvedValue({}),
     addServer: vi.fn().mockResolvedValue(undefined),
     removeServer: vi.fn().mockResolvedValue(undefined),
   };
@@ -588,5 +587,47 @@ describe("handleUpdate — multiple servers mixed state", () => {
     await handleUpdate({ yes: true }, deps);
     const out = lines.join("\n");
     expect(out).toContain("server-a");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// #59 / #23 regression: `readExistingEnv` reads through `BaseAdapter.read()`,
+// which since #23 (v0.34.0) DROPS an entry failing shape validation. A user
+// whose entry is malformed in one field (e.g. `args: "bad"` from a hand-edit)
+// but whose `env` block holds real API keys therefore got `undefined` back,
+// and the `force: true` re-write wiped those keys silently.
+// The existing "preserves existing client-config env" test above cannot see
+// this: it mocks read() to RETURN the entry, the one thing the real read()
+// stopped doing.
+// ---------------------------------------------------------------------------
+
+describe("handleUpdate — malformed client entry must not silently wipe env", () => {
+  it("refuses to overwrite an entry read() could not validate", async () => {
+    const adapter = makeAdapter("claude-desktop");
+    // Mimic the REAL read(): a malformed entry is reported via onSkip and
+    // omitted from the returned map.
+    (adapter.read as ReturnType<typeof vi.fn>).mockImplementation(
+      async (_path: string, onSkip?: (name: string) => void) => {
+        onSkip?.("io.github.test/server-a");
+        return {};
+      }
+    );
+    const lines: string[] = [];
+    const deps = makeDeps({
+      getInstalledServers: vi.fn().mockResolvedValue([
+        makeInstalledServer({ name: "io.github.test/server-a", version: "1.0.0", clients: ["claude-desktop"] }),
+      ]),
+      getServer: vi.fn().mockResolvedValue(makeServerEntry("io.github.test/server-a", "1.1.0")),
+      getAdapter: vi.fn().mockReturnValue(adapter),
+      output: (line: string) => lines.push(line),
+    });
+
+    await handleUpdate({ yes: true }, deps);
+
+    // The destructive write must not happen: the entry we would overwrite is
+    // exactly the one we could not read, so we cannot preserve what it holds.
+    expect(adapter.addServer).not.toHaveBeenCalled();
+    // ...and it must be surfaced, not silent.
+    expect(lines.join("\n")).toMatch(/malformed|does not match the expected shape/i);
   });
 });

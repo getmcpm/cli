@@ -71,14 +71,29 @@ async function readExistingEnv(
   getConfigPath: UpdateDeps["getConfigPath"],
   clientId: ClientId,
   name: string
-): Promise<Record<string, string> | undefined> {
+): Promise<{ malformed: boolean; env?: Record<string, string> }> {
   try {
     const adapter = getAdapter(clientId);
     const configPath = getConfigPath(clientId);
-    const servers = await adapter.read(configPath);
-    return servers[name]?.env;
+    // #59: distinguish "this server has no env" from "read() DROPPED this
+    // server". Since #23 (v0.34.0) an entry failing shape validation is
+    // omitted from the returned map, so a plain `servers[name]?.env` returned
+    // undefined for a malformed entry — and the caller's `force: true`
+    // re-write then discarded a perfectly good env block (API keys) held by
+    // an entry malformed in some OTHER field. The caller refuses the write
+    // instead.
+    // The callback deliberately records only THIS server: replacing the
+    // default suppresses its stderr line, and this probe runs once per
+    // (server, client) pair, so forwarding every skip would print an
+    // unrelated entry's warning N times. `mcpm doctor` is the canonical
+    // reporter for entries this run isn't touching.
+    let malformed = false;
+    const servers = await adapter.read(configPath, (skipped) => {
+      if (skipped === name) malformed = true;
+    });
+    return { malformed, env: servers[name]?.env };
   } catch {
-    return undefined;
+    return { malformed: false };
   }
 }
 
@@ -268,7 +283,18 @@ export async function handleUpdate(
     for (const clientId of originalClients) {
       try {
         const rawEntry = resolveInstallEntry(entry, clientId);
-        const existingEnv = await readExistingEnv(getAdapter, getConfigPath, clientId, r.name);
+        const existing = await readExistingEnv(getAdapter, getConfigPath, clientId, r.name);
+        if (existing.malformed) {
+          // Refuse the destructive write: the entry we would overwrite is the
+          // one we could not read, so we cannot preserve what it holds. The
+          // catch below collects this into `clientErrors`, which is surfaced
+          // in both the human output and `--json`.
+          throw new Error(
+            "existing entry does not match the expected shape - refusing to overwrite it " +
+              "(the re-write would discard its env block); fix the entry and re-run"
+          );
+        }
+        const existingEnv = existing.env;
         const newEntry: McpServerEntry = {
           ...rawEntry,
           ...(existingEnv && Object.keys(existingEnv).length > 0
