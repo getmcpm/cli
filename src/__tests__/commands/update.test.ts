@@ -719,6 +719,9 @@ describe("handleUpdate — malformed client entry must not silently wipe env", (
     expect(call[2].env.PORT).toBeUndefined();
     // and the key that could not be carried is NAMED, not dropped in silence
     expect(lines.join("\n")).toContain("PORT");
+    // ...as a NOTE. "could not update claude-desktop" would be false: it did.
+    expect(lines.join("\n")).toContain("(note:");
+    expect(lines.join("\n")).not.toContain("could not update");
   });
 
   it("re-states the warning for an unrelated malformed neighbour", async () => {

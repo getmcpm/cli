@@ -272,7 +272,7 @@ export async function handleUpdate(
   // Track update outcomes immutably (name → { updated, trustScore, clientErrors })
   const updateOutcomes = new Map<
     string,
-    { updated: boolean; trustScore: TrustScore; clientErrors: string[] }
+    { updated: boolean; trustScore: TrustScore; clientErrors: string[]; clientNotes: string[] }
   >();
 
   // Perform updates
@@ -313,6 +313,11 @@ export async function handleUpdate(
     // so we can warn the user instead of silently leaving them on the old
     // version. The store record still advances (best-effort write semantics).
     const clientErrors: string[] = [];
+    // #59: kept separate from clientErrors. These are things the user should
+    // know about a client that WAS updated — routing them through the error
+    // list made the output say "could not update claude-desktop" about a
+    // client it had just updated.
+    const clientNotes: string[] = [];
     for (const clientId of originalClients) {
       try {
         const rawEntry = resolveInstallEntry(entry, clientId);
@@ -321,7 +326,7 @@ export async function handleUpdate(
           getConfigPath,
           clientId,
           r.name,
-          (note) => clientErrors.push(note)
+          (note) => clientNotes.push(note)
         );
         const newEntry: McpServerEntry = {
           ...rawEntry,
@@ -349,15 +354,16 @@ export async function handleUpdate(
     await addInstalledServer(finalRecord);
 
     // Record outcome immutably instead of mutating the result object
-    updateOutcomes.set(r.name, { updated: true, trustScore, clientErrors });
+    updateOutcomes.set(r.name, { updated: true, trustScore, clientErrors, clientNotes });
 
     if (!isJson) {
       // Surface partial config-write failures so a client silently left on the
       // old version is visible to the user (mirrors the up.ts warning suffix).
       const warning =
-        clientErrors.length > 0
+        (clientErrors.length > 0
           ? chalk.yellow(` (warning: could not update ${clientErrors.join("; ")})`)
-          : "";
+          : "") +
+        (clientNotes.length > 0 ? chalk.yellow(` (note: ${clientNotes.join("; ")})`) : "");
       output(
         `  ${chalk.green("✓")} Updated ${chalk.white(r.name)} to ${chalk.green(r.newVersion)} [${levelColor(levelLabel(trustScore))}]${warning}`
       );
@@ -370,6 +376,7 @@ export async function handleUpdate(
         results.map((r) => {
           const outcome = updateOutcomes.get(r.name);
           const clientErrors = outcome?.clientErrors ?? [];
+          const clientNotes = outcome?.clientNotes ?? [];
           return {
             name: r.name,
             oldVersion: r.oldVersion,
@@ -378,6 +385,7 @@ export async function handleUpdate(
             trustScore: outcome?.trustScore ?? null,
             error: r.error ?? null,
             clientErrors: clientErrors.length > 0 ? clientErrors : null,
+            clientNotes: clientNotes.length > 0 ? clientNotes : null,
           };
         }),
         null,
