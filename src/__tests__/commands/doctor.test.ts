@@ -571,3 +571,72 @@ describe("buildDoctorModel — cross-client view agrees with the malformed-entry
     expect(fs.present).toEqual([]);
   });
 });
+
+// ---------------------------------------------------------------------------
+// #59: the model-level assertions above do not cover the RENDER, which is what
+// the user actually reads. A mutant that never matched the "unreadable" branch
+// regenerated `in ; missing in cursor` verbatim — the bug dogfooding found —
+// with the whole suite green.
+// ---------------------------------------------------------------------------
+
+describe("doctorHandler — cross-client render of unreadable entries", () => {
+  const twoClientsOnly = (id: ClientId) => id === "claude-desktop" || id === "cursor";
+
+  function skippingAdapter(id: ClientId, skip: string[], servers: Record<string, McpServerEntry>) {
+    return {
+      clientId: id,
+      read: vi.fn().mockImplementation(async (_p: string, onSkip?: (n: string) => void) => {
+        for (const n of skip) onSkip?.(n);
+        return servers;
+      }),
+      addServer: vi.fn().mockResolvedValue(undefined),
+      removeServer: vi.fn().mockResolvedValue(undefined),
+    } as unknown as ConfigAdapter;
+  }
+
+  it("names the holding client when the ONLY holder's entry is unreadable", async () => {
+    const cap = captureOutput();
+    const deps = makeHealthyDeps({
+      checkConfigExists: vi.fn((id: ClientId) => Promise.resolve(twoClientsOnly(id))),
+      getAdapter: vi.fn((id: ClientId) =>
+        id === "claude-desktop" ? skippingAdapter(id, ["fs"], {}) : skippingAdapter(id, [], {})
+      ),
+      output: cap.fn,
+    });
+    await doctorHandler(deps);
+    expect(cap.text()).toMatch(/⚠ fs — entry in claude-desktop does not match the expected shape/);
+    // The bug this replaces rendered an empty present list:
+    expect(cap.text()).not.toMatch(/⚠ fs — in ;/);
+  });
+
+  it("names the unreadable client alongside the readable one", async () => {
+    const cap = captureOutput();
+    const deps = makeHealthyDeps({
+      checkConfigExists: vi.fn((id: ClientId) => Promise.resolve(twoClientsOnly(id))),
+      getAdapter: vi.fn((id: ClientId) =>
+        id === "claude-desktop"
+          ? skippingAdapter(id, ["fs"], {})
+          : skippingAdapter(id, [], { fs: { command: "npx", args: ["fs"] } })
+      ),
+      output: cap.fn,
+    });
+    await doctorHandler(deps);
+    expect(cap.text()).toMatch(/⚠ fs — in cursor; unreadable in claude-desktop/);
+  });
+
+  it("sanitizes a config-supplied name before it reaches the terminal", async () => {
+    const cap = captureOutput();
+    const deps = makeHealthyDeps({
+      checkConfigExists: vi.fn((id: ClientId) => Promise.resolve(twoClientsOnly(id))),
+      getAdapter: vi.fn((id: ClientId) =>
+        id === "claude-desktop"
+          ? skippingAdapter(id, ["ev\u001b]0;PWNED\u0007il"], {})
+          : skippingAdapter(id, [], {})
+      ),
+      output: cap.fn,
+    });
+    await doctorHandler(deps);
+    expect(cap.text()).toContain("PWNED");
+    expect(cap.text()).not.toContain("\u001b");
+  });
+});

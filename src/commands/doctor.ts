@@ -269,6 +269,9 @@ function toCrossClient(states: ClientState[]): DoctorCrossClient {
         present: [...server.present],
         absent: [...server.absent],
         fields: server.conflictFields ? [...server.conflictFields] : undefined,
+        // #59: symmetric with the absent branch below — a third client holding
+        // an unreadable copy is part of the same picture.
+        ...(server.malformed.length > 0 ? { malformed: [...server.malformed] } : {}),
       });
     } else if (server.absent.length > 0 || server.malformed.length > 0) {
       // #59: a server whose ONLY holder has an unreadable entry has an empty
@@ -331,15 +334,22 @@ export function renderDoctorText(model: DoctorModel, output: (text: string) => v
     } else {
       for (const d of cc.drift) {
         if (d.kind === "conflict") {
-          output(`  ⚠ ${d.name} — config differs (${d.fields!.join(", ")}) across ${d.present.join(", ")}`);
+          output(
+            `  ⚠ ${sanitizeForTerminal(d.name)} — config differs (${d.fields!.join(", ")}) ` +
+              `across ${d.present.join(", ")}` +
+              (d.malformed && d.malformed.length > 0
+                ? `; unreadable in ${d.malformed.join(", ")}`
+                : "")
+          );
         } else if (d.kind === "unreadable") {
           output(
-            `  ⚠ ${d.name} — entry in ${d.malformed!.join(", ")} does not match the expected shape` +
+            `  ⚠ ${sanitizeForTerminal(d.name)} — entry in ${d.malformed!.join(", ")} ` +
+              `does not match the expected shape` +
               (d.absent.length > 0 ? `; missing in ${d.absent.join(", ")}` : "")
           );
         } else {
           output(
-            `  ⚠ ${d.name} — in ${d.present.join(", ")}` +
+            `  ⚠ ${sanitizeForTerminal(d.name)} — in ${d.present.join(", ")}` +
               (d.malformed && d.malformed.length > 0
                 ? `; unreadable in ${d.malformed.join(", ")}`
                 : "") +

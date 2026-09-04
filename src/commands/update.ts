@@ -20,6 +20,7 @@ import type { InstalledServer } from "../store/servers.js";
 import type { ServerEntry } from "../registry/types.js";
 import type { Finding } from "../scanner/tier1.js";
 import type { TrustScore, TrustScoreInput } from "../scanner/trust-score.js";
+import { z } from "zod";
 import type { ClientId } from "../config/paths.js";
 import type { ConfigAdapter, McpServerEntry } from "../config/adapters/index.js";
 import { levelColor, levelLabel, extractRegistryMeta } from "../utils/format-trust.js";
@@ -71,29 +72,32 @@ async function readExistingEnv(
   getConfigPath: UpdateDeps["getConfigPath"],
   clientId: ClientId,
   name: string
-): Promise<{ malformed: boolean; env?: Record<string, string> }> {
+): Promise<Record<string, string> | undefined> {
   try {
     const adapter = getAdapter(clientId);
     const configPath = getConfigPath(clientId);
-    // #59: distinguish "this server has no env" from "read() DROPPED this
-    // server". Since #23 (v0.34.0) an entry failing shape validation is
-    // omitted from the returned map, so a plain `servers[name]?.env` returned
-    // undefined for a malformed entry — and the caller's `force: true`
-    // re-write then discarded a perfectly good env block (API keys) held by
-    // an entry malformed in some OTHER field. The caller refuses the write
-    // instead.
-    // The callback deliberately records only THIS server: replacing the
-    // default suppresses its stderr line, and this probe runs once per
-    // (server, client) pair, so forwarding every skip would print an
-    // unrelated entry's warning N times. `mcpm doctor` is the canonical
-    // reporter for entries this run isn't touching.
-    let malformed = false;
-    const servers = await adapter.read(configPath, (skipped) => {
-      if (skipped === name) malformed = true;
+    // #59: since #23 (v0.34.0) an entry failing shape validation is omitted
+    // from the returned map, so a plain `servers[name]?.env` returned undefined
+    // for it — and the caller's `force: true` re-write then DISCARDED a
+    // perfectly good env block (API keys) held by an entry malformed in some
+    // OTHER field, while printing "✓ Updated".
+    //
+    // The fix is to recover the env, NOT to refuse the write. Overwriting a
+    // mis-shaped entry with a freshly resolved one is the user's self-repair
+    // path — refusing it converts a self-healing case (a malformed entry with
+    // no env to lose) into a permanently stuck one. So the raw entry's `env`
+    // is parsed on its own, narrowly: nothing else from an unvalidated entry
+    // is read, and it is never spread.
+    let recovered: Record<string, string> | undefined;
+    const servers = await adapter.read(configPath, (skipped, raw) => {
+      if (skipped !== name) return;
+      const env = (raw as { env?: unknown } | null | undefined)?.env;
+      const parsed = z.record(z.string(), z.string()).safeParse(env);
+      if (parsed.success) recovered = parsed.data;
     });
-    return { malformed, env: servers[name]?.env };
+    return servers[name]?.env ?? recovered;
   } catch {
-    return { malformed: false };
+    return undefined;
   }
 }
 
@@ -283,18 +287,7 @@ export async function handleUpdate(
     for (const clientId of originalClients) {
       try {
         const rawEntry = resolveInstallEntry(entry, clientId);
-        const existing = await readExistingEnv(getAdapter, getConfigPath, clientId, r.name);
-        if (existing.malformed) {
-          // Refuse the destructive write: the entry we would overwrite is the
-          // one we could not read, so we cannot preserve what it holds. The
-          // catch below collects this into `clientErrors`, which is surfaced
-          // in both the human output and `--json`.
-          throw new Error(
-            "existing entry does not match the expected shape - refusing to overwrite it " +
-              "(the re-write would discard its env block); fix the entry and re-run"
-          );
-        }
-        const existingEnv = existing.env;
+        const existingEnv = await readExistingEnv(getAdapter, getConfigPath, clientId, r.name);
         const newEntry: McpServerEntry = {
           ...rawEntry,
           ...(existingEnv && Object.keys(existingEnv).length > 0

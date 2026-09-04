@@ -593,41 +593,117 @@ describe("handleUpdate — multiple servers mixed state", () => {
 // ---------------------------------------------------------------------------
 // #59 / #23 regression: `readExistingEnv` reads through `BaseAdapter.read()`,
 // which since #23 (v0.34.0) DROPS an entry failing shape validation. A user
-// whose entry is malformed in one field (e.g. `args: "bad"` from a hand-edit)
-// but whose `env` block holds real API keys therefore got `undefined` back,
-// and the `force: true` re-write wiped those keys silently.
+// whose entry was malformed in one field (e.g. `args: "bad"` from a hand-edit)
+// but whose `env` held real API keys therefore got `undefined` back, and the
+// `force: true` re-write wiped those keys while printing "✓ Updated".
 // The existing "preserves existing client-config env" test above cannot see
 // this: it mocks read() to RETURN the entry, the one thing the real read()
 // stopped doing.
 // ---------------------------------------------------------------------------
 
+/** Mimic the real read(): a malformed entry goes to onSkip, never to the map. */
+function readDropping(malformed: Record<string, unknown>, valid: Record<string, unknown> = {}) {
+  return vi
+    .fn()
+    .mockImplementation(async (_p: string, onSkip?: (n: string, raw: unknown) => void) => {
+      for (const [name, raw] of Object.entries(malformed)) onSkip?.(name, raw);
+      return { ...valid };
+    });
+}
+
 describe("handleUpdate — malformed client entry must not silently wipe env", () => {
-  it("refuses to overwrite an entry read() could not validate", async () => {
+  it("recovers the env block from the raw entry and REPAIRS the entry", async () => {
     const adapter = makeAdapter("claude-desktop");
-    // Mimic the REAL read(): a malformed entry is reported via onSkip and
-    // omitted from the returned map.
     (adapter.read as ReturnType<typeof vi.fn>).mockImplementation(
-      async (_path: string, onSkip?: (name: string) => void) => {
-        onSkip?.("io.github.test/server-a");
-        return {};
-      }
+      readDropping({
+        "io.github.test/server-a": {
+          command: "npx",
+          args: "-y @test/server", // the malformation
+          env: { MY_KEY: "user-value" },
+        },
+      })
     );
-    const lines: string[] = [];
     const deps = makeDeps({
       getInstalledServers: vi.fn().mockResolvedValue([
         makeInstalledServer({ name: "io.github.test/server-a", version: "1.0.0", clients: ["claude-desktop"] }),
       ]),
       getServer: vi.fn().mockResolvedValue(makeServerEntry("io.github.test/server-a", "1.1.0")),
       getAdapter: vi.fn().mockReturnValue(adapter),
-      output: (line: string) => lines.push(line),
     });
 
     await handleUpdate({ yes: true }, deps);
 
-    // The destructive write must not happen: the entry we would overwrite is
-    // exactly the one we could not read, so we cannot preserve what it holds.
-    expect(adapter.addServer).not.toHaveBeenCalled();
-    // ...and it must be surfaced, not silent.
-    expect(lines.join("\n")).toMatch(/malformed|does not match the expected shape/i);
+    // The write MUST happen — overwriting a mis-shaped entry with a freshly
+    // resolved one is the user's self-repair path. Refusing it would convert a
+    // self-healing case into a permanently stuck one.
+    expect(adapter.addServer).toHaveBeenCalledTimes(1);
+    const call = (adapter.addServer as ReturnType<typeof vi.fn>).mock.calls[0];
+    // ...and it must carry the secrets forward.
+    expect(call[2].env.MY_KEY).toBe("user-value");
+    // ...and the repaired entry must have a well-formed args array.
+    expect(Array.isArray(call[2].args)).toBe(true);
+  });
+
+  it("still repairs a malformed entry that has NO env to recover", async () => {
+    const adapter = makeAdapter("claude-desktop");
+    (adapter.read as ReturnType<typeof vi.fn>).mockImplementation(
+      readDropping({ "io.github.test/server-a": { command: "npx", args: "-y @test/server" } })
+    );
+    const deps = makeDeps({
+      getInstalledServers: vi.fn().mockResolvedValue([
+        makeInstalledServer({ name: "io.github.test/server-a", version: "1.0.0", clients: ["claude-desktop"] }),
+      ]),
+      getServer: vi.fn().mockResolvedValue(makeServerEntry("io.github.test/server-a", "1.1.0")),
+      getAdapter: vi.fn().mockReturnValue(adapter),
+    });
+
+    await handleUpdate({ yes: true }, deps);
+    expect(adapter.addServer).toHaveBeenCalledTimes(1);
+  });
+
+  it("ignores an env recovered from a DIFFERENT malformed entry", async () => {
+    // The onSkip callback fires for every malformed entry in the config, not
+    // just the one being updated. Without the name filter, an unrelated broken
+    // neighbour's env would be grafted onto this server.
+    const adapter = makeAdapter("claude-desktop");
+    (adapter.read as ReturnType<typeof vi.fn>).mockImplementation(
+      readDropping(
+        { "some-other-server": { command: "npx", args: "bad", env: { LEAKED: "from-neighbour" } } },
+        { "io.github.test/server-a": { command: "npx", args: ["-y", "@test/server"] } }
+      )
+    );
+    const deps = makeDeps({
+      getInstalledServers: vi.fn().mockResolvedValue([
+        makeInstalledServer({ name: "io.github.test/server-a", version: "1.0.0", clients: ["claude-desktop"] }),
+      ]),
+      getServer: vi.fn().mockResolvedValue(makeServerEntry("io.github.test/server-a", "1.1.0")),
+      getAdapter: vi.fn().mockReturnValue(adapter),
+    });
+
+    await handleUpdate({ yes: true }, deps);
+
+    expect(adapter.addServer).toHaveBeenCalledTimes(1);
+    const call = (adapter.addServer as ReturnType<typeof vi.fn>).mock.calls[0];
+    expect(call[2].env?.LEAKED).toBeUndefined();
+  });
+
+  it("ignores a non-string-valued env on the raw entry (narrow parse)", async () => {
+    const adapter = makeAdapter("claude-desktop");
+    (adapter.read as ReturnType<typeof vi.fn>).mockImplementation(
+      readDropping({
+        "io.github.test/server-a": { command: "npx", args: "bad", env: { NESTED: { deep: 1 } } },
+      })
+    );
+    const deps = makeDeps({
+      getInstalledServers: vi.fn().mockResolvedValue([
+        makeInstalledServer({ name: "io.github.test/server-a", version: "1.0.0", clients: ["claude-desktop"] }),
+      ]),
+      getServer: vi.fn().mockResolvedValue(makeServerEntry("io.github.test/server-a", "1.1.0")),
+      getAdapter: vi.fn().mockReturnValue(adapter),
+    });
+
+    await handleUpdate({ yes: true }, deps);
+    const call = (adapter.addServer as ReturnType<typeof vi.fn>).mock.calls[0];
+    expect(call[2].env?.NESTED).toBeUndefined();
   });
 });

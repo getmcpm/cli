@@ -252,7 +252,16 @@ export async function handleImport(
   }
 
   if (uniqueServers.length === 0) {
-    output(chalk.yellow("No existing MCP servers found in any client config."));
+    // #59: "No existing MCP servers found" contradicts the warning above when
+    // unreadable entries were the only ones present — servers WERE found, mcpm
+    // just could not read them.
+    output(
+      chalk.yellow(
+        omitted.length > 0
+          ? "No importable MCP servers found — every entry present failed shape validation."
+          : "No existing MCP servers found in any client config."
+      )
+    );
     return;
   }
 

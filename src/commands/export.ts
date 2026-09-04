@@ -98,7 +98,11 @@ export async function handleExport(
   // entry for it — another client holding a well-formed copy makes the export
   // complete, and saying otherwise is its own false statement (caught by
   // dogfooding: cursor's good copy of a claude-desktop-malformed server).
-  const omitted = unreadable.filter((name) => !(name in servers));
+  // `name in servers` walks the PROTOTYPE CHAIN, so an entry named `toString`
+  // / `constructor` / `valueOf` read as already-exported and vanished from both
+  // the warning and the file. Server names are arbitrary JSON keys. `seen` is
+  // the Set of names actually contributed, and has no such members.
+  const omitted = unreadable.filter((name) => !seen.has(name));
   if (omitted.length > 0) {
     process.stderr.write(
       `mcpm: ${omitted.length} server ${omitted.length === 1 ? "entry" : "entries"} ` +

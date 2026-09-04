@@ -408,3 +408,52 @@ describe("handleDiff — malformed entries", () => {
     expect(text).not.toContain("Unreadable");
   });
 });
+
+describe("handleDiff — malformed in one client, VALID in another", () => {
+  it("reports the unreadable copy alongside the readable one", async () => {
+    // Regression this closes: gating on `installed.has(name)` meant NEITHER
+    // loop fired, and because diff passes its own onSkip the default stderr
+    // warning was gone too — "1 in sync" over a config it could not read,
+    // with nothing on either stream. Worse than the behaviour it replaced.
+    const stackPath = await writeStackAndLock(basicStack, basicLock);
+    const deps = makeDeps({
+      detectClients: vi
+        .fn<() => Promise<ClientId[]>>()
+        .mockResolvedValue(["claude-desktop", "cursor"]),
+      getAdapter: vi.fn().mockImplementation((id: ClientId) =>
+        id === "claude-desktop"
+          ? makeSkippingAdapter(["io.github.test/server-a"])
+          : makeSkippingAdapter([], {
+              "io.github.test/server-a": { command: "npx", args: ["-y", "@test/server-a@1.2.0"] },
+            })
+      ),
+    });
+
+    await handleDiff({ stackFile: stackPath }, deps);
+
+    const text = (deps.output as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[0]).join("\n");
+    expect(text).toContain("Unreadable");
+    expect(text).toMatch(/1 unreadable/);
+    // and the readable copy is still reported as in sync
+    expect(text).toContain("In sync:");
+  });
+
+  it("does not append \", 0 unreadable\" when there are none", async () => {
+    const stackPath = await writeStackAndLock(basicStack, basicLock);
+    const deps = makeDeps({ getAdapter: vi.fn().mockReturnValue(makeSkippingAdapter([])) });
+    await handleDiff({ stackFile: stackPath }, deps);
+    const text = (deps.output as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[0]).join("\n");
+    expect(text).not.toContain("unreadable");
+  });
+
+  it("sanitizes a config-supplied name before it reaches the terminal", async () => {
+    const stackPath = await writeStackAndLock(basicStack, basicLock);
+    const deps = makeDeps({
+      getAdapter: vi.fn().mockReturnValue(makeSkippingAdapter(["ev\u001b]0;PWNED\u0007il"])),
+    });
+    await handleDiff({ stackFile: stackPath }, deps);
+    const text = (deps.output as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[0]).join("\n");
+    expect(text).toContain("PWNED"); // the name is still shown...
+    expect(text).not.toContain("\u001b"); // ...but the escape is gone
+  });
+});

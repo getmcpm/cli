@@ -63,8 +63,10 @@ describe("handleList — multiple clients", () => {
     const deps: ListDeps = { detectClients, getAdapter, getPath, output };
     await handleList({}, deps);
 
-    expect(claudeAdapter.read).toHaveBeenCalledWith("/fake/path/config.json");
-    expect(cursorAdapter.read).toHaveBeenCalledWith("/fake/path/config.json");
+    // #59: read() now takes an onSkip callback; the assertion is about WHICH
+    // client configs were read, not the call's arity.
+    expect(claudeAdapter.read).toHaveBeenCalledWith("/fake/path/config.json", expect.any(Function));
+    expect(cursorAdapter.read).toHaveBeenCalledWith("/fake/path/config.json", expect.any(Function));
   });
 
   it("displays Client and Server Name columns", async () => {
@@ -431,5 +433,60 @@ describe("handleList — Command/URL column", () => {
     await handleList({}, { detectClients, getAdapter, getPath, output });
 
     expect(lines.join("\n")).toContain("https://tools.example.com/mcp");
+  });
+});
+
+describe("handleList — unreadable entries (#59)", () => {
+  function skipping(skip: string[], servers: Record<string, unknown> = {}) {
+    return {
+      read: vi.fn().mockImplementation(async (_p: string, onSkip?: (n: string) => void) => {
+        for (const n of skip) onSkip?.(n);
+        return servers;
+      }),
+      addServer: vi.fn(),
+      removeServer: vi.fn(),
+    };
+  }
+
+  it("names them, and does not claim nothing is installed", async () => {
+    const lines: string[] = [];
+    const deps = {
+      detectClients: vi.fn().mockResolvedValue(["claude-desktop"]),
+      getAdapter: vi.fn().mockReturnValue(skipping(["broken"])),
+      getPath: vi.fn().mockReturnValue("/fake/path/config.json"),
+      output: (t: string) => lines.push(t),
+    } as unknown as ListDeps;
+
+    await handleList({}, deps);
+    const text = lines.join("\n");
+    expect(text).toContain("broken");
+    expect(text).not.toContain("No MCP servers installed");
+  });
+
+  it("surfaces them under --json, which has no stderr channel", async () => {
+    const lines: string[] = [];
+    const deps = {
+      detectClients: vi.fn().mockResolvedValue(["claude-desktop"]),
+      getAdapter: vi.fn().mockReturnValue(skipping(["broken"])),
+      getPath: vi.fn().mockReturnValue("/fake/path/config.json"),
+      output: (t: string) => lines.push(t),
+    } as unknown as ListDeps;
+
+    await handleList({ json: true }, deps);
+    const parsed = JSON.parse(lines[0]!);
+    expect(parsed.skipped).toEqual([{ name: "broken", client: "claude-desktop" }]);
+  });
+
+  it("keeps --json a bare array when nothing was skipped (shape unchanged)", async () => {
+    const lines: string[] = [];
+    const deps = {
+      detectClients: vi.fn().mockResolvedValue(["claude-desktop"]),
+      getAdapter: vi.fn().mockReturnValue(skipping([], { ok: { command: "npx" } })),
+      getPath: vi.fn().mockReturnValue("/fake/path/config.json"),
+      output: (t: string) => lines.push(t),
+    } as unknown as ListDeps;
+
+    await handleList({ json: true }, deps);
+    expect(Array.isArray(JSON.parse(lines[0]!))).toBe(true);
   });
 });

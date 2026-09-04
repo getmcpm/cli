@@ -183,29 +183,41 @@ describe("collectClientStates", () => {
 // ---------------------------------------------------------------------------
 
 describe("buildDriftModel — malformed entries are not reported as absent", () => {
+  // NOTE ON FIXTURE SHAPE: `read()` puts a name in the returned map OR passes
+  // it to onSkip, never both (base.ts, if/else). A state with the same name in
+  // `servers` AND `malformed` is therefore unreachable — and a test built on
+  // one asserts `absent === []` that is already true via `present`, pinning
+  // nothing. Every fixture below uses the reachable shape.
   it("reports a malformed entry as malformed, NOT missing, in that client", () => {
-    const entry: McpServerEntry = { command: "npx", args: ["fs"] };
     const model = buildDriftModel([
-      { clientId: "claude-desktop", servers: { fs: entry }, malformed: ["fs"] },
-      state("cursor", { fs: { ...entry } }),
+      { clientId: "claude-desktop", servers: {}, malformed: ["fs"] },
+      state("cursor", { fs: { command: "npx", args: ["fs"] } }),
     ]);
     const fs = findServer(model, "fs");
     // claude-desktop HAS this server — saying it is "missing in claude-desktop"
     // is a false statement that sends the user to re-add a server they have.
     expect(fs.absent).toEqual([]);
     expect(fs.malformed).toEqual(["claude-desktop"]);
+    expect(fs.present).toEqual(["cursor"]);
   });
 
-  it("a malformed holder is excluded from the shape comparison", () => {
-    // The malformed entry's shape is exactly what we could not validate, so it
-    // must not manufacture a conflict against the good client.
+  it("counts a server as drifted when its ONLY client's entry is unreadable", () => {
+    // Single client: `absent` is necessarily empty, so this is the only shape
+    // in which the malformed clause of the drifted predicate decides anything.
+    const model = buildDriftModel([{ clientId: "claude-desktop", servers: {}, malformed: ["fs"] }]);
+    expect(model.drifted).toBe(1);
+    expect(model.inSync).toBe(0);
+  });
+
+  it("counts a server as drifted when EVERY client's copy is unreadable", () => {
     const model = buildDriftModel([
       { clientId: "claude-desktop", servers: {}, malformed: ["fs"] },
-      state("cursor", { fs: { command: "npx", args: ["fs"] } }),
+      { clientId: "cursor", servers: {}, malformed: ["fs"] },
     ]);
     const fs = findServer(model, "fs");
-    expect(fs.conflict).toBe(false);
-    expect(fs.present).toEqual(["cursor"]);
+    expect(fs.absent).toEqual([]); // present in both, readable in neither
+    expect(model.drifted).toBe(1);
+    expect(model.inSync).toBe(0);
   });
 
   it("surfaces a server that is malformed in the ONLY client holding it", () => {
@@ -218,7 +230,6 @@ describe("buildDriftModel — malformed entries are not reported as absent", () 
     const fs = findServer(model, "fs");
     expect(fs.malformed).toEqual(["claude-desktop"]);
     expect(fs.present).toEqual([]);
-    // Not verifiable ⇒ not in-sync. `sync --check` must not report clean.
     expect(model.inSync).toBe(0);
     expect(model.drifted).toBe(1);
   });

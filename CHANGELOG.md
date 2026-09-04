@@ -16,40 +16,67 @@ published section (it happened to #170).
   validation. It therefore returned `undefined` for a user whose entry was
   malformed in one field (say `args: "-y pkg"` instead of an array) but whose
   `env` held real API keys — and the `force: true` re-write discarded them
-  while printing `✓ Updated`. Verified against the pre-fix binary: an entry
-  carrying `MY_API_KEY` came back as `{command, args}` with no `env` at all,
-  reported as a success. `readExistingEnv` now distinguishes "has no env" from
-  "read() dropped it" and the caller refuses the write, surfacing it through
-  the existing `clientErrors` channel. The pre-existing env-preservation test
-  could not see this: it mocks `read()` to RETURN the entry, the one thing the
-  real `read()` stopped doing.
+  while printing `✓ Updated`. Verified against a binary built from the pre-fix
+  commit: an entry carrying `MY_API_KEY` came back as `{command, args}` with no
+  `env` at all, reported as a success.
+
+  `read()`'s `onSkip` now receives the **raw entry** alongside the name, and
+  `update` recovers `env` from it with a narrow `z.record(z.string(),
+  z.string())` parse — nothing else from an unvalidated entry is read, and it
+  is never spread. **The first cut of this fix refused the write instead, and
+  review was right to reject it**: overwriting a mis-shaped entry with a
+  freshly resolved one is the user's self-repair path, so refusing converted a
+  self-healing case (a malformed entry with no env to lose) into a permanently
+  stuck one whose only signal was a warning that fired once and never again —
+  the printed remediation, "fix the entry and re-run", produced "All servers
+  are up to date". Recovering the value repairs the entry *and* keeps the
+  secret; measured end to end, `args` comes back a proper array with
+  `MY_API_KEY` intact.
 
 - **A malformed entry is no longer reported as a *missing* server (TODOS
-  #59).** Five call sites still read through the stderr-only default, and each
-  made a claim the dropped entry falsified. `sync --check` — a CI gate — told
-  the user a client was MISSING a server it demonstrably has, and when only one
-  client held it the server vanished from the model entirely, exiting 0 over a
-  config mcpm could not read. `diff` reported it "missing", sending the user to
-  `mcpm up` to re-install over an entry they only needed to fix. `export`
-  omitted it from a stack file the user keeps as their declared state.
-  `import` — the first-run path — dropped it from the pick-list and could then
-  print "No existing MCP servers found". `up --strict` left it behind while
-  reporting a clean reconciliation; it is still NOT deleted (the fail-safe
-  direction #23 chose), but it is reported. `ClientState`/`ServerDrift` gain
-  `malformed`, `DiffStatus` gains `unreadable`, `DoctorDriftEntry` gains an
-  `unreadable` kind. `sync --json` is the frozen shape and gains only an
-  additive field. **`guard/cli.ts`'s two sites deliberately stay on the
-  default** — the orchestrator names the same entry in the same invocation, so
-  wiring them would double-report; recorded in the code rather than left
-  looking unfinished.
+  #59).** Six call sites read through the stderr-only default, and each made a
+  claim the dropped entry falsified. `sync --check` — a CI gate — told the user
+  a client was MISSING a server it demonstrably has, and when only one client
+  held it the server vanished from the model entirely, exiting 0 over a config
+  mcpm could not read. `diff` reported it "missing", sending the user to `mcpm
+  up` to re-install over an entry they only needed to fix. `export` omitted it
+  from a stack file the user keeps as their declared state. `import` — the
+  first-run path — dropped it from the pick-list and then printed "No existing
+  MCP servers found". `list` omitted it from the inventory, including `--json`,
+  which has no stderr channel a consumer reads. `up --strict` left it behind
+  while reporting a clean reconciliation; it is still NOT deleted (the
+  fail-safe direction #23 chose), but it is now reported on both the human and
+  the `recordResult` channel — the latter being the `mcpm_up` MCP surface's
+  only signal.
 
-  Three of the fixes introduced false statements of their own, all found by
-  dogfooding the built binary rather than by the suite: `export`/`import`
-  warned that a name was omitted when another client had supplied a good copy
-  of it, `sync` summarised "1 drifted (0 missing, 0 shape conflicts)" — a drift
-  count with no stated cause — and `doctor` rendered `in ; missing in cursor`
-  with an empty present list, never naming the client that actually held the
-  server.
+  `ClientState`/`ServerDrift` gain `malformed`, `DiffStatus` gains
+  `unreadable`, `DoctorDriftEntry` gains an `unreadable` kind, `list --json`
+  gains a `skipped` field when and only when something was skipped (the shape
+  is an unchanged bare array otherwise). **`guard/cli.ts`'s two sites pass a
+  NO-OP**: the orchestrator already names the same entry in the same
+  invocation, so the default's stderr line was printing it a second time.
+
+- **Config-supplied server names now reach the terminal sanitized in every new
+  render site** (`sync`'s table, detail, conflict and missing lines; `diff`'s
+  unreadable line; `doctor`'s three cross-client branches; `list`'s warning).
+  These names are arbitrary JSON keys from a file mcpm does not control;
+  `base.ts` states the rule for exactly this value, and routing malformed names
+  into these renderers is what newly exposed them. `--json` stays byte-faithful.
+
+- **`export` dropped `Object.prototype`-named entries from its own warning.**
+  The omission check used `name in servers` on an object literal, so a
+  malformed entry named `toString`, `constructor` or `valueOf` read as
+  already-exported and vanished from both the count and the file. It now uses
+  the `Set` already in scope.
+
+### Notes
+
+`mcpm sync --json` is a **frozen** contract (`docs/CONTRACTS.md`) and this
+change is more than additive: `malformed` is a new field, but membership of
+`servers[]` and the `drifted`/`inSync` counts also change, and `sync --check`
+flips **0 → 2** for a config that previously passed by being unreadable. The
+change is deliberate — the old exit 0 was the bug — but it is a contract
+change, not a field addition.
 
 ## [0.36.0] - 2026-09-04
 

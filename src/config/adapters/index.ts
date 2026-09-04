@@ -35,12 +35,12 @@ export interface ConfigAdapter {
 
   /**
    * Read all MCP server entries from the config file. An entry that fails
-   * shape validation is dropped rather than propagated; `onSkip` (name) is
+   * shape validation is dropped rather than propagated; `onSkip` (name, raw) is
    * called for each drop — defaults to a stderr warning (see BaseAdapter).
    */
   read(
     configPath: string,
-    onSkip?: (name: string) => void,
+    onSkip?: (name: string, raw: unknown) => void,
   ): Promise<Record<string, McpServerEntry>>;
 
   /**

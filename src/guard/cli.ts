@@ -190,12 +190,15 @@ async function collectConfineTargets(opts: ConfineComputeOpts): Promise<Map<stri
   for (const clientId of clients) {
     let entries;
     try {
-      // #59 (evaluated, deliberately NOT wired): a malformed entry is not
-      // enrolled for confinement — fail-safe (mcpm will not sandbox a command
-      // it could not parse) and not silent, because `enable` runs the
-      // orchestrator over the same configs in the same invocation and reports
-      // the entry by name in its `skipped` list.
-      entries = await getAdapter(clientId).read(getConfigPath(clientId));
+      // #59: a malformed entry is not enrolled for confinement — fail-safe
+      // (mcpm will not sandbox a command it could not parse) and not silent,
+      // because `enable` runs the orchestrator over the same configs in the
+      // same invocation and reports the entry by name in its `skipped` list.
+      // A NO-OP, not the default: the default's stderr line is what printed
+      // the same name a SECOND time in one command. (The comment here
+      // previously claimed the opposite — wiring would duplicate — which had
+      // it exactly backwards.)
+      entries = await getAdapter(clientId).read(getConfigPath(clientId), () => {});
     } catch {
       continue; // missing/unreadable config — skip (mirrors enable's read handling)
     }
@@ -496,15 +499,13 @@ async function warnUnresolvablePlaceholders(opts: DisableOpts): Promise<void> {
     if (opts.client !== undefined && clientId !== opts.client) continue;
     let entries;
     try {
-      // #59 (evaluated, deliberately NOT wired): a malformed entry is invisible
-      // to this advisory placeholder scan. It stays on the default onSkip
-      // because `disable` ALREADY names it — planForClient routes it into
-      // `skipped` with a reason, and printClientReport prints name + reason on
-      // both enable and disable — so wiring it here would print the same name
-      // a second time in the same command. The residual loss is one
-      // second-order warning (an unresolvable keychain placeholder) about a
-      // server whose first-order problem is already reported.
-      entries = await getAdapter(clientId).read(getConfigPath(clientId));
+      // #59: a malformed entry is invisible to this advisory placeholder scan.
+      // That is accepted — the residual loss is one second-order warning (an
+      // unresolvable keychain placeholder) about a server whose first-order
+      // problem `disable` already reports by name, via planForClient's
+      // `skipped` list. A NO-OP rather than the default, because the default's
+      // stderr line is what printed that name a second time in one command.
+      entries = await getAdapter(clientId).read(getConfigPath(clientId), () => {});
     } catch (err) {
       // A missing config is expected; surface anything else (permissions,
       // malformed JSON) rather than silently skipping it.

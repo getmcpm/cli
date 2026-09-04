@@ -342,3 +342,35 @@ describe("handleExport — unreadable entries", () => {
     }
   });
 });
+
+describe("handleExport — Object.prototype-named entries", () => {
+  it("counts a malformed entry named `toString` (a `name in servers` hazard)", async () => {
+    // `name in servers` walks the prototype chain, so "toString" read as
+    // already-exported and vanished from both the warning and the count.
+    const errs: string[] = [];
+    const spy = vi
+      .spyOn(process.stderr, "write")
+      .mockImplementation((chunk: string | Uint8Array) => {
+        errs.push(String(chunk));
+        return true;
+      });
+    try {
+      const deps = makeDeps({
+        detectClients: vi.fn<() => Promise<ClientId[]>>().mockResolvedValue(["claude-desktop"]),
+        getAdapter: vi.fn().mockReturnValue({
+          read: vi.fn().mockImplementation(async (_p: string, onSkip?: (n: string) => void) => {
+            onSkip?.("toString");
+            onSkip?.("real");
+            return {};
+          }),
+        }),
+      });
+      await handleExport({} as ExportOptions, deps);
+      const text = errs.join("");
+      expect(text).toContain("toString");
+      expect(text).toMatch(/2 server entries/);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+});

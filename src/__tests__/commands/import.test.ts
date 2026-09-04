@@ -780,8 +780,36 @@ describe("handleImport — unreadable entries", () => {
     const text = lines.join("\n");
     expect(text).toContain("broken-server");
     expect(text).toMatch(/cannot be imported/);
-    // The report must PRECEDE the "nothing found" line it would otherwise
-    // contradict.
-    expect(text.indexOf("broken-server")).toBeLessThan(text.indexOf("No existing MCP servers"));
+    // ...and the follow-on line must not contradict it. "No existing MCP
+    // servers found" is false when servers WERE found and merely unreadable.
+    expect(text).not.toContain("No existing MCP servers found");
+    expect(text).toContain("No importable MCP servers found");
+    expect(text.indexOf("broken-server")).toBeLessThan(text.indexOf("No importable"));
+  });
+});
+
+describe("handleImport — another client supplied a good copy", () => {
+  it("does not claim a server is un-importable when it IS in the pick-list", async () => {
+    const lines: string[] = [];
+    const deps = makeDeps({
+      detectClients: vi.fn().mockResolvedValue(["claude-desktop", "cursor"]),
+      getAdapter: vi.fn().mockImplementation((id: ClientId) => ({
+        clientId: id,
+        read: vi.fn().mockImplementation(async (_p: string, onSkip?: (n: string) => void) => {
+          if (id === "claude-desktop") {
+            onSkip?.("shared");
+            return {};
+          }
+          return { shared: { command: "npx", args: ["-y", "shared"] } };
+        }),
+        addServer: vi.fn(),
+        removeServer: vi.fn(),
+      })),
+      output: (t: string) => lines.push(t),
+      confirm: vi.fn().mockResolvedValue(false),
+    });
+
+    await handleImport({}, deps);
+    expect(lines.join("\n")).not.toMatch(/cannot be imported/);
   });
 });

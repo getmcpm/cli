@@ -21,6 +21,7 @@ import type {
   LockedServer,
 } from "../stack/schema.js";
 import { lockPathFor } from "../stack/paths.js";
+import { sanitizeForTerminal } from "../guard/sanitize.js";
 import {
   parseStackFile,
   parseLockFile,
@@ -154,10 +155,18 @@ export async function handleDiff(
     }
   }
 
-  // #59: an UNDECLARED unreadable entry is invisible to both loops otherwise —
-  // it is not in `installed` (read() dropped it) and not in `declaredNames`.
+  // #59: every unreadable entry gets a row, EXCEPT one already emitted as the
+  // declared branch's "unreadable" verdict above (that name has no readable
+  // copy anywhere). Gating this on `installed.has(name)` was a regression:
+  // when a name is malformed in client A and VALID in client B, neither loop
+  // fired AND the default stderr warning was gone, so `diff` printed
+  // "1 in sync" with nothing on either stream about the config it could not
+  // read — worse than the behaviour it replaced.
+  const alreadyReported = new Set(
+    entries.filter((e) => e.status === "unreadable").map((e) => e.name)
+  );
   for (const [name, badClients] of unreadable) {
-    if (declaredNames.has(name) || installed.has(name)) continue;
+    if (alreadyReported.has(name)) continue;
     entries.push({
       name,
       status: "unreadable",
@@ -206,7 +215,9 @@ export async function handleDiff(
   if (badShape.length > 0) {
     deps.output("Unreadable (installed but the entry does not match the expected shape):");
     for (const e of badShape) {
-      deps.output(`  ? ${e.name} [${e.clients.join(", ")}] - fix the entry, then re-run`);
+      deps.output(
+        `  ? ${sanitizeForTerminal(e.name)} [${e.clients.join(", ")}] - fix the entry, then re-run`
+      );
     }
     deps.output("");
   }

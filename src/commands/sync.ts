@@ -20,6 +20,7 @@
 
 import Table from "cli-table3";
 import type { ClientId } from "../config/paths.js";
+import { sanitizeForTerminal } from "../guard/sanitize.js";
 import {
   buildDriftModel,
   collectClientStates,
@@ -105,7 +106,7 @@ function renderDashboard(model: DriftModel, output: (text: string) => void): voi
 
   const table = new Table({ head: ["server", ...model.clients], style: { head: [], border: [] } });
   for (const server of model.servers) {
-    table.push([server.name, ...model.clients.map((c) => cell(server, c))]);
+    table.push([sanitizeForTerminal(server.name), ...model.clients.map((c) => cell(server, c))]);
   }
   output(table.toString());
   output("  legend: ✓ present · absent ≠ shape conflict ? unreadable entry");
@@ -114,7 +115,10 @@ function renderDashboard(model: DriftModel, output: (text: string) => void): voi
   if (conflicts.length > 0) {
     output("");
     for (const s of conflicts) {
-      output(`  ≠ ${s.name}: differs on ${s.conflictFields!.join(", ")} (across ${s.present.join(", ")})`);
+      output(
+        `  ≠ ${sanitizeForTerminal(s.name)}: differs on ${s.conflictFields!.join(", ")} ` +
+          `(across ${s.present.join(", ")})`
+      );
     }
   }
 
@@ -123,17 +127,32 @@ function renderDashboard(model: DriftModel, output: (text: string) => void): voi
     output("");
     for (const s of unreadable) {
       output(
-        `  ? ${s.name}: entry in ${s.malformed.join(", ")} does not match the expected shape ` +
-          `— cannot compare (run \`mcpm doctor\` for details)`
+        `  ? ${sanitizeForTerminal(s.name)}: entry in ${s.malformed.join(", ")} does not match ` +
+          `the expected shape — cannot compare` +
+          // #59: a malformed-only name has an EMPTY `present`, which the
+          // missing section below rendered as "in ; missing in cursor". Say it
+          // once, here, with the absent clients folded in.
+          (s.present.length === 0 && s.absent.length > 0
+            ? `; also missing in ${s.absent.join(", ")}`
+            : "") +
+          ` (run \`mcpm doctor\` for details)`
       );
     }
   }
 
-  const missing = model.servers.filter((s) => s.absent.length > 0);
+  // Exclude names already fully described above, or they are reported twice and
+  // counted under "missing in ≥1 client" as well.
+  const missing = model.servers.filter(
+    (s) => s.absent.length > 0 && !(s.present.length === 0 && s.malformed.length > 0)
+  );
   if (missing.length > 0) {
     output("");
     for (const s of missing) {
-      output(`  · ${s.name}: in ${s.present.join(", ")}; missing in ${s.absent.join(", ")}`);
+      output(
+        `  · ${sanitizeForTerminal(s.name)}: in ${s.present.join(", ")}` +
+          (s.malformed.length > 0 ? `; unreadable in ${s.malformed.join(", ")}` : "") +
+          `; missing in ${s.absent.join(", ")}`
+      );
     }
   }
 

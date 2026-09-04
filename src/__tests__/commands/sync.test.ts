@@ -179,3 +179,57 @@ describe("handleSync — unreadable entries are not reported as missing", () => 
     expect(cap.text()).toMatch(/1 drifted \(.*1 unreadable\)/);
   });
 });
+
+describe("handleSync — unreadable rendering details", () => {
+  it("does not ALSO list a malformed-only server under missing", async () => {
+    // present is empty for a malformed-only name, which rendered as
+    // "· orphan: in ; missing in cursor" beside the ? line, and counted the
+    // server under "missing in >=1 client" as well.
+    const cap = capture();
+    const deps = makeDepsWithMalformed(
+      { "claude-desktop": {}, cursor: {} },
+      { "claude-desktop": ["orphan"] },
+      cap.output,
+    );
+    await handleSync({}, deps);
+    expect(cap.text()).not.toMatch(/· orphan: in ;/);
+    expect(cap.text()).toMatch(/also missing in cursor/);
+    expect(cap.text()).toMatch(/0 missing in ≥1 client/);
+  });
+
+  it("prints a legend entry for the ? cell", async () => {
+    const cap = capture();
+    const deps = makeDepsWithMalformed(
+      { "claude-desktop": {}, cursor: { fs: { command: "npx" } } },
+      { "claude-desktop": ["fs"] },
+      cap.output,
+    );
+    await handleSync({}, deps);
+    expect(cap.text()).toMatch(/legend:.*\? unreadable entry/);
+  });
+
+  it("does not append \", 0 unreadable\" when there are none", async () => {
+    const cap = capture();
+    const entry: McpServerEntry = { command: "npx", args: ["fs"] };
+    const deps = makeDeps(
+      { "claude-desktop": { fs: entry }, cursor: { fs: { ...entry } } },
+      cap.output,
+    );
+    await handleSync({}, deps);
+    // The LEGEND always names the ? cell, so assert on the summary line only.
+    expect(cap.text()).toMatch(/0 shape conflicts\)/);
+    expect(cap.text()).not.toMatch(/, \d+ unreadable\)/);
+  });
+
+  it("sanitizes a config-supplied name before it reaches the terminal", async () => {
+    const cap = capture();
+    const deps = makeDepsWithMalformed(
+      { "claude-desktop": {}, cursor: {} },
+      { "claude-desktop": ["ev\u001b]0;PWNED\u0007il"] },
+      cap.output,
+    );
+    await handleSync({}, deps);
+    expect(cap.text()).toContain("PWNED");
+    expect(cap.text()).not.toContain("\u001b");
+  });
+});

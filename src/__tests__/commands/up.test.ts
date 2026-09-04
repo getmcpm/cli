@@ -1091,9 +1091,11 @@ describe("handleUp --strict — malformed undeclared entry", () => {
       }
     );
     const lines: string[] = [];
+    const recorded: Array<{ name: string; status: string }> = [];
     const deps = makeDeps({
       getAdapter: vi.fn().mockReturnValue(adapter),
       output: (t: string) => lines.push(t),
+      recordResult: (r: { name: string; status: string }) => recorded.push(r),
     });
 
     await handleUp({ stackFile: stackPath, strict: true, yes: true }, deps);
@@ -1103,6 +1105,38 @@ describe("handleUp --strict — malformed undeclared entry", () => {
     // But say so — silence was the bug, not the refusal to delete.
     expect(lines.join("\n")).toContain("broken-extra");
     expect(lines.join("\n")).toMatch(/does not match the expected shape/);
+    // And say so on the MACHINE-READABLE channel too: `recordResult` is the
+    // mcpm_up MCP surface's only signal — that surface has no stderr an agent
+    // can see, which is the whole reason v0.34.0 added `skipped` fields.
+    expect(recorded).toContainEqual({ name: "broken-extra", status: "skipped" });
+  });
+
+  it("says nothing about a DECLARED server whose entry is malformed", async () => {
+    // --strict only reconciles servers absent from mcpm.yaml. Reporting a
+    // declared one as "not in mcpm.yaml" would be a false statement.
+    const stackPath = await writeStackAndLock(basicStack, basicLock);
+    const adapter = makeAdapter();
+    (adapter.read as ReturnType<typeof vi.fn>).mockImplementation(
+      async (_p: string, onSkip?: (n: string) => void) => {
+        onSkip?.("io.github.test/server-a"); // the DECLARED name
+        return {};
+      }
+    );
+    const lines: string[] = [];
+    const recorded: Array<{ name: string; status: string }> = [];
+    const deps = makeDeps({
+      getAdapter: vi.fn().mockReturnValue(adapter),
+      output: (t: string) => lines.push(t),
+      recordResult: (r: { name: string; status: string }) => recorded.push(r),
+    });
+
+    await handleUp({ stackFile: stackPath, strict: true, yes: true }, deps);
+
+    expect(lines.join("\n")).not.toMatch(/not in mcpm\.yaml.*does not match the expected shape/);
+    expect(recorded).not.toContainEqual({
+      name: "io.github.test/server-a",
+      status: "skipped",
+    });
   });
 
   it("still removes a well-formed undeclared entry (negative control)", async () => {

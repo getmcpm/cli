@@ -161,17 +161,23 @@ export abstract class BaseAdapter implements ConfigAdapter {
     // that doesn't opt in.
     // #59 closed the remaining unwired callers: diff (a dropped entry was
     // reported "missing"), export (silently absent from a stack file the user
-    // keeps), import (silently absent from the pick-list), sync/doctor's drift
-    // model (a client that HAS the server was reported as lacking it), update
-    // (the force re-write discarded the entry's env block), and up --strict
-    // (left behind while reporting a clean reconciliation). guard/cli.ts's two
-    // sites deliberately remain on this default — the orchestrator names the
-    // same entry in the same invocation; see the comments there.
+    // keeps), import (silently absent from the pick-list), list (silently
+    // absent from the inventory, incl. `--json`), sync/doctor's drift model (a
+    // client that HAS the server was reported as lacking it), update (the
+    // force re-write discarded the entry's env block), and up --strict (left
+    // behind while reporting a clean reconciliation). guard/cli.ts's two sites
+    // pass a NO-OP on purpose — the orchestrator names the same entry in the
+    // same invocation, so the default would print it twice; see there.
     // #23 follow-up (adversarial review): name is config-supplied (attacker-
     // controllable) and reaches the real terminal via this default — sanitize
     // it the same way doctor.ts/guard's cli.ts already do for this class of
     // value, so a name like `srv\x1b]0;evil\x07` can't inject terminal escapes.
-    onSkip: (name: string) => void = (name) =>
+    // #59: the RAW entry is passed alongside the name. A caller that is about
+    // to OVERWRITE this entry needs to know what it would discard, and the
+    // validated map cannot tell it — the entry is not in there. Deliberately
+    // `unknown`: it failed validation, so a consumer must narrow whatever
+    // single field it needs and must not spread it.
+    onSkip: (name: string, raw: unknown) => void = (name) =>
       process.stderr.write(
         `mcpm: skipping malformed server entry "${sanitizeForTerminal(name)}" in ${configPath} ` +
           `(${this.clientId}): does not match the expected shape.\n`,
@@ -191,7 +197,7 @@ export abstract class BaseAdapter implements ConfigAdapter {
         // #23: skip rather than propagate a malformed entry — better an
         // absent server than one silently corrupting a downstream transform
         // (e.g. spreading a string `args` char-by-char in guard/wrap.ts).
-        onSkip(name);
+        onSkip(name, entry);
       }
     }
     return out;
