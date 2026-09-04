@@ -251,6 +251,50 @@ describe("handleSync — reporting must not be gated on the matrix (#59/H1)", ()
     expect(exitCodeFor(result, true)).toBe(2);
   });
 
+  it("does not say 'No client configs found' when it just named them", async () => {
+    // "install a server" is also the wrong remediation for broken JSON.
+    const cap = capture();
+    const deps: SyncDeps = {
+      detectClients: vi
+        .fn<() => Promise<ClientId[]>>()
+        .mockResolvedValue(["claude-desktop", "cursor"]),
+      getAdapter: vi.fn(() => ({
+        read: vi.fn().mockRejectedValue(new SyntaxError("Unexpected token")),
+      })),
+      getPath: vi.fn().mockReturnValue("/mock/config.json"),
+      output: cap.output,
+    };
+    await handleSync({}, deps);
+    expect(cap.text()).toMatch(/claude-desktop: config could not be read at all/);
+    expect(cap.text()).not.toContain("No client configs found");
+    expect(cap.text()).toMatch(/No READABLE client configs found/);
+  });
+
+  it("counts unreadable SERVERS and unreadable CLIENTS separately", async () => {
+    // The parenthetical's other terms are server counts; folding a client
+    // count into them makes one number mean two things.
+    const cap = capture();
+    const deps: SyncDeps = {
+      detectClients: vi
+        .fn<() => Promise<ClientId[]>>()
+        .mockResolvedValue(["claude-desktop", "cursor", "vscode"]),
+      getAdapter: vi.fn((id: ClientId) => ({
+        read:
+          id === "vscode"
+            ? vi.fn().mockRejectedValue(new SyntaxError("Unexpected token"))
+            : vi.fn().mockImplementation(async (_p: string, onSkip?: (n: string) => void) => {
+                if (id === "claude-desktop") onSkip?.("alpha");
+                return { beta: { command: "npx" } };
+              }),
+      })),
+      getPath: vi.fn().mockReturnValue("/mock/config.json"),
+      output: cap.output,
+    };
+    await handleSync({}, deps);
+    expect(cap.text()).toMatch(/1 unreadable\)/);
+    expect(cap.text()).toMatch(/1 client config\(s\) unreadable/);
+  });
+
   it("names a client whose whole config is unparseable, and fails --check", async () => {
     // Otherwise the LARGER failure is the quieter one: one mis-typed entry
     // failed CI while an entirely broken config passed silently.

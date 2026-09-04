@@ -21,9 +21,15 @@ published section (it happened to #170).
   `env` at all, reported as a success.
 
   `read()`'s `onSkip` now receives the **raw entry** alongside the name, and
-  `update` recovers `env` from it with a narrow `z.record(z.string(),
-  z.string())` parse — nothing else from an unvalidated entry is read, and it
-  is never spread. **The first cut of this fix refused the write instead, and
+  `update` recovers `env` from it **per key** — each string-valued key is
+  carried, and any key that cannot be (plus a non-object `env`, plus unrelated
+  malformed neighbours) is NAMED rather than dropped in silence. Per key and
+  not a whole-record parse, because `env` is frequently the field that makes
+  the entry invalid — a numeric port is the archetypal hand-edit — and
+  rejecting the whole record then destroys the API key sitting beside the bad
+  one. Nothing else from an unvalidated entry is read, and it is never spread;
+  the accumulator is `Object.create(null)` so a key named `__proto__` is
+  carried rather than swallowed by the prototype setter. **The first cut of this fix refused the write instead, and
   review was right to reject it**: overwriting a mis-shaped entry with a
   freshly resolved one is the user's self-repair path, so refusing converted a
   self-healing case (a malformed entry with no env to lose) into a permanently
@@ -50,9 +56,12 @@ published section (it happened to #170).
   only signal.
 
   `ClientState`/`ServerDrift` gain `malformed`, `DiffStatus` gains
-  `unreadable`, `DoctorDriftEntry` gains an `unreadable` kind, `list --json`
-  gains a `skipped` field when and only when something was skipped (the shape
-  is an unchanged bare array otherwise). **`guard/cli.ts`'s two sites pass a
+  `unreadable`, `DoctorDriftEntry` gains an `unreadable` kind, `list --json` keeps its
+  bare-array shape and puts the skip notice on **stderr** — flipping the
+  payload to an object only in the malformed case would break
+  `JSON.parse(out).map(...)` exactly when something is already wrong. (The MCP
+  `mcpm_list` tool does put `skipped` in its result, because that surface has
+  no stderr an agent can see; the CLI does.) **`guard/cli.ts`'s two sites pass a
   NO-OP**: the orchestrator already names the same entry in the same
   invocation, so the default's stderr line was printing it a second time.
 

@@ -124,7 +124,14 @@ function renderDashboard(model: DriftModel, output: (text: string) => void): voi
   renderUnreadable(model, output);
 
   if (model.clients.length === 0) {
-    output("No client configs found. Install a server first (e.g. `mcpm install <name>`).");
+    // #59: "No client configs found" is false when configs WERE found and could
+    // not be parsed, and "install a server" is the wrong remediation for broken
+    // JSON. Same contradiction this PR fixed in import.ts and list.ts.
+    output(
+      (model.unreadableClients ?? []).length > 0
+        ? "No READABLE client configs found — fix the configs named above, then re-run."
+        : "No client configs found. Install a server first (e.g. `mcpm install <name>`)."
+    );
     return;
   }
   if (model.clients.length === 1) {
@@ -166,9 +173,8 @@ function renderDashboard(model: DriftModel, output: (text: string) => void): voi
   );
   // ...but the SUMMARY sub-count must stay true to its own label.
   const missingCount = model.servers.filter((s) => s.absent.length > 0).length;
-  const unreadableCount =
-    model.servers.filter((s) => s.malformed.length > 0).length +
-    (model.unreadableClients ?? []).length;
+  const unreadableServers = model.servers.filter((s) => s.malformed.length > 0).length;
+  const unreadableClientCount = (model.unreadableClients ?? []).length;
   if (missing.length > 0) {
     output("");
     for (const s of missing) {
@@ -189,8 +195,14 @@ function renderDashboard(model: DriftModel, output: (text: string) => void): voi
       `${conflicts.length} shape ${conflictWord}` +
       // #59: without this the line reads "1 drifted (0 missing, 0 conflicts)"
       // — a drift count with no stated cause.
-      (unreadableCount > 0 ? `, ${unreadableCount} unreadable` : "") +
-      `)`,
+      // Reported separately: the parenthetical's other terms are SERVER counts,
+      // so folding an unreadable-CLIENT count into them makes the number mean
+      // two different things at once.
+      (unreadableServers > 0 ? `, ${unreadableServers} unreadable` : "") +
+      `)` +
+      (unreadableClientCount > 0
+        ? ` · ${unreadableClientCount} client config(s) unreadable`
+        : ""),
   );
 }
 

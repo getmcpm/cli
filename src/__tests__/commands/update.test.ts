@@ -724,6 +724,128 @@ describe("handleUpdate — malformed client entry must not silently wipe env", (
     expect(lines.join("\n")).not.toContain("could not update");
   });
 
+  it("does not disparage a neighbour this run is ALSO updating", async () => {
+    // Reporting from inside the per-server read said `srv-b ... (not updated)`
+    // one line before `✓ Updated srv-b`, and repeated it once per server.
+    const adapter = makeAdapter("claude-desktop");
+    (adapter.read as ReturnType<typeof vi.fn>).mockImplementation(
+      readDropping(
+        { "srv-b": { command: "npx", args: "BAD" } },
+        { "srv-a": { command: "npx", args: ["-y", "a"] } }
+      )
+    );
+    const lines: string[] = [];
+    const deps = makeDeps({
+      getInstalledServers: vi.fn().mockResolvedValue([
+        makeInstalledServer({ name: "srv-a", version: "1.0.0", clients: ["claude-desktop"] }),
+        makeInstalledServer({ name: "srv-b", version: "1.0.0", clients: ["claude-desktop"] }),
+      ]),
+      getServer: vi.fn().mockImplementation((n: string) => Promise.resolve(makeServerEntry(n, "1.1.0"))),
+      getAdapter: vi.fn().mockReturnValue(adapter),
+      output: (t: string) => lines.push(t),
+    });
+
+    await handleUpdate({ yes: true }, deps);
+    expect(lines.join("\n")).not.toMatch(/srv-b.*not updated/);
+  });
+
+  it("reports an unrelated malformed neighbour ONCE, not once per server", async () => {
+    const adapter = makeAdapter("claude-desktop");
+    (adapter.read as ReturnType<typeof vi.fn>).mockImplementation(
+      readDropping(
+        { "never-installed": { command: "npx", args: "BAD" } },
+        { "srv-a": { command: "npx", args: ["-y", "a"] } }
+      )
+    );
+    const lines: string[] = [];
+    const deps = makeDeps({
+      getInstalledServers: vi.fn().mockResolvedValue([
+        makeInstalledServer({ name: "srv-a", version: "1.0.0", clients: ["claude-desktop"] }),
+        makeInstalledServer({ name: "srv-c", version: "1.0.0", clients: ["claude-desktop"] }),
+      ]),
+      getServer: vi.fn().mockImplementation((n: string) => Promise.resolve(makeServerEntry(n, "1.1.0"))),
+      getAdapter: vi.fn().mockReturnValue(adapter),
+      output: (t: string) => lines.push(t),
+    });
+
+    await handleUpdate({ yes: true }, deps);
+    const hits = lines.join("\n").split("never-installed").length - 1;
+    expect(hits).toBe(1);
+  });
+
+  it("keeps a string env key named __proto__ instead of dropping it silently", async () => {
+    // A plain object literal routes an own `__proto__` key to Object.prototype's
+    // setter, dropping it — which would break this code's own promise to NAME
+    // anything it cannot carry. Same class v0.36.0 closed in the pin hash.
+    const adapter = makeAdapter("claude-desktop");
+    (adapter.read as ReturnType<typeof vi.fn>).mockImplementation(
+      readDropping({
+        "io.github.test/server-a": {
+          command: "npx",
+          args: "bad",
+          env: JSON.parse('{"__proto__":"secret-value","OK":"keep"}'),
+        },
+      })
+    );
+    const deps = makeDeps({
+      getInstalledServers: vi.fn().mockResolvedValue([
+        makeInstalledServer({ name: "io.github.test/server-a", version: "1.0.0", clients: ["claude-desktop"] }),
+      ]),
+      getServer: vi.fn().mockResolvedValue(makeServerEntry("io.github.test/server-a", "1.1.0")),
+      getAdapter: vi.fn().mockReturnValue(adapter),
+    });
+
+    await handleUpdate({ yes: true }, deps);
+    const call = (adapter.addServer as ReturnType<typeof vi.fn>).mock.calls[0];
+    expect(Object.prototype.hasOwnProperty.call(call[2].env, "__proto__")).toBe(true);
+    expect(call[2].env.OK).toBe("keep");
+    expect(({} as Record<string, unknown>).polluted).toBeUndefined();
+  });
+
+  it("names a non-object env instead of returning in silence", async () => {
+    const adapter = makeAdapter("claude-desktop");
+    (adapter.read as ReturnType<typeof vi.fn>).mockImplementation(
+      readDropping({ "io.github.test/server-a": { command: "npx", args: "bad", env: ["A=1"] } })
+    );
+    const lines: string[] = [];
+    const deps = makeDeps({
+      getInstalledServers: vi.fn().mockResolvedValue([
+        makeInstalledServer({ name: "io.github.test/server-a", version: "1.0.0", clients: ["claude-desktop"] }),
+      ]),
+      getServer: vi.fn().mockResolvedValue(makeServerEntry("io.github.test/server-a", "1.1.0")),
+      getAdapter: vi.fn().mockReturnValue(adapter),
+      output: (t: string) => lines.push(t),
+    });
+
+    await handleUpdate({ yes: true }, deps);
+    expect(lines.join("\n")).toMatch(/env is not an object/);
+    // and an array env is never written out as {"0": ...}
+    const call = (adapter.addServer as ReturnType<typeof vi.fn>).mock.calls[0];
+    expect(call[2].env?.["0"]).toBeUndefined();
+  });
+
+  it("carries clientNotes into --json", async () => {
+    const adapter = makeAdapter("claude-desktop");
+    (adapter.read as ReturnType<typeof vi.fn>).mockImplementation(
+      readDropping({
+        "io.github.test/server-a": { command: "npx", args: "bad", env: { A: "1", N: 2 } },
+      })
+    );
+    const lines: string[] = [];
+    const deps = makeDeps({
+      getInstalledServers: vi.fn().mockResolvedValue([
+        makeInstalledServer({ name: "io.github.test/server-a", version: "1.0.0", clients: ["claude-desktop"] }),
+      ]),
+      getServer: vi.fn().mockResolvedValue(makeServerEntry("io.github.test/server-a", "1.1.0")),
+      getAdapter: vi.fn().mockReturnValue(adapter),
+      output: (t: string) => lines.push(t),
+    });
+
+    await handleUpdate({ yes: true, json: true }, deps);
+    const parsed = JSON.parse(lines.join(""));
+    expect(parsed[0].clientNotes.join(" ")).toContain("N");
+  });
+
   it("re-states the warning for an unrelated malformed neighbour", async () => {
     // Replacing the default onSkip suppressed its stderr line, so `update`
     // went silent about every OTHER broken entry in the same config.

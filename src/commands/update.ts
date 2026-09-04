@@ -20,7 +20,6 @@ import type { InstalledServer } from "../store/servers.js";
 import type { ServerEntry } from "../registry/types.js";
 import type { Finding } from "../scanner/tier1.js";
 import type { TrustScore, TrustScoreInput } from "../scanner/trust-score.js";
-import { z } from "zod";
 import type { ClientId } from "../config/paths.js";
 import type { ConfigAdapter, McpServerEntry } from "../config/adapters/index.js";
 import { levelColor, levelLabel, extractRegistryMeta } from "../utils/format-trust.js";
@@ -73,7 +72,8 @@ async function readExistingEnv(
   getConfigPath: UpdateDeps["getConfigPath"],
   clientId: ClientId,
   name: string,
-  onNote: (message: string) => void
+  onNote: (message: string) => void,
+  onNeighbour: (clientId: ClientId, skipped: string) => void
 ): Promise<Record<string, string> | undefined> {
   try {
     const adapter = getAdapter(clientId);
@@ -98,17 +98,24 @@ async function readExistingEnv(
     const servers = await adapter.read(configPath, (skipped, raw) => {
       if (skipped !== name) {
         // Another malformed entry in the same config. Replacing the default
-        // onSkip suppressed its warning, so re-state it here rather than
-        // letting this command go quiet about it.
-        onNote(
-          `${clientId}: skipping malformed server entry "${sanitizeForTerminal(skipped)}" ` +
-            `(not updated)`
-        );
+        // onSkip suppressed its warning, so it is collected — but reported ONCE
+        // at the end of the run, and only for names this run did not itself
+        // update. Reporting here said `srv-b … (not updated)` one line before
+        // `✓ Updated srv-b`, and repeated it once per updated server.
+        onNeighbour(clientId, skipped);
         return;
       }
       const env = (raw as { env?: unknown } | null | undefined)?.env;
-      if (env === null || typeof env !== "object" || Array.isArray(env)) return;
-      const kept: Record<string, string> = {};
+      if (env !== undefined && (env === null || typeof env !== "object" || Array.isArray(env))) {
+        onNote(`${clientId}: env is not an object — nothing could be carried over`);
+        return;
+      }
+      if (env === undefined) return;
+      // Object.create(null): a plain literal routes an own `__proto__` key to
+      // Object.prototype's setter, which silently drops a string value — the
+      // same class v0.36.0 closed in the guard's pin hash, and it would break
+      // this block's own promise to NAME anything it cannot carry.
+      const kept = Object.create(null) as Record<string, string>;
       const dropped: string[] = [];
       for (const [k, v] of Object.entries(env as Record<string, unknown>)) {
         if (typeof v === "string") kept[k] = v;
@@ -243,7 +250,7 @@ export async function handleUpdate(
   // Show available updates (non-JSON mode)
   if (!isJson) {
     output(chalk.bold("\nUpdates available:"));
-    for (const r of withUpdates) {
+  for (const r of withUpdates) {
       output(`  ${chalk.white(r.name)}: ${chalk.yellow(r.oldVersion)} → ${chalk.green(r.newVersion)}`);
     }
   }
@@ -276,6 +283,11 @@ export async function handleUpdate(
   >();
 
   // Perform updates
+    // #59: malformed entries seen in passing while reading configs, collected
+  // across the whole run and reported ONCE below — never per updated server,
+  // and never for a name this run updated itself.
+  const neighbours = new Map<string, ClientId>();
+
   for (const r of withUpdates) {
     const entry = entryMap.get(r.name);
 
@@ -326,7 +338,8 @@ export async function handleUpdate(
           getConfigPath,
           clientId,
           r.name,
-          (note) => clientNotes.push(note)
+          (note) => clientNotes.push(note),
+          (cid, skipped) => neighbours.set(skipped, cid)
         );
         const newEntry: McpServerEntry = {
           ...rawEntry,
@@ -368,6 +381,19 @@ export async function handleUpdate(
         `  ${chalk.green("✓")} Updated ${chalk.white(r.name)} to ${chalk.green(r.newVersion)} [${levelColor(levelLabel(trustScore))}]${warning}`
       );
     }
+  }
+
+  const updatedNames = new Set(withUpdates.map((r) => r.name));
+  const unrelated = [...neighbours].filter(([name]) => !updatedNames.has(name));
+  if (unrelated.length > 0 && !isJson) {
+    output(
+      chalk.yellow(
+        `  ${unrelated.length} other malformed entr${unrelated.length === 1 ? "y was" : "ies were"} ` +
+          `skipped and not updated: ` +
+          `${unrelated.map(([n, c]) => `${sanitizeForTerminal(n)} (${c})`).join(", ")}. ` +
+          `Run \`mcpm doctor\` for details.`
+      )
+    );
   }
 
   if (isJson) {
