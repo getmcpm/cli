@@ -342,7 +342,8 @@ export async function handleUpdate(
           clientId,
           r.name,
           (note) => clientNotes.push(note),
-          (cid, skipped) => neighbours.set(`${cid}\u0000${skipped}`, { name: skipped, clientId: cid })
+          (cid, skipped) =>
+            neighbours.set(JSON.stringify([cid, skipped]), { name: skipped, clientId: cid })
         );
         const newEntry: McpServerEntry = {
           ...rawEntry,
