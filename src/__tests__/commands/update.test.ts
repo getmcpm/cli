@@ -940,6 +940,68 @@ describe("handleUpdate — malformed client entry must not silently wipe env", (
     expect(text).toContain("srv-b (claude-desktop)");
   });
 
+  it("sanitizes config-supplied names and env keys before the terminal", async () => {
+    // Both the neighbour notice and the dropped-env-key note render values a
+    // config file controls. Every other new render site in this change has an
+    // escape test; these two did not.
+    const adapter = makeAdapter("claude-desktop");
+    (adapter.read as ReturnType<typeof vi.fn>).mockImplementation(
+      readDropping({
+        "ev\u001b]0;PWNED\u0007il": { command: "npx", args: "BAD" },
+        "srv-a": { command: "npx", args: "BAD", env: { "K\u001b[31mEY": 7 } },
+      })
+    );
+    const lines: string[] = [];
+    const deps = makeDeps({
+      getInstalledServers: vi.fn().mockResolvedValue([
+        makeInstalledServer({ name: "srv-a", version: "1.0.0", clients: ["claude-desktop"] }),
+      ]),
+      getServer: vi.fn().mockResolvedValue(makeServerEntry("srv-a", "1.1.0")),
+      getAdapter: vi.fn().mockReturnValue(adapter),
+      output: (t: string) => lines.push(t),
+    });
+
+    await handleUpdate({ yes: true }, deps);
+
+    const text = lines.join("\n");
+    expect(text).toContain("PWNED"); // the neighbour name is still shown...
+    expect(text).toContain("KEY"); // ...and so is the dropped env key...
+    expect(text).not.toContain("\u001b"); // ...but no escape survives
+  });
+
+  it("records a written pair only AFTER the write succeeds", async () => {
+    // Recording before `await addServer` would let a FAILED write suppress the
+    // report for an entry that is therefore STILL malformed on disk. Needs two
+    // servers: each is the other's malformed "neighbour" in the same config,
+    // and both writes fail.
+    const adapter = makeAdapter("claude-desktop");
+    (adapter.read as ReturnType<typeof vi.fn>).mockImplementation(
+      readDropping({
+        "srv-a": { command: "npx", args: "BAD" },
+        "srv-b": { command: "npx", args: "BAD" },
+      })
+    );
+    (adapter.addServer as ReturnType<typeof vi.fn>).mockRejectedValue(new Error("read-only"));
+    const lines: string[] = [];
+    const deps = makeDeps({
+      getInstalledServers: vi.fn().mockResolvedValue([
+        makeInstalledServer({ name: "srv-a", version: "1.0.0", clients: ["claude-desktop"] }),
+        makeInstalledServer({ name: "srv-b", version: "1.0.0", clients: ["claude-desktop"] }),
+      ]),
+      getServer: vi.fn().mockImplementation((n: string) => Promise.resolve(makeServerEntry(n, "1.1.0"))),
+      getAdapter: vi.fn().mockReturnValue(adapter),
+      output: (t: string) => lines.push(t),
+    });
+
+    await handleUpdate({ yes: true }, deps);
+
+    // Neither write landed, so both entries are still malformed and both must
+    // still be named. Recording the pair before the await would hide them.
+    const text = lines.join("\n");
+    expect(text).toContain("srv-a (claude-desktop)");
+    expect(text).toContain("srv-b (claude-desktop)");
+  });
+
   it("carries clientNotes into --json", async () => {
     const adapter = makeAdapter("claude-desktop");
     (adapter.read as ReturnType<typeof vi.fn>).mockImplementation(

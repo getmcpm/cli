@@ -320,6 +320,32 @@ describe("handleExport — unreadable entries", () => {
     }
   });
 
+  it("sanitizes a config-supplied name before it reaches the terminal", async () => {
+    const errs: string[] = [];
+    const spy = vi
+      .spyOn(process.stderr, "write")
+      .mockImplementation((chunk: string | Uint8Array) => {
+        errs.push(String(chunk));
+        return true;
+      });
+    try {
+      const deps = makeDeps({
+        detectClients: vi.fn<() => Promise<ClientId[]>>().mockResolvedValue(["claude-desktop"]),
+        getAdapter: vi.fn().mockReturnValue({
+          read: vi.fn().mockImplementation(async (_p: string, onSkip?: (n: string) => void) => {
+            onSkip?.("ev\u001b]0;PWNED\u0007il");
+            return {};
+          }),
+        }),
+      });
+      await handleExport({} as ExportOptions, deps);
+      expect(errs.join("")).toContain("PWNED");
+      expect(errs.join("")).not.toContain("\u001b");
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
   it("writes nothing to stderr for a fully readable config (negative control)", async () => {
     const errs: string[] = [];
     const spy = vi

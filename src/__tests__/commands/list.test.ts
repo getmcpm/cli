@@ -463,6 +463,20 @@ describe("handleList — unreadable entries (#59)", () => {
     expect(text).not.toContain("No MCP servers installed");
   });
 
+  it("sanitizes a config-supplied name before it reaches the terminal", async () => {
+    const lines: string[] = [];
+    const deps = {
+      detectClients: vi.fn().mockResolvedValue(["claude-desktop"]),
+      getAdapter: vi.fn().mockReturnValue(skipping(["ev\u001b]0;PWNED\u0007il"])),
+      getPath: vi.fn().mockReturnValue("/fake/path/config.json"),
+      output: (t: string) => lines.push(t),
+    } as unknown as ListDeps;
+
+    await handleList({}, deps);
+    expect(lines.join("\n")).toContain("PWNED");
+    expect(lines.join("\n")).not.toContain("\u001b");
+  });
+
   it("keeps --json a bare array and puts the notice on stderr", async () => {
     // Flipping array->object only in the malformed case would break
     // `JSON.parse(out).map(...)` exactly when things are already wrong.

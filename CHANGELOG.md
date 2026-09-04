@@ -68,8 +68,11 @@ published section (it happened to #170).
 - **Config-supplied server names now reach the terminal sanitized in every new
   render site** (`sync`'s table, detail, conflict and missing lines; `diff`'s
   unreadable line; `doctor`'s three cross-client branches; `list`'s warning;
-  `up --strict`'s not-removed line — the last of these was missed on the first
-  pass, while the CHANGELOG already claimed "every new render site").
+  `up --strict`'s not-removed line; `export`'s and `import`'s warnings; and
+  `update`'s neighbour notice and dropped-env-key note). The `up --strict`
+  site was missed on the first pass while this bullet already claimed "every
+  new render site", and the list itself has since been corrected twice for
+  under-enumeration — each new render site has an escape test now.
   These names are arbitrary JSON keys from a file mcpm does not control;
   `base.ts` states the rule for exactly this value, and routing malformed names
   into these renderers is what newly exposed them. `--json` stays byte-faithful.
