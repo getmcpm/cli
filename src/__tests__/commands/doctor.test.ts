@@ -505,3 +505,42 @@ describe("doctorHandler — plaintext-secret scan (F9)", () => {
     expect(cap.text()).not.toContain("mcpm secrets set"); // env-only advice suppressed
   });
 });
+
+// ---------------------------------------------------------------------------
+// #59: doctor already raises a DoctorIssue for an entry read() dropped, but its
+// cross-client section built the drift model WITHOUT those names — so the same
+// report said "this server is absent from claude-desktop" about a server
+// claude-desktop has. The two halves must not contradict each other.
+// ---------------------------------------------------------------------------
+
+describe("buildDoctorModel — cross-client view agrees with the malformed-entry issue", () => {
+  it("does not report a malformed entry's client as absent", async () => {
+    const good: McpServerEntry = { command: "npx", args: ["-y", "fs"] };
+    const deps = makeHealthyDeps({
+      detectClients: vi.fn().mockResolvedValue(["claude-desktop", "cursor"] as ClientId[]),
+      getAdapter: vi.fn().mockImplementation((id: ClientId) => ({
+        clientId: id,
+        read: vi.fn().mockImplementation(async (_p: string, onSkip?: (n: string) => void) => {
+          if (id === "claude-desktop") {
+            onSkip?.("fs");
+            return {};
+          }
+          return { fs: good };
+        }),
+        addServer: vi.fn().mockResolvedValue(undefined),
+        removeServer: vi.fn().mockResolvedValue(undefined),
+      })),
+    });
+
+    const model = await buildDoctorModel(deps);
+
+    // The issue is raised (pre-existing #23 behavior)...
+    expect(model.issues.some((i) => i.kind === "malformed-config")).toBe(true);
+    // ...and the cross-client section must not contradict it by calling the
+    // same server absent from the client that holds it.
+    const absentEntries = (model.crossClient?.drift ?? []).filter(
+      (d) => d.name === "fs" && d.absent.includes("claude-desktop")
+    );
+    expect(absentEntries).toEqual([]);
+  });
+});

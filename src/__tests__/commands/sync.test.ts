@@ -150,7 +150,15 @@ describe("handleSync — unreadable entries are not reported as missing", () => 
     const fs = result.model.servers.find((s) => s.name === "fs")!;
     expect(fs.absent).toEqual([]);
     expect(fs.malformed).toEqual(["claude-desktop"]);
-    expect(cap.text()).toContain("?");
+    // Assert on the MATRIX ROW, not the whole output: the detail line below the
+    // table also contains "?", so a bare toContain("?") passes even when the
+    // cell is wrong (verified — that assertion survived the cell-order mutant).
+    const row = cap
+      .text()
+      .split("\n")
+      .find((l) => l.includes("fs") && l.includes("\u2502"))!;
+    expect(row).toContain("?");
+    expect(row).not.toContain("\u00b7"); // not rendered as absent
     // The false claim this fixes: it must NOT say the server is missing there.
     expect(cap.text()).not.toMatch(/missing in claude-desktop/);
     expect(cap.text()).toMatch(/does not match the expected shape/);
