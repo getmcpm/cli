@@ -43,7 +43,11 @@ export interface DiffDeps {
   output: (text: string) => void;
 }
 
-export type DiffStatus = "missing" | "extra" | "match" | "mismatch";
+// #59: "unreadable" is distinct from "missing" on purpose. A declared server
+// whose client entry failed read()'s shape validation IS installed — reporting
+// it missing sends the user to `mcpm up` to re-install over an entry that is
+// merely mis-shaped, and hides the thing they actually need to fix.
+export type DiffStatus = "missing" | "extra" | "match" | "mismatch" | "unreadable";
 
 export interface DiffEntry {
   readonly name: string;
@@ -73,12 +77,15 @@ export async function handleDiff(
   // Collect installed servers across all clients
   const clients = await deps.detectClients();
   const installed = new Map<string, { clients: ClientId[]; entry: McpServerEntry }>();
+  const unreadable = new Map<string, ClientId[]>();
 
   for (const clientId of clients) {
     try {
       const adapter = deps.getAdapter(clientId);
       const configPath = deps.getPath(clientId);
-      const servers = await adapter.read(configPath);
+      const servers = await adapter.read(configPath, (name) => {
+        unreadable.set(name, [...(unreadable.get(name) ?? []), clientId]);
+      });
 
       for (const [name, entry] of Object.entries(servers)) {
         const existing = installed.get(name);
@@ -103,12 +110,22 @@ export async function handleDiff(
     const inst = installed.get(name);
 
     if (!inst) {
-      entries.push({
-        name,
-        status: "missing",
-        detail: locked ? formatLocked(locked) : "not locked",
-        clients: [],
-      });
+      const badClients = unreadable.get(name);
+      entries.push(
+        badClients
+          ? {
+              name,
+              status: "unreadable",
+              detail: "entry does not match the expected shape - cannot compare",
+              clients: badClients,
+            }
+          : {
+              name,
+              status: "missing",
+              detail: locked ? formatLocked(locked) : "not locked",
+              clients: [],
+            }
+      );
     } else if (locked && isLockedRegistryServer(locked)) {
       const installedVersion = extractInstalledVersion(inst.entry, locked.identifier);
       if (installedVersion !== null && installedVersion !== locked.version) {
@@ -137,6 +154,18 @@ export async function handleDiff(
     }
   }
 
+  // #59: an UNDECLARED unreadable entry is invisible to both loops otherwise —
+  // it is not in `installed` (read() dropped it) and not in `declaredNames`.
+  for (const [name, badClients] of unreadable) {
+    if (declaredNames.has(name) || installed.has(name)) continue;
+    entries.push({
+      name,
+      status: "unreadable",
+      detail: "entry does not match the expected shape - cannot compare",
+      clients: badClients,
+    });
+  }
+
   // Check for extra servers (installed but not in yaml)
   for (const [name, inst] of installed) {
     if (!declaredNames.has(name)) {
@@ -161,6 +190,7 @@ export async function handleDiff(
   }
 
   const missing = entries.filter((e) => e.status === "missing");
+  const badShape = entries.filter((e) => e.status === "unreadable");
   const extra = entries.filter((e) => e.status === "extra");
   const mismatched = entries.filter((e) => e.status === "mismatch");
   const matched = entries.filter((e) => e.status === "match");
@@ -169,6 +199,14 @@ export async function handleDiff(
     deps.output("Missing (in mcpm.yaml but not installed):");
     for (const e of missing) {
       deps.output(`  - ${e.name} (${e.detail})`);
+    }
+    deps.output("");
+  }
+
+  if (badShape.length > 0) {
+    deps.output("Unreadable (installed but the entry does not match the expected shape):");
+    for (const e of badShape) {
+      deps.output(`  ? ${e.name} [${e.clients.join(", ")}] - fix the entry, then re-run`);
     }
     deps.output("");
   }
@@ -198,7 +236,8 @@ export async function handleDiff(
   }
 
   deps.output(
-    `${matched.length} in sync, ${mismatched.length} mismatched, ${missing.length} missing, ${extra.length} extra`
+    `${matched.length} in sync, ${mismatched.length} mismatched, ${missing.length} missing, ${extra.length} extra` +
+      (badShape.length > 0 ? `, ${badShape.length} unreadable` : "")
   );
 }
 

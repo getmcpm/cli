@@ -334,3 +334,77 @@ servers:
     );
   });
 });
+
+// ---------------------------------------------------------------------------
+// #59: a declared server whose client entry read() dropped for failing shape
+// validation was reported "missing" — a false statement that sends the user to
+// `mcpm up` to re-install over an entry they only need to fix.
+// ---------------------------------------------------------------------------
+
+function makeSkippingAdapter(skip: string[], servers: Record<string, McpServerEntry> = {}) {
+  return {
+    read: vi.fn().mockImplementation(async (_p: string, onSkip?: (n: string) => void) => {
+      for (const n of skip) onSkip?.(n);
+      return { ...servers };
+    }),
+  };
+}
+
+describe("handleDiff — malformed entries", () => {
+  it("reports a declared-but-unreadable entry as unreadable, not missing", async () => {
+    const stackPath = await writeStackAndLock(basicStack, basicLock);
+    const deps = makeDeps({
+      getAdapter: vi.fn().mockReturnValue(makeSkippingAdapter(["io.github.test/server-a"])),
+    });
+
+    await handleDiff({ stackFile: stackPath }, deps);
+
+    const text = (deps.output as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[0]).join("\n");
+    expect(text).toContain("Unreadable");
+    expect(text).toMatch(/1 unreadable/);
+    // The false claim: it must not be listed under Missing.
+    expect(text).not.toMatch(/Missing \(in mcpm\.yaml but not installed\):/);
+  });
+
+  it("surfaces an UNDECLARED unreadable entry (in neither loop otherwise)", async () => {
+    const stackPath = await writeStackAndLock(basicStack, basicLock);
+    const deps = makeDeps({
+      getAdapter: vi.fn().mockReturnValue(
+        makeSkippingAdapter(["some-other-server"], {
+          "io.github.test/server-a": { command: "npx", args: ["-y", "@test/server-a@1.2.0"] },
+        })
+      ),
+    });
+
+    await handleDiff({ stackFile: stackPath }, deps);
+
+    const text = (deps.output as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[0]).join("\n");
+    expect(text).toContain("some-other-server");
+    expect(text).toMatch(/1 unreadable/);
+  });
+
+  it("emits status \"unreadable\" under --json", async () => {
+    const stackPath = await writeStackAndLock(basicStack, basicLock);
+    const deps = makeDeps({
+      getAdapter: vi.fn().mockReturnValue(makeSkippingAdapter(["io.github.test/server-a"])),
+    });
+
+    await handleDiff({ stackFile: stackPath, json: true }, deps);
+
+    const parsed = JSON.parse((deps.output as ReturnType<typeof vi.fn>).mock.calls[0][0]);
+    const row = parsed.find((e: { name: string }) => e.name === "io.github.test/server-a");
+    expect(row.status).toBe("unreadable");
+    expect(row.clients).toEqual(["claude-desktop"]);
+  });
+
+  it("still reports a genuinely absent server as missing (negative control)", async () => {
+    const stackPath = await writeStackAndLock(basicStack, basicLock);
+    const deps = makeDeps({ getAdapter: vi.fn().mockReturnValue(makeSkippingAdapter([])) });
+
+    await handleDiff({ stackFile: stackPath }, deps);
+
+    const text = (deps.output as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[0]).join("\n");
+    expect(text).toContain("Missing");
+    expect(text).not.toContain("Unreadable");
+  });
+});

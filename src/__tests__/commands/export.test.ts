@@ -252,3 +252,58 @@ describe("handleExport", () => {
     expect(Object.keys(stack.servers)).toHaveLength(1);
   });
 });
+
+// ---------------------------------------------------------------------------
+// #59: an entry read() dropped is silently ABSENT from the export, and the user
+// keeps the result as their declared stack. It must never look complete.
+// ---------------------------------------------------------------------------
+
+describe("handleExport — unreadable entries", () => {
+  it("names the entries it could not read on stderr", async () => {
+    const errs: string[] = [];
+    const spy = vi
+      .spyOn(process.stderr, "write")
+      .mockImplementation((chunk: string | Uint8Array) => {
+        errs.push(String(chunk));
+        return true;
+      });
+    try {
+      const deps = makeDeps({
+        detectClients: vi.fn<() => Promise<ClientId[]>>().mockResolvedValue(["claude-desktop"]),
+        getAdapter: vi.fn().mockReturnValue({
+          read: vi.fn().mockImplementation(async (_p: string, onSkip?: (n: string) => void) => {
+            onSkip?.("broken-server");
+            return { ok: { command: "npx", args: ["-y", "ok"] } };
+          }),
+        }),
+      });
+      await handleExport({} as ExportOptions, deps);
+      expect(errs.join("")).toContain("broken-server");
+      expect(errs.join("")).toMatch(/NOT in this export/);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it("writes nothing to stderr for a fully readable config (negative control)", async () => {
+    const errs: string[] = [];
+    const spy = vi
+      .spyOn(process.stderr, "write")
+      .mockImplementation((chunk: string | Uint8Array) => {
+        errs.push(String(chunk));
+        return true;
+      });
+    try {
+      const deps = makeDeps({
+        detectClients: vi.fn<() => Promise<ClientId[]>>().mockResolvedValue(["claude-desktop"]),
+        getAdapter: vi
+          .fn()
+          .mockReturnValue(makeAdapter({ ok: { command: "npx", args: ["-y", "ok"] } })),
+      });
+      await handleExport({} as ExportOptions, deps);
+      expect(errs.join("")).not.toMatch(/NOT in this export/);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+});

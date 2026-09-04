@@ -15,6 +15,7 @@ import type { ClientId } from "../config/paths.js";
 import type { ConfigAdapter, McpServerEntry } from "../config/adapters/index.js";
 import type { StackFile, StackEnvVar } from "../stack/schema.js";
 import { serializeYaml } from "../stack/schema.js";
+import { sanitizeForTerminal } from "../guard/sanitize.js";
 import { DEFAULT_MIN_RELEASE_AGE_HOURS } from "../scanner/cooldown.js";
 
 // ---------------------------------------------------------------------------
@@ -69,12 +70,19 @@ export async function handleExport(
   const clients = await detectClients();
   const seen = new Set<string>();
   const servers: Record<string, { entry: McpServerEntry }> = {};
+  // #59: an entry read() dropped for failing shape validation is silently
+  // ABSENT from the export — and the user keeps the result as their declared
+  // stack. Name them on stderr so the file is never mistaken for complete
+  // (stderr, not `output`: with no --output the YAML itself goes to stdout).
+  const unreadable: string[] = [];
 
   for (const clientId of clients) {
     try {
       const adapter = getAdapter(clientId);
       const configPath = getPath(clientId);
-      const installed = await adapter.read(configPath);
+      const installed = await adapter.read(configPath, (name) => {
+        if (!unreadable.includes(name)) unreadable.push(name);
+      });
 
       for (const [name, entry] of Object.entries(installed)) {
         if (seen.has(name)) continue;
@@ -84,6 +92,15 @@ export async function handleExport(
     } catch {
       // Skip clients with unreadable configs
     }
+  }
+
+  if (unreadable.length > 0) {
+    process.stderr.write(
+      `mcpm: ${unreadable.length} server ${unreadable.length === 1 ? "entry" : "entries"} ` +
+        `could not be read and ${unreadable.length === 1 ? "is" : "are"} NOT in this export: ` +
+        `${unreadable.map((n) => sanitizeForTerminal(n)).join(", ")}. ` +
+        `Run \`mcpm doctor\` for details.\n`
+    );
   }
 
   const stackFile = buildStackFile(servers);

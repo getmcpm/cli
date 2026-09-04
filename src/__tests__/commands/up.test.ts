@@ -1073,3 +1073,45 @@ servers:
     expect(findingsPassedToScore(deps).some((f) => f.type === "release-cooldown")).toBe(false);
   });
 });
+
+// ---------------------------------------------------------------------------
+// #59 (was #23's deferred sub-gap): --strict must not silently leave a
+// malformed, undeclared entry behind while reporting a clean reconciliation.
+// The fail-safe direction is kept — it is NOT deleted — but it is reported.
+// ---------------------------------------------------------------------------
+
+describe("handleUp --strict — malformed undeclared entry", () => {
+  it("reports it instead of silently leaving it, and does NOT delete it", async () => {
+    const stackPath = await writeStackAndLock(basicStack, basicLock);
+    const adapter = makeAdapter();
+    (adapter.read as ReturnType<typeof vi.fn>).mockImplementation(
+      async (_p: string, onSkip?: (n: string) => void) => {
+        onSkip?.("broken-extra");
+        return {};
+      }
+    );
+    const lines: string[] = [];
+    const deps = makeDeps({
+      getAdapter: vi.fn().mockReturnValue(adapter),
+      output: (t: string) => lines.push(t),
+    });
+
+    await handleUp({ stackFile: stackPath, strict: true, yes: true }, deps);
+
+    // Fail-safe: never delete an entry mcpm could not read.
+    expect(adapter.removeServer).not.toHaveBeenCalledWith("/mock/config.json", "broken-extra");
+    // But say so — silence was the bug, not the refusal to delete.
+    expect(lines.join("\n")).toContain("broken-extra");
+    expect(lines.join("\n")).toMatch(/does not match the expected shape/);
+  });
+
+  it("still removes a well-formed undeclared entry (negative control)", async () => {
+    const stackPath = await writeStackAndLock(basicStack, basicLock);
+    const adapter = makeAdapter({ "extra-server": { command: "npx", args: ["-y", "extra"] } });
+    const deps = makeDeps({ getAdapter: vi.fn().mockReturnValue(adapter) });
+
+    await handleUp({ stackFile: stackPath, strict: true, yes: true }, deps);
+
+    expect(adapter.removeServer).toHaveBeenCalledWith("/mock/config.json", "extra-server");
+  });
+});

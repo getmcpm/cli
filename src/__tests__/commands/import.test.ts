@@ -750,3 +750,38 @@ describe("handleImport — immutability", () => {
     expect(originalName).toBe("filesystem");
   });
 });
+
+// ---------------------------------------------------------------------------
+// #59: import is the "bring my existing setup in" path, so an entry that never
+// appears in the pick-list is the worst place to stay quiet — and reporting it
+// AFTER the empty-result return would leave "No existing MCP servers found"
+// standing as a false statement.
+// ---------------------------------------------------------------------------
+
+describe("handleImport — unreadable entries", () => {
+  it("names them, even when they were the ONLY entries present", async () => {
+    const lines: string[] = [];
+    const deps = makeDeps({
+      detectClients: vi.fn().mockResolvedValue(["claude-desktop"]),
+      getAdapter: vi.fn().mockReturnValue({
+        clientId: "claude-desktop",
+        read: vi.fn().mockImplementation(async (_p: string, onSkip?: (n: string) => void) => {
+          onSkip?.("broken-server");
+          return {};
+        }),
+        addServer: vi.fn(),
+        removeServer: vi.fn(),
+      }),
+      output: (t: string) => lines.push(t),
+    });
+
+    await handleImport({}, deps);
+
+    const text = lines.join("\n");
+    expect(text).toContain("broken-server");
+    expect(text).toMatch(/cannot be imported/);
+    // The report must PRECEDE the "nothing found" line it would otherwise
+    // contradict.
+    expect(text.indexOf("broken-server")).toBeLessThan(text.indexOf("No existing MCP servers"));
+  });
+});
