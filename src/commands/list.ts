@@ -51,15 +51,13 @@ interface ServerRow {
  * All dependencies are injected so the function is hermetically testable.
  * This command is strictly READ-ONLY — it never writes to any config file.
  */
-function writeSkipNotice(
-  malformed: ReadonlyArray<{ name: string; client: ClientId }>,
-  write: (text: string) => void
-): void {
-  write(
-    `mcpm: ${malformed.length} entr${malformed.length === 1 ? "y" : "ies"} could not be read ` +
-      `and ${malformed.length === 1 ? "is" : "are"} not listed: ` +
-      `${malformed.map((m) => `${sanitizeForTerminal(m.name)} (${m.client})`).join(", ")}. ` +
-      `Run \`mcpm doctor\` for details.\n`
+/** The one skip sentence. Two sinks (stderr under --json, stdout otherwise). */
+function skipNotice(malformed: ReadonlyArray<{ name: string; client: ClientId }>): string {
+  return (
+    `${malformed.length} entr${malformed.length === 1 ? "y" : "ies"} could not be read ` +
+    `and ${malformed.length === 1 ? "is" : "are"} not listed: ` +
+    `${malformed.map((m) => `${sanitizeForTerminal(m.name)} (${m.client})`).join(", ")}. ` +
+    `Run \`mcpm doctor\` for details.`
   );
 }
 
@@ -112,21 +110,12 @@ export async function handleList(
     // break `JSON.parse(out).map(...)` exactly when things are already wrong.
     // (The MCP `mcpm_list` tool puts `skipped` in its result because that
     // surface has no stderr an agent can see; the CLI does.)
-    if (malformed.length > 0) writeSkipNotice(malformed, process.stderr.write.bind(process.stderr));
+    if (malformed.length > 0) process.stderr.write(`mcpm: ${skipNotice(malformed)}\n`);
     output(JSON.stringify(jsonData, null, 2));
     return;
   }
 
-  if (malformed.length > 0) {
-    output(
-      chalk.yellow(
-        `${malformed.length} entr${malformed.length === 1 ? "y" : "ies"} could not be read and ` +
-          `${malformed.length === 1 ? "is" : "are"} not listed: ` +
-          `${malformed.map((m) => `${sanitizeForTerminal(m.name)} (${m.client})`).join(", ")}. ` +
-          `Run \`mcpm doctor\` for details.`
-      )
-    );
-  }
+  if (malformed.length > 0) output(chalk.yellow(skipNotice(malformed)));
 
   // No servers found.
   if (rows.length === 0) {
