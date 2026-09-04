@@ -334,3 +334,126 @@ servers:
     );
   });
 });
+
+// ---------------------------------------------------------------------------
+// #59: a declared server whose client entry read() dropped for failing shape
+// validation was reported "missing" — a false statement that sends the user to
+// `mcpm up` to re-install over an entry they only need to fix.
+// ---------------------------------------------------------------------------
+
+function makeSkippingAdapter(skip: string[], servers: Record<string, McpServerEntry> = {}) {
+  return {
+    read: vi.fn().mockImplementation(async (_p: string, onSkip?: (n: string) => void) => {
+      for (const n of skip) onSkip?.(n);
+      return { ...servers };
+    }),
+  };
+}
+
+describe("handleDiff — malformed entries", () => {
+  it("reports a declared-but-unreadable entry as unreadable, not missing", async () => {
+    const stackPath = await writeStackAndLock(basicStack, basicLock);
+    const deps = makeDeps({
+      getAdapter: vi.fn().mockReturnValue(makeSkippingAdapter(["io.github.test/server-a"])),
+    });
+
+    await handleDiff({ stackFile: stackPath }, deps);
+
+    const text = (deps.output as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[0]).join("\n");
+    expect(text).toContain("Unreadable");
+    expect(text).toMatch(/1 unreadable/);
+    // The false claim: it must not be listed under Missing.
+    expect(text).not.toMatch(/Missing \(in mcpm\.yaml but not installed\):/);
+  });
+
+  it("surfaces an UNDECLARED unreadable entry (in neither loop otherwise)", async () => {
+    const stackPath = await writeStackAndLock(basicStack, basicLock);
+    const deps = makeDeps({
+      getAdapter: vi.fn().mockReturnValue(
+        makeSkippingAdapter(["some-other-server"], {
+          "io.github.test/server-a": { command: "npx", args: ["-y", "@test/server-a@1.2.0"] },
+        })
+      ),
+    });
+
+    await handleDiff({ stackFile: stackPath }, deps);
+
+    const text = (deps.output as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[0]).join("\n");
+    expect(text).toContain("some-other-server");
+    expect(text).toMatch(/1 unreadable/);
+  });
+
+  it("emits status \"unreadable\" under --json", async () => {
+    const stackPath = await writeStackAndLock(basicStack, basicLock);
+    const deps = makeDeps({
+      getAdapter: vi.fn().mockReturnValue(makeSkippingAdapter(["io.github.test/server-a"])),
+    });
+
+    await handleDiff({ stackFile: stackPath, json: true }, deps);
+
+    const parsed = JSON.parse((deps.output as ReturnType<typeof vi.fn>).mock.calls[0][0]);
+    const row = parsed.find((e: { name: string }) => e.name === "io.github.test/server-a");
+    expect(row.status).toBe("unreadable");
+    expect(row.clients).toEqual(["claude-desktop"]);
+  });
+
+  it("still reports a genuinely absent server as missing (negative control)", async () => {
+    const stackPath = await writeStackAndLock(basicStack, basicLock);
+    const deps = makeDeps({ getAdapter: vi.fn().mockReturnValue(makeSkippingAdapter([])) });
+
+    await handleDiff({ stackFile: stackPath }, deps);
+
+    const text = (deps.output as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[0]).join("\n");
+    expect(text).toContain("Missing");
+    expect(text).not.toContain("Unreadable");
+  });
+});
+
+describe("handleDiff — malformed in one client, VALID in another", () => {
+  it("reports the unreadable copy alongside the readable one", async () => {
+    // Regression this closes: gating on `installed.has(name)` meant NEITHER
+    // loop fired, and because diff passes its own onSkip the default stderr
+    // warning was gone too — "1 in sync" over a config it could not read,
+    // with nothing on either stream. Worse than the behaviour it replaced.
+    const stackPath = await writeStackAndLock(basicStack, basicLock);
+    const deps = makeDeps({
+      detectClients: vi
+        .fn<() => Promise<ClientId[]>>()
+        .mockResolvedValue(["claude-desktop", "cursor"]),
+      getAdapter: vi.fn().mockImplementation((id: ClientId) =>
+        id === "claude-desktop"
+          ? makeSkippingAdapter(["io.github.test/server-a"])
+          : makeSkippingAdapter([], {
+              "io.github.test/server-a": { command: "npx", args: ["-y", "@test/server-a@1.2.0"] },
+            })
+      ),
+    });
+
+    await handleDiff({ stackFile: stackPath }, deps);
+
+    const text = (deps.output as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[0]).join("\n");
+    expect(text).toContain("Unreadable");
+    expect(text).toMatch(/1 unreadable/);
+    // and the readable copy is still reported as in sync
+    expect(text).toContain("In sync:");
+  });
+
+  it("does not append \", 0 unreadable\" when there are none", async () => {
+    const stackPath = await writeStackAndLock(basicStack, basicLock);
+    const deps = makeDeps({ getAdapter: vi.fn().mockReturnValue(makeSkippingAdapter([])) });
+    await handleDiff({ stackFile: stackPath }, deps);
+    const text = (deps.output as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[0]).join("\n");
+    expect(text).not.toContain("unreadable");
+  });
+
+  it("sanitizes a config-supplied name before it reaches the terminal", async () => {
+    const stackPath = await writeStackAndLock(basicStack, basicLock);
+    const deps = makeDeps({
+      getAdapter: vi.fn().mockReturnValue(makeSkippingAdapter(["ev\u001b]0;PWNED\u0007il"])),
+    });
+    await handleDiff({ stackFile: stackPath }, deps);
+    const text = (deps.output as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[0]).join("\n");
+    expect(text).toContain("PWNED"); // the name is still shown...
+    expect(text).not.toContain("\u001b"); // ...but the escape is gone
+  });
+});

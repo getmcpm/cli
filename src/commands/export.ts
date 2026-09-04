@@ -15,6 +15,7 @@ import type { ClientId } from "../config/paths.js";
 import type { ConfigAdapter, McpServerEntry } from "../config/adapters/index.js";
 import type { StackFile, StackEnvVar } from "../stack/schema.js";
 import { serializeYaml } from "../stack/schema.js";
+import { sanitizeForTerminal } from "../guard/sanitize.js";
 import { DEFAULT_MIN_RELEASE_AGE_HOURS } from "../scanner/cooldown.js";
 
 // ---------------------------------------------------------------------------
@@ -69,12 +70,19 @@ export async function handleExport(
   const clients = await detectClients();
   const seen = new Set<string>();
   const servers: Record<string, { entry: McpServerEntry }> = {};
+  // #59: an entry read() dropped for failing shape validation is silently
+  // ABSENT from the export — and the user keeps the result as their declared
+  // stack. Name them on stderr so the file is never mistaken for complete
+  // (stderr, not `output`: with no --output the YAML itself goes to stdout).
+  const unreadable: string[] = [];
 
   for (const clientId of clients) {
     try {
       const adapter = getAdapter(clientId);
       const configPath = getPath(clientId);
-      const installed = await adapter.read(configPath);
+      const installed = await adapter.read(configPath, (name) => {
+        if (!unreadable.includes(name)) unreadable.push(name);
+      });
 
       for (const [name, entry] of Object.entries(installed)) {
         if (seen.has(name)) continue;
@@ -84,6 +92,24 @@ export async function handleExport(
     } catch {
       // Skip clients with unreadable configs
     }
+  }
+
+  // A name is only ABSENT from the export if no client contributed a readable
+  // entry for it — another client holding a well-formed copy makes the export
+  // complete, and saying otherwise is its own false statement (caught by
+  // dogfooding: cursor's good copy of a claude-desktop-malformed server).
+  // `name in servers` walks the PROTOTYPE CHAIN, so an entry named `toString`
+  // / `constructor` / `valueOf` read as already-exported and vanished from both
+  // the warning and the file. Server names are arbitrary JSON keys. `seen` is
+  // the Set of names actually contributed, and has no such members.
+  const omitted = unreadable.filter((name) => !seen.has(name));
+  if (omitted.length > 0) {
+    process.stderr.write(
+      `mcpm: ${omitted.length} server ${omitted.length === 1 ? "entry" : "entries"} ` +
+        `could not be read and ${omitted.length === 1 ? "is" : "are"} NOT in this export: ` +
+        `${omitted.map((n) => sanitizeForTerminal(n)).join(", ")}. ` +
+        `Run \`mcpm doctor\` for details.\n`
+    );
   }
 
   const stackFile = buildStackFile(servers);

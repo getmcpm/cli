@@ -23,6 +23,7 @@ import type { Finding } from "../scanner/tier1.js";
 import type { TrustScore, TrustScoreInput } from "../scanner/trust-score.js";
 import { formatMcpEntryCommand } from "../utils/format-entry.js";
 import { stdoutOutput } from "../utils/output.js";
+import { sanitizeForTerminal } from "../guard/sanitize.js";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -67,12 +68,18 @@ interface DiscoveredServer {
  */
 async function readClientServers(
   clientId: ClientId,
-  deps: ImportDeps
+  deps: ImportDeps,
+  // #59: names read() dropped for failing shape validation. Import is the
+  // first-run "bring my existing setup in" path, so an entry that silently
+  // never appears in the pick-list is the worst place to stay quiet.
+  unreadable?: string[]
 ): Promise<DiscoveredServer[]> {
   try {
     const adapter = deps.getAdapter(clientId);
     const configPath = deps.getConfigPath(clientId);
-    const servers = await adapter.read(configPath);
+    const servers = await adapter.read(configPath, (name) => {
+      if (unreadable && !unreadable.includes(name)) unreadable.push(name);
+    });
     return Object.entries(servers).map(([name, entry]) => ({
       name,
       clientId,
@@ -218,16 +225,43 @@ export async function handleImport(
   }
 
   // Read servers from each client — in parallel
+  const unreadable: string[] = [];
   const perClientResults = await Promise.all(
-    clientsToScan.map((clientId) => readClientServers(clientId, deps))
+    clientsToScan.map((clientId) => readClientServers(clientId, deps, unreadable))
   );
   const discovered: DiscoveredServer[] = perClientResults.flat();
 
   // De-duplicate by server name
   const uniqueServers = deduplicateServers(discovered);
 
+  // #59: report BEFORE the empty-result return below — "No existing MCP servers
+  // found" is a false statement when the only entries present were unreadable.
+  // Only names NO client could supply are actually un-importable: a well-formed
+  // copy in another client makes the server importable regardless.
+  const importable = new Set(uniqueServers.map((s) => s.name));
+  const omitted = unreadable.filter((n) => !importable.has(n));
+  if (omitted.length > 0) {
+    output(
+      chalk.yellow(
+        `${omitted.length} server ${omitted.length === 1 ? "entry does" : "entries do"} ` +
+          `not match the expected shape and cannot be imported: ` +
+          `${omitted.map((n) => sanitizeForTerminal(n)).join(", ")}. ` +
+          `Run \`mcpm doctor\` for details.`
+      )
+    );
+  }
+
   if (uniqueServers.length === 0) {
-    output(chalk.yellow("No existing MCP servers found in any client config."));
+    // #59: "No existing MCP servers found" contradicts the warning above when
+    // unreadable entries were the only ones present — servers WERE found, mcpm
+    // just could not read them.
+    output(
+      chalk.yellow(
+        omitted.length > 0
+          ? "No importable MCP servers found — every entry present failed shape validation."
+          : "No existing MCP servers found in any client config."
+      )
+    );
     return;
   }
 

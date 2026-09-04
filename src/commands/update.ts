@@ -25,6 +25,7 @@ import type { ConfigAdapter, McpServerEntry } from "../config/adapters/index.js"
 import { levelColor, levelLabel, extractRegistryMeta } from "../utils/format-trust.js";
 import { resolveInstallEntry } from "./install.js";
 import { stdoutOutput } from "../utils/output.js";
+import { sanitizeForTerminal } from "../guard/sanitize.js";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -70,13 +71,67 @@ async function readExistingEnv(
   getAdapter: UpdateDeps["getAdapter"],
   getConfigPath: UpdateDeps["getConfigPath"],
   clientId: ClientId,
-  name: string
+  name: string,
+  onNote: (message: string) => void,
+  onNeighbour: (clientId: ClientId, skipped: string) => void
 ): Promise<Record<string, string> | undefined> {
   try {
     const adapter = getAdapter(clientId);
     const configPath = getConfigPath(clientId);
-    const servers = await adapter.read(configPath);
-    return servers[name]?.env;
+    // #59: since #23 (v0.34.0) an entry failing shape validation is omitted
+    // from the returned map, so a plain `servers[name]?.env` returned undefined
+    // for it — and the caller's `force: true` re-write then DISCARDED a
+    // perfectly good env block (API keys) held by an entry malformed in some
+    // OTHER field, while printing "✓ Updated".
+    //
+    // The fix is to recover the env, NOT to refuse the write. Overwriting a
+    // mis-shaped entry with a freshly resolved one is the user's self-repair
+    // path; refusing it turns a self-healing case into a permanently stuck one.
+    //
+    // Recovery is PER KEY, not all-or-nothing. `env` is frequently the field
+    // that makes the entry invalid in the first place — a numeric port is the
+    // archetypal hand-edit — and parsing the whole record then rejects every
+    // key, destroying the API key beside the bad one. Only string-valued keys
+    // can be carried into a valid entry; any key that cannot is NAMED rather
+    // than dropped in silence.
+    let recovered: Record<string, string> | undefined;
+    const servers = await adapter.read(configPath, (skipped, raw) => {
+      if (skipped !== name) {
+        // Another malformed entry in the same config. Replacing the default
+        // onSkip suppressed its warning, so it is collected — but reported ONCE
+        // at the end of the run, and only for names this run did not itself
+        // update. Reporting here said `srv-b … (not updated)` one line before
+        // `✓ Updated srv-b`, and repeated it once per updated server.
+        onNeighbour(clientId, skipped);
+        return;
+      }
+      const env = (raw as { env?: unknown } | null | undefined)?.env;
+      if (env !== undefined && (env === null || typeof env !== "object" || Array.isArray(env))) {
+        onNote(`${clientId}: env is not an object — nothing could be carried over`);
+        return;
+      }
+      if (env === undefined) return;
+      // Object.create(null): a plain literal routes an own `__proto__` key to
+      // Object.prototype's setter, which silently drops a string value — the
+      // same class v0.36.0 closed in the guard's pin hash, and it would break
+      // this block's own promise to NAME anything it cannot carry.
+      const kept = Object.create(null) as Record<string, string>;
+      const dropped: string[] = [];
+      for (const [k, v] of Object.entries(env as Record<string, unknown>)) {
+        if (typeof v === "string") kept[k] = v;
+        else dropped.push(k);
+      }
+      if (dropped.length > 0) {
+        onNote(
+          `${clientId}: env ${dropped.length === 1 ? "key" : "keys"} ` +
+            `${dropped.map((k) => `"${sanitizeForTerminal(k)}"`).join(", ")} ` +
+            `${dropped.length === 1 ? "is" : "are"} not a string and could not be carried over ` +
+            `— re-set ${dropped.length === 1 ? "it" : "them"} with the value quoted`
+        );
+      }
+      if (Object.keys(kept).length > 0) recovered = kept;
+    });
+    return servers[name]?.env ?? recovered;
   } catch {
     return undefined;
   }
@@ -224,10 +279,23 @@ export async function handleUpdate(
   // Track update outcomes immutably (name → { updated, trustScore, clientErrors })
   const updateOutcomes = new Map<
     string,
-    { updated: boolean; trustScore: TrustScore; clientErrors: string[] }
+    { updated: boolean; trustScore: TrustScore; clientErrors: string[]; clientNotes: string[] }
   >();
 
-  // Perform updates
+  // Perform updates.
+  //
+  // #59: malformed entries seen in passing while reading configs, collected
+  // across the whole run and reported ONCE below rather than per updated
+  // server. Keyed by (client, name), not name: the same malformed name in two
+  // clients is two facts, and a name-only key silently dropped one of them.
+  const neighbours = new Map<string, { name: string; clientId: ClientId }>();
+  // The (client, name) pairs this run actually re-wrote. Suppression must be
+  // keyed the same way the FACT is: `update` writes only to a server's own
+  // `originalClients`, so a malformed copy of that name in a DIFFERENT client
+  // is neither updated nor — under a name-scoped filter — reported, silently
+  // suppressed by its own success elsewhere.
+  const writtenPairs = new Set<string>();
+
   for (const r of withUpdates) {
     const entry = entryMap.get(r.name);
 
@@ -265,10 +333,23 @@ export async function handleUpdate(
     // so we can warn the user instead of silently leaving them on the old
     // version. The store record still advances (best-effort write semantics).
     const clientErrors: string[] = [];
+    // #59: kept separate from clientErrors. These are things the user should
+    // know about a client that WAS updated — routing them through the error
+    // list made the output say "could not update claude-desktop" about a
+    // client it had just updated.
+    const clientNotes: string[] = [];
     for (const clientId of originalClients) {
       try {
         const rawEntry = resolveInstallEntry(entry, clientId);
-        const existingEnv = await readExistingEnv(getAdapter, getConfigPath, clientId, r.name);
+        const existingEnv = await readExistingEnv(
+          getAdapter,
+          getConfigPath,
+          clientId,
+          r.name,
+          (note) => clientNotes.push(note),
+          (cid, skipped) =>
+            neighbours.set(JSON.stringify([cid, skipped]), { name: skipped, clientId: cid })
+        );
         const newEntry: McpServerEntry = {
           ...rawEntry,
           ...(existingEnv && Object.keys(existingEnv).length > 0
@@ -278,6 +359,7 @@ export async function handleUpdate(
         const adapter = getAdapter(clientId);
         const configPath = getConfigPath(clientId);
         await adapter.addServer(configPath, r.name, newEntry, { force: true });
+        writtenPairs.add(JSON.stringify([clientId, r.name]));
       } catch (err) {
         // Some clients may not support this server type, or the config may be
         // unwritable — collect the failure and warn (store record still advances).
@@ -295,19 +377,35 @@ export async function handleUpdate(
     await addInstalledServer(finalRecord);
 
     // Record outcome immutably instead of mutating the result object
-    updateOutcomes.set(r.name, { updated: true, trustScore, clientErrors });
+    updateOutcomes.set(r.name, { updated: true, trustScore, clientErrors, clientNotes });
 
     if (!isJson) {
       // Surface partial config-write failures so a client silently left on the
       // old version is visible to the user (mirrors the up.ts warning suffix).
       const warning =
-        clientErrors.length > 0
+        (clientErrors.length > 0
           ? chalk.yellow(` (warning: could not update ${clientErrors.join("; ")})`)
-          : "";
+          : "") +
+        (clientNotes.length > 0 ? chalk.yellow(` (note: ${clientNotes.join("; ")})`) : "");
       output(
         `  ${chalk.green("✓")} Updated ${chalk.white(r.name)} to ${chalk.green(r.newVersion)} [${levelColor(levelLabel(trustScore))}]${warning}`
       );
     }
+  }
+
+  const unrelated = [...neighbours].filter(([key]) => !writtenPairs.has(key));
+  if (unrelated.length > 0) {
+    const body =
+      `${unrelated.length} other malformed entr${unrelated.length === 1 ? "y was" : "ies were"} ` +
+      `skipped and not updated: ` +
+      `${unrelated.map(([, e]) => `${sanitizeForTerminal(e.name)} (${e.clientId})`).join(", ")}. ` +
+      `Run \`mcpm doctor\` for details.`;
+    // #59: --json has no field for this and stdout must stay parseable, so the
+    // notice goes to stderr — otherwise replacing read()'s stderr default
+    // emitted it NOWHERE, leaving a malformed entry LESS visible than before
+    // this PR. Same resolution list.ts uses for the same problem.
+    if (isJson) process.stderr.write(`mcpm: ${body}\n`);
+    else output(chalk.yellow(`  ${body}`));
   }
 
   if (isJson) {
@@ -316,6 +414,7 @@ export async function handleUpdate(
         results.map((r) => {
           const outcome = updateOutcomes.get(r.name);
           const clientErrors = outcome?.clientErrors ?? [];
+          const clientNotes = outcome?.clientNotes ?? [];
           return {
             name: r.name,
             oldVersion: r.oldVersion,
@@ -324,6 +423,7 @@ export async function handleUpdate(
             trustScore: outcome?.trustScore ?? null,
             error: r.error ?? null,
             clientErrors: clientErrors.length > 0 ? clientErrors : null,
+            clientNotes: clientNotes.length > 0 ? clientNotes : null,
           };
         }),
         null,

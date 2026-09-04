@@ -8,6 +8,101 @@ _Add entries here, never under a stamped version_ — a release commit renames t
 heading, and a branch that wrote beneath it merges without conflict straight into a
 published section (it happened to #170).
 
+### Fixed
+
+- **`mcpm update` silently destroyed a malformed entry's `env` block — a
+  regression shipped in v0.34.0 (TODOS #59).** `readExistingEnv` reads through
+  `BaseAdapter.read()`, which since #23 DROPS an entry that fails shape
+  validation. It therefore returned `undefined` for a user whose entry was
+  malformed in one field (say `args: "-y pkg"` instead of an array) but whose
+  `env` held real API keys — and the `force: true` re-write discarded them
+  while printing `✓ Updated`. Verified against a binary built from the pre-fix
+  commit: an entry carrying `MY_API_KEY` came back as `{command, args}` with no
+  `env` at all, reported as a success.
+
+  `read()`'s `onSkip` now receives the **raw entry** alongside the name, and
+  `update` recovers `env` from it **per key** — each string-valued key is
+  carried, and any key that cannot be (plus a non-object `env`, plus unrelated
+  malformed neighbours) is NAMED rather than dropped in silence. Per key and
+  not a whole-record parse, because `env` is frequently the field that makes
+  the entry invalid — a numeric port is the archetypal hand-edit — and
+  rejecting the whole record then destroys the API key sitting beside the bad
+  one. Nothing else from an unvalidated entry is read, and it is never spread;
+  the accumulator is `Object.create(null)` so a key named `__proto__` is
+  carried rather than swallowed by the prototype setter. **The first cut of this fix refused the write instead, and
+  review was right to reject it**: overwriting a mis-shaped entry with a
+  freshly resolved one is the user's self-repair path, so refusing converted a
+  self-healing case (a malformed entry with no env to lose) into a permanently
+  stuck one whose only signal was a warning that fired once and never again —
+  the printed remediation, "fix the entry and re-run", produced "All servers
+  are up to date". Recovering the value repairs the entry *and* keeps the
+  secret; measured end to end, `args` comes back a proper array with
+  `MY_API_KEY` intact.
+
+- **A malformed entry is no longer reported as a *missing* server (TODOS
+  #59).** Six call sites read through the stderr-only default, and each made a
+  claim the dropped entry falsified. `sync --check` — a CI gate — told the user
+  a client was MISSING a server it demonstrably has, and when only one client
+  held it the server vanished from the model entirely, exiting 0 over a config
+  mcpm could not read. `diff` reported it "missing", sending the user to `mcpm
+  up` to re-install over an entry they only needed to fix. `export` omitted it
+  from a stack file the user keeps as their declared state. `import` — the
+  first-run path — dropped it from the pick-list and then printed "No existing
+  MCP servers found". `list` omitted it from the inventory, including `--json`,
+  which has no stderr channel a consumer reads. `up --strict` left it behind
+  while reporting a clean reconciliation; it is still NOT deleted (the
+  fail-safe direction #23 chose), but it is now reported on both the human and
+  the `recordResult` channel — the latter being the `mcpm_up` MCP surface's
+  only signal.
+
+  `ClientState`/`ServerDrift` gain `malformed`, `DiffStatus` gains
+  `unreadable`, `DoctorDriftEntry` gains an `unreadable` kind, `list --json` keeps its
+  bare-array shape and puts the skip notice on **stderr** — flipping the
+  payload to an object only in the malformed case would break
+  `JSON.parse(out).map(...)` exactly when something is already wrong. (The MCP
+  `mcpm_list` tool does put `skipped` in its result, because that surface has
+  no stderr an agent can see; the CLI does.) **`guard/cli.ts`'s two sites pass a
+  NO-OP**: the orchestrator already names the same entry in the same
+  invocation, so the default's stderr line was printing it a second time.
+
+- **Config-supplied server names now reach the terminal sanitized in every new
+  render site** (`sync`'s table, detail, conflict and missing lines; `diff`'s
+  unreadable line; `doctor`'s three cross-client branches; `list`'s warning;
+  `up --strict`'s not-removed line; `export`'s and `import`'s warnings; and
+  `update`'s neighbour notice and dropped-env-key note). The `up --strict`
+  site was missed on the first pass while this bullet already claimed "every
+  new render site", and the list itself has since been corrected twice for
+  under-enumeration — each new render site has an escape test now.
+  These names are arbitrary JSON keys from a file mcpm does not control;
+  `base.ts` states the rule for exactly this value, and routing malformed names
+  into these renderers is what newly exposed them. `--json` stays byte-faithful.
+
+- **`export` dropped `Object.prototype`-named entries from its own warning.**
+  The omission check used `name in servers` on an object literal, so a
+  malformed entry named `toString`, `constructor` or `valueOf` read as
+  already-exported and vanished from the warning that exists to say it was
+  dropped. It now uses the `Set` already in scope.
+
+- **`sync --check` reported a CI failure whose own output said there was
+  nothing to look at.** `renderDashboard` returns early for zero clients, one
+  client, or no servers, but `drifted` is computed from the model — so on the
+  common single-client desktop shape, `--check` exited 2 while printing only
+  "nothing to compare across clients", and the entry was named on neither
+  stream (the collector had replaced the stderr default). Unreadable entries
+  and unreadable client configs are now reported before every early return.
+  Relatedly, an entirely unparseable config used to pass `--check` silently
+  while one mis-typed entry inside it failed — the larger failure was the
+  quieter one; both now fail.
+
+### Notes
+
+`mcpm sync --json` is a **frozen** contract (`docs/CONTRACTS.md`) and this
+change is more than additive: `malformed` is a new field, but membership of
+`servers[]` and the `drifted`/`inSync` counts also change, and `sync --check`
+flips **0 → 2** for a config that previously passed by being unreadable. The
+change is deliberate — the old exit 0 was the bug — but it is a contract
+change, not a field addition.
+
 ## [0.36.0] - 2026-09-04
 
 ### Fixed

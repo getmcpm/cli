@@ -252,3 +252,151 @@ describe("handleExport", () => {
     expect(Object.keys(stack.servers)).toHaveLength(1);
   });
 });
+
+// ---------------------------------------------------------------------------
+// #59: an entry read() dropped is silently ABSENT from the export, and the user
+// keeps the result as their declared stack. It must never look complete.
+// ---------------------------------------------------------------------------
+
+describe("handleExport — unreadable entries", () => {
+  it("names the entries it could not read on stderr", async () => {
+    const errs: string[] = [];
+    const spy = vi
+      .spyOn(process.stderr, "write")
+      .mockImplementation((chunk: string | Uint8Array) => {
+        errs.push(String(chunk));
+        return true;
+      });
+    try {
+      const deps = makeDeps({
+        detectClients: vi.fn<() => Promise<ClientId[]>>().mockResolvedValue(["claude-desktop"]),
+        getAdapter: vi.fn().mockReturnValue({
+          read: vi.fn().mockImplementation(async (_p: string, onSkip?: (n: string) => void) => {
+            onSkip?.("broken-server");
+            return { ok: { command: "npx", args: ["-y", "ok"] } };
+          }),
+        }),
+      });
+      await handleExport({} as ExportOptions, deps);
+      expect(errs.join("")).toContain("broken-server");
+      expect(errs.join("")).toMatch(/NOT in this export/);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it("stays quiet when ANOTHER client supplied a readable copy of the same name", async () => {
+    // Found by dogfooding: warning "NOT in this export" about a server the
+    // export DOES contain (via the other client) is its own false statement.
+    const errs: string[] = [];
+    const spy = vi
+      .spyOn(process.stderr, "write")
+      .mockImplementation((chunk: string | Uint8Array) => {
+        errs.push(String(chunk));
+        return true;
+      });
+    try {
+      const deps = makeDeps({
+        detectClients: vi
+          .fn<() => Promise<ClientId[]>>()
+          .mockResolvedValue(["claude-desktop", "cursor"]),
+        getAdapter: vi.fn().mockImplementation((id: ClientId) =>
+          id === "claude-desktop"
+            ? {
+                read: vi
+                  .fn()
+                  .mockImplementation(async (_p: string, onSkip?: (n: string) => void) => {
+                    onSkip?.("shared");
+                    return {};
+                  }),
+              }
+            : makeAdapter({ shared: { command: "npx", args: ["-y", "shared"] } })
+        ),
+      });
+      await handleExport({} as ExportOptions, deps);
+      expect(errs.join("")).not.toMatch(/NOT in this export/);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it("sanitizes a config-supplied name before it reaches the terminal", async () => {
+    const errs: string[] = [];
+    const spy = vi
+      .spyOn(process.stderr, "write")
+      .mockImplementation((chunk: string | Uint8Array) => {
+        errs.push(String(chunk));
+        return true;
+      });
+    try {
+      const deps = makeDeps({
+        detectClients: vi.fn<() => Promise<ClientId[]>>().mockResolvedValue(["claude-desktop"]),
+        getAdapter: vi.fn().mockReturnValue({
+          read: vi.fn().mockImplementation(async (_p: string, onSkip?: (n: string) => void) => {
+            onSkip?.("ev\u001b]0;PWNED\u0007il");
+            return {};
+          }),
+        }),
+      });
+      await handleExport({} as ExportOptions, deps);
+      expect(errs.join("")).toContain("PWNED");
+      expect(errs.join("")).not.toContain("\u001b");
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it("writes nothing to stderr for a fully readable config (negative control)", async () => {
+    const errs: string[] = [];
+    const spy = vi
+      .spyOn(process.stderr, "write")
+      .mockImplementation((chunk: string | Uint8Array) => {
+        errs.push(String(chunk));
+        return true;
+      });
+    try {
+      const deps = makeDeps({
+        detectClients: vi.fn<() => Promise<ClientId[]>>().mockResolvedValue(["claude-desktop"]),
+        getAdapter: vi
+          .fn()
+          .mockReturnValue(makeAdapter({ ok: { command: "npx", args: ["-y", "ok"] } })),
+      });
+      await handleExport({} as ExportOptions, deps);
+      expect(errs.join("")).not.toMatch(/NOT in this export/);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+});
+
+describe("handleExport — Object.prototype-named entries", () => {
+  it("counts a malformed entry named `toString` (a `name in servers` hazard)", async () => {
+    // `name in servers` walks the prototype chain, so "toString" read as
+    // already-exported and vanished from both the warning and the count.
+    const errs: string[] = [];
+    const spy = vi
+      .spyOn(process.stderr, "write")
+      .mockImplementation((chunk: string | Uint8Array) => {
+        errs.push(String(chunk));
+        return true;
+      });
+    try {
+      const deps = makeDeps({
+        detectClients: vi.fn<() => Promise<ClientId[]>>().mockResolvedValue(["claude-desktop"]),
+        getAdapter: vi.fn().mockReturnValue({
+          read: vi.fn().mockImplementation(async (_p: string, onSkip?: (n: string) => void) => {
+            onSkip?.("toString");
+            onSkip?.("real");
+            return {};
+          }),
+        }),
+      });
+      await handleExport({} as ExportOptions, deps);
+      const text = errs.join("");
+      expect(text).toContain("toString");
+      expect(text).toMatch(/2 server entries/);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+});

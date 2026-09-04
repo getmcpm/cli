@@ -156,3 +156,47 @@ describe("BaseAdapter.setServerDisabled() — rejects a non-object raw entry (#2
     );
   });
 });
+
+/**
+ * #59 — `onSkip` also receives the RAW entry. That second argument is the
+ * entire mechanism `mcpm update`'s env recovery depends on: with it neutered,
+ * update silently wipes a malformed entry's env block again, which is the
+ * original bug. Every update test supplies `raw` itself from a mocked
+ * adapter, so nothing pinned that the REAL read() passes it.
+ */
+describe("BaseAdapter.read() — onSkip receives the raw entry (#59)", () => {
+  const adapter = new ClaudeDesktopAdapter();
+
+  beforeEach(() => {
+    vi.resetAllMocks();
+    mockLstat.mockResolvedValue({ isSymbolicLink: () => false });
+    vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+  });
+
+  it("passes the unvalidated entry alongside the name", async () => {
+    mockReadFile.mockResolvedValue(
+      JSON.stringify({
+        mcpServers: {
+          bad: { command: "npx", args: "not-an-array", env: { K: "v" } },
+          good: { command: "npx", args: ["-y", "ok"] },
+        },
+      })
+    );
+
+    const seen: Array<[string, unknown]> = [];
+    const out = await adapter.read(CONFIG_PATH, (name, raw) => seen.push([name, raw]));
+
+    expect(Object.keys(out)).toEqual(["good"]);
+    expect(seen).toHaveLength(1);
+    expect(seen[0]![0]).toBe("bad");
+    // The raw entry must arrive INTACT — this is what update reads env from.
+    expect(seen[0]![1]).toEqual({ command: "npx", args: "not-an-array", env: { K: "v" } });
+  });
+
+  it("passes a non-object raw entry through as-is", async () => {
+    mockReadFile.mockResolvedValue(JSON.stringify({ mcpServers: { bad: "a bare string" } }));
+    const seen: unknown[] = [];
+    await adapter.read(CONFIG_PATH, (_n, raw) => seen.push(raw));
+    expect(seen).toEqual(["a bare string"]);
+  });
+});

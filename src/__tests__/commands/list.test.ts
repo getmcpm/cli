@@ -32,7 +32,6 @@ const VSCODE_SERVERS: Record<string, McpServerEntry> = {
 function makeMockAdapter(servers: Record<string, McpServerEntry> = {}) {
   return {
     read: vi.fn().mockResolvedValue(servers),
-    read: vi.fn().mockResolvedValue(servers),
     addServer: vi.fn(),
     removeServer: vi.fn(),
   };
@@ -64,8 +63,10 @@ describe("handleList — multiple clients", () => {
     const deps: ListDeps = { detectClients, getAdapter, getPath, output };
     await handleList({}, deps);
 
-    expect(claudeAdapter.read).toHaveBeenCalledWith("/fake/path/config.json");
-    expect(cursorAdapter.read).toHaveBeenCalledWith("/fake/path/config.json");
+    // #59: read() now takes an onSkip callback; the assertion is about WHICH
+    // client configs were read, not the call's arity.
+    expect(claudeAdapter.read).toHaveBeenCalledWith("/fake/path/config.json", expect.any(Function));
+    expect(cursorAdapter.read).toHaveBeenCalledWith("/fake/path/config.json", expect.any(Function));
   });
 
   it("displays Client and Server Name columns", async () => {
@@ -432,5 +433,87 @@ describe("handleList — Command/URL column", () => {
     await handleList({}, { detectClients, getAdapter, getPath, output });
 
     expect(lines.join("\n")).toContain("https://tools.example.com/mcp");
+  });
+});
+
+describe("handleList — unreadable entries (#59)", () => {
+  function skipping(skip: string[], servers: Record<string, unknown> = {}) {
+    return {
+      read: vi.fn().mockImplementation(async (_p: string, onSkip?: (n: string) => void) => {
+        for (const n of skip) onSkip?.(n);
+        return servers;
+      }),
+      addServer: vi.fn(),
+      removeServer: vi.fn(),
+    };
+  }
+
+  it("names them, and does not claim nothing is installed", async () => {
+    const lines: string[] = [];
+    const deps = {
+      detectClients: vi.fn().mockResolvedValue(["claude-desktop"]),
+      getAdapter: vi.fn().mockReturnValue(skipping(["broken"])),
+      getPath: vi.fn().mockReturnValue("/fake/path/config.json"),
+      output: (t: string) => lines.push(t),
+    } as unknown as ListDeps;
+
+    await handleList({}, deps);
+    const text = lines.join("\n");
+    expect(text).toContain("broken");
+    expect(text).not.toContain("No MCP servers installed");
+  });
+
+  it("sanitizes a config-supplied name before it reaches the terminal", async () => {
+    const lines: string[] = [];
+    const deps = {
+      detectClients: vi.fn().mockResolvedValue(["claude-desktop"]),
+      getAdapter: vi.fn().mockReturnValue(skipping(["ev\u001b]0;PWNED\u0007il"])),
+      getPath: vi.fn().mockReturnValue("/fake/path/config.json"),
+      output: (t: string) => lines.push(t),
+    } as unknown as ListDeps;
+
+    await handleList({}, deps);
+    expect(lines.join("\n")).toContain("PWNED");
+    expect(lines.join("\n")).not.toContain("\u001b");
+  });
+
+  it("keeps --json a bare array and puts the notice on stderr", async () => {
+    // Flipping array->object only in the malformed case would break
+    // `JSON.parse(out).map(...)` exactly when things are already wrong.
+    const lines: string[] = [];
+    const errs: string[] = [];
+    const spy = vi
+      .spyOn(process.stderr, "write")
+      .mockImplementation((chunk: string | Uint8Array) => {
+        errs.push(String(chunk));
+        return true;
+      });
+    try {
+      const deps = {
+        detectClients: vi.fn().mockResolvedValue(["claude-desktop"]),
+        getAdapter: vi.fn().mockReturnValue(skipping(["broken"])),
+        getPath: vi.fn().mockReturnValue("/fake/path/config.json"),
+        output: (t: string) => lines.push(t),
+      } as unknown as ListDeps;
+
+      await handleList({ json: true }, deps);
+      expect(Array.isArray(JSON.parse(lines[0]!))).toBe(true);
+      expect(errs.join("")).toContain("broken");
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it("keeps --json a bare array when nothing was skipped (shape unchanged)", async () => {
+    const lines: string[] = [];
+    const deps = {
+      detectClients: vi.fn().mockResolvedValue(["claude-desktop"]),
+      getAdapter: vi.fn().mockReturnValue(skipping([], { ok: { command: "npx" } })),
+      getPath: vi.fn().mockReturnValue("/fake/path/config.json"),
+      output: (t: string) => lines.push(t),
+    } as unknown as ListDeps;
+
+    await handleList({ json: true }, deps);
+    expect(Array.isArray(JSON.parse(lines[0]!))).toBe(true);
   });
 });

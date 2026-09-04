@@ -37,3 +37,6 @@ tmp/
 # MCP Registry publisher
 server.json
 research/
+
+# Local Claude Code permissions (per-machine, never shared)
+.claude/settings.local.json

@@ -46,7 +46,6 @@ function makeAdapter(
     read: vi.fn().mockResolvedValue(servers),
     addServer: vi.fn(),
     removeServer: vi.fn(),
-    read: vi.fn().mockResolvedValue(servers),
   };
 }
 
@@ -499,7 +498,6 @@ describe("handleImport — adapter errors", () => {
       read: vi.fn().mockRejectedValue(new Error("Permission denied")),
       addServer: vi.fn(),
       removeServer: vi.fn(),
-      read: vi.fn().mockRejectedValue(new Error("Permission denied")),
     };
     const deps = makeDeps({
       detectClients: vi.fn().mockResolvedValue(["claude-desktop", "cursor"]),
@@ -750,5 +748,68 @@ describe("handleImport — immutability", () => {
     const originalName = server.name;
     (server as { name: string }).name = "mutated";
     expect(originalName).toBe("filesystem");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// #59: import is the "bring my existing setup in" path, so an entry that never
+// appears in the pick-list is the worst place to stay quiet — and reporting it
+// AFTER the empty-result return would leave "No existing MCP servers found"
+// standing as a false statement.
+// ---------------------------------------------------------------------------
+
+describe("handleImport — unreadable entries", () => {
+  it("names them, even when they were the ONLY entries present", async () => {
+    const lines: string[] = [];
+    const deps = makeDeps({
+      detectClients: vi.fn().mockResolvedValue(["claude-desktop"]),
+      getAdapter: vi.fn().mockReturnValue({
+        clientId: "claude-desktop",
+        read: vi.fn().mockImplementation(async (_p: string, onSkip?: (n: string) => void) => {
+          onSkip?.("broken-server");
+          return {};
+        }),
+        addServer: vi.fn(),
+        removeServer: vi.fn(),
+      }),
+      output: (t: string) => lines.push(t),
+    });
+
+    await handleImport({}, deps);
+
+    const text = lines.join("\n");
+    expect(text).toContain("broken-server");
+    expect(text).toMatch(/cannot be imported/);
+    // ...and the follow-on line must not contradict it. "No existing MCP
+    // servers found" is false when servers WERE found and merely unreadable.
+    expect(text).not.toContain("No existing MCP servers found");
+    expect(text).toContain("No importable MCP servers found");
+    expect(text.indexOf("broken-server")).toBeLessThan(text.indexOf("No importable"));
+  });
+});
+
+describe("handleImport — another client supplied a good copy", () => {
+  it("does not claim a server is un-importable when it IS in the pick-list", async () => {
+    const lines: string[] = [];
+    const deps = makeDeps({
+      detectClients: vi.fn().mockResolvedValue(["claude-desktop", "cursor"]),
+      getAdapter: vi.fn().mockImplementation((id: ClientId) => ({
+        clientId: id,
+        read: vi.fn().mockImplementation(async (_p: string, onSkip?: (n: string) => void) => {
+          if (id === "claude-desktop") {
+            onSkip?.("shared");
+            return {};
+          }
+          return { shared: { command: "npx", args: ["-y", "shared"] } };
+        }),
+        addServer: vi.fn(),
+        removeServer: vi.fn(),
+      })),
+      output: (t: string) => lines.push(t),
+      confirm: vi.fn().mockResolvedValue(false),
+    });
+
+    await handleImport({}, deps);
+    expect(lines.join("\n")).not.toMatch(/cannot be imported/);
   });
 });

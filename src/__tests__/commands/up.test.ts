@@ -1073,3 +1073,104 @@ servers:
     expect(findingsPassedToScore(deps).some((f) => f.type === "release-cooldown")).toBe(false);
   });
 });
+
+// ---------------------------------------------------------------------------
+// #59 (was #23's deferred sub-gap): --strict must not silently leave a
+// malformed, undeclared entry behind while reporting a clean reconciliation.
+// The fail-safe direction is kept — it is NOT deleted — but it is reported.
+// ---------------------------------------------------------------------------
+
+describe("handleUp --strict — malformed undeclared entry", () => {
+  it("reports it instead of silently leaving it, and does NOT delete it", async () => {
+    const stackPath = await writeStackAndLock(basicStack, basicLock);
+    const adapter = makeAdapter();
+    (adapter.read as ReturnType<typeof vi.fn>).mockImplementation(
+      async (_p: string, onSkip?: (n: string) => void) => {
+        onSkip?.("broken-extra");
+        return {};
+      }
+    );
+    const lines: string[] = [];
+    const recorded: Array<{ name: string; status: string }> = [];
+    const deps = makeDeps({
+      getAdapter: vi.fn().mockReturnValue(adapter),
+      output: (t: string) => lines.push(t),
+      recordResult: (r: { name: string; status: string }) => recorded.push(r),
+    });
+
+    await handleUp({ stackFile: stackPath, strict: true, yes: true }, deps);
+
+    // Fail-safe: never delete an entry mcpm could not read.
+    expect(adapter.removeServer).not.toHaveBeenCalledWith("/mock/config.json", "broken-extra");
+    // But say so — silence was the bug, not the refusal to delete.
+    expect(lines.join("\n")).toContain("broken-extra");
+    expect(lines.join("\n")).toMatch(/does not match the expected shape/);
+    // And say so on the MACHINE-READABLE channel too: `recordResult` is the
+    // mcpm_up MCP surface's only signal — that surface has no stderr an agent
+    // can see, which is the whole reason v0.34.0 added `skipped` fields.
+    expect(recorded).toContainEqual({ name: "broken-extra", status: "skipped" });
+  });
+
+  it("sanitizes a config-supplied name before it reaches the terminal", async () => {
+    const stackPath = await writeStackAndLock(basicStack, basicLock);
+    const adapter = makeAdapter();
+    (adapter.read as ReturnType<typeof vi.fn>).mockImplementation(
+      async (_p: string, onSkip?: (n: string) => void) => {
+        onSkip?.("ev\u001b]0;PWNED\u0007il");
+        return {};
+      }
+    );
+    const lines: string[] = [];
+    const deps = makeDeps({
+      getAdapter: vi.fn().mockReturnValue(adapter),
+      output: (t: string) => lines.push(t),
+    });
+
+    await handleUp({ stackFile: stackPath, strict: true, yes: true }, deps);
+
+    expect(lines.join("\n")).toContain("PWNED");
+    expect(lines.join("\n")).not.toContain("\u001b");
+  });
+
+  it("says nothing about a DECLARED server whose entry is malformed", async () => {
+    // --strict only reconciles servers absent from mcpm.yaml. Reporting a
+    // declared one as "not in mcpm.yaml" would be a false statement.
+    const stackPath = await writeStackAndLock(basicStack, basicLock);
+    const adapter = makeAdapter();
+    (adapter.read as ReturnType<typeof vi.fn>).mockImplementation(
+      async (_p: string, onSkip?: (n: string) => void) => {
+        onSkip?.("io.github.test/server-a"); // the DECLARED name
+        return {};
+      }
+    );
+    const lines: string[] = [];
+    const recorded: Array<{ name: string; status: string }> = [];
+    const deps = makeDeps({
+      getAdapter: vi.fn().mockReturnValue(adapter),
+      output: (t: string) => lines.push(t),
+      recordResult: (r: { name: string; status: string }) => recorded.push(r),
+    });
+
+    await handleUp({ stackFile: stackPath, strict: true, yes: true }, deps);
+
+    // NB: assert on `recorded` and on the rendered line separately. An earlier
+    // assertion here matched "not in mcpm.yaml", which lives only in
+    // `results[].message` and is never rendered on the strict-removal path —
+    // so it could not fail, whatever the code did.
+    expect(lines.join("\n")).not.toContain("io.github.test/server-a: not removed");
+    expect(recorded).not.toContainEqual({
+      name: "io.github.test/server-a",
+      status: "skipped",
+    });
+  });
+
+  it("still removes a well-formed undeclared entry (negative control)", async () => {
+    const stackPath = await writeStackAndLock(basicStack, basicLock);
+    const adapter = makeAdapter({ "extra-server": { command: "npx", args: ["-y", "extra"] } });
+    const deps = makeDeps({ getAdapter: vi.fn().mockReturnValue(adapter) });
+
+    await handleUp({ stackFile: stackPath, strict: true, yes: true }, deps);
+
+    expect(adapter.removeServer).toHaveBeenCalledWith("/mock/config.json", "extra-server");
+  });
+});

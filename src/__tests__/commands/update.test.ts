@@ -80,7 +80,6 @@ function makeAdapter(clientId: ClientId): ConfigAdapter {
   return {
     clientId,
     read: vi.fn().mockResolvedValue({}),
-    read: vi.fn().mockResolvedValue({}),
     addServer: vi.fn().mockResolvedValue(undefined),
     removeServer: vi.fn().mockResolvedValue(undefined),
   };
@@ -588,5 +587,484 @@ describe("handleUpdate — multiple servers mixed state", () => {
     await handleUpdate({ yes: true }, deps);
     const out = lines.join("\n");
     expect(out).toContain("server-a");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// #59 / #23 regression: `readExistingEnv` reads through `BaseAdapter.read()`,
+// which since #23 (v0.34.0) DROPS an entry failing shape validation. A user
+// whose entry was malformed in one field (e.g. `args: "bad"` from a hand-edit)
+// but whose `env` held real API keys therefore got `undefined` back, and the
+// `force: true` re-write wiped those keys while printing "✓ Updated".
+// The existing "preserves existing client-config env" test above cannot see
+// this: it mocks read() to RETURN the entry, the one thing the real read()
+// stopped doing.
+// ---------------------------------------------------------------------------
+
+/** Mimic the real read(): a malformed entry goes to onSkip, never to the map. */
+function readDropping(malformed: Record<string, unknown>, valid: Record<string, unknown> = {}) {
+  return vi
+    .fn()
+    .mockImplementation(async (_p: string, onSkip?: (n: string, raw: unknown) => void) => {
+      for (const [name, raw] of Object.entries(malformed)) onSkip?.(name, raw);
+      return { ...valid };
+    });
+}
+
+describe("handleUpdate — malformed client entry must not silently wipe env", () => {
+  it("recovers the env block from the raw entry and REPAIRS the entry", async () => {
+    const adapter = makeAdapter("claude-desktop");
+    (adapter.read as ReturnType<typeof vi.fn>).mockImplementation(
+      readDropping({
+        "io.github.test/server-a": {
+          command: "npx",
+          args: "-y @test/server", // the malformation
+          env: { MY_KEY: "user-value" },
+        },
+      })
+    );
+    const deps = makeDeps({
+      getInstalledServers: vi.fn().mockResolvedValue([
+        makeInstalledServer({ name: "io.github.test/server-a", version: "1.0.0", clients: ["claude-desktop"] }),
+      ]),
+      getServer: vi.fn().mockResolvedValue(makeServerEntry("io.github.test/server-a", "1.1.0")),
+      getAdapter: vi.fn().mockReturnValue(adapter),
+    });
+
+    await handleUpdate({ yes: true }, deps);
+
+    // The write MUST happen — overwriting a mis-shaped entry with a freshly
+    // resolved one is the user's self-repair path. Refusing it would convert a
+    // self-healing case into a permanently stuck one.
+    expect(adapter.addServer).toHaveBeenCalledTimes(1);
+    const call = (adapter.addServer as ReturnType<typeof vi.fn>).mock.calls[0];
+    // ...and it must carry the secrets forward.
+    expect(call[2].env.MY_KEY).toBe("user-value");
+    // ...and the repaired entry must have a well-formed args array.
+    expect(Array.isArray(call[2].args)).toBe(true);
+  });
+
+  it("still repairs a malformed entry that has NO env to recover", async () => {
+    const adapter = makeAdapter("claude-desktop");
+    (adapter.read as ReturnType<typeof vi.fn>).mockImplementation(
+      readDropping({ "io.github.test/server-a": { command: "npx", args: "-y @test/server" } })
+    );
+    const deps = makeDeps({
+      getInstalledServers: vi.fn().mockResolvedValue([
+        makeInstalledServer({ name: "io.github.test/server-a", version: "1.0.0", clients: ["claude-desktop"] }),
+      ]),
+      getServer: vi.fn().mockResolvedValue(makeServerEntry("io.github.test/server-a", "1.1.0")),
+      getAdapter: vi.fn().mockReturnValue(adapter),
+    });
+
+    await handleUpdate({ yes: true }, deps);
+    expect(adapter.addServer).toHaveBeenCalledTimes(1);
+  });
+
+  it("ignores an env recovered from a DIFFERENT malformed entry", async () => {
+    // The onSkip callback fires for every malformed entry in the config, not
+    // just the one being updated. Without the name filter, an unrelated broken
+    // neighbour's env would be grafted onto this server.
+    const adapter = makeAdapter("claude-desktop");
+    (adapter.read as ReturnType<typeof vi.fn>).mockImplementation(
+      readDropping(
+        { "some-other-server": { command: "npx", args: "bad", env: { LEAKED: "from-neighbour" } } },
+        { "io.github.test/server-a": { command: "npx", args: ["-y", "@test/server"] } }
+      )
+    );
+    const deps = makeDeps({
+      getInstalledServers: vi.fn().mockResolvedValue([
+        makeInstalledServer({ name: "io.github.test/server-a", version: "1.0.0", clients: ["claude-desktop"] }),
+      ]),
+      getServer: vi.fn().mockResolvedValue(makeServerEntry("io.github.test/server-a", "1.1.0")),
+      getAdapter: vi.fn().mockReturnValue(adapter),
+    });
+
+    await handleUpdate({ yes: true }, deps);
+
+    expect(adapter.addServer).toHaveBeenCalledTimes(1);
+    const call = (adapter.addServer as ReturnType<typeof vi.fn>).mock.calls[0];
+    expect(call[2].env?.LEAKED).toBeUndefined();
+  });
+
+  it("keeps the string keys when env ITSELF is the malformed field", async () => {
+    // A numeric port is the archetypal hand-edit, and it is what makes the
+    // entry invalid. Parsing the whole env record then rejected EVERY key and
+    // destroyed the API key beside the bad one — the exact loss this fix
+    // exists to prevent, in the population it targets.
+    const adapter = makeAdapter("claude-desktop");
+    (adapter.read as ReturnType<typeof vi.fn>).mockImplementation(
+      readDropping({
+        "io.github.test/server-a": {
+          command: "npx",
+          args: ["-y", "@test/server"],
+          env: { API_KEY: "s3cret", PORT: 8080 },
+        },
+      })
+    );
+    const lines: string[] = [];
+    const deps = makeDeps({
+      getInstalledServers: vi.fn().mockResolvedValue([
+        makeInstalledServer({ name: "io.github.test/server-a", version: "1.0.0", clients: ["claude-desktop"] }),
+      ]),
+      getServer: vi.fn().mockResolvedValue(makeServerEntry("io.github.test/server-a", "1.1.0")),
+      getAdapter: vi.fn().mockReturnValue(adapter),
+      output: (t: string) => lines.push(t),
+    });
+
+    await handleUpdate({ yes: true }, deps);
+
+    const call = (adapter.addServer as ReturnType<typeof vi.fn>).mock.calls[0];
+    expect(call[2].env.API_KEY).toBe("s3cret");
+    expect(call[2].env.PORT).toBeUndefined();
+    // and the key that could not be carried is NAMED, not dropped in silence
+    expect(lines.join("\n")).toContain("PORT");
+    // ...as a NOTE. "could not update claude-desktop" would be false: it did.
+    expect(lines.join("\n")).toContain("(note:");
+    expect(lines.join("\n")).not.toContain("could not update");
+  });
+
+  it("does not disparage a neighbour this run is ALSO updating", async () => {
+    // Reporting from inside the per-server read said `srv-b ... (not updated)`
+    // one line before `✓ Updated srv-b`, and repeated it once per server.
+    const adapter = makeAdapter("claude-desktop");
+    (adapter.read as ReturnType<typeof vi.fn>).mockImplementation(
+      readDropping(
+        { "srv-b": { command: "npx", args: "BAD" } },
+        { "srv-a": { command: "npx", args: ["-y", "a"] } }
+      )
+    );
+    const lines: string[] = [];
+    const deps = makeDeps({
+      getInstalledServers: vi.fn().mockResolvedValue([
+        makeInstalledServer({ name: "srv-a", version: "1.0.0", clients: ["claude-desktop"] }),
+        makeInstalledServer({ name: "srv-b", version: "1.0.0", clients: ["claude-desktop"] }),
+      ]),
+      getServer: vi.fn().mockImplementation((n: string) => Promise.resolve(makeServerEntry(n, "1.1.0"))),
+      getAdapter: vi.fn().mockReturnValue(adapter),
+      output: (t: string) => lines.push(t),
+    });
+
+    await handleUpdate({ yes: true }, deps);
+    const text = lines.join("\n");
+    // Assert on the EXACT rendering of an entry in the skipped report — the
+    // earlier /srv-b.*not updated/ could never match, because the report puts
+    // "not updated" BEFORE the names, so it passed with the bug live.
+    expect(text).not.toContain("srv-b (claude-desktop)");
+    expect(text).not.toMatch(/malformed entr(y was|ies were) skipped/);
+    // positive control: srv-b really was processed by this run
+    expect(text).toMatch(/Updated srv-b/);
+  });
+
+  it("reports an unrelated malformed neighbour ONCE, not once per server", async () => {
+    const adapter = makeAdapter("claude-desktop");
+    (adapter.read as ReturnType<typeof vi.fn>).mockImplementation(
+      readDropping(
+        { "never-installed": { command: "npx", args: "BAD" } },
+        { "srv-a": { command: "npx", args: ["-y", "a"] } }
+      )
+    );
+    const lines: string[] = [];
+    const deps = makeDeps({
+      getInstalledServers: vi.fn().mockResolvedValue([
+        makeInstalledServer({ name: "srv-a", version: "1.0.0", clients: ["claude-desktop"] }),
+        makeInstalledServer({ name: "srv-c", version: "1.0.0", clients: ["claude-desktop"] }),
+      ]),
+      getServer: vi.fn().mockImplementation((n: string) => Promise.resolve(makeServerEntry(n, "1.1.0"))),
+      getAdapter: vi.fn().mockReturnValue(adapter),
+      output: (t: string) => lines.push(t),
+    });
+
+    await handleUpdate({ yes: true }, deps);
+    const hits = lines.join("\n").split("never-installed").length - 1;
+    expect(hits).toBe(1);
+  });
+
+  it("keeps a string env key named __proto__ instead of dropping it silently", async () => {
+    // A plain object literal routes an own `__proto__` key to Object.prototype's
+    // setter, dropping it — which would break this code's own promise to NAME
+    // anything it cannot carry. Same class v0.36.0 closed in the pin hash.
+    const adapter = makeAdapter("claude-desktop");
+    (adapter.read as ReturnType<typeof vi.fn>).mockImplementation(
+      readDropping({
+        "io.github.test/server-a": {
+          command: "npx",
+          args: "bad",
+          env: JSON.parse('{"__proto__":"secret-value","OK":"keep"}'),
+        },
+      })
+    );
+    const deps = makeDeps({
+      getInstalledServers: vi.fn().mockResolvedValue([
+        makeInstalledServer({ name: "io.github.test/server-a", version: "1.0.0", clients: ["claude-desktop"] }),
+      ]),
+      getServer: vi.fn().mockResolvedValue(makeServerEntry("io.github.test/server-a", "1.1.0")),
+      getAdapter: vi.fn().mockReturnValue(adapter),
+    });
+
+    await handleUpdate({ yes: true }, deps);
+    const call = (adapter.addServer as ReturnType<typeof vi.fn>).mock.calls[0];
+    expect(Object.prototype.hasOwnProperty.call(call[2].env, "__proto__")).toBe(true);
+    expect(call[2].env.OK).toBe("keep");
+    // The real hazard is the prototype being REPLACED by the recovered value.
+    expect(Object.getPrototypeOf({})).toBe(Object.prototype);
+    expect(typeof ({} as Record<string, unknown>).toString).toBe("function");
+  });
+
+  it("names a non-object env instead of returning in silence", async () => {
+    const adapter = makeAdapter("claude-desktop");
+    (adapter.read as ReturnType<typeof vi.fn>).mockImplementation(
+      readDropping({ "io.github.test/server-a": { command: "npx", args: "bad", env: ["A=1"] } })
+    );
+    const lines: string[] = [];
+    const deps = makeDeps({
+      getInstalledServers: vi.fn().mockResolvedValue([
+        makeInstalledServer({ name: "io.github.test/server-a", version: "1.0.0", clients: ["claude-desktop"] }),
+      ]),
+      getServer: vi.fn().mockResolvedValue(makeServerEntry("io.github.test/server-a", "1.1.0")),
+      getAdapter: vi.fn().mockReturnValue(adapter),
+      output: (t: string) => lines.push(t),
+    });
+
+    await handleUpdate({ yes: true }, deps);
+    expect(lines.join("\n")).toMatch(/env is not an object/);
+    // and an array env is never written out as {"0": ...}
+    const call = (adapter.addServer as ReturnType<typeof vi.fn>).mock.calls[0];
+    expect(call[2].env?.["0"]).toBeUndefined();
+  });
+
+  it("still reports an unrelated malformed entry under --json (via stderr)", async () => {
+    // --json has no field for it and stdout must stay parseable, so replacing
+    // read()'s stderr default emitted it NOWHERE — LESS visible than before
+    // this change, which is the class this whole PR exists to close.
+    const errs: string[] = [];
+    const spy = vi
+      .spyOn(process.stderr, "write")
+      .mockImplementation((chunk: string | Uint8Array) => {
+        errs.push(String(chunk));
+        return true;
+      });
+    try {
+      const adapter = makeAdapter("claude-desktop");
+      (adapter.read as ReturnType<typeof vi.fn>).mockImplementation(
+        readDropping(
+          { "never-installed": { command: "npx", args: "BAD" } },
+          { "srv-a": { command: "npx", args: ["-y", "a"] } }
+        )
+      );
+      const lines: string[] = [];
+      const deps = makeDeps({
+        getInstalledServers: vi.fn().mockResolvedValue([
+          makeInstalledServer({ name: "srv-a", version: "1.0.0", clients: ["claude-desktop"] }),
+        ]),
+        getServer: vi.fn().mockResolvedValue(makeServerEntry("srv-a", "1.1.0")),
+        getAdapter: vi.fn().mockReturnValue(adapter),
+        output: (t: string) => lines.push(t),
+      });
+
+      await handleUpdate({ yes: true, json: true }, deps);
+
+      expect(errs.join("")).toContain("never-installed");
+      // stdout must remain parseable JSON
+      expect(() => JSON.parse(lines.join(""))).not.toThrow();
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it("names EVERY client holding the same malformed entry, not just one", async () => {
+    // A name-only key dropped one of two facts, and which client got named
+    // depended on iteration order.
+    const adapter = makeAdapter("claude-desktop");
+    (adapter.read as ReturnType<typeof vi.fn>).mockImplementation(
+      readDropping(
+        { "never-installed": { command: "npx", args: "BAD" } },
+        { "srv-a": { command: "npx", args: ["-y", "a"] } }
+      )
+    );
+    const lines: string[] = [];
+    const deps = makeDeps({
+      getInstalledServers: vi.fn().mockResolvedValue([
+        makeInstalledServer({
+          name: "srv-a",
+          version: "1.0.0",
+          clients: ["claude-desktop", "cursor"],
+        }),
+      ]),
+      getServer: vi.fn().mockResolvedValue(makeServerEntry("srv-a", "1.1.0")),
+      getAdapter: vi.fn().mockReturnValue(adapter),
+      output: (t: string) => lines.push(t),
+    });
+
+    await handleUpdate({ yes: true }, deps);
+    const text = lines.join("\n");
+    expect(text).toContain("never-installed (claude-desktop)");
+    expect(text).toContain("never-installed (cursor)");
+    expect(text).toMatch(/2 other malformed entries/);
+  });
+
+  it("reports a malformed copy in a client the server is NOT installed in", async () => {
+    // `update` writes only to a server's own `originalClients`. A malformed
+    // copy of that name in a DIFFERENT client is therefore never updated —
+    // but a name-scoped suppression filter hid it anyway, silently, because
+    // the name succeeded elsewhere. Suppression must be keyed by (client,
+    // name), the same way the fact is.
+    const cd = makeAdapter("claude-desktop");
+    const cur = makeAdapter("cursor");
+    (cd.read as ReturnType<typeof vi.fn>).mockImplementation(
+      readDropping(
+        { "srv-b": { command: "npx", args: "BAD" } }, // malformed HERE
+        { "srv-a": { command: "npx", args: ["-y", "a"] } }
+      )
+    );
+    (cur.read as ReturnType<typeof vi.fn>).mockImplementation(
+      readDropping({}, { "srv-b": { command: "npx", args: ["-y", "b"] } }) // valid THERE
+    );
+    const lines: string[] = [];
+    const deps = makeDeps({
+      getInstalledServers: vi.fn().mockResolvedValue([
+        makeInstalledServer({ name: "srv-a", version: "1.0.0", clients: ["claude-desktop"] }),
+        makeInstalledServer({ name: "srv-b", version: "1.0.0", clients: ["cursor"] }),
+      ]),
+      getServer: vi.fn().mockImplementation((n: string) => Promise.resolve(makeServerEntry(n, "1.1.0"))),
+      getAdapter: vi.fn((id: ClientId) => (id === "cursor" ? cur : cd)),
+      output: (t: string) => lines.push(t),
+    });
+
+    await handleUpdate({ yes: true }, deps);
+
+    const text = lines.join("\n");
+    // srv-b WAS updated — in cursor. The claude-desktop copy was not, and is
+    // the one that must still be named.
+    expect(text).toMatch(/Updated srv-b/);
+    expect(text).toContain("srv-b (claude-desktop)");
+  });
+
+  it("sanitizes config-supplied names and env keys before the terminal", async () => {
+    // Both the neighbour notice and the dropped-env-key note render values a
+    // config file controls. Every other new render site in this change has an
+    // escape test; these two did not.
+    const adapter = makeAdapter("claude-desktop");
+    (adapter.read as ReturnType<typeof vi.fn>).mockImplementation(
+      readDropping({
+        "ev\u001b]0;PWNED\u0007il": { command: "npx", args: "BAD" },
+        "srv-a": { command: "npx", args: "BAD", env: { "K\u001b[31mEY": 7 } },
+      })
+    );
+    const lines: string[] = [];
+    const deps = makeDeps({
+      getInstalledServers: vi.fn().mockResolvedValue([
+        makeInstalledServer({ name: "srv-a", version: "1.0.0", clients: ["claude-desktop"] }),
+      ]),
+      getServer: vi.fn().mockResolvedValue(makeServerEntry("srv-a", "1.1.0")),
+      getAdapter: vi.fn().mockReturnValue(adapter),
+      output: (t: string) => lines.push(t),
+    });
+
+    await handleUpdate({ yes: true }, deps);
+
+    const text = lines.join("\n");
+    expect(text).toContain("PWNED"); // the neighbour name is still shown...
+    expect(text).toContain("KEY"); // ...and so is the dropped env key...
+    expect(text).not.toContain("\u001b"); // ...but no escape survives
+  });
+
+  it("records a written pair only AFTER the write succeeds", async () => {
+    // Recording before `await addServer` would let a FAILED write suppress the
+    // report for an entry that is therefore STILL malformed on disk. Needs two
+    // servers: each is the other's malformed "neighbour" in the same config,
+    // and both writes fail.
+    const adapter = makeAdapter("claude-desktop");
+    (adapter.read as ReturnType<typeof vi.fn>).mockImplementation(
+      readDropping({
+        "srv-a": { command: "npx", args: "BAD" },
+        "srv-b": { command: "npx", args: "BAD" },
+      })
+    );
+    (adapter.addServer as ReturnType<typeof vi.fn>).mockRejectedValue(new Error("read-only"));
+    const lines: string[] = [];
+    const deps = makeDeps({
+      getInstalledServers: vi.fn().mockResolvedValue([
+        makeInstalledServer({ name: "srv-a", version: "1.0.0", clients: ["claude-desktop"] }),
+        makeInstalledServer({ name: "srv-b", version: "1.0.0", clients: ["claude-desktop"] }),
+      ]),
+      getServer: vi.fn().mockImplementation((n: string) => Promise.resolve(makeServerEntry(n, "1.1.0"))),
+      getAdapter: vi.fn().mockReturnValue(adapter),
+      output: (t: string) => lines.push(t),
+    });
+
+    await handleUpdate({ yes: true }, deps);
+
+    // Neither write landed, so both entries are still malformed and both must
+    // still be named. Recording the pair before the await would hide them.
+    const text = lines.join("\n");
+    expect(text).toContain("srv-a (claude-desktop)");
+    expect(text).toContain("srv-b (claude-desktop)");
+  });
+
+  it("carries clientNotes into --json", async () => {
+    const adapter = makeAdapter("claude-desktop");
+    (adapter.read as ReturnType<typeof vi.fn>).mockImplementation(
+      readDropping({
+        "io.github.test/server-a": { command: "npx", args: "bad", env: { A: "1", N: 2 } },
+      })
+    );
+    const lines: string[] = [];
+    const deps = makeDeps({
+      getInstalledServers: vi.fn().mockResolvedValue([
+        makeInstalledServer({ name: "io.github.test/server-a", version: "1.0.0", clients: ["claude-desktop"] }),
+      ]),
+      getServer: vi.fn().mockResolvedValue(makeServerEntry("io.github.test/server-a", "1.1.0")),
+      getAdapter: vi.fn().mockReturnValue(adapter),
+      output: (t: string) => lines.push(t),
+    });
+
+    await handleUpdate({ yes: true, json: true }, deps);
+    const parsed = JSON.parse(lines.join(""));
+    expect(parsed[0].clientNotes.join(" ")).toContain("N");
+  });
+
+  it("re-states the warning for an unrelated malformed neighbour", async () => {
+    // Replacing the default onSkip suppressed its stderr line, so `update`
+    // went silent about every OTHER broken entry in the same config.
+    const adapter = makeAdapter("claude-desktop");
+    (adapter.read as ReturnType<typeof vi.fn>).mockImplementation(
+      readDropping(
+        { "unrelated-bad": { command: "npx", args: "bad" } },
+        { "io.github.test/server-a": { command: "npx", args: ["-y", "@test/server"] } }
+      )
+    );
+    const lines: string[] = [];
+    const deps = makeDeps({
+      getInstalledServers: vi.fn().mockResolvedValue([
+        makeInstalledServer({ name: "io.github.test/server-a", version: "1.0.0", clients: ["claude-desktop"] }),
+      ]),
+      getServer: vi.fn().mockResolvedValue(makeServerEntry("io.github.test/server-a", "1.1.0")),
+      getAdapter: vi.fn().mockReturnValue(adapter),
+      output: (t: string) => lines.push(t),
+    });
+
+    await handleUpdate({ yes: true }, deps);
+    expect(lines.join("\n")).toContain("unrelated-bad");
+  });
+
+  it("ignores a non-string-valued env on the raw entry (narrow parse)", async () => {
+    const adapter = makeAdapter("claude-desktop");
+    (adapter.read as ReturnType<typeof vi.fn>).mockImplementation(
+      readDropping({
+        "io.github.test/server-a": { command: "npx", args: "bad", env: { NESTED: { deep: 1 } } },
+      })
+    );
+    const deps = makeDeps({
+      getInstalledServers: vi.fn().mockResolvedValue([
+        makeInstalledServer({ name: "io.github.test/server-a", version: "1.0.0", clients: ["claude-desktop"] }),
+      ]),
+      getServer: vi.fn().mockResolvedValue(makeServerEntry("io.github.test/server-a", "1.1.0")),
+      getAdapter: vi.fn().mockReturnValue(adapter),
+    });
+
+    await handleUpdate({ yes: true }, deps);
+    const call = (adapter.addServer as ReturnType<typeof vi.fn>).mock.calls[0];
+    expect(call[2].env?.NESTED).toBeUndefined();
   });
 });

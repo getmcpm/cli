@@ -16,7 +16,7 @@ do-not-proceed.
 | `mcpm up --frozen` | lockfile verified, applied | `1` | fail-closed pre-install verify: blocks on integrity drift, an unverifiable record, a format mismatch, or a missing stack/lock |
 | `mcpm verify` | lockfile integrity verified | `1` | repo-only, **client-free** CI gate: the same fail-closed integrity pass as `up --frozen` (drift / unverifiable / format mismatch / suspicious missing baseline), plus `1` when no lock file is found. `--json` emits the verify model |
 | `mcpm up --ci` | applied, no prompts | `1` | non-interactive; also non-zero on shadow collisions when combined with `--check-shadowing` |
-| `mcpm sync --check` | all clients in sync | **`2`** on drift/conflict; `1` on error | **`2` is the drift signal** — the value CI consumes. `--json` emits the drift model |
+| `mcpm sync --check` | all clients in sync **and every config readable** | **`2`** on drift/conflict, on an entry that failed shape validation, or on a config that could not be read at all; `1` on error | **`2` is the drift signal** — the value CI consumes. `--json` emits the drift model. Since 0.37.0 (#59), `2` also covers "could not verify": previously an unreadable entry or config exited `0`, reporting in-sync over input never compared |
 | `mcpm audit` | scan complete | `1` when overall trust level is **risky**; **`2`** when the invocation cannot be satisfied | advisory findings (e.g. a delisted/deprecated server) lower the score but do not by themselves flip the exit. `2` is scoped to four invocations mcpm refuses outright: `--min-trust` above the highest score audit could produce for *every* scanned server, `--fix --json` without `--yes`, `--min-trust` without `--fix`, and `--sarif` with `--fix`. It is **not** a general "usage errors exit 2" promise — Commander's own argument-parse failures (e.g. `--min-trust 150`) still exit `1` |
 | `mcpm doctor` | no blocking issues | `1` | health check; the cross-client advisory section never changes the exit code |
 | `mcpm install` | installed | `1` | non-zero on a policy/trust block (`--min-trust`, `--min-release-age`, a registry-**deleted** server) or any failure |
@@ -41,6 +41,14 @@ added or renamed — with one exception:
 
 - **`mcpm sync --json`** (the drift model) is **frozen** because CI consumes it
   alongside the exit-`2` contract above.
+  **Changed in 0.37.0 (#59), deliberately and not additively:** `ServerDrift`
+  gains `malformed` and `DriftModel` gains `unreadableClients`, but membership
+  of `servers[]` and the `drifted`/`inSync` counts also change — a server whose
+  entry failed shape validation used to be absent from the model entirely, and
+  a client whose config could not be parsed contributed nothing. `sync --check`
+  therefore now exits **2** where it previously exited **0** for a config mcpm
+  could not read. The old exit `0` was the bug: the gate reported "in sync"
+  over input it had never compared.
 
 The remaining `--json` shapes stabilize per-command as they are schema-typed and
 documented; until then, pin to the exit codes, not the field names.

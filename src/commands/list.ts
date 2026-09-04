@@ -13,6 +13,7 @@
 
 import { Command } from "commander";
 import chalk from "chalk";
+import { sanitizeForTerminal } from "../guard/sanitize.js";
 import Table from "cli-table3";
 import type { ClientId } from "../config/paths.js";
 import type { ConfigAdapter, McpServerEntry } from "../config/adapters/index.js";
@@ -50,6 +51,16 @@ interface ServerRow {
  * All dependencies are injected so the function is hermetically testable.
  * This command is strictly READ-ONLY — it never writes to any config file.
  */
+/** The one skip sentence. Two sinks (stderr under --json, stdout otherwise). */
+function skipNotice(malformed: ReadonlyArray<{ name: string; client: ClientId }>): string {
+  return (
+    `${malformed.length} entr${malformed.length === 1 ? "y" : "ies"} could not be read ` +
+    `and ${malformed.length === 1 ? "is" : "are"} not listed: ` +
+    `${malformed.map((m) => `${sanitizeForTerminal(m.name)} (${m.client})`).join(", ")}. ` +
+    `Run \`mcpm doctor\` for details.`
+  );
+}
+
 export async function handleList(
   options: ListOptions,
   deps: ListDeps
@@ -65,12 +76,19 @@ export async function handleList(
 
   // Collect rows from all applicable clients.
   const rows: ServerRow[] = [];
+  // #59: entries read() dropped for failing shape validation. `list` is the
+  // inventory command, and --json has no stderr channel a consumer reads.
+  const malformed: Array<{ name: string; client: ClientId }> = [];
 
   for (const clientId of clients) {
     try {
       const adapter = getAdapter(clientId);
       const configPath = getPath(clientId);
-      const servers = await adapter.read(configPath);
+      const servers = await adapter.read(configPath, (name) => {
+        if (!malformed.some((m) => m.name === name && m.client === clientId)) {
+          malformed.push({ name, client: clientId });
+        }
+      });
 
       for (const [serverName, entry] of Object.entries(servers)) {
         rows.push({ client: clientId, serverName, entry: { ...entry } });
@@ -87,13 +105,25 @@ export async function handleList(
       serverName,
       entry,
     }));
+    // #59: the skip notice goes to STDERR, not into the payload. Flipping the
+    // shape from a bare array to an object only in the malformed case would
+    // break `JSON.parse(out).map(...)` exactly when things are already wrong.
+    // (The MCP `mcpm_list` tool puts `skipped` in its result because that
+    // surface has no stderr an agent can see; the CLI does.)
+    if (malformed.length > 0) process.stderr.write(`mcpm: ${skipNotice(malformed)}\n`);
     output(JSON.stringify(jsonData, null, 2));
     return;
   }
 
+  if (malformed.length > 0) output(chalk.yellow(skipNotice(malformed)));
+
   // No servers found.
   if (rows.length === 0) {
-    output("No MCP servers installed. Try: mcpm search <query>");
+    output(
+      malformed.length > 0
+        ? "No readable MCP servers installed."
+        : "No MCP servers installed. Try: mcpm search <query>"
+    );
     return;
   }
 

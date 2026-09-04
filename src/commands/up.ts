@@ -20,6 +20,7 @@
  */
 
 import type { ClientId } from "../config/paths.js";
+import { sanitizeForTerminal } from "../guard/sanitize.js";
 import type { ConfigAdapter, McpServerEntry } from "../config/adapters/index.js";
 import type { ServerEntry } from "../registry/types.js";
 import type { Finding } from "../scanner/tier1.js";
@@ -1160,16 +1161,30 @@ async function handleStrictRemoval(
   for (const clientId of clients) {
     const adapter = deps.getAdapter(clientId);
     const configPath = deps.getPath(clientId);
-    // #23 follow-up (adversarial review, not wired): an entry that fails
-    // read()'s shape validation is invisible here too, so a malformed,
-    // undeclared entry survives --strict with only a stderr line — the
-    // "installed state now matches mcpm.yaml" claim isn't fully honored.
-    // Deliberately left as the DEFAULT (stderr-only) onSkip rather than fully
-    // wired: --strict's job is DELETION, and the fail-safe direction (never
-    // delete something read() couldn't validate) is the one this project
-    // has consistently chosen elsewhere (v0.29.0's Math.min row) — worth a
-    // dedicated pass, not a rushed change to a destructive path.
-    const installed = await adapter.read(configPath);
+    // #59 (was #23's deferred sub-gap): an entry that fails read()'s shape
+    // validation is invisible here, so a malformed UNDECLARED entry survives
+    // --strict. The fail-safe direction is kept — mcpm still does NOT delete an
+    // entry it could not read, the same choice as v0.29.0's Math.min row — but
+    // it no longer claims the reconciliation succeeded. Silence was the bug,
+    // not the refusal to delete.
+    const unreadable: string[] = [];
+    const installed = await adapter.read(configPath, (name) => unreadable.push(name));
+
+    for (const name of unreadable) {
+      if (declaredNames.has(name)) continue; // declared: not --strict's business
+      results.push({
+        name,
+        status: "skipped",
+        message:
+          `in ${clientId} but not in mcpm.yaml, and its entry does not match the ` +
+          `expected shape — NOT removed (fix the entry, then re-run)`,
+      });
+      deps.recordResult?.({ name, status: "skipped" });
+      deps.output(
+        `  • ${sanitizeForTerminal(name)}: not removed from ${clientId} — ` +
+          `entry does not match the expected shape`
+      );
+    }
 
     for (const name of Object.keys(installed)) {
       if (declaredNames.has(name)) continue;
