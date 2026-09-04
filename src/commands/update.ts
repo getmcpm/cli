@@ -290,6 +290,12 @@ export async function handleUpdate(
   // two facts, and a name-only key silently dropped one of them (the reported
   // client then depended on iteration order).
   const neighbours = new Map<string, { name: string; clientId: ClientId }>();
+  // The (client, name) pairs this run actually re-wrote. Suppression must be
+  // keyed the same way the FACT is: `update` writes only to a server's own
+  // `originalClients`, so a malformed copy of that name in a DIFFERENT client
+  // is neither updated nor — under a name-scoped filter — reported, silently
+  // suppressed by its own success elsewhere.
+  const writtenPairs = new Set<string>();
 
   for (const r of withUpdates) {
     const entry = entryMap.get(r.name);
@@ -354,6 +360,7 @@ export async function handleUpdate(
         const adapter = getAdapter(clientId);
         const configPath = getConfigPath(clientId);
         await adapter.addServer(configPath, r.name, newEntry, { force: true });
+        writtenPairs.add(JSON.stringify([clientId, r.name]));
       } catch (err) {
         // Some clients may not support this server type, or the config may be
         // unwritable — collect the failure and warn (store record still advances).
@@ -387,8 +394,7 @@ export async function handleUpdate(
     }
   }
 
-  const updatedNames = new Set(withUpdates.map((r) => r.name));
-  const unrelated = [...neighbours].filter(([, entry]) => !updatedNames.has(entry.name));
+  const unrelated = [...neighbours].filter(([key]) => !writtenPairs.has(key));
   if (unrelated.length > 0) {
     const body =
       `${unrelated.length} other malformed entr${unrelated.length === 1 ? "y was" : "ies were"} ` +

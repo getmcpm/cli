@@ -903,6 +903,43 @@ describe("handleUpdate — malformed client entry must not silently wipe env", (
     expect(text).toMatch(/2 other malformed entries/);
   });
 
+  it("reports a malformed copy in a client the server is NOT installed in", async () => {
+    // `update` writes only to a server's own `originalClients`. A malformed
+    // copy of that name in a DIFFERENT client is therefore never updated —
+    // but a name-scoped suppression filter hid it anyway, silently, because
+    // the name succeeded elsewhere. Suppression must be keyed by (client,
+    // name), the same way the fact is.
+    const cd = makeAdapter("claude-desktop");
+    const cur = makeAdapter("cursor");
+    (cd.read as ReturnType<typeof vi.fn>).mockImplementation(
+      readDropping(
+        { "srv-b": { command: "npx", args: "BAD" } }, // malformed HERE
+        { "srv-a": { command: "npx", args: ["-y", "a"] } }
+      )
+    );
+    (cur.read as ReturnType<typeof vi.fn>).mockImplementation(
+      readDropping({}, { "srv-b": { command: "npx", args: ["-y", "b"] } }) // valid THERE
+    );
+    const lines: string[] = [];
+    const deps = makeDeps({
+      getInstalledServers: vi.fn().mockResolvedValue([
+        makeInstalledServer({ name: "srv-a", version: "1.0.0", clients: ["claude-desktop"] }),
+        makeInstalledServer({ name: "srv-b", version: "1.0.0", clients: ["cursor"] }),
+      ]),
+      getServer: vi.fn().mockImplementation((n: string) => Promise.resolve(makeServerEntry(n, "1.1.0"))),
+      getAdapter: vi.fn((id: ClientId) => (id === "cursor" ? cur : cd)),
+      output: (t: string) => lines.push(t),
+    });
+
+    await handleUpdate({ yes: true }, deps);
+
+    const text = lines.join("\n");
+    // srv-b WAS updated — in cursor. The claude-desktop copy was not, and is
+    // the one that must still be named.
+    expect(text).toMatch(/Updated srv-b/);
+    expect(text).toContain("srv-b (claude-desktop)");
+  });
+
   it("carries clientNotes into --json", async () => {
     const adapter = makeAdapter("claude-desktop");
     (adapter.read as ReturnType<typeof vi.fn>).mockImplementation(
