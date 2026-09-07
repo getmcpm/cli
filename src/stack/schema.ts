@@ -299,6 +299,39 @@ export function isLockedRegistryServer(
 // ---------------------------------------------------------------------------
 
 /**
+ * #65: refuse a file whose `servers` map declares the one name Zod discards.
+ *
+ * `z.record` DROPS a key named `__proto__` — measured against the real schemas,
+ * and only that key: `constructor`, `prototype` and `toString` all survive. The
+ * parse then SUCCEEDS one server short, so every gate downstream enforces
+ * against less than the file declares and still reports success. `lock.ts`
+ * already refuses to WRITE a lock in that state ("a truncated lock passes every
+ * gate — silently narrowing what is enforced"); both files it reads had the
+ * same hole. Shared by BOTH readers on purpose — `mcpm verify` in its lock-only
+ * CI mode never reads the stack file, so guarding only that one would leave the
+ * supply-chain gate itself passing a lock whose dropped entry it never checked.
+ *
+ * Two conditions, deliberately: `Object.hasOwn` coerces a primitive without
+ * throwing and reports false, so nullish is the only case needing a guard, and
+ * a longer conjunction would only add clauses no test can tell apart.
+ */
+function assertServersRepresentable(
+  parsed: unknown,
+  filePath: string,
+  kind: "stack" | "lock"
+): void {
+  const servers: unknown = (parsed as { servers?: unknown } | null | undefined)?.servers;
+  if (servers == null || !Object.hasOwn(servers as object, "__proto__")) return;
+
+  const file = kind === "stack" ? "mcpm.yaml" : "mcpm-lock.yaml";
+  throw new Error(
+    `Invalid ${kind} file (${filePath}): a server named "__proto__" cannot be ` +
+      `represented in ${file}. Rename it — parsing would drop it silently and ` +
+      `every gate would then enforce less than this file declares.`
+  );
+}
+
+/**
  * Read and validate an mcpm.yaml stack file.
  * Throws with a descriptive Zod error if validation fails.
  */
@@ -319,6 +352,8 @@ export async function parseStackFile(filePath: string): Promise<StackFile> {
   } catch {
     throw new Error(`Invalid YAML in stack file: ${filePath}`);
   }
+
+  assertServersRepresentable(parsed, filePath, "stack");
 
   const result = StackFileSchema.safeParse(parsed);
   if (!result.success) {
@@ -354,6 +389,8 @@ export async function parseLockFile(
   } catch {
     throw new Error(`Invalid YAML in lock file: ${filePath}`);
   }
+
+  assertServersRepresentable(parsed, filePath, "lock");
 
   const result = LockFileSchema.safeParse(parsed);
   if (!result.success) {

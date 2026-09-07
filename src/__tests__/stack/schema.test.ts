@@ -418,3 +418,128 @@ describe("serializeYaml", () => {
     }
   });
 });
+
+// ---------------------------------------------------------------------------
+// #65 — a stack file declaring a server named `__proto__`
+// ---------------------------------------------------------------------------
+
+describe("parseStackFile — a server named __proto__ (#65)", () => {
+  async function writeStack(body: string): Promise<string> {
+    const dir = await mkdtemp(path.join(os.tmpdir(), "mcpm-proto-stack-"));
+    const filePath = path.join(dir, "mcpm.yaml");
+    await writeFile(filePath, body, "utf-8");
+    return filePath;
+  }
+
+  it("refuses the file instead of silently parsing one server short", async () => {
+    // `z.record` DISCARDS this key, so without the guard the parse succeeds
+    // with 1 of the 2 declared servers and `lock` / `up --frozen` / `verify`
+    // all enforce against less than the file says — the exact failure lock.ts
+    // already refuses to WRITE a lock for.
+    const filePath = await writeStack(
+      `version: "1"\nservers:\n  __proto__:\n    version: "1.0.0"\n  good:\n    version: "2.0.0"\n`
+    );
+
+    await expect(parseStackFile(filePath)).rejects.toThrow(/__proto__/);
+    await expect(parseStackFile(filePath)).rejects.toThrow(/cannot be represented/);
+  });
+
+  it("refuses it even when it is the only server", async () => {
+    const filePath = await writeStack(
+      `version: "1"\nservers:\n  __proto__:\n    version: "1.0.0"\n`
+    );
+    await expect(parseStackFile(filePath)).rejects.toThrow(/cannot be represented/);
+  });
+
+  it("still accepts the names z.record does NOT drop", async () => {
+    // Measured: `__proto__` is the only key discarded. Refusing the others
+    // would reject stacks that round-trip perfectly well.
+    const filePath = await writeStack(
+      `version: "1"\nservers:\n  constructor:\n    version: "1.0.0"\n` +
+        `  prototype:\n    version: "1.0.0"\n  toString:\n    version: "1.0.0"\n`
+    );
+
+    const stack = await parseStackFile(filePath);
+    expect(Object.keys(stack.servers).sort()).toEqual([
+      "constructor",
+      "prototype",
+      "toString",
+    ]);
+  });
+
+  it("leaves a malformed `servers` to Zod instead of crashing on it", async () => {
+    // Pins the nullish clause. Without it `Object.hasOwn(null, ...)` throws a
+    // raw TypeError and the user loses Zod's readable diagnostic — a guard
+    // against `__proto__` must not degrade the error for every OTHER bad file.
+    for (const body of [
+      `version: "1"\nservers: null\n`,
+      `version: "1"\nservers: "nope"\n`,
+      `version: "1"\nservers: []\n`,
+      `version: "1"\n`,
+    ]) {
+      const filePath = await writeStack(body);
+      await expect(parseStackFile(filePath)).rejects.toThrow(/Invalid stack file/);
+      await expect(parseStackFile(filePath)).rejects.not.toThrow(/TypeError/);
+    }
+  });
+
+  it("leaves an empty document to Zod instead of crashing on it", async () => {
+    // Pins the optional chain: `parsed` itself is null for an empty file.
+    const filePath = await writeStack("");
+    await expect(parseStackFile(filePath)).rejects.toThrow(/Invalid stack file/);
+  });
+
+  it("does not trip on a server whose declaration merely mentions the name", async () => {
+    const filePath = await writeStack(
+      `version: "1"\nservers:\n  good:\n    version: "1.0.0"\n    env:\n      __proto__:\n        required: true\n`
+    );
+    await expect(parseStackFile(filePath)).resolves.toBeTruthy();
+  });
+});
+
+describe("parseLockFile — a server named __proto__ (#65)", () => {
+  async function writeLock(body: string): Promise<string> {
+    const dir = await mkdtemp(path.join(os.tmpdir(), "mcpm-proto-lock-"));
+    const filePath = path.join(dir, "mcpm-lock.yaml");
+    await writeFile(filePath, body, "utf-8");
+    return filePath;
+  }
+
+  const HEAD = `lockfileVersion: 1\nlockedAt: "2026-09-07T00:00:00Z"\nservers:\n`;
+
+  it("refuses the lock instead of verifying a set smaller than it declares", async () => {
+    // The lock is the artifact `mcpm verify` and `up --frozen` ENFORCE against,
+    // and in verify's lock-only CI mode no stack file is read at all. A dropped
+    // entry is therefore never integrity- or provenance-checked, and verify
+    // exits 0 — a false "verified" from the supply-chain gate itself.
+    const filePath = await writeLock(
+      HEAD +
+        `  __proto__:\n    url: "https://evil.example/mcp"\n` +
+        `  good:\n    url: "https://fine.example/mcp"\n`
+    );
+
+    await expect(parseLockFile(filePath)).rejects.toThrow(/__proto__/);
+    await expect(parseLockFile(filePath)).rejects.toThrow(/mcpm-lock\.yaml/);
+  });
+
+  it("still accepts the names z.record does NOT drop", async () => {
+    const filePath = await writeLock(
+      HEAD + `  constructor:\n    url: "https://a.example/mcp"\n` +
+        `  toString:\n    url: "https://b.example/mcp"\n`
+    );
+
+    const lock = await parseLockFile(filePath);
+    expect(Object.keys(lock!.servers).sort()).toEqual(["constructor", "toString"]);
+  });
+
+  it("leaves a malformed `servers` to Zod instead of crashing on it", async () => {
+    const filePath = await writeLock(`lockfileVersion: 1\nlockedAt: "x"\nservers: null\n`);
+    await expect(parseLockFile(filePath)).rejects.toThrow(/Invalid lock file/);
+    await expect(parseLockFile(filePath)).rejects.not.toThrow(/TypeError/);
+  });
+
+  it("still returns null for a lock file that does not exist", async () => {
+    const dir = await mkdtemp(path.join(os.tmpdir(), "mcpm-proto-lock-"));
+    await expect(parseLockFile(path.join(dir, "nope.yaml"))).resolves.toBeNull();
+  });
+});

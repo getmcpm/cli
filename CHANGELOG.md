@@ -8,6 +8,77 @@ _Add entries here, never under a stamped version_ — a release commit renames t
 heading, and a branch that wrote beneath it merges without conflict straight into a
 published section (it happened to #170).
 
+### Fixed
+
+- **A server named `__proto__` was invisible to every mcpm surface, and
+  poisoned the map it was read into (backlog #65).** `BaseAdapter.read()`
+  accumulated into an object LITERAL and wrote with plain assignment
+  (`out[name] = parsed.data`), so that one name hit `Object.prototype`'s
+  inherited setter instead of creating an own property. The entry never
+  appeared in `Object.entries()`, so it was absent from `list`, `export`,
+  `import`,
+  `sync`, `diff`, `doctor` and the drift model — and `onSkip` stayed silent,
+  because nothing about the entry is malformed. Client config is untrusted
+  input by this project's own threat model, and every client mcpm writes for
+  iterates its config with `Object.entries`, so the server really does launch:
+  mcpm was unable to see, audit, guard or remove a server that was running.
+  Verified against the published **0.37.0**: `mcpm list` shows only the
+  sibling, and `mcpm doctor`'s plaintext-secret scan reports nothing for an
+  `API_KEY` sitting in the invisible entry's `env`.
+
+  The second half is worse than invisibility: the assignment made the entry the
+  map's **prototype**, so `"command" in servers` read `true` and
+  `servers.command` returned the entry's command string typed as an
+  `McpServerEntry`. A null-prototype accumulator fixes both at the one place
+  every caller routes through.
+
+  `export` is the one surface that still cannot carry the name — the stack
+  schema's `z.record` DROPS the key `__proto__` on parse (measured, and only
+  that key: `constructor`, `prototype` and `toString` all survive), so emitting
+  it would write an `mcpm.yaml` that reads back one server short and let `up`
+  install part of a stack it called complete. It is now named on stderr and
+  omitted, deliberately NOT through the `unreadable` channel, which means
+  "malformed" and would send the user hunting a defect that isn't there.
+
+  The **read** direction had the same hole in BOTH files mcpm reads, and that
+  was the more dangerous half — found by adversarial review of this diff and
+  reproduced before acting. `z.record` discards the key, so a hand-written
+  `mcpm.yaml` or `mcpm-lock.yaml` declaring that name parsed **successfully,
+  one server short**: `lock`, `up --frozen` and `verify` enforced against less
+  than the file declared and still exited 0. The lock is the worse of the two,
+  because it is the artifact those gates actually enforce against and `mcpm
+  verify` has a documented **lock-only CI mode** that never reads a stack file
+  at all — so the dropped entry's integrity and provenance were never
+  re-checked and the supply-chain gate itself reported a clean pass. This is
+  precisely the failure `lock.ts` already refuses to WRITE a lock for — "a
+  truncated lock passes every gate — silently narrowing what is enforced" —
+  present in both files it reads.
+
+  One shared guard now runs before Zod in `parseStackFile` **and**
+  `parseLockFile` (one helper, not two copies), so every command that reads
+  either file inherits it and the refusal names the one thing the user can do
+  about it. Deliberately NOT widened to `constructor`/`prototype`/`toString`:
+  those round-trip perfectly well and refusing them would reject working files.
+
+  **Mutation-tested across two rounds, and both rounds changed the code.** Round
+  one: removing the `continue` from export's guard changed nothing observable,
+  because `buildStackFile`'s own object literal was absorbing the key one
+  function down — the omission was being done by a second instance of the bug,
+  not by the guard. Round two, after adversarial review: the first cut of the
+  stack guard was a six-clause conjunction of which **five clauses could each be
+  deleted with the whole suite green**, and two of those deletions turned a
+  readable Zod error on `servers: null` into a raw `TypeError` — the "mutate
+  each CLAUSE, not the predicate" lesson from the v0.29.0 row, reproduced inside
+  a change that cites it. The guard is now two conditions, both pinned by their
+  own regression test, because `Object.hasOwn` coerces a primitive safely and
+  the other four clauses were never doing anything. 12 mutations, 10 caught; the
+  two survivors are an equivalent mutant and one unpinned defensive accumulator,
+  both named in comments rather than left for a reader to rediscover.
+
+  A `sanitizeForTerminal` call on the export warning was DELETED rather than
+  tested: the only value that can reach it is a compile-time constant, so
+  nothing could pin it and nothing needed it.
+
 ## [0.37.0] - 2026-09-05
 
 ### Fixed

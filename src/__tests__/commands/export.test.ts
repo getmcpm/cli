@@ -400,3 +400,127 @@ describe("handleExport — Object.prototype-named entries", () => {
     }
   });
 });
+
+// ---------------------------------------------------------------------------
+// #65 — a server named `__proto__`
+// ---------------------------------------------------------------------------
+
+/**
+ * read() now surfaces a well-formed entry named `__proto__` (it used to
+ * disappear into the accumulator's prototype). mcpm.yaml still cannot carry
+ * it: the stack schema's `z.record` DROPS that key on parse — measured, and
+ * only that key; `constructor` / `prototype` / `toString` survive. So export
+ * must NAME it rather than emit a file that reads back one server short.
+ *
+ * The map is built with Object.create(null) on purpose: writing
+ * `{ __proto__: entry }` as a literal sets the object's prototype, so the
+ * fixture would carry no such server and the test would pass against
+ * unmodified code.
+ */
+function withProtoServer(rest: Record<string, McpServerEntry> = {}) {
+  const servers: Record<string, McpServerEntry> = Object.create(null);
+  for (const [k, v] of Object.entries(rest)) servers[k] = v;
+  servers["__proto__"] = { command: "node", args: ["/tmp/payload.js"] };
+  return servers;
+}
+
+describe("handleExport — a server named __proto__ (#65)", () => {
+  let errs: string[];
+  let spy: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    errs = [];
+    spy = vi
+      .spyOn(process.stderr, "write")
+      .mockImplementation((chunk: string | Uint8Array) => {
+        errs.push(String(chunk));
+        return true;
+      });
+  });
+  afterEach(() => spy.mockRestore());
+
+  it("names it on stderr and leaves it out of the stack file", async () => {
+    const out = vi.fn();
+    const deps = makeDeps({
+      detectClients: vi.fn<() => Promise<ClientId[]>>().mockResolvedValue(["claude-desktop"]),
+      getAdapter: vi
+        .fn()
+        .mockReturnValue(
+          makeAdapter(withProtoServer({ good: { command: "npx", args: ["-y", "good"] } }))
+        ),
+      output: out,
+    });
+
+    await handleExport({} as ExportOptions, deps);
+
+    expect(errs.join("")).toContain("__proto__");
+    expect(errs.join("")).toMatch(/cannot represent that name/);
+
+    const yaml = out.mock.calls.map((c) => String(c[0])).join("\n");
+    expect(yaml).toContain("good:");
+    expect(yaml).not.toContain("__proto__");
+  });
+
+  it("does not confuse it with a malformed entry", async () => {
+    // `unreadable` means the entry failed shape validation. This one is
+    // perfectly valid and the client launches it — pointing the user at
+    // `mcpm doctor` would send them looking for a defect that isn't there.
+    const deps = makeDeps({
+      detectClients: vi.fn<() => Promise<ClientId[]>>().mockResolvedValue(["claude-desktop"]),
+      getAdapter: vi.fn().mockReturnValue(makeAdapter(withProtoServer())),
+    });
+
+    await handleExport({} as ExportOptions, deps);
+
+    // Assert the POSITIVE too. Asserting only the absence of the malformed
+    // message passes against unfixed code, where the entry vanishes before
+    // export sees it and NO message fires at all — a guard that cannot fail.
+    expect(errs.join("")).toMatch(/cannot represent that name/);
+    expect(errs.join("")).not.toMatch(/could not be read/);
+  });
+
+  it("does not ALSO claim it could not be read when another client's copy is malformed", async () => {
+    // The reason this name is missing is stated once, and it is not
+    // "malformed": client A's copy failing shape validation does not make
+    // client B's well-formed copy unreadable. Printing both messages repeats
+    // the false statement the #59 fix removed for every other name.
+    const bServers: Record<string, McpServerEntry> = Object.create(null);
+    bServers["__proto__"] = { command: "node", args: ["/tmp/payload.js"] };
+
+    const deps = makeDeps({
+      detectClients: vi
+        .fn<() => Promise<ClientId[]>>()
+        .mockResolvedValue(["claude-desktop", "cursor"]),
+      getAdapter: vi.fn().mockImplementation((id: ClientId) =>
+        id === "claude-desktop"
+          ? {
+              read: vi
+                .fn()
+                .mockImplementation(async (_p: string, onSkip?: (n: string, r: unknown) => void) => {
+                  onSkip?.("__proto__", { command: 123 });
+                  return {};
+                }),
+            }
+          : makeAdapter(bServers)
+      ),
+    });
+
+    await handleExport({} as ExportOptions, deps);
+
+    expect(errs.join("")).toMatch(/cannot represent that name/);
+    expect(errs.join("")).not.toMatch(/could not be read/);
+  });
+
+  it("stays silent when no server carries the name", async () => {
+    const deps = makeDeps({
+      detectClients: vi.fn<() => Promise<ClientId[]>>().mockResolvedValue(["claude-desktop"]),
+      getAdapter: vi
+        .fn()
+        .mockReturnValue(makeAdapter({ good: { command: "npx", args: ["-y", "good"] } })),
+    });
+
+    await handleExport({} as ExportOptions, deps);
+
+    expect(errs.join("")).not.toMatch(/cannot represent that name/);
+  });
+});
