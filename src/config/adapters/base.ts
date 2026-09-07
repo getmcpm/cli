@@ -188,7 +188,18 @@ export abstract class BaseAdapter implements ConfigAdapter {
     if (servers == null || typeof servers !== "object" || Array.isArray(servers)) {
       return {};
     }
-    const out: Record<string, McpServerEntry> = {};
+    // #65: NOT an object literal. `name` is config-supplied, and plain
+    // assignment of the key `__proto__` invokes Object.prototype's inherited
+    // setter instead of creating an own property — so a WELL-FORMED entry with
+    // that name vanished from every consumer of this map (`list`, `export`,
+    // `sync`, `diff`, the drift model) while `onSkip` stayed silent, because
+    // nothing about it is malformed. It also made the entry the map's
+    // PROTOTYPE, so `"command" in servers` read true and `servers.command`
+    // returned the entry's command string typed as an McpServerEntry. Every
+    // client mcpm writes for iterates its own config with Object.entries, so
+    // such a server really does launch: mcpm has to see what the client sees.
+    // A null prototype makes the assignment an ordinary own-property write.
+    const out: Record<string, McpServerEntry> = Object.create(null);
     for (const [name, entry] of Object.entries(servers as Record<string, unknown>)) {
       const parsed = McpServerEntrySchema.safeParse(entry);
       if (parsed.success) {

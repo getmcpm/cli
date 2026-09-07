@@ -69,12 +69,23 @@ export async function handleExport(
 
   const clients = await detectClients();
   const seen = new Set<string>();
+  // #65: Object.create(null), not a literal — see base.ts's read(). `name` is
+  // config-supplied, and plain assignment of `__proto__` sets this object's
+  // prototype instead of adding a key, so the server disappeared from the
+  // stack file the user then keeps as their declaration of record. Silently:
+  // it is well-formed, so nothing reports it.
   const servers: Record<string, { entry: McpServerEntry }> = {};
   // #59: an entry read() dropped for failing shape validation is silently
   // ABSENT from the export — and the user keeps the result as their declared
   // stack. Name them on stderr so the file is never mistaken for complete
   // (stderr, not `output`: with no --output the YAML itself goes to stdout).
   const unreadable: string[] = [];
+  // #65: `__proto__` is the ONE name this format cannot round-trip, so this is
+  // a flag, not a list. Kept separate from `unreadable` — those entries are
+  // malformed, this one is perfectly valid and the client launches it; only
+  // mcpm.yaml can't name it. No sanitizeForTerminal: the only value that can
+  // reach the message is that compile-time constant, not the config's string.
+  let sawProtoName = false;
 
   for (const clientId of clients) {
     try {
@@ -85,6 +96,27 @@ export async function handleExport(
       });
 
       for (const [name, entry] of Object.entries(installed)) {
+        if (name === "__proto__") {
+          // #65: read() now surfaces this entry (it used to vanish into the
+          // accumulator's prototype), but mcpm.yaml cannot carry it: the stack
+          // schema's `z.record` DROPS the key `__proto__` on parse — measured,
+          // and only that name; `constructor`/`prototype`/`toString` survive.
+          // Emitting it would write a file that reads back one server short,
+          // so `up` would install part of a stack it called complete. Name it
+          // instead. The client still runs the server; renaming it in the
+          // client config is the fix, and only the user can make that call.
+          sawProtoName = true;
+          // Record it as CONTRIBUTED even though it is not exported. The
+          // `omitted` filter below reads `seen` to decide whether a name that
+          // one client reported as malformed was supplied intact by another —
+          // without this, a client holding a malformed copy makes export ALSO
+          // print "could not be read", which is false, and is the exact false
+          // statement the #59 paragraph below was written to prevent for every
+          // other name. The reason this entry is missing is stated once, by
+          // the message below, and it is not "malformed".
+          seen.add(name);
+          continue;
+        }
         if (seen.has(name)) continue;
         seen.add(name);
         servers[name] = { entry: { ...entry } };
@@ -112,6 +144,13 @@ export async function handleExport(
     );
   }
 
+  if (sawProtoName) {
+    process.stderr.write(
+      `mcpm: the server named "__proto__" is NOT in this export — mcpm.yaml ` +
+        `cannot represent that name. Rename it in the client config to include it.\n`
+    );
+  }
+
   const stackFile = buildStackFile(servers);
   const yaml = serializeYaml(stackFile);
 
@@ -130,7 +169,14 @@ export async function handleExport(
 function buildStackFile(
   servers: Record<string, { entry: McpServerEntry }>
 ): StackFile {
-  const stackServers: StackFile["servers"] = {};
+  // #65: Object.create(null) like every other name-keyed accumulator here.
+  // handleExport filters `__proto__` before this runs, so no test can currently
+  // distinguish this from a literal — kept anyway because the correct form
+  // costs one word, and a literal here would silently ABSORB the name if the
+  // filter above were ever removed, turning a loud bug into an invisible one.
+  // That is not hypothetical: it is the third instance of this exact swallow in
+  // this codebase (read(), the dedupe map above, and here).
+  const stackServers: StackFile["servers"] = Object.create(null);
 
   for (const [name, { entry }] of Object.entries(servers)) {
     if (entry.url) {
