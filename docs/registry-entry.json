@@ -1,9 +1,9 @@
 {
-  "$comment": "Registry entry for submitting mcpm to the official MCP Registry. Submit via https://registry.modelcontextprotocol.io or PR to modelcontextprotocol/servers.",
+  "$comment": "Registry entry for submitting mcpm to the official MCP Registry. Submit via https://registry.modelcontextprotocol.io or PR to modelcontextprotocol/servers. Hand-submission template only \u2014 no code reads this file. The `version` below is illustrative: the real publish path builds its own manifest from package.json and the release tag.",
   "name": "io.github.getmcpm/cli",
   "title": "mcpm",
-  "description": "MCP package manager with built-in trust scoring. Search, install, audit, and manage MCP servers across Claude Desktop, Cursor, VS Code, and Windsurf. Also runs as an MCP server itself — agents can search, install, and audit servers programmatically.",
-  "version": "0.5.0",
+  "description": "MCP security guard and package manager. Search, install and audit MCP servers with trust scoring and Sigstore provenance across Claude Desktop, Claude Code, Cursor, VS Code, Windsurf and Gemini CLI; run a local relay that blocks prompt injection, tool poisoning and rug-pulls at runtime. Also runs as an MCP server: agents can search, install and audit servers programmatically.",
+  "version": "0.39.0",
   "packages": [
     {
       "registryType": "npm",

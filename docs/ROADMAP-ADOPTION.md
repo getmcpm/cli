@@ -1,6 +1,6 @@
 # mcpm Roadmap — Developer & Enterprise Adoption
 
-> Status: **Active plan of record** · Current: **v0.26.0** · Baseline drafted at v0.16.0 (2026-07-03)
+> Status: **Active plan of record** · Current: **v0.39.0** · Baseline drafted at v0.16.0 (2026-07-03)
 >
 > Companion to [`VISION.md`](./VISION.md) (the strategy layer both roadmaps hang off) and
 > [`ROADMAP.md`](./ROADMAP.md) (the security/DevX feature roadmap, now ~80%
@@ -87,7 +87,7 @@ names the **critique-corrected first slice**.
 | 2 | E10a | `mcpm policy check` — cross-client compliance auditor | ent | S–M | 4 | 5 |
 | 3 | E1 | Managed org policy layer (MDM/git, non-overridable) | ent | **L** | 5 | 5 |
 | 3 | B2 | Linux confine backend (bubblewrap) | both | L | 3 | 5 |
-| 3 | B3 | F8: Sigstore provenance verify + signer-identity drift | ent | L | 3 | 3 |
+| 3 | B3 | ✅ **SHIPPED** — F8: Sigstore provenance verify + signer-identity drift (identity drift v0.22.0, offline crypto verify v0.23.0, verify-time enforcing gate v0.24.0) | ent | L | 3 | 3 |
 | 3 | E7 | Remote-MCP OAuth metadata conformance (`--probe-remote`) | ent | S–M | 3 | 4 |
 | 3 | E9b | Signed org denylist feeds (`policy.denylistFeeds`) | ent | M | 3 | 4 |
 | 3 | D5 | "State of MCP supply-chain hygiene" report (launch vehicle) | dev | M | 4 | 3 |
@@ -292,8 +292,13 @@ is the big content vehicle.
   Landlock/seccomp fallback or L becomes XL. `doctor-confine` must detect bwrap AND
   unprivileged-userns availability (Ubuntu 24.04 AppArmor restriction) — the Linux
   no-backend rate will dwarf macOS's.
-- **B3 · F8 Sigstore provenance + signer-identity drift (L).** Ship the ROADMAP F8 v1
-  slice as specified there: npm-only offline verify (`@sigstore/verify` +
+- **B3 · F8 Sigstore provenance + signer-identity drift (L).** ✅ **SHIPPED across three
+  releases** — parse-only identity drift in **v0.22.0**, offline `@sigstore/verify` crypto
+  verification in **v0.23.0**, and the verify-time enforcing gate (`mcpm verify` /
+  `up --frozen` fail closed on signer-changed / regression / unverifiable) in **v0.24.0**.
+  The plan as written below is kept for the reasoning; what shipped matches it, except that
+  the WARN-only slice and the enforcing gate landed as separate releases. Original text:
+  ship the ROADMAP F8 v1 slice as specified there: npm-only offline verify (`@sigstore/verify` +
   `@sigstore/bundle` against a vendored `trusted_root.json` — flagged as a small
   pure-JS dep *tree*); optional provenance block in the existing lock snapshot
   (mirror the H11 optional-integrity pattern, no lockfile version bump); `up` WARNs
@@ -364,8 +369,9 @@ decision, not a drift).
 - **v0.18** — ✅ D1 (Claude Code adapter) + the SBOM-under-immutable-releases fix.
 - **v0.19** — ✅ the rest of Wave 1 together: D4a (Gemini CLI) + D7 (`doctor --json`/
   `--report`) + D2 (`mcpm verify` + Action) + D3 (`audit --sarif`) + D6 (distribution).
-- **v0.20** — E5 + E2 + E4 + E6 + E10a (the enterprise self-serve evidence kit).
-- **v1.0** — E1 + B2 + B3 (managed policy, Linux confine, provenance — the
-  "enterprise-ready" claim becomes true, and 1.0 signals the semver discipline
-  enterprises ask for) + D5 as the launch content.
+- **v0.20** — ~~E5 + E2 + E4 + E6 + E10a (the enterprise self-serve evidence kit)~~ — **did not happen.** v0.20.0 shipped F10 (credential-egress DLP) instead; the kit was re-penciled to v0.21, then v0.22 … v0.25, and is **unscheduled — never shipped as of v0.39.0**.
+- **v1.0** — E1 + B2 (managed policy, Linux confine — the "enterprise-ready" claim
+  becomes true, and 1.0 signals the semver discipline enterprises ask for) + D5 as the
+  launch content. **B3 has already shipped** (v0.22.0–v0.24.0) and is no longer part of
+  this bundle; E1 and B2 remain unshipped.
 - **post-1.0** — E7, E9b, E10b, D4b, B1b, devcontainer, Claude Code plugin spike.

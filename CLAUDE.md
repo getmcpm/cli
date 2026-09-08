@@ -18,7 +18,7 @@ across all major clients (Claude Desktop, Claude Code, Cursor, VS Code, Windsurf
 
 ## The Problem We're Solving
 
-The MCP ecosystem has 5,800+ servers and 185M+ monthly SDK downloads, but:
+The MCP ecosystem has ~18.8k servers listed in the registry substrate (MCP Queen scrape, late July 2026 — see "Ecosystem Scale" below for sourcing and caveats; the older "5,800+ servers / 185M+ monthly SDK downloads" pair is a March 2026 figure kept there for trend context only), but:
 
 - Servers are scattered across GitHub, npm, PyPI, and personal blogs
 - No standardized validation — you don't know if a server works
@@ -237,7 +237,11 @@ Build the **open-source, community-owned npm+npm_audit** for MCP:
   wired to nothing on purpose — `snyk/agent-scan`, the most plausible real-world
   candidate, was evaluated and does not fit the contract (2026-08-31 decision row)
 - **Trust score**: 0-100 (health check 30pts, static scan 40pts, external scanner 20pts,
-  registry metadata 10pts, capped to 0 on critical/high findings). Green ≥80, Yellow 50-79, Red <50
+  registry metadata 10pts; the registry-metadata bucket is capped to 0 on critical/high findings).
+  Levels are a RATIO of `maxPossible`, not an absolute score (`computeLevel`,
+  `src/scanner/trust-score.ts`): **safe** ≥80%, **caution** 50–79%, **risky** <50%.
+  `maxPossible` is 80 with no external scanner credited and 100 with one, so safe starts
+  at 64/80 in the common case, not 80
 - **Safety floors use mcpm-native evidence only** (`nativeTrustScore`, TODOS #33):
   the MCP surface's `HARD_TRUST_FLOOR` excludes the external-scanner bucket,
   because `MCPM_EXTERNAL_SCANNER` is caller-supplied and unverifiable. One-directional
@@ -376,7 +380,7 @@ Five `docs/ROADMAP.md` features (see its delivery log) + a full dogfood and CI g
 - [x] **F3 — `up --frozen` fail-closed integrity BLOCK tier (v0.13.0)** — promotes the H11 WARN tripwire to an enforcing CI gate: pre-install verify of every locked npm server's `dist.integrity`, BLOCK (install nothing, exit nonzero — `npm ci` semantics) on drift / could-not-verify / format-mismatch / suspicious-missing-baseline; benign refuse-to-run for a pre-baseline lock; pypi/oci/url coverage notice. `--frozen` / `policy.frozen`. (#95)
 - [x] **F5 — reject exfil-named tool-schema params, DENY-tier list-time (v0.14.0)** — structural `exfil-param-in-schema` detector walks `tools/list` inputSchema property KEYS and blocks a tool declaring an underscore-wrapped context-exfil sigil (`_system_prompt_`, …) before the model sees it; zero-FP deny tier (wrapped form only; `_context_`/`_memory_` framework slots excluded), honest "tripwire not defense" scope, muteable. (#97)
 - [x] **F10 Detector-A + B — response-side credential DLP + decode-and-rescan (SHIPPED v0.20.0)** — `credential-egress-in-response` warn-tier signature + `redact` seam (A, 2026-07-12), extended to GitHub-fine-grained/GitLab/Stripe families (#128); decode-and-rescan of base64/base64url in server data with a WARN-clamp (B, 2026-07-13). Deferred: entropy/PII detectors, block-tier, Detector-C (`outputSchema` in the pin hash).
-- [ ] **Next up (docs/ROADMAP.md):** F9 PR2 (login-PATH probe), the Wave-2 enterprise kit; then the deferred F10 block-tier + Detector-C, and the F8 fast-follows (PyPI, Fulcio source-repo OID for reusable-workflow SANs). (F8 is now COMPLETE across all three slices: identity-drift v0.22.0, crypto-verify v0.23.0, verify-time enforcing gate v0.24.0. `mcpm guard inspect` shipped v0.25.0 — it is a FLYWHEEL dependency, not a detector: it unblocks publishing the case corpus as a standalone guard-agnostic benchmark, which VISION.md calls the highest-leverage H1 item.) (F7 `mcpm sync --check` shipped in v0.15.0; F1 `guard --confine` released in v0.16.0 — see the block below. See also **docs/ROADMAP-ADOPTION.md**: Wave 0 shipped in v0.17.0, Wave 1 complete [D1 in v0.18.0, D4a+D7+D2+D3+D6 in v0.19.0]; the **Wave-2 enterprise kit** [E5/E2/E4/E6/E10a] is now penciled for **v0.21.0** — F10 took v0.20.0.)
+- [ ] **Next up (docs/ROADMAP.md):** F9 PR2 (login-PATH probe), the Wave-2 enterprise kit; then the deferred F10 block-tier + Detector-C, and the F8 fast-follows (PyPI, Fulcio source-repo OID for reusable-workflow SANs). (F8 is now COMPLETE across all three slices: identity-drift v0.22.0, crypto-verify v0.23.0, verify-time enforcing gate v0.24.0. `mcpm guard inspect` shipped v0.25.0 — it is a FLYWHEEL dependency, not a detector: it unblocks publishing the case corpus as a standalone guard-agnostic benchmark, which VISION.md calls the highest-leverage H1 item.) (F7 `mcpm sync --check` shipped in v0.15.0; F1 `guard --confine` released in v0.16.0 — see the block below. See also **docs/ROADMAP-ADOPTION.md**: Wave 0 shipped in v0.17.0, Wave 1 complete [D1 in v0.18.0, D4a+D7+D2+D3+D6 in v0.19.0]; the **Wave-2 enterprise kit** [E5/E2/E4/E6/E10a] was penciled for v0.21.0, slipped release by release through v0.25, and is **unscheduled — never shipped as of v0.39.0**.)
 
 ### F1 `guard --confine` — first enforcement primitive (RELEASED in v0.16.0)
 
@@ -391,7 +395,7 @@ The first **enforcement** primitive in mcpm-guard — every prior guard feature 
 
 ### V1.5 (community trust)
 
-- [ ] `mcpm publish` — submit to official registry with mandatory security scan gate
+- [x] `mcpm publish` — submit to official registry with mandatory security scan gate (shipped in **v0.4.0**; the gate is `assertTrustGate` in `src/commands/publish/submit.ts`, run before any submission)
 - [ ] User ratings and reviews (requires backend)
 - [ ] Verified publisher badge
 - [ ] Usage stats (installs, active users)
@@ -502,7 +506,10 @@ the registry concept end-to-end before we launch publicly.
        │
        ├── Pattern engine (src/guard/patterns.ts)
        │   NFKC + zero-width-strip + regex → InspectResult
-       │   Signatures: src/guard/signatures.ts (vendored OWASP MCP Top 10)
+       │   Signatures: src/guard/signatures.ts (their `category` field is the
+       │   OBSOLETE OWASP MCP Top 10 v0.1 numbering, kept only as a stable internal
+       │   tag; src/guard/owasp.ts carries the pinned MCP01–MCP10 mapping and is
+       │   what every emitted finding is classified against)
        │
        ├── Schema-drift inspector (src/guard/drift.ts + run-inner.ts sync path)
        │   SHA-256(description + schema + annotations) vs ~/.mcpm/pins.json
@@ -644,7 +651,7 @@ When helping with this project:
 - V1 is local-first: no server infrastructure, JSON files in `~/.mcpm/`
 - Immutable data patterns: always return new objects, never mutate
 - All config writes use atomic write-then-rename with backup-before-write
-- Existing competitors: mcpm.sh, mcp-get, mcpman — we differentiate on trust assessment
+- Existing competitors (see the Competitive Landscape table above): **Microsoft APM** is the closest — an npm-style installer + lockfile across 9+ clients, with no trust scoring, Sigstore verification, runtime guard or confinement; **Smithery** (acquired by Arcade.dev, 2026-08-05) is a hosted-execution lane, not a local CLI; the OSS runtime proxies (McpVanguard, MCP Firewall) inspect at runtime but add no install-time trust scoring or supply-chain verification. We differentiate by combining trust assessment, Sigstore provenance, and a runtime guard in one local tool. NOTE: `mcpm.sh` is an unrelated project that merely collides on the name (it owns the homebrew-core `mcpm` formula), and `mcp-get` was archived 2026-06-17 — neither is a competitor
 
 ---
 

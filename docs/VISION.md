@@ -165,5 +165,5 @@ Trust through constraints. These are load-bearing, not aspirational:
 | Platforms absorb MCP security natively | Cross-client independence + benchmark ownership hedge it. Clients adopting the benchmark is a win, not a loss. |
 | A funded startup takes the category | OSS + local-first is the differentiated flank (the nmap/osquery precedent), not the loser. The benchmark keeps the project relevant regardless. |
 | Nobody cares | That is what H1's exit metrics are for — falsify cheaply, don't drift. |
-| Single-maintainer trust ceiling | Deterministic core, ~1,900 tests, signed releases, bus-factor docs; recruit maintainer #2 from disclosure collaborators. |
+| Single-maintainer trust ceiling | Deterministic core, 2,931 tests, signed releases, bus-factor docs; recruit maintainer #2 from disclosure collaborators. |
 | A false-positive incident | The zero-FP doctrine is the defense. Non-negotiable. |

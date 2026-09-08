@@ -78,12 +78,12 @@ Relay->>Relay: inspectMessage()<br/>Pattern engine<br/>(OWASP-MCP Top 10)
 alt hasToolsList()?
 Relay->>PinStore: Load pins
 Relay->>Relay: inspectForDriftSync():<br/>Hash live schema<br/>vs pinned hash
-Relay->>Relay: SECURITY F3:<br/>Check sessionFirstHashes<br/>for same-session drift
+Relay->>Relay: SECURITY F3:<br/>Check firstHashes<br/>for same-session drift
 alt Schema mismatch or in-session drift
 Relay->>EventLog: append finding<br/>(signature: schema-drift)
 Relay->>IDE: JSON-RPC error<br/>(block)
 else Schema matches
-Relay->>Relay: Off-thread:<br/>Async pin write +<br/>snapshot refresh
+Relay->>Relay: Pin write + snapshot refresh<br/>(AWAITED for a never-pinned server's<br/>FIRST tools/list — v0.34.1, so a crash<br/>cannot leave the session baseline-less;<br/>off-thread for every later one)
 end
 end
 end
@@ -101,7 +101,7 @@ else PASS
 Relay->>IDE: forward response
 end
 
-Note over IDE,EventLog: Event log entry (if findings):<br/>{ts, server_name, direction,<br/>action, findings:[{signature_id,<br/>category, severity, target,<br/>matched_text_excerpt, remediation}]}
+Note over IDE,EventLog: Event log entry (if findings):<br/>{ts, server_name, direction,<br/>action, findings:[{signature_id,<br/>category, severity, target,<br/>matched_text_excerpt, owasp}]}
 ```
 
 ---
@@ -124,6 +124,11 @@ The wrap transformation in JSON:
 A pre-batch `.bak` snapshot is written per touched client (`<config>.guard-enable.bak`) so the whole operation is recoverable even if a single per-server write fails mid-batch.
 
 The `--orig-hash` token is now verified at spawn time too (previously it was checked only on `disable`/unwrap). This is **Phase 1: warn-once** on mismatch — it does *not* fail closed yet (a future release promotes it after zero-mismatch dogfood evidence); an absent hash (a legacy pre-`--orig-hash` wrap) is skipped, not failed.
+
+### `mcpm guard enable [...] --allow-unguarded`
+A URL/HTTP-transport server entry has no `command`, so the stdio MITM relay cannot wrap it — it would run with **zero** runtime inspection. H9 turned that silent skip into a fail-closed deny-by-default: such a server is refused unless you record explicit, informed consent with `--allow-unguarded`. Consent is persisted to `~/.mcpm/guard-unguarded.json` (`src/guard/unguarded.ts`), so later runs stay quiet for the servers you already allowed instead of re-prompting. The same flag exists on `mcpm install` and `mcpm up`.
+
+Consent does **not** add protection — it records that you accepted its absence. The underlying limitation stands: no relay exists for non-stdio transports (a streamable-HTTP MITM is deferred).
 
 ### `mcpm guard disable [--client <id>] [--server <name>]`
 Reverses the wrap by parsing the wrap marker out of the args and reconstructing the original entry. Falls back to the `.bak` if the wrap pattern is malformed (e.g. user hand-edited the config since enable).
@@ -222,7 +227,7 @@ On macOS, confinement is applied via Seatbelt (`sandbox-exec`). The one shipped 
 
 - **READ — allow-all except a secret-dir denylist.** Reads are permitted everywhere *except* a curated set of credential/config locations: SSH / AWS / gcloud / gh / GnuPG keys, `~/.npmrc` / `~/.docker` / `~/.kube` / `~/.netrc` / `~/.git-credentials` and similar credential files, macOS Keychains, browser cookie stores, the MCP client config dirs, and mcpm's own `~/.mcpm` store.
 - **WRITE — deny-all-of-`$HOME` except caches + scratch.** A single rule blocks the whole persistence class (`~/.zshrc`, `~/Library/LaunchAgents`, PATH-shadowing `~/bin`, git hooks). Writes are allowed only to caches (`~/.npm`, `~/.cache`, `~/Library/Caches`), the per-server scratch dir, system temp (`/tmp`, `/private/tmp`, `/var/folders`, `/var/tmp`), and `/dev`.
-- **NET — launcher-classified.** Launchers that fetch at startup (npx / uvx / pip / pipx / docker / npm / pnpm / yarn / bun) get network "all"; everything else gets egress-deny "none".
+- **NET — launcher-classified.** Launchers that fetch at startup get network "all"; everything else gets egress-deny "none". The full set (`LAUNCHER_COMMANDS`, `src/guard/confine/derive.ts`) is 14 commands: `npx`, `npm`, `pnpm`, `yarn`, `bun`, `bunx`, `uv`, `uvx`, `pip`, `pip3`, `pipx`, `pipenv`, `poetry`, `docker` — matched on the lowercased basename without extension, so `/usr/bin/npx` and `npx.cmd` both classify.
 - The server's own scratch dir (`~/.mcpm/sandbox/<server>`) is both readable and writable.
 
 ### Enabling and disabling
@@ -274,6 +279,7 @@ The wrapped config entry carries two new tokens **before** the `--` separator: `
 | `~/.mcpm/guard-policy.yaml.integrity` | SHA-256 of `guard-policy.yaml` | One-line sha256 sidecar |
 | `~/.mcpm/guard-confine.yaml` | OS-confinement enrollment (tier / net / require_confine per server) | YAML, fails closed like pins.json |
 | `~/.mcpm/guard-confine.yaml.integrity` | SHA-256 of `guard-confine.yaml` | One-line sha256 sidecar |
+| `~/.mcpm/guard-unguarded.json` | H9 consent record: URL/HTTP-transport servers you allowed to run WITHOUT relay inspection (`--allow-unguarded`) | JSON |
 | `~/.mcpm/guard-events.jsonl` | Append-only event log | JSON-Lines |
 | `<client config>.guard-{enable,disable}.bak` | Pre-batch backup per touched client | Original JSON content |
 

@@ -40,7 +40,7 @@ An array of per-signature overrides. Each entry:
 | field | type | required | meaning |
 |---|---|---|---|
 | `id` | string | yes | Must match a shipped signature id (see `mcpm guard list-signatures`) |
-| `action` | enum | yes | `ignore` (drop the finding entirely) / `warn` (downgrade critical→warn) / `block` (upgrade high→block) / `log_only` (keep the finding for the event log but treat as pass) |
+| `action` | enum | yes | `ignore` (drop the finding entirely) / `warn` / `block` / `log_only` (keep the finding for the event log but treat as pass). `warn` and `block` are set **unconditionally** — `applyPolicy` (`src/guard/run-inner.ts`) assigns the override action outright rather than applying it as a severity-conditioned downgrade/upgrade, so `block` on a `low`-severity signature promotes it, and `warn` on a `high` one that would already warn is a no-op |
 | `expires_at` | ISO 8601 string | no | Override auto-expires on or after this timestamp |
 
 ### `paused_until`
@@ -51,7 +51,18 @@ ISO 8601 string. When set + in the future, the relay short-circuits all inspecti
 
 The relay parses the YAML through a strict Zod schema. Malformed shapes (e.g. `paused_until: 99999999999999` — numeric, not ISO string) cause Zod to fall back to **empty policy** — fail toward more restrictive enforcement.
 
-Date strings must be **full ISO 8601 with timezone** (e.g. `2026-05-17T18:00:00Z`). Date-only strings like `2026-05-17` parse as UTC midnight per ECMA-262 — technically correct but easy to confuse with local midnight. Always include the `T...Z` for clarity.
+Date strings must be **full ISO 8601 UTC** (e.g. `2026-05-17T18:00:00Z`). The schema is
+`z.string().datetime()` with no `offset` option, so it accepts **only** the `Z` form:
+
+- `2026-05-17` (date-only) — **rejected**
+- `2026-05-17T18:00:00+02:00` (numeric offset) — **rejected**
+- `2026-05-17T18:00:00Z` — accepted
+
+This is not a lenient coercion. Because the file is validated with a single whole-file
+`safeParse` and a `.catch({})` fallback, ONE bad date string discards the **entire policy** —
+every override and any `paused_until` — and the relay proceeds with an empty policy. That
+fails toward more enforcement, not less, but it means a mistyped date silently un-mutes
+everything you muted rather than erroring. Always write the `T...Z` form.
 
 ## Action semantics (the bug fix that mattered)
 

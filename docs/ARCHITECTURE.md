@@ -33,10 +33,17 @@ mcpm/
 │   │   ├── tools.ts                — Zod input schemas for each tool
 │   │   └── handlers.ts             — tool handlers (wraps existing CLI logic)
 │   ├── registry/
+│   │   ├── index.ts                — public API barrel export
 │   │   ├── client.ts               — RegistryClient (HTTP, injectable fetch)
+│   │   ├── publish-client.ts       — POST submit endpoint for `mcpm publish`
+│   │   ├── http-utils.ts           — shared capped-body reader (decompression-bomb cap)
 │   │   ├── schemas.ts              — Zod schemas for API responses
-│   │   ├── types.ts                — inferred TypeScript types
-│   │   ├── pagination.ts           — async cursor-based pagination
+│   │   ├── types.ts                — TypeScript types inferred from schemas.ts
+│   │   ├── argument-tokens.ts      — shared extractor of scannable string tokens from a runtime Argument
+│   │   ├── npm-integrity.ts        — npm `dist.integrity` tripwire (H11)
+│   │   ├── npm-provenance.ts       — parse-only Sigstore attestation identity + the lazy crypto verdict (F8)
+│   │   ├── sigstore-verify.ts      — offline Sigstore verification; the ONLY module that may conclude "verified"
+│   │   ├── sigstore-trusted-root.json — vendored sigstore/root-signing trusted root
 │   │   └── errors.ts               — RegistryError, NotFoundError, NetworkError
 │   ├── config/
 │   │   ├── paths.ts                — OS-aware config file paths
@@ -56,35 +63,53 @@ mcpm/
 │   │   ├── tier2.ts                — opt-in external scanner (MCPM_EXTERNAL_SCANNER)
 │   │   └── patterns.ts             — regex patterns for secrets, injection, typosquatting
 │   ├── store/
-│   │   ├── index.ts                — local state manager (~/.mcpm/)
-│   │   ├── servers.ts              — installed server registry
-│   │   ├── cache.ts                — HTTP response cache
-│   │   └── aliases.ts              — server name aliases (~/.mcpm/aliases.json)
+│   │   ├── index.ts                — local JSON state manager (~/.mcpm/)
+│   │   ├── servers.ts              — installed server registry (~/.mcpm/servers.json)
+│   │   ├── aliases.ts              — server name aliases (~/.mcpm/aliases.json)
+│   │   ├── atomic.ts               — symlink-safe atomic writes + locked read-modify-write
+│   │   ├── keychain.ts             — AES-GCM encrypted secret store (~/.mcpm/secrets.enc.json)
+│   │   └── os-keychain.ts          — zero-native-dep master-key access (macOS `security` / libsecret / DPAPI)
 │   ├── stack/
 │   │   ├── schema.ts               — Zod schemas for mcpm.yaml + mcpm-lock.yaml
 │   │   ├── resolve.ts              — semver range resolution
-│   │   ├── policy.ts               — trust policy enforcement
+│   │   ├── policy.ts               — trust policy enforcement (normalized-percentage comparisons)
+│   │   ├── paths.ts                — stack→lock path derivation, shared by lock/up/verify/diff
+│   │   ├── frozen-verify.ts        — shared lockfile INTEGRITY verification (F3 / D2)
+│   │   ├── frozen-provenance.ts    — shared lockfile PROVENANCE re-verification (F8 / "B3")
 │   │   ├── env.ts                  — .env file parser
 │   │   └── index.ts                — public API surface
 │   ├── guard/                       — v0.5.0 runtime defense (mcpm-guard)
-│   │   ├── types.ts                — Severity, Signature, InspectResult types
-│   │   ├── patterns.ts             — pattern engine (NFKC + leaf walk + regex)
-│   │   ├── signatures.ts           — vendored OWASP MCP Top 10 catalog
+│   │   ├── types.ts                — Severity, Signature, InspectResult types (8 SignatureTargets)
+│   │   ├── patterns.ts             — pattern engine (NFKC + leaf walk + regex + decode-and-rescan)
+│   │   ├── signatures.ts           — the shipped signature catalog (21 entries)
+│   │   ├── owasp.ts                — OWASP MCP Top 10 (beta) pin carried on every emitted finding
+│   │   ├── inspect-frame.ts        — the ONE stateless composition every consumer shares (relay, `guard inspect`, release gate)
 │   │   ├── relay.ts                — production stdio MITM (subprocess + in-process variants)
 │   │   ├── wrap.ts                 — entry transformation (wrapEntry/unwrapEntry/isWrapped)
 │   │   ├── orchestrator.ts         — two-phase commit across detected clients
 │   │   ├── pins.ts                 — schema-pin storage + integrity sidecar
-│   │   ├── drift.ts                — async drift detection + accept-drift application
+│   │   ├── drift.ts                — schema/handshake drift detection + accept-drift application
 │   │   ├── policy.ts               — guard-policy.yaml (mute/pause overrides)
 │   │   ├── run-inner.ts            — `mcpm guard run --inner` entry, wires the relay
+│   │   ├── inspect-cli.ts          — `mcpm guard inspect`: offline verdicts over captured frames (the public scoring seam)
 │   │   ├── event-log.ts            — append-only JSONL writer for guard-events.jsonl
 │   │   ├── sanitize.ts             — shared ANSI/control-char terminal sanitizer
 │   │   ├── store-integrity.ts      — shared fileSha / assertNotSymlink / writeFileAtomic (pins + policy + confine)
+│   │   ├── unguarded.ts            — H9 deny-by-default consent store for un-wrappable (HTTP/SSE) transports
+│   │   ├── shadow.ts               — F2 cross-server tool-name-collision detector
+│   │   ├── key-canon.ts            — shared identifier-KEY canonicalization (homoglyph fold + camelCase split)
+│   │   ├── exfil-names.ts          — F5 exfil-param name classifier (underscore-sigil denylist)
+│   │   ├── exfil-params.ts         — F5 structural exfil-param detector over `tools/list` inputSchema keys
+│   │   ├── tool-call-args-walk.ts  — shared `tools/call` argument-tree walker for the key+value detectors
+│   │   ├── shell-metachar-args.ts  — shell-metacharacter detector (CVE-2025-53818 / CVE-2026-25546 shape)
+│   │   ├── query-control-args.ts   — query-control-syntax detector (CVE-2026-33980 shape)
+│   │   ├── cli-flag-injection-args.ts — embedded CLI-flag detector (CVE-2026-39884 shape)
+│   │   ├── tool-name-confusable.ts — tool-NAME inspection: confusable duplicates + deceptive characters
 │   │   ├── cli.ts                  — Commander glue for enable/disable/status/cleanup
 │   │   ├── confine/                 — OS confinement (F1, macOS-only, opt-in via --confine)
-│   │   │   ├── profile.ts          — standard-tier read/write/net rule set
-│   │   │   ├── derive.ts           — render a Seatbelt profile for a server (+ content hash)
-│   │   │   ├── backend-macos.ts    — sandbox-exec backend + availability pre-check
+│   │   │   ├── profile.ts          — platform-neutral ConfineProfile shape
+│   │   │   ├── derive.ts           — derive a standard-tier profile for a server (pure, no I/O)
+│   │   │   ├── backend-macos.ts    — macOS Seatbelt backend: renders SBPL + the sandbox-exec argv
 │   │   │   ├── apply.ts            — wrap the child spawn argv with the backend
 │   │   │   ├── store.ts            — ~/.mcpm/guard-confine.yaml enrollment store (+ integrity)
 │   │   │   └── decide.ts           — spawn-time confine/fail-closed/hybrid-warn decision
@@ -96,14 +121,27 @@ mcpm/
 │       ├── format-trust.ts         — format trust score display
 │       └── fs.ts                   — shared filesystem helpers (isEnoent)
 ├── src/__tests__/
-│   ├── commands/                    — 33 command test files
-│   ├── config/                      — adapter + detector + paths tests
-│   └── store/                       — cache + servers + store tests
+│   ├── commands/                    — 35 command test files
+│   ├── config/                      — adapter + detector + paths + drift tests
+│   ├── output/                      — SARIF mapper tests
+│   ├── registry/                    — registry-client tests
+│   ├── server/                      — MCP tool-surface tests
+│   ├── smoke/                       — built-binary output-contract smoke matrix
+│   ├── stack/                       — stack/lock schema + policy + frozen-gate tests
+│   ├── store/                       — servers + aliases + atomic + keychain tests
+│   ├── engines-invariant.test.ts    — `engines.node` vs the real dependency tree
+│   └── test-isolation.test.ts       — guards the suite against touching the real $HOME
 ├── scripts/
-│   └── demo.sh                     — asciinema demo recording script
+│   ├── demo.sh                     — asciinema demo recording script
+│   ├── dogfood-confine.sh          — hermetic end-to-end `--confine` dogfood (real macOS Seatbelt enforcement)
+│   ├── dogfood-release.sh          — pack → clean-install → smoke-run the real binary; gates `pnpm publish`
+│   └── launch-checklist.md         — pre/post-launch checklist
 ├── .github/workflows/
-│   ├── ci.yml                      — build + test on push/PR (Node 22, 24, 26)
-│   └── publish.yml                 — packed-artifact gate (Node 22, 24, 26) then npm publish + GitHub Release, on v* tags
+│   ├── ci.yml                      — build + test on push/PR (Node 22, 24, 26) + the `confine-macos` Seatbelt dogfood leg
+│   ├── dogfood.yml                 — on-demand smoke of an ALREADY-PUBLISHED version on GitHub's machines
+│   ├── publish.yml                 — packed-artifact gate (Node 22, 24, 26) then npm publish + GitHub Release, on v* tags
+│   └── scorecard.yml               — OpenSSF Scorecard supply-chain posture (weekly + on push to main)
+├── .github/actions/mcpm-verify/    — composite Action wrapping `mcpm verify --json` for downstream CI
 ├── package.json                    — @getmcpm/cli, bin: mcpm
 ├── tsconfig.json
 ├── tsup.config.ts                  — bundler config
@@ -120,8 +158,8 @@ mcpm/
 | `guard/` | **v0.5.0 runtime defense.** Stdio MITM relay, OWASP MCP Top 10 pattern engine, schema pinning + drift detection, policy file editor, integrity sidecars, event log. Plus `guard/confine/` (F1, released v0.16.0, macOS-only, opt-in via --confine): the first **enforcement** primitive — the relay optionally wraps the child spawn in an OS sandbox (macOS `sandbox-exec`) so a server physically can't read secret files or persist, complementing byte-level detection. See `docs/GUARD.md`. |
 | `registry/` | Typed HTTP client for the official MCP Registry API (v0.1 at registry.modelcontextprotocol.io) |
 | `config/` | OS-aware config paths, client detection, and per-client config adapters with atomic writes |
-| `scanner/` | Trust scoring engine: tier 1 (metadata), tier 2 (static pattern analysis), composite score |
-| `store/` | Local state in `~/.mcpm/` — installed server registry, HTTP response cache, server name aliases, guard pins + policy + events |
+| `scanner/` | Trust scoring engine: tier 1 (built-in static pattern analysis over registry metadata — secrets, prompt injection, typosquatting, exfil-shaped args), tier 2 (the opt-in external scanner named by `MCPM_EXTERNAL_SCANNER`, off by default), composite score |
+| `store/` | Local state in `~/.mcpm/` — installed server registry, server name aliases, the AES-GCM encrypted secret store (`secrets.enc.json`, master key in the OS keychain), guard pins + policy + confine + events. There is no HTTP cache: every registry read is a live fetch |
 | `utils/` | Output formatting, confirmation prompts, trust display helpers |
 
 ## Commands
@@ -158,6 +196,7 @@ mcpm/
 | `mcpm guard doctor-confine` | Read-only: report OS-backend availability + enrolled servers (tier / net / require_confine) |
 | `mcpm guard demo` | Synthetic prompt-injection scenario (visible block in terminal) |
 | `mcpm guard accept-drift / mute / unmute / pause / cleanup` | Runtime tuning + escape hatches |
+| `mcpm guard inspect [file]` | Run the signature catalog over MCP JSON-RPC frame(s) offline — no relay, no server, no network. The public seam external benchmarks score mcpm through (`--json`, exit 0/1/2) |
 | `mcpm guard list-signatures / reset-integrity` | Catalog inspection + integrity sidecar regeneration |
 | `mcpm guard run --inner` | Internal: relay entry point invoked by wrapped configs (semver-exempt) |
 
@@ -268,12 +307,12 @@ Relay->>Relay: inspectMessage()<br/>Pattern engine<br/>(OWASP-MCP Top 10)
 alt hasToolsList()?
 Relay->>PinStore: Load pins
 Relay->>Relay: inspectForDriftSync():<br/>Hash live schema<br/>vs pinned hash
-Relay->>Relay: SECURITY F3:<br/>Check sessionFirstHashes<br/>for same-session drift
+Relay->>Relay: SECURITY F3:<br/>Check firstHashes<br/>for same-session drift
 alt Schema mismatch or in-session drift
 Relay->>EventLog: append finding<br/>(signature: schema-drift)
 Relay->>IDE: JSON-RPC error<br/>(block)
 else Schema matches
-Relay->>Relay: Off-thread:<br/>Async pin write +<br/>snapshot refresh
+Relay->>Relay: Pin write + snapshot refresh<br/>(AWAITED for a never-pinned<br/>server's first tools/list — v0.34.1;<br/>off-thread thereafter)
 end
 end
 end
@@ -340,9 +379,13 @@ integrity/shape/format-version mismatch. CONFINE events (`confine-applied`,
 `confine-hash-mismatch`, `confine-marker-stripped`, …) append to
 `guard-events.jsonl`; the OWASP signature catalog count is unchanged.
 
-Honest caveats: the sandbox-exec path is not exercised in ubuntu-only CI (mocked
-arg-vector unit tests + local darwin verification, same gap the os-keychain shell-outs
-carry); net is launcher-permissive (do not read this as general exfil prevention); it
+The `sandbox-exec` path IS exercised in CI: the `confine-macos` job in `ci.yml` runs
+`scripts/dogfood-confine.sh` on a `macos-latest` runner, so real kernel enforcement is
+verified on every push and PR, not only locally. (The full unit suite is deliberately not
+re-run on that leg — a few tests are darwin-env sensitive; the dogfood is the enforcement
+contract that matters.)
+
+Honest caveats: net is launcher-permissive (do not read this as general exfil prevention); it
 does not defend against a same-user attacker who can rewrite **both** the IDE config
 and `~/.mcpm`. A strict tier (read-allowlist / scratch-only-write / host-granular net),
 Linux `bwrap`, and the per-server `guard confine <server>` command are deferred (per-server
@@ -356,7 +399,7 @@ confine is achievable today via `enable --confine --server X` + `disable --serve
 ~/.mcpm/
 ├── servers.json                  — installed server registry (name, version, clients, install date)
 ├── aliases.json                  — short aliases for server names
-├── cache/                        — HTTP response cache (TTL-based)
+├── secrets.enc.json              — AES-GCM encrypted credential store (master key in the OS keychain)
 ├── pins.json                     — guard schema pins (v0.5.0)
 ├── pins.json.integrity           — sha256 sidecar over pins.json
 ├── guard-policy.yaml             — user overrides (mute/pause)
@@ -364,6 +407,7 @@ confine is achievable today via `enable --confine --server X` + `disable --serve
 ├── guard-confine.yaml            — confine enrollment store (F1; source of truth for "server X is confined")
 ├── guard-confine.yaml.integrity  — sha256 sidecar over guard-confine.yaml (fails closed on mismatch)
 ├── sandbox/<server>/             — per-server confine scratch dir (read+write inside the sandbox)
+├── guard-unguarded.json          — H9 consent record for un-wrappable (HTTP/SSE) servers the user allowed
 └── guard-events.jsonl            — append-only event log (parse with jq)
 ```
 
@@ -389,9 +433,9 @@ All config writes use atomic file operations (write to `.tmp`, then `fs.rename`)
 ## Testing
 
 - **Framework**: vitest with `@vitest/coverage-v8`
-- **Test count**: ~1,800+ tests
+- **Test count**: 2,931 tests
 - **Coverage thresholds**: lines 80%, branches 75%
-- **Test locations**: `src/__tests__/` (command, config, store tests) + colocated `*.test.ts` (registry, scanner)
+- **Test locations**: `src/__tests__/` (commands, config, output, registry, server, smoke, stack, store) + colocated `*.test.ts` (registry, scanner, stack, guard — `src/guard/__tests__/`)
 - **Approach**: injectable `fetchImpl` for registry tests (no network calls), temp directories for config adapter tests
 
 Run tests:
@@ -411,6 +455,12 @@ Runs on push to `main` and pull requests. Matrix: Node 22, 24, 26. All GitHub Ac
 Steps: `pnpm install --frozen-lockfile` → `typecheck` → `build` → `test:coverage`
 → `typecheck` again against `@types/node` for that leg's own Node major (the pinned
 `@types/node` tracks the engines floor, so the first typecheck only describes Node 22).
+
+A second job, **`confine-macos`**, runs on `macos-latest` and executes
+`pnpm dogfood:confine` (`scripts/dogfood-confine.sh`) — a hermetic end-to-end run of the
+F1 `--confine` sandbox against real macOS Seatbelt enforcement under a throwaway `$HOME`.
+The ubuntu matrix structurally cannot exercise `sandbox-exec`, so this leg is what keeps
+the flagship enforcement path CI-verified.
 
 ### Publish (`publish.yml`)
 
