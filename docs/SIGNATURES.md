@@ -1,8 +1,15 @@
-# mcpm-guard signature reference (v0.5.0)
+# mcpm-guard signature reference (v0.39.0)
 
 The shipped signature catalog + how to add one. See `docs/GUARD.md` for the runtime model.
 
 ## Currently shipped (21 catalog entries)
+
+> The **category** column is each signature's own `category` field in
+> `src/guard/signatures.ts`. Those strings (`OWASP-MCP-1`, `OWASP-MCP-2`, …) are the
+> **obsolete OWASP MCP Top 10 v0.1 numbering**, kept only as stable internal tags — they
+> are NOT the current classification. The pinned MCP01–MCP10 mapping every emitted finding
+> actually carries lives in `src/guard/owasp.ts` and is documented in
+> `docs/owasp-mcp-mapping.md`; README's "What it catches" table renders those ids.
 
 | id | category | severity | target | description |
 |---|---|---|---|---|
@@ -79,9 +86,13 @@ Plus the runtime drift detectors (`schema-drift`, `schema-drift-cosmetic`, `sche
 
 ## Action mapping
 
-- **critical → block** by default
+- **critical → block** by default — clamped to **warn** on the warn-only
+  retrieved-data carriers (`resource_content`, `prompt_content`), and on any finding
+  recovered from a base64-decoded leaf (`decoded: true`)
 - **high → warn** by default (forwards traffic; promote to block via policy)
-- **medium / low → log_only**
+- **medium / low → pass** — `severityToAction` (`src/guard/patterns.ts`) maps them to
+  `pass`, i.e. they contribute no action of their own. `log_only` is **not** a severity
+  mapping: it is one of the four actions a *policy override* can set for a signature id
 
 Policy overrides in `~/.mcpm/guard-policy.yaml` can promote, demote, or mute any signature per-id. See `docs/POLICY.md`.
 
@@ -94,7 +105,12 @@ For every JSON-RPC message:
    - `tool_call_args` → `params.arguments` of `tools/call`
    - `tool_description` → `result.tools[*].description`, `result.tools[*].title`, and full `result.tools[*].inputSchema` including nested property descriptions/enums (only when present) — inputSchema is scanned because poison can hide in parameter descriptions
    - `tool_annotations` → `result.tools[*].annotations`
-2. Walk every string leaf in the subtree (depth-bounded at 32).
+2. Walk every string leaf in the subtree. The walk is **not** depth-bounded — the
+   depth cap of 32 was removed in v0.26.0 because a payload nested deeper than 32 in
+   `structuredContent` went uninspected. It is bounded instead by a total-visit budget
+   of `MAX_LEAF_WALK_NODES` = 100,000 nodes (`src/guard/patterns.ts`), and exhausting
+   that budget **fails closed**: it emits the `guard-inspection-truncated` finding at
+   `critical` rather than silently returning a `pass`.
 3. NFKC-normalize the leaf + strip zero-width / bidi / Unicode-tag control chars (anti-evasion).
 4. Test each signature's regex patterns against the normalized leaf.
 5. First match per signature wins (no double-counting).
@@ -113,6 +129,9 @@ interface Signature {
     | "resource_content" | "prompt_content" | "initialize_instructions" | "sampling_prompt";
   readonly patterns: readonly RegExp[];   // NFKC-tolerant regexes; whitespace via [\s-]* (zero-width-evasion safe)
   readonly remediation: string;           // actionable string; shown to user on block
+  readonly redact?: boolean;              // when true the match IS a secret: the excerpt
+                                          // becomes "‹redacted N-char secret›" so it never
+                                          // reaches guard-events.jsonl or the warn message
 }
 ```
 

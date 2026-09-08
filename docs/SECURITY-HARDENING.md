@@ -1,6 +1,6 @@
 # mcpm Security Hardening Plan — Supply Chain + Agent Tool-Call Defense
 
-> Status: **in delivery** (see *Delivery status* below) · Baseline: **v0.19.0** · Drafted: 2026-06-12 · Reconciled to shipped state: 2026-07-05
+> Status: **in delivery** (see *Delivery status* below) · Baseline: **v0.39.0** · Drafted: 2026-06-12 · Reconciled to shipped state: 2026-09-08
 >
 > **How this was produced:** a grounded multi-agent pass — (1) a file-and-function map of
 > mcpm's *current* protections and extension seams (`guard/`, `scanner/`, `stack/`,
@@ -144,11 +144,16 @@ Most of this plan is *extension of existing seams*, not new architecture.
 - **Relay (`relay.ts`):** spawns the real child, `wireDirection()` parses newline-framed
   JSON-RPC both ways; `action === "block"` drops the frame and synthesizes a `-32099
   BLOCKED` error (preserving id; notifications dropped silently). 64 MB/direction buffer cap.
-- **Inspection (`patterns.ts inspectMessage` + `targetSubtree`):** exactly **4** (v0.5.0 baseline; expanded to 8 in v0.10.0)
-  `SignatureTarget`s — `tool_response`, `tool_call_args`, `tool_description`,
-  `tool_annotations`. Each string leaf is `normalizeForMatch`-folded (NFKC + zero-width/bidi
-  strip + confusable fold, ReDoS-bounded) then tested against **3** signatures in
-  `signatures.ts` (`OWASP_MCP_TOP_10`). Severity → action: critical = block, high = warn.
+- **Inspection (`patterns.ts inspectMessage` + `targetSubtree`):** *(the 4-target / 3-signature
+  figures below are the **v0.5.0 baseline** this plan was written against — as of v0.39.0 it
+  is **8** `SignatureTarget`s (`src/guard/types.ts`) and **21** signatures
+  (`src/guard/signatures.ts`); see README's "What it catches" and `docs/SIGNATURES.md` for
+  the shipped set.)* At the baseline: exactly **4** `SignatureTarget`s — `tool_response`,
+  `tool_call_args`, `tool_description`, `tool_annotations`. Each string leaf is
+  `normalizeForMatch`-folded (NFKC + zero-width/bidi strip + confusable fold, ReDoS-bounded)
+  then tested against **3** signatures in `signatures.ts` (`OWASP_MCP_TOP_10`). Severity →
+  action: critical = block, high = warn (critical is clamped to warn on the warn-only
+  retrieved-data carriers `resource_content` / `prompt_content`).
 - **Drift (`drift.ts` + `pins.ts`):** `hashToolDefinition` (canonical SHA-256 of
   description + schema + annotations) vs `~/.mcpm/pins.json`; mismatch = critical block.
   Per-session second-`tools/list` race guard (F3). **Capture is `first-session` only** — the
@@ -166,8 +171,8 @@ Most of this plan is *extension of existing seams*, not new architecture.
 
 | Gap | Detail |
 |---|---|
-| **G1** | `resources/*`, `prompts/*`, `sampling/*`, `elicitation/*`, `initialize.instructions`, `structuredContent` are **never inspected** |
-| **G2** | HTTP/SSE-transport servers run with **zero** runtime inspection (relay only wraps stdio); silently skipped on Cursor |
+| **G1** | ~~`resources/*`, `prompts/*`, `sampling/*`, `elicitation/*`, `initialize.instructions`, `structuredContent` are **never inspected**~~ — **CLOSED in v0.10.0.** H1 (#74) added the resources / prompts / `initialize.instructions` / `structuredContent` carriers and H7 slice-A (#78) added the server-initiated `sampling`/`elicitation` path (`sampling_prompt`, block-capable). See the *Delivery status* table above. |
+| **G2** | ~~HTTP/SSE-transport servers run with **zero** runtime inspection (relay only wraps stdio); silently skipped on Cursor~~ — **CORRECTED in v0.10.0.** H9 (#76) replaced the silent skip with a fail-closed **deny-by-default**: an un-wrappable transport is refused unless the user records explicit consent (`--allow-unguarded`, stored in `~/.mcpm/guard-unguarded.json`). The underlying limitation stands — the relay still cannot inspect HTTP/SSE traffic, so a consented server runs uninspected; a streamable-HTTP MITM relay remains the full fix. |
 | **G3** | No install-time pin capture → first run is **trust-on-first-use**; a born-poisoned server self-blesses its baseline |
 | **G4** | `pins.json` / `guard-policy.yaml` integrity sidecars are **unkeyed SHA-256** — tamper-evidence, not authenticity; a same-user/postinstall process recomputes them |
 | **G5** | `pause` / `mute` persist in that same user-writable file → relay silently neuterable |
