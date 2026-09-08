@@ -26,6 +26,17 @@ published section (it happened to #170).
   referencing that taxonomy by `name`. Purely additive: no existing field,
   verdict, or exit code changes (`docs/CONTRACTS.md`).
 
+### Changed
+
+- **Two runtime dependencies bumped: `zod` `^4.4.3` → `^4.5.4` and
+  `@inquirer/prompts` `^8.5.2` → `^8.7.0`.** Both are runtime deps, so the gate
+  that matters is the packed-tarball dogfood — pack, clean-install the real
+  tarball under a throwaway `$HOME`, smoke the binary — which CI does not run.
+  It was run before merge and passed on Node 24.20.0. Dependabot's own PRs
+  (#201, #202) were closed rather than merged: its regenerated `pnpm-lock.yaml`
+  drops the `pnpm.overrides` block and fails CI with
+  `ERR_PNPM_LOCKFILE_CONFIG_MISMATCH`.
+
 ## [0.38.0] - 2026-09-07
 
 ### Fixed

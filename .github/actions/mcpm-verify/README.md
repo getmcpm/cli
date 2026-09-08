@@ -24,7 +24,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: getmcpm/cli/.github/actions/mcpm-verify@v0.38.0
+      - uses: getmcpm/cli/.github/actions/mcpm-verify@v0.39.0
         # with:
         #   version: latest          # @getmcpm/cli version/dist-tag to run
         #   working-directory: .     # dir containing mcpm.yaml / mcpm-lock.yaml
