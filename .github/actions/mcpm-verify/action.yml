@@ -1,5 +1,5 @@
 name: 'mcpm verify'
-description: "Fail-closed lockfile integrity gate — verify mcpm-lock.yaml against npm's published record."
+description: "Fail-closed lockfile gate — re-check mcpm-lock.yaml against npm's published integrity record AND re-verify its Sigstore build provenance, blocking on drift, a changed signer, or servers the lock does not cover."
 branding:
   icon: 'shield'
   color: 'green'
@@ -32,19 +32,53 @@ runs:
         echo "$out"
 
         # Render a job step summary from --json (node is preinstalled on GH runners).
+        #
+        # `ok:false` has FOUR independent causes and only one of them fills `blocked`:
+        # integrity blocks (`blocked`), provenance regressions (`provenanceBlocked`),
+        # servers mcpm.yaml declares that the lock omits (`uncovered`), and an empty
+        # lock with no mcpm.yaml to confirm that is intentional (`vacuous`). Rendering
+        # `blocked` alone printed "verification failed - 0 server(s):" with nothing
+        # under it whenever the cause was one of the other three.
         printf '%s' "$out" | node -e '
           let d; try { d = JSON.parse(require("fs").readFileSync(0, "utf8")); } catch { process.exit(0); }
           const fs = require("fs"); const sum = process.env.GITHUB_STEP_SUMMARY;
           if (!sum) process.exit(0);
+          const arr = (x) => (Array.isArray(x) ? x : []);
           const L = ["### mcpm verify"];
           if (d.error) L.push("", "✗ " + d.error);
-          else if (d.noBaselines) L.push("", "✗ lock has no integrity baselines — run `mcpm lock` online once.");
-          else if (d.ok) L.push("", "✓ " + d.verified + " npm server(s) verified against npm’s published record.");
           else {
-            L.push("", "✗ verification failed — " + (d.blocked || []).length + " server(s):", "");
-            for (const b of d.blocked || []) L.push("- `" + (b.identifier || b.name) + "` — " + b.reason);
+            const blocked = arr(d.blocked), prov = arr(d.provenanceBlocked), uncov = arr(d.uncovered);
+            if (uncov.length) {
+              L.push("", "✗ " + uncov.length + " declared server(s) missing from the lock — it enforces less than `mcpm.yaml` declares:", "");
+              for (const n of uncov) L.push("- `" + n + "`");
+              L.push("", "Run `mcpm lock` to cover them.");
+            }
+            if (d.vacuous)
+              L.push("", "✗ this lock contains no servers — this run verified nothing, and there is no `mcpm.yaml` alongside it to confirm that is intentional.");
+            if (d.noBaselines)
+              L.push("", "✗ lock has no integrity baselines — run `mcpm lock` online once.");
+            if (blocked.length) {
+              L.push("", "✗ integrity — " + blocked.length + " server(s) blocked:", "");
+              for (const b of blocked) L.push("- `" + (b.identifier || b.name) + "` — " + b.reason);
+            }
+            if (prov.length) {
+              L.push("", "✗ provenance — " + prov.length + " server(s) blocked:", "");
+              for (const b of prov) L.push("- `" + (b.identifier || b.name) + "@" + b.npmVersion + "` — " + b.reason + (b.detail ? " (" + b.detail + ")" : ""));
+            }
+            if (d.ok) {
+              if (d.verified > 0)
+                L.push("", "✓ " + d.verified + " npm server(s) verified against npm’s published integrity record.");
+              if (d.checkedProvenanceCount > 0)
+                L.push("", "✓ " + d.checkedProvenanceCount + " npm attestation(s) cryptographically re-verified (signer unchanged).");
+              if (d.verified === 0 && d.checkedProvenanceCount === 0 && !d.noBaselines)
+                L.push("", "— nothing to verify: this stack declares no servers.");
+            } else if (!uncov.length && !d.vacuous && !d.noBaselines && !blocked.length && !prov.length) {
+              // Fail closed: never render a green summary for an ok:false model whose
+              // cause we could not attribute to a known block family.
+              L.push("", "✗ verification failed (see the command output above).");
+            }
           }
-          if ((d.unenforceable || []).length)
+          if (arr(d.unenforceable).length)
             L.push("", "_" + d.unenforceable.length + " server(s) (pypi/oci/url) have no baseline mechanism — not enforced._");
           L.push("", "_mcpm checks the registry’s published record, not the code your agent runs._");
           fs.appendFileSync(sum, L.join("\n") + "\n");
