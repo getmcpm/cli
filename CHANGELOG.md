@@ -8,6 +8,74 @@ _Add entries here, never under a stamped version_ — a release commit renames t
 heading, and a branch that wrote beneath it merges without conflict straight into a
 published section (it happened to #170).
 
+### Fixed
+
+- **The `mcpm-verify` GitHub Action's step summary rendered only integrity
+  blocks, so a provenance-only or coverage-only failure printed an empty list
+  (#207).** `mcpm verify --json` sets `ok:false` from four independent causes —
+  integrity blocks (`blocked`), Sigstore provenance regressions
+  (`provenanceBlocked`, shipped v0.24.0), servers `mcpm.yaml` declares that the
+  lock omits (`uncovered`, shipped v0.38.0), and an empty lock with no
+  `mcpm.yaml` beside it to confirm that is intentional (`vacuous`) — and the
+  summary script read `blocked` alone. Measured on both sides by driving a
+  provenance-only model (a `signer-changed` block, `blocked: []`) through the
+  `node -e` program extracted verbatim from each version of `action.yml`: the
+  pre-fix script wrote `✗ verification failed — 0 server(s):` followed by
+  nothing, the fixed one names the server, its `signer-changed` reason and the
+  `detail` sub-cause. **The step's exit code was never wrong** — it is the CLI's
+  own (`out="$(… verify --json)"; code=$?` … `exit $code`, with the summary
+  render `|| true`), so the job failed correctly every time. This is a reporting
+  defect, not a gate bypass; its cost was pointing a maintainer at an empty list
+  for the two block families that matter most. Each family now renders its own
+  section with per-server reasons; the success path reports the provenance
+  re-check alongside the integrity one; and an `ok:false` model matching no
+  known family falls through to an explicit failure line rather than a green
+  summary. Verified across nine model shapes — `error`, provenance-only,
+  uncovered-only, `vacuous`, `noBaselines`, integrity-only, both block families
+  at once, the full success path, and an unattributable `ok:false` — each piped
+  through the shipped program with `GITHUB_STEP_SUMMARY` pointed at a temp file.
+  The Action's own `description` and its README both claimed integrity-only
+  scope; both now state the provenance re-check.
+
+### Changed
+
+- **The npm listing metadata, and a full-repo documentation reconcile against
+  v0.39.0 (#207).** `package.json` carries a new `description` and grows its
+  `keywords` from 9 to 19 — **this is the first publish that delivers either to
+  npm**, where the listing still reads "MCP package manager — search, install,
+  and audit MCP servers across Claude Desktop, Cursor, VS Code, and Windsurf",
+  a sentence that mentions none of the guard, the trust scoring, or the Sigstore
+  verification, and omits two of the six clients mcpm now writes for (Claude
+  Code and Gemini CLI). The README
+  headline is keyword-first to match (`mcpm — MCP security guard and package
+  manager`). Every doc was then read against the code rather than against
+  itself, and the corrections fall into four classes. *Sample output blocks
+  regenerated from the real renderers, never hand-edited:* the `mcpm audit`
+  table's `72/80 safe` row is unreachable — `audit` passes
+  `healthCheckPassed: null`, so the native ceiling is 62/80 and a flawless
+  server renders `clean · not run`, never `safe` — and the `mcpm doctor` block
+  invented a `[pass]`/`[warn]` format `renderDoctorText` has never emitted.
+  *Obsolete labels replaced by pinned ids:* README's "What it catches" listed
+  `OWASP-MCP-1/2/7` from the withdrawn v0.1 numbering; it now uses the `MCP0x`
+  ids from `src/guard/owasp.ts`, with the eight shipped signatures that had no
+  row added. *Stale module trees:* `docs/ARCHITECTURE.md` listed
+  `registry/pagination.ts` and `store/cache.ts`, both deleted in the v0.23.0
+  dead-code sweep, was missing ~25 files that do exist, and the deleted
+  `~/.mcpm/cache/` was still drawn in two diagrams. *Gap tables that predate
+  their own fixes:* `docs/SECURITY-HARDENING.md` still listed G1 and G2 open
+  although its own delivery-status table records them closed in v0.10.0 by
+  H1/H7-A (#74/#78) and H9 (#76), and its "sandbox-exec is not exercised in
+  ubuntu-only CI" caveat was simply false — a `confine-macos` job has run
+  `scripts/dogfood-confine.sh` on `macos-latest` since v0.17.0. The two
+  documented `uses: getmcpm/cli/.github/actions/mcpm-verify@…` pins move to
+  `v0.39.1`, so the workflow snippets a user copies point at the tag that
+  carries the summary fix.
+
+**No runtime code changed.** `git diff v0.39.0..v0.39.1 -- src/` is empty; the
+2931 tests, `tsc --noEmit` and the packed-tarball dogfood are unchanged and
+green. The release exists because users pin the Action by tag, and a fix that
+ships only on `main` is invisible to every one of them.
+
 ## [0.39.0] - 2026-09-08
 
 ### Added
