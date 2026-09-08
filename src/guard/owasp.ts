@@ -18,6 +18,7 @@
  */
 
 import type { Finding } from "../scanner/tier1.js";
+import type { ConfineEventName } from "./confine/decide.js";
 
 /** Must equal the sha pinned in docs/owasp-mcp-mapping.md — owasp.test.ts checks this. */
 export const OWASP_MCP_TOP_10_REF = "165fe0f78ef104459237b4a8e0f6e78db9b02391";
@@ -57,11 +58,29 @@ export const OWASP_MCP_TOP_10_TAXA: ReadonlyArray<{ readonly id: OwaspMcpId; rea
 type PinState = OwaspMcpId | "unknown" | "unpinnable";
 
 /**
- * Explicit per-signature_id classification. `_TEST_ONLY` prefix marks the
- * export as test-consumption only (exhaustiveness check in owasp.test.ts) —
- * not part of the module's real API.
+ * Every confine spawn-decision event (run-inner.ts `confineGuardEvent` writes
+ * these into a finding's `signature_id`). All guard-health, none an attack
+ * class — the same bucket `orig-hash-mismatch` sits in. TS-exhaustive over
+ * `ConfineEventName`, so adding a confine event fails the build until it is
+ * classified; a source-text scan cannot see these (the id is a function
+ * ARGUMENT, never a `signature_id:` literal).
  */
-export const _SIGNATURE_OWASP_TABLE: Readonly<Record<string, PinState>> = {
+const CONFINE_EVENT_OWASP: Readonly<Record<ConfineEventName, "unpinnable">> = {
+  "confine-applied": "unpinnable",
+  "confine-marker-stripped": "unpinnable",
+  "confine-hash-mismatch": "unpinnable",
+  "confine-backend-missing": "unpinnable",
+  "confine-profile-missing": "unpinnable",
+  "confine-marker-malformed": "unpinnable",
+};
+
+/**
+ * Explicit per-signature_id classification. The leading underscore marks the
+ * export as test-consumption only (the exhaustiveness check in owasp.test.ts) —
+ * not part of the module's real API. Frozen so a test cannot corrupt it for
+ * whatever runs next in the same worker.
+ */
+export const _SIGNATURE_OWASP_TABLE: Readonly<Record<string, PinState>> = Object.freeze({
   // ── MCP01 — Token Mismanagement & Secret Exposure ─────────────────────────
   "credential-egress-in-response": "MCP01",
   "generic-bearer-token-disclosure": "MCP01",
@@ -116,11 +135,21 @@ export const _SIGNATURE_OWASP_TABLE: Readonly<Record<string, PinState>> = {
   "spawn-failure": "unpinnable",
   "inspect-rejected": "unpinnable",
   "malformed-frame": "unpinnable",
-};
+  ...CONFINE_EVENT_OWASP,
+});
 
-/** Ids absent from the table classify as `unknown` — never fabricate a category. */
+/**
+ * Ids absent from the table classify as `unknown` — never fabricate a category.
+ *
+ * `Object.hasOwn`, not a bare index: the table is an object literal, so
+ * `TABLE["toString"]` resolves up Object.prototype and used to return
+ * `{status:"pinned"}` with no `id` at all — a fabricated pin that is not even a
+ * valid `OwaspPin`. Same class as the `__proto__` bug closed in v0.38.0.
+ */
 export function owaspPinFor(signatureId: string): OwaspPin {
-  const state = _SIGNATURE_OWASP_TABLE[signatureId];
+  const state = Object.hasOwn(_SIGNATURE_OWASP_TABLE, signatureId)
+    ? _SIGNATURE_OWASP_TABLE[signatureId]
+    : undefined;
   if (state === undefined || state === "unknown") {
     return { status: "unknown", ref: OWASP_MCP_TOP_10_REF };
   }

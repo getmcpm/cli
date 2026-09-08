@@ -35,7 +35,7 @@ import { appendEvent } from "./event-log.js";
 import { hashOriginalEntry } from "./wrap.js";
 import { loadProfile } from "./confine/store.js";
 import { isConfineBackendAvailable, wrapForConfinement } from "./confine/apply.js";
-import { decideConfine } from "./confine/decide.js";
+import { decideConfine, type ConfineEventName } from "./confine/decide.js";
 import type { ConfineProfile } from "./confine/profile.js";
 import { canonicalToolName } from "./key-canon.js";
 import { sanitizeForTerminal } from "./sanitize.js";
@@ -131,7 +131,7 @@ export function applyPolicy(result: InspectResult, policy: GuardPolicyFile): Ins
  * the H9 spawn-failure precedent: a valid InspectFinding shape, no type change).
  */
 function confineGuardEvent(
-  event: string,
+  event: ConfineEventName,
   reason: string,
   action: InspectResult["action"],
   severity: Severity,

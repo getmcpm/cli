@@ -8,8 +8,9 @@
  *
  * `run.taxonomies` carries the OWASP MCP Top 10 (beta) taxonomy (backlog #71);
  * a rule whose `Finding.type` is pinned to a category (see `guard/owasp.ts`)
- * gets a `relationships` entry pointing at it. `scanner-error` has none — it
- * is a scanner-health signal, not an attack class.
+ * gets a `relationships` entry pointing at it, of kind `subset` (the rule
+ * detects one slice of the category, not all of it). `scanner-error` has none —
+ * it is a scanner-health signal, not an attack class.
  */
 
 import crypto from "crypto";
@@ -100,8 +101,15 @@ export function buildSarif(servers: SarifServer[], version: string): SarifLog {
         ? {
             relationships: [
               {
-                target: { id: pin.id, toolComponent: { name: OWASP_TAXONOMY_NAME, index: 0 } },
-                kinds: ["superset"],
+                // `subset`, not `superset`: SARIF 2.1.0 §3.53.3 defines the kind
+                // as the CONTAINING descriptor's relation to the target, and an
+                // mcpm rule detects one slice of its OWASP category, never all
+                // of it. No `index`: §3.54.2 makes `index` an index into
+                // `run.tool.extensions`, which this log has none of — the
+                // taxonomy is referenced by `name`, which the spec permits
+                // ("at least one of name/index/guid SHALL be present").
+                target: { id: pin.id, toolComponent: { name: OWASP_TAXONOMY_NAME } },
+                kinds: ["subset"],
               },
             ],
           }

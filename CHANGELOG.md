@@ -12,16 +12,19 @@ published section (it happened to #170).
 
 - **The OWASP MCP Top 10 pin now travels with every finding a guard tool
   emits (backlog #71).** New `src/guard/owasp.ts` classifies each
-  `signature_id` (catalog and non-catalog emitters alike) against the commit
-  pinned in `docs/owasp-mcp-mapping.md`, in one of three states: `pinned`
+  `signature_id` — the 21 catalog signatures, the ids emitted directly by
+  `drift.ts`/`patterns.ts`/`relay.ts`/`run-inner.ts`, and the six confine
+  spawn-decision events — against the commit pinned in
+  `docs/owasp-mcp-mapping.md`, in one of three states: `pinned`
   (`{status, id: "MCP0x", ref}`), `unknown` (not yet classified), or
-  `unpinnable` (a guard/relay health signal, not an attack class — never a
-  fabricated category). `mcpm guard inspect --json` findings, each
+  `unpinnable` (a guard/relay/sandbox health signal, not an attack class —
+  never a fabricated category). `mcpm guard inspect --json` findings, each
   `~/.mcpm/guard-events.jsonl` finding, and `mcpm guard list-signatures`
   (text and `--json`) all carry the pin. `mcpm audit --sarif` gains a
-  `run.taxonomies` entry for the OWASP MCP Top 10 and a `relationships` link
-  on any rule whose scanner finding type is pinned to a category. All four
-  surfaces are additive/unstable `--json` shapes per `docs/CONTRACTS.md`.
+  `run.taxonomies` entry for the OWASP MCP Top 10 and, on any rule whose
+  scanner finding type is pinned, a `relationships` link of kind `subset`
+  referencing that taxonomy by `name`. Purely additive: no existing field,
+  verdict, or exit code changes (`docs/CONTRACTS.md`).
 
 ## [0.38.0] - 2026-09-07
 

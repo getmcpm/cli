@@ -39,13 +39,6 @@ new failure modes, but the meanings above will not be repurposed within `0.x`.
 `guard doctor-confine`, and `guard inspect`. **Treat these shapes as unstable in
 `0.x`** — fields may be added or renamed — with one exception:
 
-**Additive (backlog #71):** `guard inspect --json` findings, each
-`guard-events.jsonl` line's findings, and `guard list-signatures --json`
-entries all gain an `owasp` field — the OWASP MCP Top 10 pin (see
-`docs/owasp-mcp-mapping.md`). `mcpm audit --sarif` gains a `run.taxonomies`
-entry for the same taxonomy, plus a `relationships` array on any rule whose
-finding type is pinned to a category.
-
 - **`mcpm sync --json`** (the drift model) is **frozen** because CI consumes it
   alongside the exit-`2` contract above.
   **Changed in 0.37.0 (#59), deliberately and not additively:** `ServerDrift`
@@ -56,6 +49,15 @@ finding type is pinned to a category.
   therefore now exits **2** where it previously exited **0** for a config mcpm
   could not read. The old exit `0` was the bug: the gate reported "in sync"
   over input it had never compared.
+
+**Additive (backlog #71), on the unstable shapes:** `guard inspect --json`
+findings, each `guard-events.jsonl` line's findings, and
+`guard list-signatures --json` entries all gain an `owasp` field — the OWASP MCP
+Top 10 pin (see `docs/owasp-mcp-mapping.md`). `mcpm audit --sarif` gains a
+`run.taxonomies` entry for the same taxonomy, plus a `relationships` array
+(kind `subset`, referencing the taxonomy by `name`) on any rule whose finding
+type is pinned to a category. `guard list-signatures`' human output gains an
+`owasp` line. Nothing existing is renamed, removed, or re-valued.
 
 The remaining `--json` shapes stabilize per-command as they are schema-typed and
 documented; until then, pin to the exit codes, not the field names.

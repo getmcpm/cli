@@ -17,6 +17,21 @@ import { hashConfineProfile, type ConfineProfile } from "./profile.js";
 
 export type ConfineAction = "confine" | "unconfined" | "fail-closed";
 
+/**
+ * Every event id a confine spawn decision can log to guard-events.jsonl, where
+ * it lands in the `signature_id` field (run-inner.ts `confineGuardEvent`).
+ * `confine-marker-malformed` is raised by run-inner before this table runs, but
+ * belongs to the same set. Named as a union, not `string`, so `guard/owasp.ts`
+ * can classify it TS-exhaustively — a new event fails the build until it is.
+ */
+export type ConfineEventName =
+  | "confine-applied"
+  | "confine-marker-stripped"
+  | "confine-hash-mismatch"
+  | "confine-backend-missing"
+  | "confine-profile-missing"
+  | "confine-marker-malformed";
+
 export interface ConfineDecisionInput {
   /** Profile loaded from the store by server name; null if absent OR unreadable. */
   readonly profile: ConfineProfile | null;
@@ -32,7 +47,7 @@ export interface ConfineDecision {
   readonly action: ConfineAction;
   readonly reason: string;
   /** Event id for guard-events.jsonl; undefined = don't log (the row-6 no-op). */
-  readonly event?: string;
+  readonly event?: ConfineEventName;
 }
 
 export function decideConfine(input: ConfineDecisionInput): ConfineDecision {

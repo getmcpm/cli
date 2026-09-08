@@ -285,8 +285,10 @@ Each logged finding also carries an OWASP MCP Top 10 pin (backlog #71 — see
 `docs/owasp-mcp-mapping.md`), so you can filter the event log by category:
 
 ```sh
-# every event with at least one MCP03 (Tool Poisoning)-pinned finding
-jq 'select(.findings[].owasp.id == "MCP03")' ~/.mcpm/guard-events.jsonl
+# every event with at least one MCP03 (Tool Poisoning)-pinned finding.
+# `any(...)`, not `select(.findings[]...)` — the latter re-emits the event once
+# per matching finding, so a two-finding event prints twice.
+jq 'select(any(.findings[]; .owasp.id == "MCP03"))' ~/.mcpm/guard-events.jsonl
 ```
 
 ---
