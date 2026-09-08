@@ -8,6 +8,8 @@ _Add entries here, never under a stamped version_ — a release commit renames t
 heading, and a branch that wrote beneath it merges without conflict straight into a
 published section (it happened to #170).
 
+## [0.39.0] - 2026-09-08
+
 ### Added
 
 - **The OWASP MCP Top 10 pin now travels with every finding a guard tool
