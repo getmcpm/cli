@@ -25,6 +25,17 @@ The shipped signature catalog + how to add one. See `docs/GUARD.md` for the runt
 | `tool-name-confusable-duplicate` | OWASP-MCP-1 | high (→ warn) | tool_description | **Structural** (no regex): one `tools/list` advertises two tools whose NAMES canonicalize to the same form (NFKC + zero-width/TAG strip + confusable fold + case-fold) but whose raw spellings differ — `format_code` beside `Format_Code` or Cyrillic `fоrmat_code`. This is the co-existence half of the TODOS #58 look-alike residual: keying drift by the raw name let a poisoned definition arrive under a twin and be filed as a brand-new tool. WARN, not block: a case-only pair is legal under SEP-986 (names are case-sensitive) and a block on a `tools/list` disables the server's entire tool surface, so the enforcing half is the canonical drift/pin keying in the relay, which BLOCKS the stateful *replace* form. Colliding names fall back to RAW keying (and an exact-only pin lookup) for the rest of the session, so the two tools keep independent baselines and neither can poison the other's — they are never dropped from inspection, because a dropped collision group takes the incumbent with it and would let one throwaway case-variant disarm drift for a real tool. Emitted by `detectConfusableToolNames`. |
 | `tool-name-deceptive-characters` | OWASP-MCP-1 | high (→ warn) | tool_description | **Structural** (no regex): a tool NAME outside SEP-986's charset (`[A-Za-z0-9._-]`, max 128 — the SDK's own `TOOL_NAME_REGEX`). The complement to the fold above, not a duplicate of it: the confusable table is a scoped Cyrillic/Greek subset, so out-of-table look-alikes like `ԝrite_file` (Armenian U+051D) or `ɡet_user` (U+0261) survive canonicalization but cannot survive a charset check — though only at **warn**, so an out-of-table twin's poisoned frame is reported and forwarded where an in-table one blocks. Measured zero false positives — 863/863 tool names across 53 real public and hosted MCP servers are pure ASCII within this charset. Before this, a tool's `name` was **not an inspected carrier at all**: `tool_description` extracts `[description, title, inputSchema]` and `tool_annotations` extracts `annotations`, so a zero-width or homoglyph character in a NAME was silent — not even a warn — while the same character in a description warned. |
 
+Every id above (plus the non-catalog emitters below) also carries an OWASP MCP
+Top 10 (beta) pin — backlog #71, `src/guard/owasp.ts` — classifying the finding
+against the commit pinned in `docs/owasp-mcp-mapping.md` as `pinned` (with a
+category), `unknown` (not yet classified), or `unpinnable` (a guard-health
+signal, evaluated and found not to correspond to any category). It is not a
+column here because it's a many-to-few mapping better read as a table keyed
+the other way (see `docs/owasp-mcp-mapping.md`'s coverage map); `mcpm guard
+list-signatures` prints it per signature (`owasp : MCP03 @ 165fe0f7`, or
+`unknown @ 165fe0f7` / `unpinnable @ 165fe0f7`), and `--json` includes the
+full `{status, id?, ref}` object.
+
 Plus three entries that carry **no patterns** — they are emitted by dedicated passes
 rather than by a content regex, and exist in the catalog so their ids are
 recognized by `guard mute`, `guard list-signatures`, and policy overrides:

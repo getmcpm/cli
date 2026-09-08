@@ -8,6 +8,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { appendEvent, buildEventLogEntry } from "../event-log.js";
 import { _resetCachedStorePath } from "../../store/index.js";
+import { OWASP_MCP_TOP_10_REF } from "../owasp.js";
 
 let tmpHome: string;
 let originalHome: string | undefined;
@@ -49,6 +50,28 @@ describe("buildEventLogEntry", () => {
     expect(entry.server_name).toBe("evilserver"); // sanitized
     expect(entry.action).toBe("block");
     expect(entry.findings[0]?.signature_id).toBe("owasp-mcp-2-instruction-injection-in-response");
+  });
+
+  test("carries the OWASP MCP Top 10 pin on each finding (backlog #71)", () => {
+    const entry = buildEventLogEntry(
+      {
+        ts: "2026-05-17T00:00:00Z",
+        direction: "child->parent",
+        action: "block",
+        findings: [
+          {
+            signature_id: "owasp-mcp-2-instruction-injection-in-response",
+            category: "OWASP-MCP-2",
+            severity: "critical",
+            target: "tool_response",
+            matched_text_excerpt: "Ignore previous instructions",
+            remediation: "do thing",
+          },
+        ],
+      },
+      "server",
+    );
+    expect(entry.findings[0]?.owasp).toEqual({ status: "pinned", id: "MCP03", ref: OWASP_MCP_TOP_10_REF });
   });
 });
 

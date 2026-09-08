@@ -27,7 +27,35 @@ a different, since-renumbered scheme than the current beta list pinned
 above (where, for example, `MCP01` means Token Mismanagement, not
 description injection). This document's `MCP0x` numbers are derived fresh
 from the mechanism against the *current* beta list; they should not be
-read as consistent with those internal tag strings.
+read as consistent with those internal tag strings. The `owasp` field
+described below is the **authoritative** pin — `category` is not, and
+should not be read as one.
+
+## The pin travels in the record (backlog #71)
+
+Every finding a guard tool emits — `mcpm guard inspect --json`,
+`~/.mcpm/guard-events.jsonl`, `mcpm guard list-signatures`, and
+`mcpm audit --sarif`'s taxonomy relationships (kind `subset` — an mcpm rule
+detects one slice of its category, never all of it) — carries an `owasp` pin
+classifying it against `OWASP_MCP_TOP_10_REF` (the commit pinned above), in
+one of three states:
+
+- **`pinned`** — `{ status: "pinned", id: "MCP0x", ref }`. Maps to a category
+  as of this commit.
+- **`unknown`** — `{ status: "unknown", ref }`. Not yet classified against
+  this commit (never a fabricated category — see the "Not yet classified"
+  list below).
+- **`unpinnable`** — `{ status: "unpinnable", ref }`. Evaluated and does
+  **not** correspond to any category — a guard/relay health signal (a
+  spawn failure, an integrity-sidecar mismatch, a truncated inspection), not
+  an attack class.
+
+The mapping lives in `src/guard/owasp.ts` as one explicit side table keyed by
+`signature_id` (plus a second small table keyed by the scanner's
+`Finding["type"]`, for the SARIF taxonomy relationships) — not a field on
+`Signature`, because it must also cover ids that are emitted directly
+(`drift.ts`, `patterns.ts`, `relay.ts`, `run-inner.ts`) and never appear as a
+catalog entry.
 
 ## Coverage map
 
@@ -35,7 +63,7 @@ read as consistent with those internal tag strings.
 |---|---|---|
 | **MCP01 — Token Mismanagement & Secret Exposure** | Tier-1 hardcoded-secret scan (`detectSecrets`/`detectSecretLabels`, `src/scanner/patterns.ts`); installed-config plaintext-secret scan (`scanConfigSecrets`, `src/scanner/config-secrets.ts`); `credential-egress-in-response` + `generic-bearer-token-disclosure` guard signatures (`src/guard/signatures.ts`); an AES-GCM-encrypted secrets vault (`src/store/keychain.ts`) whose master key is held in the OS credential store (`src/store/os-keychain.ts`), not on disk | mcpm looks for credentials in three places a server can expose them — registry metadata, already-installed client configs, and live tool responses — and redacts what it catches before logging. Its own secrets vault also avoids at-rest exposure for values a user stores through mcpm (a copied `secrets.enc.json` cannot be decrypted off-machine). None of this tracks token *lifetime* (rotation, expiry); it's presence/leak detection, not lifecycle management. |
 | **MCP02 — Privilege Escalation via Scope Creep** | Partial: `initialize`-handshake capability-drift detection (`classifyHandshakeDrift`/`buildHandshakeDriftFinding`, `src/guard/drift.ts`, H5) | mcpm TOFU-pins a server's declared capabilities at first observation and WARNs (never blocks) when they change on a later session; if the newly-added capabilities include `sampling` or `elicitation` — a channel the server can use to actively drive prompts to the model/user — the warning names it a "capability/grant escalation" in its own remediation text. This is genuinely scope-creep detection, but narrow: it only recognizes two specific capability keys as escalation-worthy, it fires only on a CHANGE from a TOFU baseline (a server that requests broad capabilities from its very first session is never flagged), and it has no concept of tool-level or argument-level scope at all. See the gap list for what remains uncovered. |
-| **MCP03 — Tool Poisoning** | `owasp-mcp-1-tool-description-injection`, `owasp-mcp-2-instruction-injection-in-response`, `hidden-chars-in-metadata`, `unicode-tag-concealment` (all `src/guard/signatures.ts`); `exfil-param-in-schema` (`src/guard/exfil-params.ts` / `exfil-names.ts`); schema/description pin+drift detection (`src/guard/drift.ts`) | This is mcpm-guard's founding use case: it inspects tool descriptions, schemas, and a tool's own response content for injected or concealed manipulation, and separately re-verifies a previously-approved tool's description/schema/annotations on every `tools/list`, so poisoning introduced *after* approval (a rug-pull) is caught too. `instruction-injection-in-response` also has secondary relevance to MCP06 (same injected-phrase family, different carrier); `exfil-param-in-schema` also has secondary relevance to MCP10 (the schema field's purpose is inducing over-sharing of the model's own context). |
+| **MCP03 — Tool Poisoning** | `owasp-mcp-1-tool-description-injection`, `owasp-mcp-1-tool-annotation-injection`, `owasp-mcp-2-instruction-injection-in-response`, `hidden-chars-in-metadata`, `unicode-tag-concealment`, `tool-name-confusable-duplicate`, `tool-name-deceptive-characters` (all `src/guard/signatures.ts`); `exfil-param-in-schema` (`src/guard/exfil-params.ts` / `exfil-names.ts`), and its install-time twin the scanner's `exfil-args` finding type (`detectExfilArgs`, `src/scanner/patterns.ts`); the tier-1 scanner's `prompt-injection` finding type, which reads the same injected-instruction family out of registry metadata (descriptions, titles, headers, runtime args) before anything is installed (`detectPromptInjection`, `src/scanner/patterns.ts`); schema/description pin+drift detection (`schema-drift`, `schema-drift-cosmetic`, `schema-drift-in-session`, `src/guard/drift.ts` + `run-inner.ts`) | This is mcpm-guard's founding use case: it inspects tool descriptions, schemas, annotations, and tool NAMES (v0.35.0) for injected, concealed, or look-alike manipulation, and a tool's own response content for injected instructions, and separately re-verifies a previously-approved tool's description/schema/annotations on every `tools/list`, so poisoning introduced *after* approval (a rug-pull) is caught too. `owasp-mcp-1-tool-annotation-injection` is the same injection class as the description signature carried via the annotations extension surface instead; `tool-name-confusable-duplicate`/`tool-name-deceptive-characters` are the look-alike-name variant of the same class. `instruction-injection-in-response` also has secondary relevance to MCP06 (same injected-phrase family, different carrier); `exfil-param-in-schema`/`exfil-args` also have secondary relevance to MCP10 (the schema field's purpose is inducing over-sharing of the model's own context). |
 | **MCP04 — Software Supply Chain Attacks & Dependency Tampering** | npm Sigstore provenance identity + crypto verification (`fetchNpmProvenance`/`compareProvenance`, `src/registry/npm-provenance.ts`); verify-time provenance regression block (`classifyProvenance`, `src/stack/frozen-provenance.ts`); verify-time `dist.integrity` drift block (`classifyIntegrity`/`frozenVerdict`, `src/stack/frozen-verify.ts`); typosquatting detector (`detectTyposquatting`, `src/scanner/patterns.ts`); release-age cooldown (`assessReleaseAge`, `src/scanner/cooldown.ts`); registry lifecycle status check (`src/scanner/registry-status.ts`) | mcpm's second-deepest category: build-identity attestation, tarball-integrity re-verification, name-confusion detection, and a freshness/lifecycle check together target a tampered dependency or a poisoned republish from several independent angles — though only the npm registry type gets the cryptographic layer; pypi/oci packages are unverified. |
 | **MCP05 — Command Injection & Execution** | `shell-metachar-in-identifier-arg` (`src/guard/shell-metachar-args.ts`); `query-control-syntax-in-identifier-arg` (`src/guard/query-control-args.ts`); `cli-flag-injection-in-identifier-arg` (`src/guard/cli-flag-injection-args.ts`); install-script / dangerous-launch-flag detector (`detectInstallScriptShape`, `src/scanner/patterns.ts`) | Three CVE-motivated structural detectors watch `tools/call` argument values for shell, query-language, or CLI-flag injection syntax — but, by design, only when the argument's own key looks like an identifier/path, to stay zero-FP on legitimate shell/query/exec-style tools. That is a deliberate, documented trade-off: some untyped or `name`-keyed injections pass through uncaught. |
 | **MCP06 — Intent Flow Subversion** | `owasp-mcp-2-instruction-injection-in-resource`, `owasp-mcp-2-instruction-injection-in-prompt`, `owasp-mcp-1-initialize-instruction-injection`, `credential-phishing-wallet-solicitation`, `credential-phishing-financial-solicitation` (all `src/guard/signatures.ts`) | mcpm scans every context channel MCP exposes before or around a tool call — retrieved resources, prompt templates, and the `initialize` handshake — for the same imperative-injection phrase family, which is exactly the "context as a secondary instruction channel" shape this category describes. The credential-phishing pair is a specialized instance where the hijacked intent is soliciting the user's own secret (also relevant to MCP01). |
@@ -43,6 +71,50 @@ read as consistent with those internal tag strings.
 | **MCP08 — Lack of Audit and Telemetry** | `guard-events.jsonl` append-only audit trail (`logEvent`, `src/guard/relay.ts`) | Real but partial coverage: a frame is appended only when the inspection produces at least one finding — a clean frame with zero findings is never logged (every catalog signature today resolves to at least `warn`, so in practice this means only `block`/`warn` verdicts are recorded, but the gate is "has findings," not "action ≠ pass") — so this is an audit trail of what the guard flagged, not the complete per-invocation record the category asks for. |
 | **MCP09 — Shadow MCP Servers** | *No mechanism.* | Verified gap, and a deliberate non-mapping: mcpm's cross-server tool-shadowing check (`src/guard/shadow.ts`) is exact tool-*name* collision detection between two already-installed, already-guarded servers on one user's own machine. It has no concept of organizational approval and is blind to a server that was never guarded — a different problem from ungoverned server discovery/deployment across an org, despite the shared word "shadow." |
 | **MCP10 — Context Injection & Over-Sharing** | *No dedicated mechanism* (see MCP03's `exfil-param-in-schema` for an adjacent, narrower case) | mcpm is architected as one relay wrapping one server for one session on one local machine — there is no shared or persistent multi-agent/multi-session context store for it to scope or isolate, which is the architecture this category assumes. `exfil-param-in-schema` blocks a narrower, different case (a poisoned tool schema tricking a single agent into leaking its own context outward) and is counted as tool poisoning under MCP03, not as coverage here. |
+
+## Not yet classified
+
+These signature ids carry the `owasp` pin's `unknown` state (`src/guard/owasp.ts`)
+— evaluated against `OWASP_MCP_TOP_10_REF` and not yet given a category. Listed
+here, not silently defaulted, so a reader can tell "not yet looked at" apart
+from "looked at and doesn't fit":
+
+- **`owasp-mcp-7-path-exfil-in-args`** — sensitive filesystem paths in tool
+  call arguments. Candidate categories (MCP05, MCP10) were considered and
+  neither is a clean fit; not classified pending a maintainer decision.
+- **`renderer-code-execution-in-response`** — HTML/script content in a tool
+  response calling a privileged client-renderer IPC bridge (CVE-2025-68669,
+  CVE-2026-22793). Not an MCP-protocol-level category in the current beta
+  list; it targets a vulnerable *client renderer*, not the server/agent
+  boundary the ten categories describe.
+- **`handshake-drift-in-session`** — compares the WHOLE `initialize` handshake
+  hash (capabilities AND `serverInfo.name` together) against the same-session
+  baseline, so it is not exclusively the MCP02 capability dimension the way
+  `handshake-drift-capability` is — see `src/guard/pins.ts`'s
+  `HandshakeFieldHashes`.
+- **`handshake-drift-identity`** — deliberately not counted under MCP07
+  either (see that row's justification: anti-impersonation, not
+  authentication/authorization) and not counted anywhere else.
+
+## Unpinnable
+
+These ids carry the `owasp` pin's `unpinnable` state — evaluated and found not
+to describe an attack class at all. They report on the guard, the relay, or the
+sandbox, so pinning them to an OWASP category would misfile a health signal as
+a threat finding. Listed in full so `unpinnable` is auditable rather than a
+bucket things fall into:
+
+- **Inspection / relay health** — `guard-inspection-truncated` (the leaf-walk
+  budget was exhausted, so the frame was not fully inspected),
+  `inspect-rejected`, `malformed-frame`, `spawn-failure`.
+- **Store and marker integrity** — `pins-integrity-failure`,
+  `orig-hash-mismatch`.
+- **Confine spawn decisions** (`src/guard/confine/decide.ts`, logged by
+  `run-inner.ts`) — `confine-applied`, `confine-marker-stripped`,
+  `confine-hash-mismatch`, `confine-backend-missing`, `confine-profile-missing`,
+  `confine-marker-malformed`. These are enumerated as a TS union
+  (`ConfineEventName`) and classified TS-exhaustively, because their id reaches
+  `signature_id` as a function argument and no source-text scan can see it.
 
 ## Gap list
 

@@ -17,6 +17,7 @@
 
 import { describe, expect, test } from "vitest";
 import { runInspectCommand } from "../inspect-cli.js";
+import { owaspPinFor, OWASP_MCP_TOP_10_REF } from "../owasp.js";
 
 /** Real payload from the guard fixture corpus — critical, block-capable carrier. */
 const BLOCK_FRAME = {
@@ -73,6 +74,12 @@ describe("guard inspect — single frame", () => {
     expect(findings.length).toBeGreaterThan(0);
     expect(findings[0].signature_id).toBe("owasp-mcp-2-instruction-injection-in-response");
     expect(findings[0].severity).toBe("critical");
+  });
+
+  test("carries the OWASP MCP Top 10 pin (backlog #71) on a --json finding", () => {
+    const [v] = verdicts(JSON.stringify(BLOCK_FRAME));
+    const findings = v.findings as Array<Record<string, unknown>>;
+    expect(findings[0].owasp).toEqual({ status: "pinned", id: "MCP03", ref: OWASP_MCP_TOP_10_REF });
   });
 
   test("clamps the same injection to warn on a warn-only carrier", () => {
@@ -202,5 +209,23 @@ describe("guard inspect — human output", () => {
   test("reports a malformed frame visibly", () => {
     const { out } = collect("{oops", false);
     expect(out).toMatch(/error/i);
+  });
+});
+
+describe("guard inspect — OWASP MCP Top 10 pin (backlog #71)", () => {
+  test("a pinned finding's human line appends the category", () => {
+    const { out } = collect(JSON.stringify(BLOCK_FRAME), false);
+    expect(out).toContain("owasp-mcp-2-instruction-injection-in-response · critical · tool_response · MCP03");
+  });
+
+  // guard-inspection-truncated needs a >100k-node frame (see
+  // leaf-budget-bypass.test.ts) to reproduce end-to-end through
+  // runInspectCommand — too heavy for this unit; asserted at the seam
+  // (owaspPinFor is what findingToJson calls) instead.
+  test("guard-inspection-truncated (a guard-health signal, not an attack class) pins unpinnable", () => {
+    expect(owaspPinFor("guard-inspection-truncated")).toEqual({
+      status: "unpinnable",
+      ref: OWASP_MCP_TOP_10_REF,
+    });
   });
 });

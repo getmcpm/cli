@@ -8,6 +8,9 @@
  *
  * Rotation is intentionally not implemented for v0.5.0 (TODOS #25 covers
  * v0.5.1 rotation policy). Users with noisy servers can `> ~/.mcpm/guard-events.jsonl`.
+ *
+ * Each finding carries `owasp` (backlog #71) — the OWASP MCP Top 10 pin from
+ * `owasp.ts`, additive.
  */
 
 import { appendFile, mkdir } from "node:fs/promises";
@@ -15,6 +18,7 @@ import path from "node:path";
 import { getStorePath } from "../store/index.js";
 import type { GuardEvent } from "./relay.js";
 import { sanitizeForTerminal } from "./sanitize.js";
+import { owaspPinFor, type OwaspPin } from "./owasp.js";
 
 const EVENT_LOG_FILENAME = "guard-events.jsonl";
 
@@ -35,6 +39,7 @@ export interface EventLogEntry {
     readonly severity: string;
     readonly target: string;
     readonly matched_text_excerpt: string;
+    readonly owasp: OwaspPin;
   }>;
 }
 
@@ -55,6 +60,7 @@ export function buildEventLogEntry(event: GuardEvent, serverName: string): Event
       severity: f.severity,
       target: f.target,
       matched_text_excerpt: f.matched_text_excerpt,
+      owasp: owaspPinFor(f.signature_id),
     })),
   };
 }

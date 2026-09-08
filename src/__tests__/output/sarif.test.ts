@@ -9,6 +9,7 @@
 import { describe, it, expect } from "vitest";
 import { buildSarif, type SarifServer } from "../../output/sarif.js";
 import type { Finding } from "../../scanner/tier1.js";
+import { OWASP_MCP_TOP_10_REF } from "../../guard/owasp.js";
 
 function finding(type: Finding["type"], severity: Finding["severity"], message = "msg"): Finding {
   return { type, severity, message, location: "server" };
@@ -89,6 +90,49 @@ describe("buildSarif", () => {
     expect(fps[0]).not.toBe(fps[1]); // different messages → different fingerprints
     // Deterministic across builds.
     expect(buildSarif(servers, "0.19.0")).toEqual(buildSarif(servers, "0.19.0"));
+  });
+
+  it("declares the OWASP MCP Top 10 taxonomy with all ten taxa and the pinned ref (backlog #71)", () => {
+    const log = buildSarif([], "0.19.0");
+    const taxonomies = run(log).taxonomies;
+    expect(taxonomies).toHaveLength(1);
+    expect(taxonomies[0].name).toBe("OWASP MCP Top 10");
+    expect(taxonomies[0].version).toBe(OWASP_MCP_TOP_10_REF);
+    expect(taxonomies[0].taxa).toHaveLength(10);
+    expect(taxonomies[0].taxa.map((t: { id: string }) => t.id)).toEqual(
+      expect.arrayContaining(["MCP01", "MCP02", "MCP03", "MCP04", "MCP05", "MCP06", "MCP07", "MCP08", "MCP09", "MCP10"])
+    );
+  });
+
+  it("a typosquatting rule has a relationship to MCP04", () => {
+    const rules = run(buildSarif([], "0.19.0")).tool.driver.rules;
+    const rule = rules.find((r: { id: string }) => r.id === "mcpm/typosquatting");
+    // SARIF 2.1.0 §3.53.3: the kind describes the CONTAINING descriptor's
+    // relation to the target — "superset" would claim mcpm/typosquatting detects
+    // everything MCP04 covers. It detects one slice of it, so: subset.
+    // §3.54.2: `index` is an index into `run.tool.extensions`, which this log
+    // does not have — so the taxonomy is referenced by `name` alone (permitted:
+    // at least one of name/index/guid SHALL be present).
+    expect(rule.relationships).toEqual([
+      { target: { id: "MCP04", toolComponent: { name: "OWASP MCP Top 10" } }, kinds: ["subset"] },
+    ]);
+  });
+
+  it("no rule references a tool.extensions index the log does not have (SARIF 2.1.0 §3.54.2)", () => {
+    const r = run(buildSarif([], "0.19.0"));
+    expect(r.tool.extensions).toBeUndefined();
+    for (const rule of r.tool.driver.rules as Array<{ relationships?: Array<{ target: { toolComponent: Record<string, unknown> } }> }>) {
+      for (const rel of rule.relationships ?? []) {
+        expect(rel.target.toolComponent).not.toHaveProperty("index");
+        expect(rel.target.toolComponent.name).toBe("OWASP MCP Top 10");
+      }
+    }
+  });
+
+  it("a scanner-error rule has no relationships (it's a scanner-health signal, not an attack class)", () => {
+    const rules = run(buildSarif([], "0.19.0")).tool.driver.rules;
+    const rule = rules.find((r: { id: string }) => r.id === "mcpm/scanner-error");
+    expect(rule.relationships).toBeUndefined();
   });
 
   it("flattens findings across multiple servers", () => {

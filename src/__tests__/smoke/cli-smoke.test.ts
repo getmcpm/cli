@@ -180,6 +180,33 @@ describe("CLI smoke — CI-gate exit codes (docs/CONTRACTS.md)", () => {
   });
 });
 
+describe("CLI smoke — guard list-signatures carries the OWASP MCP Top 10 pin (backlog #71)", () => {
+  it("--json emits an owasp object per signature", () => {
+    withHome((home) => {
+      const r = run(["guard", "list-signatures", "--json"], home);
+      expect(r.code).toBe(0);
+      const sigs = JSON.parse(r.stdout) as Array<{ id: string; owasp: { status: string } }>;
+      expect(sigs.length).toBeGreaterThan(0);
+      const pinned = sigs.find((s) => s.id === "owasp-mcp-1-tool-description-injection");
+      expect(pinned?.owasp).toEqual({
+        status: "pinned",
+        id: "MCP03",
+        ref: "165fe0f78ef104459237b4a8e0f6e78db9b02391",
+      });
+      const unpinnable = sigs.find((s) => s.id === "guard-inspection-truncated");
+      expect(unpinnable?.owasp.status).toBe("unpinnable");
+    });
+  });
+
+  it("text output prints an owasp line naming the pinned category", () => {
+    withHome((home) => {
+      const r = run(["guard", "list-signatures"], home);
+      expect(r.code).toBe(0);
+      expect(r.stdout).toMatch(/owasp\s*: MCP03 @ 165fe0f7/);
+    });
+  });
+});
+
 describe("CLI smoke — generated completions are valid shell", () => {
   it("the bash completion script passes `bash -n` (syntax check)", () => {
     withHome((home) => {
