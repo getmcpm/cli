@@ -19,6 +19,8 @@
  *   - an unparseable frame yields `{"action":"error"}`, never a silent skip and
  *     never a fabricated "pass" (a harness must be able to tell "my guard said
  *     this is safe" apart from "my guard fell over")
+ *   - each `--json` finding carries `owasp` (backlog #71) — the OWASP MCP Top
+ *     10 pin from `owasp.ts`, additive
  *
  * The verdict comes from `inspectFrame` — the SAME stateless composition the
  * relay enforces (signature patterns + the F5 exfil-param key walker + the H7
@@ -37,6 +39,7 @@
 import type { JSONRPCMessage } from "@modelcontextprotocol/sdk/types.js";
 import { inspectFrame } from "./inspect-frame.js";
 import { sanitizeForTerminal } from "./sanitize.js";
+import { owaspPinFor } from "./owasp.js";
 import type { InspectAction, InspectFinding } from "./types.js";
 
 export interface InspectCliOpts {
@@ -115,6 +118,7 @@ function findingToJson(f: InspectFinding): Record<string, unknown> {
     matched_text_excerpt: f.matched_text_excerpt,
     remediation: f.remediation,
     ...(f.decoded === true ? { decoded: true } : {}),
+    owasp: owaspPinFor(f.signature_id),
   };
 }
 
@@ -184,7 +188,9 @@ export function runInspectCommand(opts: InspectCliOpts): InspectCliResult {
 
     humanLines.push(`frame ${i + 1} — ${result.action}`);
     for (const f of result.findings) {
-      humanLines.push(`    ${f.signature_id} · ${f.severity} · ${f.target}${f.decoded === true ? " · decoded" : ""}`);
+      const pin = owaspPinFor(f.signature_id);
+      const owaspSuffix = pin.status === "pinned" ? ` · ${pin.id}` : "";
+      humanLines.push(`    ${f.signature_id} · ${f.severity} · ${f.target}${f.decoded === true ? " · decoded" : ""}${owaspSuffix}`);
       // Excerpts are attacker-controlled. Sanitize before they reach a
       // terminal, or `guard inspect` becomes the ANSI/OSC injection vector the
       // guard itself detects.

@@ -5,10 +5,19 @@
  * (`github/codeql-action/upload-sarif`). Findings anchor file-level to `mcpm.yaml`
  * — audit scans the INSTALLED server set, which has no source line to point at, so
  * a fabricated line number would be a lie. One SARIF rule per real `Finding.type`.
+ *
+ * `run.taxonomies` carries the OWASP MCP Top 10 (beta) taxonomy (backlog #71);
+ * a rule whose `Finding.type` is pinned to a category (see `guard/owasp.ts`)
+ * gets a `relationships` entry pointing at it. `scanner-error` has none — it
+ * is a scanner-health signal, not an attack class.
  */
 
 import crypto from "crypto";
 import type { Finding } from "../scanner/tier1.js";
+import { OWASP_MCP_TOP_10_REF, OWASP_MCP_TOP_10_URL, OWASP_MCP_TOP_10_TAXA, owaspPinForScannerType } from "../guard/owasp.js";
+
+/** SARIF taxonomy name for the OWASP MCP Top 10 — referenced from both `run.taxonomies` and each pinned rule's `relationships`. */
+const OWASP_TAXONOMY_NAME = "OWASP MCP Top 10";
 
 /** The repo artifact findings are anchored to (file-level, no line numbers). */
 const ARTIFACT_URI = "mcpm.yaml";
@@ -78,14 +87,27 @@ export interface SarifLog {
  * @param version mcpm version string for the tool driver
  */
 export function buildSarif(servers: SarifServer[], version: string): SarifLog {
-  const rules = (Object.keys(RULES) as Finding["type"][]).map((type) => ({
-    id: ruleId(type),
-    name: RULES[type].name,
-    shortDescription: { text: RULES[type].name },
-    fullDescription: { text: RULES[type].description },
-    helpUri: INFO_URI,
-    defaultConfiguration: { level: "warning" },
-  }));
+  const rules = (Object.keys(RULES) as Finding["type"][]).map((type) => {
+    const pin = owaspPinForScannerType(type);
+    return {
+      id: ruleId(type),
+      name: RULES[type].name,
+      shortDescription: { text: RULES[type].name },
+      fullDescription: { text: RULES[type].description },
+      helpUri: INFO_URI,
+      defaultConfiguration: { level: "warning" },
+      ...(pin.status === "pinned"
+        ? {
+            relationships: [
+              {
+                target: { id: pin.id, toolComponent: { name: OWASP_TAXONOMY_NAME, index: 0 } },
+                kinds: ["superset"],
+              },
+            ],
+          }
+        : {}),
+    };
+  });
 
   const results = servers.flatMap((server) =>
     server.findings.map((f, i) => ({
@@ -120,6 +142,15 @@ export function buildSarif(servers: SarifServer[], version: string): SarifLog {
             rules,
           },
         },
+        taxonomies: [
+          {
+            name: OWASP_TAXONOMY_NAME,
+            version: OWASP_MCP_TOP_10_REF,
+            informationUri: OWASP_MCP_TOP_10_URL,
+            organization: "OWASP",
+            taxa: OWASP_MCP_TOP_10_TAXA.map((t) => ({ id: t.id, name: t.name })),
+          },
+        ],
         results,
       },
     ],

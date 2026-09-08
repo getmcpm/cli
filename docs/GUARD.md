@@ -281,6 +281,14 @@ All files are written `0o600`; the parent dir is `0o700`.
 
 Confinement adds events (not signatures — the catalog count is unchanged) to `guard-events.jsonl` under category `CONFINE`: `confine-applied`, `confine-hash-mismatch`, `confine-marker-stripped`, `confine-profile-missing`, `confine-backend-missing`, `confine-marker-malformed`; plus `orig-hash-mismatch` (category `RELAY`, from the spawn-time `--orig-hash` verify).
 
+Each logged finding also carries an OWASP MCP Top 10 pin (backlog #71 — see
+`docs/owasp-mcp-mapping.md`), so you can filter the event log by category:
+
+```sh
+# every event with at least one MCP03 (Tool Poisoning)-pinned finding
+jq 'select(.findings[].owasp.id == "MCP03")' ~/.mcpm/guard-events.jsonl
+```
+
 ---
 
 ## Day-1 vs Day-7 vs Day-30 surface

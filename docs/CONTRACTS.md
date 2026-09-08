@@ -35,9 +35,16 @@ new failure modes, but the meanings above will not be repurposed within `0.x`.
 ## `--json` output (mostly UNSTABLE for now)
 
 `--json` is available on `search`, `install`, `list`, `info`, `audit`, `update`,
-`outdated`, `diff`, `sync`, `why`, `doctor`, `verify`, `guard list-signatures`, and
-`guard doctor-confine`. **Treat these shapes as unstable in `0.x`** — fields may be
-added or renamed — with one exception:
+`outdated`, `diff`, `sync`, `why`, `doctor`, `verify`, `guard list-signatures`,
+`guard doctor-confine`, and `guard inspect`. **Treat these shapes as unstable in
+`0.x`** — fields may be added or renamed — with one exception:
+
+**Additive (backlog #71):** `guard inspect --json` findings, each
+`guard-events.jsonl` line's findings, and `guard list-signatures --json`
+entries all gain an `owasp` field — the OWASP MCP Top 10 pin (see
+`docs/owasp-mcp-mapping.md`). `mcpm audit --sarif` gains a `run.taxonomies`
+entry for the same taxonomy, plus a `relationships` array on any rule whose
+finding type is pinned to a category.
 
 - **`mcpm sync --json`** (the drift model) is **frozen** because CI consumes it
   alongside the exit-`2` contract above.

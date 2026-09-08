@@ -296,6 +296,7 @@ export function registerGuardCommand(program: Command): void {
     .option("--json", "emit machine-readable JSON")
     .action(async (opts: { json?: boolean }) => {
       const { OWASP_MCP_TOP_10 } = await import("../guard/signatures.js");
+      const { owaspPinFor } = await import("../guard/owasp.js");
       if (opts.json === true) {
         process.stdout.write(JSON.stringify(OWASP_MCP_TOP_10.map((s) => ({
           id: s.id,
@@ -303,15 +304,19 @@ export function registerGuardCommand(program: Command): void {
           severity: s.severity,
           target: s.target,
           description: s.description,
+          owasp: owaspPinFor(s.id),
         })), null, 2) + "\n");
         return;
       }
       process.stdout.write(`mcpm guard signatures (vendored, ${OWASP_MCP_TOP_10.length} total):\n\n`);
       for (const s of OWASP_MCP_TOP_10) {
+        const pin = owaspPinFor(s.id);
+        const owaspLabel = pin.status === "pinned" ? `${pin.id} @ ${pin.ref.slice(0, 8)}` : `${pin.status} @ ${pin.ref.slice(0, 8)}`;
         process.stdout.write(`  ${s.id}\n`);
         process.stdout.write(`    category : ${s.category}\n`);
         process.stdout.write(`    severity : ${s.severity}\n`);
         process.stdout.write(`    target   : ${s.target}\n`);
+        process.stdout.write(`    owasp    : ${owaspLabel}\n`);
         process.stdout.write(`    details  : ${s.description}\n\n`);
       }
     });
