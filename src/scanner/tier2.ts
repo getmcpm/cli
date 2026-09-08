@@ -24,23 +24,26 @@
  * a redirect package for `snyk-agent-scan`), never on npm.
  *
  * 2026-08-31: `snyk-agent-scan` was evaluated as a candidate for this seam
- * (backlog #32) and does NOT fit — confirmed against its README/CLI/JSON-output
- * docs, not assumed. Two independent mismatches, either one disqualifying:
- * (1) its CLI (`snyk-agent-scan scan [CONFIG_FILE...]`) auto-discovers and
- * scans installed agent CONFIG FILES, with no mode to hand it a single
- * not-yet-installed registry coordinate the way `scanTier2` calls scanners
- * here; for MCP entries it actively CONNECTS TO AND STARTS the stdio server
- * from the config to retrieve live tool descriptions, which conflicts with
- * mcpm's install-then-verify design at the two call sites (install/lock) where
- * this runs before the user has committed to installing. (2) it requires a
- * Snyk account + `SNYK_TOKEN` and sends component data to Snyk's Analysis API
- * by default — not the local-only posture "a scanner you already installed"
+ * (backlog #32) and does NOT fit — confirmed against its source, not assumed.
+ * [Corrected 2026-09-08]: its `direct_scanner.py` DOES accept a bare registry
+ * coordinate as input (`npm:<pkg>@<ver>`, `pypi:`, `oci:`, `streamable-http(s):`,
+ * `sse:` — `nuget:`/`mcpb:` are declared in its SUPPORTED_TYPES but raise on
+ * use, unimplemented), so the seam's original "no bare-identifier input"
+ * objection was wrong. Two OTHER independent mismatches remain, either one
+ * disqualifying: (1) for MCP entries it converts that coordinate into an
+ * `npx -y` / `uvx` / `docker run` invocation and CONNECTS TO AND STARTS the
+ * server to retrieve live tool descriptions, which conflicts with mcpm's
+ * install-then-verify design at the two call sites (install/lock) where this
+ * runs before the user has committed to installing. (2) it requires a Snyk
+ * account + `SNYK_TOKEN` and sends component data to Snyk's Analysis API by
+ * default — not the local-only posture "a scanner you already installed"
  * implies. Its JSON output is also path-keyed and nested
  * (`{path: {servers:[...], issues:[...]}}`), not the flat `{findings:[...]}`
- * this module parses — moot given the input mismatch. See the CLAUDE.md
- * 2026-08-31 decision row for the full evaluation. No known candidate meets
- * this seam's bar today (bare-identifier input, fully local, flat findings
- * output); this file's contract is the target shape, not something to bend.
+ * this module parses — moot given the live-execution mismatch. See the
+ * CLAUDE.md 2026-08-31 decision row (with its 2026-09-08 correction) for the
+ * full evaluation. No known candidate meets this seam's bar today (fully
+ * local, no live server execution, flat findings output); this file's
+ * contract is the target shape, not something to bend.
  */
 
 import type { Finding } from "./tier1.js";
