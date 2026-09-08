@@ -2,13 +2,13 @@
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="./assets/banner-dark.svg">
     <source media="(prefers-color-scheme: light)" srcset="./assets/banner-light.svg">
-    <img alt="mcpm - runtime guard for MCP" src="./assets/banner-light.svg" width="680">
+    <img alt="mcpm — MCP security guard and package manager for Model Context Protocol servers" src="./assets/banner-light.svg" width="680">
   </picture>
 </p>
 
-# mcpm
+# mcpm — MCP security guard and package manager
 
-**A runtime security guard for your AI's tools -- and the package manager to install them.** Blocks prompt injection, tool poisoning, and credential exfiltration in live MCP traffic. Local-first, deterministic, no LLM in the enforcement path.
+**Block prompt injection, tool poisoning, rug-pulls and credential theft in Model Context Protocol (MCP) servers -- at runtime, on your machine.** Your AI agent trusts every MCP server it talks to; mcpm scores each install, verifies its supply chain with Sigstore, pins every tool definition, and inspects every tool call through a local relay -- with an opt-in OS sandbox on macOS. No cloud, no account, no LLM in the enforcement path.
 
 **Everything runs on your machine.** No account, no mcpm backend, no telemetry -- the guard is a local stdio relay, and trust scores are computed locally with no model and no remote verdict (the 40-point static-scan bucket is deterministic regex/structural checks you can read yourself; the rest is a local health check, registry metadata, and an external scanner only if you name one). Commands that resolve, audit or re-verify a server do reach the public MCP registry and npm -- nothing reaches an mcpm server.
 
@@ -101,11 +101,26 @@ Scan everything you have installed. Get a trust report.
 ```
 $ mcpm audit
 
-  Server                                   Score  Level    Findings
-  servers-filesystem                        72/80  safe     0
-  servers-github                            52/80  caution  2
-  some-sketchy-server                       24/80  risky    5
+┌─────────────────────────────────────────────┬─────────────────────────┬─────────────────┬──────────┐
+│ Server                                      │ Score                   │ Level           │ Findings │
+├─────────────────────────────────────────────┼─────────────────────────┼─────────────────┼──────────┤
+│ servers-filesystem                          │ ████████░░ 62/80        │ clean · not run │ 0        │
+├─────────────────────────────────────────────┼─────────────────────────┼─────────────────┼──────────┤
+│ servers-github                              │ ████████░░ 60/80        │ caution         │ 1        │
+├─────────────────────────────────────────────┼─────────────────────────┼─────────────────┼──────────┤
+│ servers-fetch                               │ ███████░░░ 52/80        │ caution         │ 2        │
+├─────────────────────────────────────────────┼─────────────────────────┼─────────────────┼──────────┤
+│ some-sketchy-server                         │ ██░░░░░░░░ 16/80        │ risky           │ 5        │
+└─────────────────────────────────────────────┴─────────────────────────┴─────────────────┴──────────┘
+4 servers scanned, 0 safe, 1 clean · not run, 2 caution, 1 risky
 ```
+
+`audit` never executes a server, so the 30-point health-check bucket scores a flat 15 and
+**62/80 is the ceiling** — no server can be rated `safe` here. A server that cleared every
+check that actually ran reads `clean · not run` instead. `servers-github` scores 60 because
+an `npx -y` launcher draws one `low` install-script finding, which is also why it reads
+`caution` rather than `clean · not run`: that label requires the scan to have found
+*nothing*, not merely a top-band score.
 
 ### Cross-IDE support
 
@@ -127,13 +142,30 @@ Find misconfigurations, missing runtimes, broken servers, and plaintext secrets 
 ```
 $ mcpm doctor
 
-  Checking MCP setup...
-  [pass] Claude Desktop config found
-  [pass] npx runtime available
-  [warn] Cursor config not found
-  [pass] 3 servers installed, 0 with errors
-  [warn] plaintext secret (advisory): github-mcp · env 'GITHUB_TOKEN' — GitHub token
-         Move it to the encrypted store: mcpm secrets set <server> <KEY>
+mcpm doctor
+
+  ✓ Claude Desktop — config found, 3 servers
+  ✗ Claude Code — config not found
+  ✓ Cursor — config found, 1 server
+  ✗ VS Code — config not found
+  ✗ Windsurf — config not found
+  ✗ Gemini CLI — config not found
+
+Runtimes:
+  ✓ npx available
+  ✓ uvx available
+  ✓ docker available
+
+Cross-client (advisory):
+  ⚠ servers-filesystem — in claude-desktop; missing in cursor
+  ⚠ servers-github — in claude-desktop; missing in cursor
+  Run `mcpm sync --check` for the full matrix (advisory, not a failure).
+
+Plaintext secrets (advisory):
+  ⚠ claude-desktop · servers-github · env 'GITHUB_TOKEN' — GitHub token
+  Move env secrets to the encrypted store: `mcpm secrets set <server> <KEY>` or re-install with `--secrets keychain`.
+
+No critical issues found.
 ```
 
 The plaintext-secret scan reports the key name and label only — never the value — and skips values already stored as `mcpm:keychain:` placeholders. It's advisory (never fails `doctor`).
@@ -208,7 +240,7 @@ Package runners (`npx`, `uvx`, `pipx`, `docker`, shells, …) are refused, inclu
 
 No scanner is recommended here because none evaluated so far fits: `snyk/agent-scan` (the actively maintained successor to Invariant Labs' mcp-scan) does accept a bare registry coordinate as input, but it converts that coordinate into an `npx`/`uvx`/`docker run` invocation and starts the server to inspect it live — conflicting with mcpm's install-then-verify design at the two call sites (install, lock) where this runs before you've committed to installing — and it requires a Snyk account and `SNYK_TOKEN`, with no offline mode. See `src/scanner/tier2.ts`'s header comment for the full evaluation.
 
-Those 20 points **inform the score but cannot clear a safety floor.** The MCP server surface (`mcpm_install`, `mcpm_up`) enforces a hard trust floor of 25 that no caller-supplied value may lower — and since `MCPM_EXTERNAL_SCANNER` names an arbitrary executable, a two-line script printing `{"findings": []}` is caller-supplied input too. So the floor is compared against mcpm's own evidence only: health check + static scan + registry metadata, out of 80. The exclusion is one-directional — a scanner reporting a critical finding still drags a server *down* through the floor (via the registry-metadata cap), it just can't push one up through it. Your own `--min-trust` threshold, a stack file's `policy.minTrustScore`, and `mcpm audit --fix` are unaffected: there the same person picks both the threshold and the scanner. `audit --fix` is also the one score gate that *deletes* rather than refuses, so subtracting the bucket there would remove more servers, not fewer.
+Those 20 points **inform the score but cannot clear a safety floor.** The MCP server surface (`mcpm_install`, `mcpm_up`, `mcpm_setup`) enforces a hard trust floor of 25 that no caller-supplied value may lower — and since `MCPM_EXTERNAL_SCANNER` names an arbitrary executable, a two-line script printing `{"findings": []}` is caller-supplied input too. So the floor is compared against mcpm's own evidence only: health check + static scan + registry metadata, out of 80. The exclusion is one-directional — a scanner reporting a critical finding still drags a server *down* through the floor (via the registry-metadata cap), it just can't push one up through it. Your own `--min-trust` threshold, a stack file's `policy.minTrustScore`, and `mcpm audit --fix` are unaffected: there the same person picks both the threshold and the scanner. `audit --fix` is also the one score gate that *deletes* rather than refuses, so subtracting the bucket there would remove more servers, not fewer.
 
 ## Commands
 
@@ -252,6 +284,7 @@ Those 20 points **inform the score but cannot clear a safety floor.** The MCP se
 | `mcpm guard cleanup` | Prune pin entries for uninstalled servers |
 | `mcpm guard inspect [file]` | Run the signature catalog over MCP JSON-RPC frame(s), offline — no relay, no server |
 | `mcpm guard list-signatures` | Show the shipped OWASP MCP Top 10 signature catalog |
+| `mcpm guard doctor-confine` | Report sandbox-backend availability and which servers are enrolled in confinement (`--json`) |
 | `mcpm guard reset-integrity` | Regenerate the pins.json or guard-policy.yaml integrity sidecar |
 
 Run `mcpm <command> --help` for options and flags.
@@ -361,21 +394,32 @@ The `demo` command boots an in-process synthetic malicious server that returns a
 
 ### What it catches
 
+Categories are the [OWASP MCP Top 10 (beta)](https://github.com/OWASP/www-project-mcp-top-10) ids mcpm pins in `src/guard/owasp.ts`; see `docs/owasp-mcp-mapping.md` for the pinned spec commit and the reasoning behind each assignment. "unclassified" means the signature was evaluated and does not map cleanly to a category at that commit — never that it is unreviewed.
+
 | Category | Attack class | Action |
 |---|---|---|
-| OWASP-MCP-1 | Tool-description injection (poisoning) | block |
-| OWASP-MCP-1 | Schema / annotation drift since install (rug-pull) | block |
-| OWASP-MCP-1 | Description-only drift (cosmetic tier) | warn |
-| OWASP-MCP-1 | Injection in `initialize` instructions | block |
-| OWASP-MCP-2 | Instruction injection in tool responses | block |
-| OWASP-MCP-2 | Instruction injection in resource / prompt content | warn (forward) |
-| OWASP-MCP-7 | Sensitive-path exfil in tool arguments | warn (promote to block via policy) |
-| OWASP-MCP-1 | Exfil-named parameter in a tool's input schema (`_system_prompt_`, …) | block (list-time) |
-| Credential phishing | Server solicits a wallet seed phrase / private key / card CVV / SSN / PIN | block (to the server) |
-| Credential egress | High-confidence secret returned in a tool response | warn (secret redacted in the log) |
-| Hidden chars | Zero-width / bidi / non-printable / Unicode TAG block in tool metadata | high (warn) |
-| Unicode TAG block | Payload concealed in U+E0000–U+E007F on any carrier ("ASCII smuggling") | decoded and re-scanned — the recovered signature decides |
-| Sampling | Injection in a server-initiated `sampling` prompt | block (to the server) |
+| MCP03 Tool Poisoning | Tool-description injection (poisoning) | block |
+| MCP03 Tool Poisoning | Instruction-shaped text in tool annotations (title or a custom annotation field) | block |
+| MCP03 Tool Poisoning | Schema / annotation drift since install (rug-pull) | block |
+| MCP03 Tool Poisoning | Description-only drift (cosmetic tier) | warn |
+| MCP03 Tool Poisoning | Instruction injection in tool responses | block |
+| MCP03 Tool Poisoning | Exfil-named parameter in a tool's input schema (`_system_prompt_`, …) | block (list-time) |
+| MCP03 Tool Poisoning | Zero-width / bidi / non-printable / Unicode TAG block in tool metadata | warn |
+| MCP03 Tool Poisoning | Payload concealed in U+E0000–U+E007F on any carrier ("ASCII smuggling") | decoded and re-scanned — the recovered signature decides; a bare presence floor warns |
+| MCP03 Tool Poisoning | One `tools/list` advertises two tool names that are visually indistinguishable after normalization | warn |
+| MCP03 Tool Poisoning | A tool name carries an invisible character, or mixes Latin with another script | warn |
+| MCP06 Intent Flow Subversion | Injection in `initialize` instructions (line-jumping) | block |
+| MCP06 Intent Flow Subversion | Instruction injection in resource / prompt content | warn (forward) |
+| MCP06 Intent Flow Subversion | Server solicits a wallet seed phrase / private key / card CVV / SSN / PIN | block (to the server) |
+| MCP06 Intent Flow Subversion | Injection in a server-initiated `sampling` prompt | block (to the server) |
+| MCP05 Command Injection & Execution | Shell-metacharacter / command-substitution syntax in an identifier- or path-shaped `tools/call` argument (CVE-2025-53818, CVE-2026-25546 shape) | block |
+| MCP05 Command Injection & Execution | Query-language control syntax in a table/column/database-name-shaped argument (CVE-2026-33980 shape) | block |
+| MCP05 Command Injection & Execution | An embedded `--`-prefixed CLI flag token in a namespace- or opaque-identifier-shaped argument (CVE-2026-39884 shape) | block |
+| MCP01 Token Mismanagement & Secret Exposure | High-confidence secret returned in a tool response | warn (secret redacted in the log) |
+| MCP01 Token Mismanagement & Secret Exposure | Generic bearer token disclosed in a tool response | warn (secret redacted in the log) |
+| MCP02 Privilege Escalation via Scope Creep | Server's advertised capabilities changed across the `initialize` handshake | warn (once) |
+| unclassified | Sensitive-path exfil in tool arguments | warn (promote to block via policy) |
+| unclassified | HTML/script in a tool response calling the `electron.mcp` privileged IPC bridge (CVE-2025-68669, CVE-2026-22793 shape) | warn |
 
 Detection is regex + structural; NFKC + zero-width-char stripping defeats the common Unicode evasions, and a separate hidden-character *presence* check flags evasion carriers before they're normalized away. ["ASCII smuggling"](https://arxiv.org/abs/2607.05744) -- hiding a payload in the Unicode TAG block (U+E0000-U+E007F), which renders as nothing but is readable by a model -- gets two dedicated passes, because that stripping ERASES a fully encoded payload rather than revealing it. The guard decodes TAG runs back to ASCII and re-runs the carrier's own signatures, so a concealed payload is judged by what it says: a TAG-encoded wallet-seed solicitation is blocked by the credential-phishing signature, not merely noted as suspicious. Beneath that sits a presence floor for payloads that are concealed but match nothing. Emoji subdivision flags are built from the same codepoints, so the three a client actually renders (England, Scotland, Wales) are carved out by whole-sequence validation; another well-formed subdivision flag still warns. Base64 / base64url payloads inside server responses are also decoded and re-scanned, so an injection or credential hidden behind an encoding can't slip past the regex floor (base64-decoded hits warn, never hard-block; TAG-decoded hits keep their native severity, since concealment on that plane is not something benign content does). See `mcpm guard list-signatures` for the current shipped set.
 
@@ -553,7 +597,8 @@ end
 
 subgraph local_state["Local State<br/>(~/.mcpm/)"]
     SERVERS["servers.json"]
-    CACHE["cache/"]
+    ALIASES["aliases.json"]
+    SECRETS["secrets.enc.json"]
     PINS_STORE["pins.json"]
     POLICY["guard-policy.yaml"]
 end
@@ -591,13 +636,14 @@ PATTERNS -->|read policy| POLICY
 PINS -->|fail-closed| FAILCLOSED
 RELAY -->|record| EVENTS
 commands -->|store| SERVERS
-commands -->|cache| CACHE
+commands -->|aliases| ALIASES
+commands -->|secrets| SECRETS
 ```
 
 1. **Search and install** query the [official MCP Registry API](https://registry.modelcontextprotocol.io) (v0.1) maintained by the Model Context Protocol project.
 2. **Trust assessment** runs locally using built-in scanners (regex-based pattern detection), and can additionally shell out to a third-party scanner you have installed and named via `MCPM_EXTERNAL_SCANNER`.
 3. **Config management** reads and writes the native config file for each AI client. All writes use atomic file operations with restricted permissions (0o600 files, 0o700 directories).
-4. **Local state** lives in `~/.mcpm/` (installed server registry, scan results, response cache).
+4. **Local state** lives in `~/.mcpm/` — `servers.json` (installed server registry), `aliases.json`, `secrets.enc.json` (the encrypted credential store), and the guard files (`pins.json`, `guard-policy.yaml`, `guard-confine.yaml`, `guard-unguarded.json`, `guard-events.jsonl`). There is no registry cache: every registry read is a live fetch.
 
 No telemetry. No analytics. No account required.
 
