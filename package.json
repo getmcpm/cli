@@ -60,7 +60,7 @@
     }
   },
   "dependencies": {
-    "@inquirer/prompts": "^8.5.2",
+    "@inquirer/prompts": "^8.7.0",
     "@modelcontextprotocol/sdk": "^1.30.0",
     "@sigstore/bundle": "^5.0.0",
     "@sigstore/protobuf-specs": "^0.5.2",
@@ -73,7 +73,7 @@
     "proper-lockfile": "^4.1.2",
     "semver": "^7.8.1",
     "yaml": "^2.9.0",
-    "zod": "^4.4.3"
+    "zod": "^4.5.4"
   },
   "devDependencies": {
     "@types/node": "^22.19.19",
