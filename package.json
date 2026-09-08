@@ -2,7 +2,7 @@
   "name": "@getmcpm/cli",
   "version": "0.15.0",
   "mcpName": "io.github.getmcpm/cli",
-  "description": "MCP package manager — search, install, and audit MCP servers across Claude Desktop, Cursor, VS Code, and Windsurf",
+  "description": "MCP security guard and package manager: block prompt injection, tool poisoning and rug-pulls in Model Context Protocol servers at runtime, and install them with trust scoring and Sigstore provenance across Claude Desktop, Claude Code, Cursor, VS Code, Windsurf and Gemini CLI",
   "type": "module",
   "bin": {
     "mcpm": "./dist/index.js"
@@ -27,13 +27,23 @@
   "keywords": [
     "mcp",
     "model-context-protocol",
+    "mcp-security",
+    "mcp-server",
     "package-manager",
     "cli",
-    "ai",
     "security",
+    "prompt-injection",
+    "tool-poisoning",
+    "llm-security",
+    "ai-agents",
+    "supply-chain-security",
+    "sigstore",
     "claude",
+    "claude-code",
     "cursor",
-    "vscode"
+    "vscode",
+    "windsurf",
+    "gemini-cli"
   ],
   "author": "",
   "license": "MIT",
