@@ -4,7 +4,7 @@
 
 import { Command } from "commander";
 import chalk from "chalk";
-import { readManifest } from "./manifest.js";
+import { readManifest, validateDescription } from "./manifest.js";
 import { handlePublishCheck } from "./check.js";
 import { handlePublishSubmit, getTokenFromEnv } from "./submit.js";
 import { scanTier1 } from "../../scanner/tier1.js";
@@ -29,9 +29,7 @@ export function registerPublishCommand(program: Command): void {
       const name = await input({ message: "Package name (e.g. io.github.you/my-server):" });
       const description = await input({
         message: "Short description:",
-        validate: (value) =>
-          value.length <= 100 ||
-          `the MCP registry caps description at 100 characters (server.schema.json maxLength); yours is ${value.length}`,
+        validate: validateDescription,
       });
       const homepage = await input({ message: "Homepage URL (optional):", default: "" });
       const registryType = await select({

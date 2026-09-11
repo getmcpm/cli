@@ -136,17 +136,22 @@ describe("handlePublishCheck — real readManifest surfaces the description cap"
       const { readManifest } = await import("../../commands/publish/manifest.js");
       const { handlePublishCheck } = await import("../../commands/publish/check.js");
 
-      await expect(
-        handlePublishCheck(
-          {},
-          {
-            readManifest: () => readManifest(dir),
-            scanTier1: vi.fn().mockReturnValue([]),
-            computeTrustScore: vi.fn(),
-            output: () => {},
-          }
-        )
-      ).rejects.toThrow(/caps description at 100 characters.*yours is 150/s);
+      const err = (await handlePublishCheck(
+        {},
+        {
+          readManifest: () => readManifest(dir),
+          scanTier1: vi.fn().mockReturnValue([]),
+          computeTrustScore: vi.fn(),
+          output: () => {},
+        }
+      ).catch((e: Error) => e)) as Error;
+
+      expect(err.message).toContain("yours is 150");
+      // Framing, not just the text: `.parse()`'s raw ZodError dump EMBEDS the
+      // same custom message, so asserting the message alone passes against the
+      // very dump this test's name says it excludes.
+      expect(err.message).toContain("Invalid .mcpm-publish.yaml:\n  description: ");
+      expect(err.message).not.toMatch(/"code":\s*"too_big"/);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
