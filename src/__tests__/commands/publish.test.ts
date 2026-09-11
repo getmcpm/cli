@@ -6,6 +6,9 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import type { Finding } from "../../scanner/tier1.js";
 import { RegistryError } from "../../registry/errors.js";
 
@@ -107,6 +110,46 @@ describe("handlePublishCheck", () => {
     expect(findings).toHaveLength(1);
     expect(findings[0]).toMatchObject({ severity: "low", type: "install-script" });
     expect(findings[0].message).toContain("This launcher runs install scripts:");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Tests: handlePublishCheck + the real readManifest (backlog #85)
+// ---------------------------------------------------------------------------
+
+describe("handlePublishCheck — real readManifest surfaces the description cap", () => {
+  it("rejects with a readable message (not a raw ZodError dump) when description exceeds 100 chars", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "mcpm-publish-check-"));
+    try {
+      writeFileSync(
+        join(dir, ".mcpm-publish.yaml"),
+        [
+          "name: io.github.test/my-server",
+          `description: ${"a".repeat(150)}`,
+          "package:",
+          "  registryType: npm",
+          '  identifier: "@test/my-server"',
+          "",
+        ].join("\n")
+      );
+
+      const { readManifest } = await import("../../commands/publish/manifest.js");
+      const { handlePublishCheck } = await import("../../commands/publish/check.js");
+
+      await expect(
+        handlePublishCheck(
+          {},
+          {
+            readManifest: () => readManifest(dir),
+            scanTier1: vi.fn().mockReturnValue([]),
+            computeTrustScore: vi.fn(),
+            output: () => {},
+          }
+        )
+      ).rejects.toThrow(/caps description at 100 characters.*yours is 150/s);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
 

@@ -27,7 +27,12 @@ export function registerPublishCommand(program: Command): void {
       const { stringify } = await import("yaml");
 
       const name = await input({ message: "Package name (e.g. io.github.you/my-server):" });
-      const description = await input({ message: "Short description:" });
+      const description = await input({
+        message: "Short description:",
+        validate: (value) =>
+          value.length <= 100 ||
+          `the MCP registry caps description at 100 characters (server.schema.json maxLength); yours is ${value.length}`,
+      });
       const homepage = await input({ message: "Homepage URL (optional):", default: "" });
       const registryType = await select({
         message: "Registry type:",

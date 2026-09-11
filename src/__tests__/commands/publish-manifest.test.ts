@@ -58,6 +58,25 @@ describe("readManifest", () => {
     await expect(readManifest("/fake/cwd")).rejects.toThrow("Invalid .mcpm-publish.yaml");
   });
 
+  // backlog #85: the registry's server.schema.json caps `description` at 100
+  // chars (confirmed against static.modelcontextprotocol.io); mcpm's own
+  // manifest schema only checked min(1), so an over-cap description passed
+  // `mcpm publish check` and was rejected by the registry at submit time.
+  it("rejects a description over 100 characters, naming the cap and the actual length", async () => {
+    mockReadFile.mockResolvedValue(VALID_YAML.replace("A test MCP server", "a".repeat(101)));
+
+    await expect(readManifest("/fake/cwd")).rejects.toThrow(
+      /caps description at 100 characters.*yours is 101/s
+    );
+  });
+
+  it("accepts a description of exactly 100 characters", async () => {
+    mockReadFile.mockResolvedValue(VALID_YAML.replace("A test MCP server", "a".repeat(100)));
+
+    const result = await readManifest("/fake/cwd");
+    expect(result?.description).toHaveLength(100);
+  });
+
   it("rethrows non-ENOENT fs errors", async () => {
     const permError = Object.assign(new Error("EACCES"), { code: "EACCES" });
     mockReadFile.mockRejectedValue(permError);

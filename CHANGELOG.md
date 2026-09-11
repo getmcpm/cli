@@ -25,6 +25,19 @@ published section (it happened to #170).
   enforced by `npm pack` or CI, so both are now pinned by a test. Takes
   effect on npm at this release's publish.
 
+- **`mcpm publish` did not enforce the registry's 100-character `description`
+  cap before submit (#85).** `PublishManifestSchema` checked `min(1)` only,
+  so a publisher's `.mcpm-publish.yaml` with a longer description scaffolded
+  fine and passed `mcpm publish check`'s trust gate, only to be rejected by
+  the registry at submit time. `description` now also enforces `max(100)`,
+  naming the cap and the actual length in the error (`... yours is N`). Along
+  the way, `readManifest`'s Zod-failure path was dumping the raw
+  `ZodError.message` (a JSON blob of issues) at the user; it now formats
+  issues as `path: message` lines, the same pattern `parseStackFile` and
+  `parseLockFile` already use. The scaffold wizard's description prompt gets
+  the same 100-char check so a publisher is told at entry time, not at
+  `check`.
+
 ## [0.39.1] - 2026-09-08
 
 ### Fixed
