@@ -6,6 +6,9 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import type { Finding } from "../../scanner/tier1.js";
 import { RegistryError } from "../../registry/errors.js";
 
@@ -107,6 +110,51 @@ describe("handlePublishCheck", () => {
     expect(findings).toHaveLength(1);
     expect(findings[0]).toMatchObject({ severity: "low", type: "install-script" });
     expect(findings[0].message).toContain("This launcher runs install scripts:");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Tests: handlePublishCheck + the real readManifest (backlog #85)
+// ---------------------------------------------------------------------------
+
+describe("handlePublishCheck — real readManifest surfaces the description cap", () => {
+  it("rejects with a readable message (not a raw ZodError dump) when description exceeds 100 chars", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "mcpm-publish-check-"));
+    try {
+      writeFileSync(
+        join(dir, ".mcpm-publish.yaml"),
+        [
+          "name: io.github.test/my-server",
+          `description: ${"a".repeat(150)}`,
+          "package:",
+          "  registryType: npm",
+          '  identifier: "@test/my-server"',
+          "",
+        ].join("\n")
+      );
+
+      const { readManifest } = await import("../../commands/publish/manifest.js");
+      const { handlePublishCheck } = await import("../../commands/publish/check.js");
+
+      const err = (await handlePublishCheck(
+        {},
+        {
+          readManifest: () => readManifest(dir),
+          scanTier1: vi.fn().mockReturnValue([]),
+          computeTrustScore: vi.fn(),
+          output: () => {},
+        }
+      ).catch((e: Error) => e)) as Error;
+
+      expect(err.message).toContain("yours is 150");
+      // Framing, not just the text: `.parse()`'s raw ZodError dump EMBEDS the
+      // same custom message, so asserting the message alone passes against the
+      // very dump this test's name says it excludes.
+      expect(err.message).toContain("Invalid .mcpm-publish.yaml:\n  description: ");
+      expect(err.message).not.toMatch(/"code":\s*"too_big"/);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
 

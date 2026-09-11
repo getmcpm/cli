@@ -25,6 +25,40 @@ published section (it happened to #170).
   enforced by `npm pack` or CI, so both are now pinned by a test. Takes
   effect on npm at this release's publish.
 
+- **`mcpm publish` did not enforce the registry's 100-character `description`
+  cap before submit (#85).** `PublishManifestSchema` checked `min(1)` only,
+  so a publisher's `.mcpm-publish.yaml` with a longer description scaffolded
+  fine and passed `mcpm publish check`'s trust gate, only to be rejected by
+  the registry at submit time. `description` now also enforces `max(100)`,
+  naming the cap and the actual length in the error (`... yours is N`). The
+  cap counts **code points, not UTF-16 units**: `server.schema.json` is JSON
+  Schema draft-07, whose `maxLength` is "the number of characters as defined
+  by RFC 8259", and the registry enforces it with
+  `santhosh-tekuri/jsonschema` v5, which measures with `utf8.RuneCount`. Zod's
+  own `.max()` already counts code points, so one emoji is one character here
+  — a 100-emoji description is accepted and a 101-emoji one is refused
+  reporting `yours is 101`, not the 202 `String.length` would have named.
+  Along the way, `readManifest`'s Zod-failure path was dumping the raw
+  `ZodError.message` (a JSON blob of issues) at the user; it now formats
+  issues as `path: message` lines, the same pattern `parseStackFile` and
+  `parseLockFile` already use. The scaffold wizard's description prompt runs
+  that same exported rule rather than a private copy, so a publisher is told
+  at entry time, not at `check`, and the prompt cannot refuse a description
+  the manifest and the registry would both accept.
+
+### Changed
+
+- `hono` transitive override bumped `^4.12.27` → `^4.13.5`, closing three
+  Dependabot alerts (GHSA-g6gw-c38x-mqfc, GHSA-gqvv-2mrq-wpjv,
+  GHSA-crvj-82cr-hjcx; fixed in 4.13.5). Pulled in via
+  `@modelcontextprotocol/sdk`, both directly and through
+  `@hono/node-server`; `pnpm why hono` resolves a single copy, 4.13.7.
+- `fast-uri` and `qs` transitive overrides bumped to `^3.1.6` / `^6.16.0`
+  (#209, already on `main`), closing six Dependabot alerts
+  (`fast-uri` 3.1.5: GHSA-jqff-g426-hqxp, GHSA-f65p-4m7j-42xc,
+  GHSA-fph4-wmhf-6fwf, GHSA-5jgf-p345-68v8; `qs` 6.15.2: GHSA-4mjr-xmp4-gh2g,
+  GHSA-x5fp-wj9c-mxmx), both transitive through `@modelcontextprotocol/sdk`.
+
 ## [0.39.1] - 2026-09-08
 
 ### Fixed
