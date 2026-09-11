@@ -8,6 +8,8 @@ _Add entries here, never under a stamped version_ — a release commit renames t
 heading, and a branch that wrote beneath it merges without conflict straight into a
 published section (it happened to #170).
 
+## [0.39.2] - 2026-09-12
+
 ### Fixed
 
 - **The npm listing cut the v0.39.1 `description` off mid-word at "VS Code,
@@ -53,8 +55,8 @@ published section (it happened to #170).
   GHSA-crvj-82cr-hjcx; fixed in 4.13.5). Pulled in via
   `@modelcontextprotocol/sdk`, both directly and through
   `@hono/node-server`; `pnpm why hono` resolves a single copy, 4.13.7.
-- `fast-uri` and `qs` transitive overrides bumped to `^3.1.6` / `^6.16.0`
-  (#209, already on `main`), closing six Dependabot alerts
+- `fast-uri` transitive override bumped `^3.1.4` → `^3.1.6`, and a `qs`
+  override added at `^6.16.0` (#209), closing six Dependabot alerts
   (`fast-uri` 3.1.5: GHSA-jqff-g426-hqxp, GHSA-f65p-4m7j-42xc,
   GHSA-fph4-wmhf-6fwf, GHSA-5jgf-p345-68v8; `qs` 6.15.2: GHSA-4mjr-xmp4-gh2g,
   GHSA-x5fp-wj9c-mxmx), both transitive through `@modelcontextprotocol/sdk`.
