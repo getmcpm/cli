@@ -38,6 +38,18 @@ published section (it happened to #170).
   the same 100-char check so a publisher is told at entry time, not at
   `check`.
 
+### Changed
+
+- `hono` transitive override bumped `^4.12.27` → `^4.13.5`, closing three
+  Dependabot alerts (GHSA-g6gw-c38x-mqfc, GHSA-gqvv-2mrq-wpjv,
+  GHSA-crvj-82cr-hjcx; fixed in 4.13.5). Pulled in via
+  `@modelcontextprotocol/sdk` → `@hono/node-server`.
+- `fast-uri` and `qs` transitive overrides bumped to `^3.1.6` / `^6.16.0`
+  (#209, already on `main`), closing six Dependabot alerts
+  (`fast-uri` 3.1.5: GHSA-jqff-g426-hqxp, GHSA-f65p-4m7j-42xc,
+  GHSA-fph4-wmhf-6fwf, GHSA-5jgf-p345-68v8; `qs` 6.15.2: GHSA-4mjr-xmp4-gh2g,
+  GHSA-x5fp-wj9c-mxmx), both transitive through `@modelcontextprotocol/sdk`.
+
 ## [0.39.1] - 2026-09-08
 
 ### Fixed
