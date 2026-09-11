@@ -335,7 +335,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: getmcpm/cli/.github/actions/mcpm-verify@v0.39.1   # or: run: npx @getmcpm/cli verify
+      - uses: getmcpm/cli/.github/actions/mcpm-verify@v0.39.2   # or: run: npx @getmcpm/cli verify
 ```
 
 The Action writes a job step summary from `--json`; the same verb works as a
