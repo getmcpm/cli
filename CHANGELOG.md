@@ -8,6 +8,23 @@ _Add entries here, never under a stamped version_ — a release commit renames t
 heading, and a branch that wrote beneath it merges without conflict straight into a
 published section (it happened to #170).
 
+### Fixed
+
+- **The npm listing cut the v0.39.1 `description` off mid-word at "VS Code,
+  Win" (#208).** The 275-character sentence #207 wrote survives intact in the
+  published tarball, but npm's registry metadata — what `npm view` returns
+  and what npmjs.com and its search results render — is capped at 255
+  characters, so the listing showed a truncated sentence from the moment it
+  first delivered the new headline. Rewritten to 232 characters, measured
+  rather than eyeballed: the security-guard framing and the prompt-injection /
+  tool-poisoning / Model Context Protocol keywords are kept verbatim, all six
+  clients stay listed, and "Sigstore provenance" moves out of the sentence
+  (`keywords` already carries `sigstore`). The same pass found
+  `docs/registry-entry.json`'s description 278 characters over the official
+  MCP Registry schema's `maxLength: 100` and cut it to fit. Neither cap is
+  enforced by `npm pack` or CI, so both are now pinned by a test. Takes
+  effect on npm at this release's publish.
+
 ## [0.39.1] - 2026-09-08
 
 ### Fixed
