@@ -3,7 +3,7 @@
  *
  * Covers: check (dry-run, --json body), trust gate, missing manifest guard,
  * token exchange (GITHUB_TOKEN and --github-oidc), and that a registry 404
- * is now a real thrown error (fix/publish-live-registry — the endpoint is
+ * is now a real thrown error (#216 — the endpoint is
  * real; a 404 no longer means "not yet available").
  */
 

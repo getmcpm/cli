@@ -11,7 +11,7 @@
  *   on `description`. The old hand-submission template
  *   `docs/registry-entry.json` (no code read it) exceeded it by 278; it was
  *   deleted in favor of the root `.mcpm-publish.yaml`, the manifest
- *   `mcpm publish` actually reads and sends (fix/publish-live-registry) —
+ *   `mcpm publish` actually reads and sends (#216) —
  *   `PublishManifestSchema` already enforces `max(100)` at read time
  *   (backlog #85, publish-manifest.test.ts), so this test is redundant with
  *   that runtime check for THIS file specifically. Kept anyway as a static,

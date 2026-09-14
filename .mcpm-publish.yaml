@@ -5,7 +5,7 @@
 # package publishes under. This is the single source of truth: docs/registry-
 # entry.json (a stale hand-submission template, unread by any code, with the
 # now-known-wrong `repository.type: "git"` shape) has been deleted in favor
-# of this file — see fix/publish-live-registry.
+# of this file — see #216.
 name: io.github.getmcpm/cli
 title: mcpm
 description: "MCP security guard + package manager: trust-scored installs, blocks prompt injection and rug-pulls."

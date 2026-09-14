@@ -3,8 +3,7 @@
  * Shares timeout/error infrastructure with RegistryClient.
  *
  * Endpoint paths and required auth were verified live against
- * registry.modelcontextprotocol.io on 2026-09-14 (see the fix/publish-live-registry
- * PR): `/v0.1/servers` is GET-only (POST 404s); publishing is `POST /v0.1/publish`,
+ * registry.modelcontextprotocol.io on 2026-09-14 (see #216): `/v0.1/servers` is GET-only (POST 404s); publishing is `POST /v0.1/publish`,
  * authenticated with a registry JWT obtained by exchange — never the raw GitHub
  * token/PAT — from `POST /v0.1/auth/github-at` ({github_token}) or, inside GitHub
  * Actions, `POST /v0.1/auth/github-oidc` ({oidc_token}).
