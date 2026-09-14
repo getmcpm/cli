@@ -253,6 +253,18 @@ describe("exchangeGitHubOidcToken", () => {
     expect(url).toBe(`${REGISTRY_URL}/v0.1/auth/github-oidc`);
     expect(JSON.parse(init.body as string)).toEqual({ oidc_token: "eyJ.oidc.jwt" });
   });
+
+  // #216 review, MED 1: exchangeGitHubOidcToken had no test pinning that it
+  // calls validateRegistryUrl before fetch — the sibling exchangeGitHubToken
+  // describe block above has this test, exchangeGitHubOidcToken did not, and
+  // deleting its validateRegistryUrl(registryUrl) call left the full suite
+  // green.
+  it("never calls fetch for an unsafe registry URL", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(exchangeGitHubOidcToken("http://evil.example.com", "t")).rejects.toThrow(/https/);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
 });
 
 describe("audienceFromRegistryUrl", () => {
