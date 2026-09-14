@@ -64,14 +64,19 @@ describe("submitToRegistry", () => {
     expect(result.url).toBe("https://registry.example.com/servers/my-server");
   });
 
-  it("falls back to a constructed url when body.url is missing (the real ServerResponse shape has none)", async () => {
+  // #216 review, MED 5: /v0.1/servers/<name> 404s live ("Endpoint not
+  // found") — the readable listing path is /v0.1/servers/<name>/versions
+  // (confirmed 200 live against registry.modelcontextprotocol.io). This is
+  // the path actually taken in production: the real /v0.1/publish response
+  // body has no `url` field at all.
+  it("falls back to /v0.1/servers/<name>/versions when body.url is missing (the real ServerResponse shape has none, and this is the only path that 200s)", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
       ok: true,
       json: async () => ({}),
     }));
 
     const result = await submitToRegistry(SERVER_JSON, REGISTRY_TOKEN, REGISTRY_URL);
-    expect(result.url).toContain("io.github.test%2Fmy-server");
+    expect(result.url).toBe(`${REGISTRY_URL}/v0.1/servers/io.github.test%2Fmy-server/versions`);
   });
 
   it("throws RegistryError on non-ok response", async () => {

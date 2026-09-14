@@ -320,5 +320,10 @@ export async function submitToRegistry(
   const body = (await postJson(url, serverJson, { Authorization: `Bearer ${registryToken}` })) as {
     url?: string;
   };
-  return { url: body.url ?? `${registryUrl}/v0.1/servers/${encodeURIComponent(serverJson.name)}` };
+  // The live /v0.1/publish response body has no `url` field (confirmed
+  // against registry.modelcontextprotocol.io, #216 review MED 5), so this
+  // fallback is the path actually taken in production — and
+  // `/v0.1/servers/<name>` 404s live ("Endpoint not found"); the readable
+  // listing is `/v0.1/servers/<name>/versions` (confirmed 200 live).
+  return { url: body.url ?? `${registryUrl}/v0.1/servers/${encodeURIComponent(serverJson.name)}/versions` };
 }
