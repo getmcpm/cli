@@ -128,6 +128,40 @@ export interface ServerJson {
 }
 
 /**
+ * Builds the registry Package[] for a manifest — the ONE place that maps
+ * `runtimeArguments`/`environmentVariables` from manifest shape to registry
+ * shape. Shared by `manifestToServerJson` (what gets POSTed) and
+ * `manifestToEntry` in check.ts (what gets scanned by scanTier1), so the two
+ * can never diverge again — see the HIGH finding in #216 review: the trust
+ * gate previously scanned a hand-rolled entry that hardcoded
+ * `environmentVariables: []` and omitted `runtimeArguments` entirely, so a
+ * manifest with an injection-laden runtime argument or env var passed
+ * `publish check` clean while the exact same data would be scanned (and
+ * flagged) by the live registry/relay once published.
+ */
+export function manifestToPackages(manifest: PublishManifest, version: string): ServerJsonPackage[] {
+  return [
+    {
+      registryType: manifest.package.registryType,
+      identifier: manifest.package.identifier,
+      version,
+      transport: manifest.transport,
+      ...(manifest.runtimeHint ? { runtimeHint: manifest.runtimeHint } : {}),
+      ...(manifest.runtimeArguments?.length
+        ? {
+            runtimeArguments: manifest.runtimeArguments.map(
+              (value): ServerJsonArgument => ({ type: "positional", value })
+            ),
+          }
+        : {}),
+      ...(manifest.environmentVariables?.length
+        ? { environmentVariables: manifest.environmentVariables }
+        : {}),
+    },
+  ];
+}
+
+/**
  * Builds exactly the registry's ServerJSON shape for POST /v0.1/publish (and
  * /v0.1/validate) — verified live against registry.modelcontextprotocol.io.
  */
@@ -140,25 +174,7 @@ export function manifestToServerJson(manifest: PublishManifest, version: string)
     version,
     ...(websiteUrl ? { websiteUrl } : {}),
     ...(manifest.repository ? { repository: manifest.repository } : {}),
-    packages: [
-      {
-        registryType: manifest.package.registryType,
-        identifier: manifest.package.identifier,
-        version,
-        transport: manifest.transport,
-        ...(manifest.runtimeHint ? { runtimeHint: manifest.runtimeHint } : {}),
-        ...(manifest.runtimeArguments?.length
-          ? {
-              runtimeArguments: manifest.runtimeArguments.map(
-                (value): ServerJsonArgument => ({ type: "positional", value })
-              ),
-            }
-          : {}),
-        ...(manifest.environmentVariables?.length
-          ? { environmentVariables: manifest.environmentVariables }
-          : {}),
-      },
-    ],
+    packages: manifestToPackages(manifest, version),
   };
 }
 
