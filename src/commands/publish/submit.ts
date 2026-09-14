@@ -18,6 +18,7 @@ import type { RegistryTokenResponse } from "../../registry/publish-client.js";
 import { PublishErrors } from "../../errors/publish-errors.js";
 import { manifestToEntry, assertTrustGate } from "./check.js";
 import { manifestToServerJson, resolveVersion } from "./manifest.js";
+import { validateRegistryUrl } from "../../registry/publish-client.js";
 
 export interface SubmitResult {
   url: string;
@@ -62,11 +63,27 @@ export async function handlePublishSubmit(
     cwd = process.cwd(),
   } = deps;
   const registryUrl = options.registryUrl ?? DEFAULT_REGISTRY;
+  // Before anything else: a malformed/unsafe --registry must not cause a
+  // real GitHub Actions OIDC mint (fetchActionsOidcToken hits GitHub's own
+  // token endpoint) or a wasted registry round-trip further down (#216
+  // review, NIT 14). exchangeGitHubToken/exchangeGitHubOidcToken/
+  // submitToRegistry each re-validate before their own network call, so
+  // this is defense-in-depth for the steps between here and there, not a
+  // replacement for those checks.
+  validateRegistryUrl(registryUrl);
 
   const manifest = await readManifest();
   if (!manifest) throw PublishErrors.manifestNotFound();
 
   assertTrustGate(scanTier1(manifestToEntry(manifest)));
+
+  // Resolve the version BEFORE any token exchange (#216 review, NIT 14): a
+  // missing version (no manifest `version`, no package.json in cwd) must
+  // fail before burning a registry JWT exchange or minting a real GitHub
+  // Actions OIDC token — both are real network calls with side effects
+  // (an OIDC mint is scoped/logged; a registry token exchange is a live
+  // round-trip), wasted entirely if resolveVersion is about to throw.
+  const version = await resolveVersion(manifest, cwd);
 
   const registryToken = options.githubOidc
     ? (await exchangeGitHubOidcToken(registryUrl, await fetchActionsOidcToken(audienceFromRegistryUrl(registryUrl), env)))
@@ -77,7 +94,6 @@ export async function handlePublishSubmit(
         return (await exchangeGitHubToken(registryUrl, token)).registryToken;
       })();
 
-  const version = await resolveVersion(manifest, cwd);
   const serverJson = manifestToServerJson(manifest, version);
 
   const result = await submitToRegistry(serverJson, registryToken, registryUrl);

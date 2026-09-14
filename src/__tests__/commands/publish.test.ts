@@ -404,6 +404,50 @@ describe("handlePublishSubmit", () => {
     expect(submitToRegistry).not.toHaveBeenCalled();
   });
 
+  // ---------------------------------------------------------------------------
+  // #216 review, NIT 14: ordering — resolveVersion before any token
+  // exchange, and validateRegistryUrl before the OIDC audience/mint.
+  // ---------------------------------------------------------------------------
+
+  it("resolves the version before any token exchange — a missing version must not burn a registry JWT/OIDC mint", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "mcpm-publish-noversion-"));
+    try {
+      readManifest.mockResolvedValue({ ...MANIFEST, version: undefined });
+      const { handlePublishSubmit } = await import("../../commands/publish/submit.js");
+      await expect(
+        handlePublishSubmit(
+          {},
+          {
+            readManifest,
+            scanTier1,
+            submitToRegistry,
+            exchangeGitHubToken,
+            exchangeGitHubOidcToken,
+            fetchActionsOidcToken,
+            audienceFromRegistryUrl,
+            getToken,
+            output: (t) => output.push(t),
+            cwd: dir, // no package.json here => resolveVersion throws
+          }
+        )
+      ).rejects.toThrow(/No version found/);
+      expect(getToken).not.toHaveBeenCalled();
+      expect(exchangeGitHubToken).not.toHaveBeenCalled();
+      expect(submitToRegistry).not.toHaveBeenCalled();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("validates the registry URL before deriving the OIDC audience or minting a token", async () => {
+    await expect(runSubmit({ registryUrl: "http://evil.example.com", githubOidc: true })).rejects.toThrow(
+      /https/
+    );
+    expect(audienceFromRegistryUrl).not.toHaveBeenCalled();
+    expect(fetchActionsOidcToken).not.toHaveBeenCalled();
+    expect(exchangeGitHubOidcToken).not.toHaveBeenCalled();
+  });
+
   describe("--github-oidc", () => {
     it("mints an Actions OIDC token and exchanges it, instead of reading GITHUB_TOKEN/MCPM_TOKEN", async () => {
       await runSubmit({ githubOidc: true });
