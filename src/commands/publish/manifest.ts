@@ -49,10 +49,19 @@ export const validateDescription = (value: string): true | string =>
 // KeyValueInput/Repository shapes 1:1 (confirmed against the live
 // registry.modelcontextprotocol.io/openapi.yaml, 2026-09-14) so
 // `manifestToServerJson` can pass them through with no remapping.
-const TransportSchema = z.object({
-  type: z.enum(["stdio", "streamable-http", "sse"]),
-  url: z.string().url().optional(),
-});
+//
+// A discriminated union, not a flat optional `url` (#216 review, LOW 9):
+// the live /v0.1/validate rejects `{type:"stdio", url:"..."}` ("url must be
+// empty for stdio transport type") and `{type:"streamable-http"}` with no
+// `url` ("url is required for streamable-http transport type") — confirmed
+// live, 2026-09-15. The old flat schema accepted both shapes at manifest-
+// read time, deferring the rejection to the live 422 that `mcpm publish
+// check` exists to catch before submission.
+const TransportSchema = z.discriminatedUnion("type", [
+  z.strictObject({ type: z.literal("stdio") }),
+  z.strictObject({ type: z.literal("streamable-http"), url: z.string().url() }),
+  z.strictObject({ type: z.literal("sse"), url: z.string().url() }),
+]);
 
 const EnvVarSchema = z.object({
   name: z.string().min(1),
@@ -71,8 +80,15 @@ const RepositorySchema = z.object({
   url: z.string().url(),
 });
 
+// The registry's name pattern (confirmed live in openapi.yaml,
+// minLength 3/maxLength 200): "<namespace>/<name>", e.g.
+// "io.github.you/my-server". #216 review, LOW 9.
+const REGISTRY_NAME_PATTERN = /^[a-zA-Z0-9.-]+\/[a-zA-Z0-9._-]+$/;
+
 export const PublishManifestSchema = z.object({
-  name: z.string().min(1),
+  name: z.string().min(1).regex(REGISTRY_NAME_PATTERN, {
+    error: "name must match the registry's <namespace>/<name> pattern (e.g. io.github.you/my-server)",
+  }),
   description: z.string().min(1).max(DESCRIPTION_MAX, {
     error: (issue) => descriptionCapMessage(String(issue.input)),
   }),

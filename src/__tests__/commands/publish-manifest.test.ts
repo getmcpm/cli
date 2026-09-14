@@ -277,6 +277,64 @@ describe("manifestToServerJson", () => {
 });
 
 // ---------------------------------------------------------------------------
+// PublishManifestSchema — name pattern + transport discriminated union
+// (#216 review, LOW 9). Both shapes confirmed live against
+// registry.modelcontextprotocol.io/v0.1/validate on 2026-09-15: the old flat
+// schema accepted a name with no "/" and a transport with a mismatched/
+// missing `url`, deferring the rejection to a live 422 instead of catching
+// it at manifest-read time.
+// ---------------------------------------------------------------------------
+
+describe("PublishManifestSchema — name pattern", () => {
+  it("rejects a name with no namespace/name split (live: 422 'expected string to match pattern')", () => {
+    expect(() => PublishManifestSchema.parse({ ...BASE_RAW, name: "myserver" })).toThrow();
+  });
+
+  it("accepts the registry's <namespace>/<name> shape", () => {
+    expect(() => PublishManifestSchema.parse({ ...BASE_RAW, name: "io.github.you/my-server" })).not.toThrow();
+  });
+});
+
+describe("PublishManifestSchema — transport discriminated union", () => {
+  it("accepts stdio with no url", () => {
+    expect(() =>
+      PublishManifestSchema.parse({ ...BASE_RAW, transport: { type: "stdio" } })
+    ).not.toThrow();
+  });
+
+  it("rejects stdio with a url (live: 'url must be empty for stdio transport type')", () => {
+    expect(() =>
+      PublishManifestSchema.parse({ ...BASE_RAW, transport: { type: "stdio", url: "https://example.com" } })
+    ).toThrow();
+  });
+
+  it("accepts streamable-http with a url", () => {
+    expect(() =>
+      PublishManifestSchema.parse({
+        ...BASE_RAW,
+        transport: { type: "streamable-http", url: "https://example.com/mcp" },
+      })
+    ).not.toThrow();
+  });
+
+  it("rejects streamable-http with no url (live: 'url is required for streamable-http transport type')", () => {
+    expect(() =>
+      PublishManifestSchema.parse({ ...BASE_RAW, transport: { type: "streamable-http" } })
+    ).toThrow();
+  });
+
+  it("accepts sse with a url", () => {
+    expect(() =>
+      PublishManifestSchema.parse({ ...BASE_RAW, transport: { type: "sse", url: "https://example.com/sse" } })
+    ).not.toThrow();
+  });
+
+  it("rejects sse with no url", () => {
+    expect(() => PublishManifestSchema.parse({ ...BASE_RAW, transport: { type: "sse" } })).toThrow();
+  });
+});
+
+// ---------------------------------------------------------------------------
 // resolveVersion — manifest.version → package.json in cwd → error.
 // ---------------------------------------------------------------------------
 
