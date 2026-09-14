@@ -14,8 +14,8 @@ published section (it happened to #170).
   `vitest` `^4.1.0` → `^5.0.0` and `@vitest/coverage-v8` `^4.1.0` → `^5.0.0`
   (both dev-only), and `@inquirer/prompts` `^8.7.0` → `^8.7.2` (runtime).**
   Dependabot's own PRs (#212, #213) were not merged — its regenerated
-  `pnpm-lock.yaml` drops the `pnpm.overrides` block (fast-uri/qs/hono,
-  closing six alerts per #209) and fails CI with
+  `pnpm-lock.yaml` drops the `pnpm.overrides` block (fast-uri and qs per #209, hono per #211 — nine
+  entries in all) and fails CI with
   `ERR_PNPM_LOCKFILE_CONFIG_MISMATCH`, the same #204 precedent. Bumped
   locally with `pnpm up` instead so the overrides survive. Full suite green
   (2944 tests, running under vitest 5.0.0 itself), `tsc --noEmit` clean, and
