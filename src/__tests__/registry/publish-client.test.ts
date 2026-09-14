@@ -107,6 +107,50 @@ describe("submitToRegistry", () => {
     expect((err as Error).message).toBe("Registry API returned 500");
   });
 
+  // #216 review, MED 3: detail/title/errors[].message are registry-controlled
+  // and land in a thrown Error's .message, which publish/index.ts prints
+  // straight to the terminal — an ANSI/OSC/control-char escape sequence in
+  // any of them must not reach stdout/stderr unsanitized.
+  it("strips terminal escape sequences from a 422 body's detail/errors before they reach the thrown message", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
+      ok: false,
+      status: 422,
+      headers: { get: () => null },
+      json: async () => ({
+        title: "Unprocessable Entity",
+        status: 422,
+        detail: "[2J]0;pwnedvalidation failed",
+        errors: [{ message: "]0;evilbad field", location: "body" }],
+      }),
+    }));
+
+    const err = await submitToRegistry(SERVER_JSON, REGISTRY_TOKEN, REGISTRY_URL).catch((e: Error) => e);
+    const message = (err as Error).message;
+    expect(message).not.toContain("");
+    expect(message).not.toContain("");
+    expect(message).toContain("validation failed");
+    expect(message).toContain("bad field");
+  });
+
+  // #216 review, LOW 8: the registry echoes the whole submitted request body
+  // back in errors[].value on a 422 — that must never be interpolated into
+  // the thrown message (it can carry arbitrary manifest data).
+  it("never includes errors[].value in the thrown message", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
+      ok: false,
+      status: 422,
+      headers: { get: () => null },
+      json: async () => ({
+        title: "Unprocessable Entity",
+        status: 422,
+        errors: [{ message: "invalid", location: "body.name", value: { github_token: "SENTINEL" } }],
+      }),
+    }));
+
+    const err = await submitToRegistry(SERVER_JSON, REGISTRY_TOKEN, REGISTRY_URL).catch((e: Error) => e);
+    expect((err as Error).message).not.toContain("SENTINEL");
+  });
+
   it("throws NetworkError when fetch rejects", async () => {
     vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("Network failure")));
 

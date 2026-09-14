@@ -14,6 +14,7 @@ import type { ServerJson } from "../commands/publish/manifest.js";
 import type { SubmitResult } from "../commands/publish/submit.js";
 import { NetworkError, RegistryError } from "./errors.js";
 import { readCappedBody } from "./http-utils.js";
+import { sanitizeForTerminal } from "../guard/sanitize.js";
 
 const DEFAULT_TIMEOUT_MS = 15_000;
 
@@ -165,6 +166,18 @@ async function postJson(
  * ({title, status, detail, errors?: [{message, location, value}]}) — surface
  * `detail` and `errors[].message` so a 422 (missing/invalid fields) is
  * actually readable instead of just "Registry API returned 422".
+ *
+ * `detail`/`title`/`errors[].message`/`errors[].location` are REGISTRY-
+ * CONTROLLED text that lands in a thrown Error's `.message`, which callers
+ * print straight to the terminal (`console.error(chalk.red(err.message))` in
+ * publish/index.ts) — so each piece is run through sanitizeForTerminal
+ * (#216 review, MED 3) to strip ANSI/OSC/control-character injection before
+ * it reaches stdout/stderr.
+ *
+ * `errors[].value` is deliberately NEVER interpolated (#216 review, LOW 8):
+ * the registry echoes the request body back on a 422, so `value` can be
+ * arbitrary submitted data (e.g. a `.mcpm-publish.yaml` field). Destructured
+ * here only so a future edit that starts using it doesn't do so silently.
  */
 async function describeError(url: string, response: Response): Promise<string> {
   const base = `Registry API returned ${response.status}`;
@@ -172,13 +185,22 @@ async function describeError(url: string, response: Response): Promise<string> {
     const body = (await readCappedBody(url, response)) as {
       detail?: string;
       title?: string;
-      errors?: Array<{ message?: string; location?: string }>;
+      errors?: Array<{ message?: string; location?: string; value?: unknown }>;
     };
     const parts = [base];
-    if (body.detail) parts.push(body.detail);
-    else if (body.title) parts.push(body.title);
+    if (body.detail) parts.push(sanitizeForTerminal(body.detail));
+    else if (body.title) parts.push(sanitizeForTerminal(body.title));
     if (body.errors?.length) {
-      parts.push(body.errors.map((e) => [e.location, e.message].filter(Boolean).join(": ")).join("; "));
+      parts.push(
+        body.errors
+          .map((e) =>
+            [e.location, e.message]
+              .filter(Boolean)
+              .map((s) => sanitizeForTerminal(String(s)))
+              .join(": ")
+          )
+          .join("; ")
+      );
     }
     return parts.join(" — ");
   } catch {
