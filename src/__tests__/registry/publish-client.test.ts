@@ -393,6 +393,23 @@ describe("fetchActionsOidcToken", () => {
       /no value/i
     );
   });
+
+  // #216 review, LOW 7: fetchActionsOidcToken had no redirect:"manual", no
+  // timeout, and read response.json() directly instead of readCappedBody —
+  // while carrying ACTIONS_ID_TOKEN_REQUEST_TOKEN as a Bearer header. A 3xx
+  // must not carry that token to a redirect target (same discipline as
+  // postJson for the registry endpoints).
+  it("passes redirect:'manual' and refuses to follow a 3xx (the request token must not reach a redirect target)", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ type: "opaqueredirect", status: 0, ok: false });
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(fetchActionsOidcToken("https://registry.modelcontextprotocol.io", ENV)).rejects.toThrow(
+      /redirect/i
+    );
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({ redirect: "manual" })
+    );
+  });
 });
 
 describe("token-routing invariant (security)", () => {

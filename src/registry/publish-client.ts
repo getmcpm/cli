@@ -260,6 +260,51 @@ export function audienceFromRegistryUrl(registryUrl: string): string {
 }
 
 /**
+ * Shared GET helper mirroring postJson's hardening — timeout, refuse to
+ * follow redirects (so a token/Bearer header never reaches a 3xx target),
+ * and the capped-body reader — for a non-registry endpoint (the GitHub
+ * Actions token-request endpoint) that still carries a bearer credential.
+ * (#216 review, LOW 7: fetchActionsOidcToken previously had none of this.)
+ */
+async function getJson(
+  url: string,
+  headers: Record<string, string>
+): Promise<{ status: number; body: unknown }> {
+  const controller = new AbortController();
+  const timerId = setTimeout(() => controller.abort(), DEFAULT_TIMEOUT_MS);
+
+  let response: Response;
+  try {
+    response = await fetch(url, {
+      method: "GET",
+      redirect: "manual",
+      headers,
+      signal: controller.signal,
+    });
+  } catch (err) {
+    throw new NetworkError(
+      `Network request failed: ${url}`,
+      err instanceof Error ? err : new Error(String(err))
+    );
+  } finally {
+    clearTimeout(timerId);
+  }
+
+  if (response.type === "opaqueredirect" || response.status === 0) {
+    throw new RegistryError(
+      "GitHub Actions OIDC token endpoint attempted a redirect (3xx); refusing to follow it with the request token.",
+      0
+    );
+  }
+
+  if (!response.ok) {
+    throw new RegistryError(`GitHub Actions OIDC token request returned ${response.status}`, response.status);
+  }
+
+  return { status: response.status, body: await readCappedBody(url, response) };
+}
+
+/**
  * Mints a GitHub Actions OIDC token for `audience` via the Actions runtime's
  * own token-request endpoint. Pure over an injected `env` (so it's testable
  * without real Actions env vars) + the global fetch.
@@ -284,23 +329,13 @@ export async function fetchActionsOidcToken(
   }
 
   const url = `${requestUrl}&audience=${encodeURIComponent(audience)}`;
-  let response: Response;
-  try {
-    response = await fetch(url, {
-      headers: { Authorization: `Bearer ${requestToken}`, Accept: "application/json" },
-    });
-  } catch (err) {
-    throw new NetworkError(
-      "Failed to request GitHub Actions OIDC token",
-      err instanceof Error ? err : new Error(String(err))
-    );
-  }
-  if (!response.ok) {
-    throw new RegistryError(`GitHub Actions OIDC token request returned ${response.status}`, response.status);
-  }
-  const body = (await response.json()) as { value?: string };
+  const { status, body: rawBody } = await getJson(url, {
+    Authorization: `Bearer ${requestToken}`,
+    Accept: "application/json",
+  });
+  const body = rawBody as { value?: string };
   if (!body.value) {
-    throw new RegistryError("GitHub Actions OIDC token response had no value", response.status);
+    throw new RegistryError("GitHub Actions OIDC token response had no value", status);
   }
   return body.value;
 }
