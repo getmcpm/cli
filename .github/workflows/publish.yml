@@ -119,6 +119,12 @@ jobs:
           cache: pnpm
           registry-url: https://registry.npmjs.org
 
+      # $VERSION is quoted on every use below (and in the registry job's own
+      # workflow_dispatch step further down, which references this comment)
+      # so a value containing shell metacharacters can't be interpreted by
+      # `run:` — GITHUB_REF_NAME is push-trigger-controlled (a tag name, not
+      # attacker-free-text), but the same quoting discipline costs nothing
+      # and avoids depending on that distinction holding forever.
       - name: Set version from git tag
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
@@ -174,6 +180,15 @@ jobs:
   # even though `publish` is SKIPPED (not failed) on workflow_dispatch, but
   # still skips it if `publish` (or `dogfood`) actually failed on a tag push.
   # A failure HERE fails this job/run visibly; it does not touch npm.
+  #
+  # Known gap (the v0.17.0 SBOM-asset history, #216 review LOW 11): a
+  # `publish`-job failure AFTER `pnpm publish` already succeeded — e.g. the
+  # SBOM generation or GitHub Release step — still counts as a job failure,
+  # so `needs: publish` + this `if:` SKIP this job even though the npm
+  # release is real and would benefit from a registry listing. No behaviour
+  # change here; the recovery is the `workflow_dispatch` trigger at the top
+  # of this file with that version, which re-lists an already-published npm
+  # version independently of whether the `publish` job itself succeeded.
   registry:
     name: registry listing
     needs: publish
