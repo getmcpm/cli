@@ -222,14 +222,19 @@ export async function exchangeGitHubOidcToken(
 }
 
 /**
- * OIDC audience for a given registry URL: scheme + lowercased host, matching
- * the official publisher's `audienceFromRegistryURL`
- * (modelcontextprotocol/registry, cmd/publisher/auth/github-oidc.go) exactly —
- * so a token minted here validates against that registry's issuer check.
+ * OIDC audience for a given registry URL: scheme + lowercased host (host
+ * INCLUDES the port, e.g. "example.com:8443"), matching the official
+ * publisher's `audienceFromRegistryURL` (modelcontextprotocol/registry,
+ * cmd/publisher/auth/github-oidc.go:182, `u.Host`) exactly — so a token
+ * minted here validates against that registry's issuer check. #216 review,
+ * MED 2: this previously used `parsed.hostname`, which DROPS the port —
+ * `u.Host` in the Go reference keeps it — so a `--registry` on a non-default
+ * port minted a token with the wrong audience (silently rejected by that
+ * registry's issuer check, not a visible bug here).
  */
 export function audienceFromRegistryUrl(registryUrl: string): string {
   const parsed = new URL(registryUrl);
-  return `${parsed.protocol}//${parsed.hostname.toLowerCase()}`;
+  return `${parsed.protocol}//${parsed.host.toLowerCase()}`;
 }
 
 /**

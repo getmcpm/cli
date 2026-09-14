@@ -267,8 +267,13 @@ describe("exchangeGitHubOidcToken", () => {
   });
 });
 
-describe("audienceFromRegistryUrl", () => {
-  it("derives scheme + lowercased host, matching the official publisher's audienceFromRegistryURL exactly", () => {
+// #216 review, MED 2: the reference implementation
+// (cmd/publisher/auth/github-oidc.go:182) uses Go's `u.Host`, which KEEPS the
+// port; this previously used `parsed.hostname`, which drops it — a
+// `--registry https://example.com:8443` minted a token whose audience
+// silently dropped ":8443", failing that registry's issuer check.
+describe("audienceFromRegistryUrl (parity with cmd/publisher/auth/github-oidc.go's u.Host)", () => {
+  it("derives scheme + lowercased host, matching the official publisher's audienceFromRegistryURL", () => {
     expect(audienceFromRegistryUrl("https://registry.modelcontextprotocol.io")).toBe(
       "https://registry.modelcontextprotocol.io"
     );
@@ -284,6 +289,10 @@ describe("audienceFromRegistryUrl", () => {
     expect(audienceFromRegistryUrl("https://registry.example.com/v0.1")).toBe(
       "https://registry.example.com"
     );
+  });
+
+  it("keeps a non-default port (u.Host includes it; parsed.hostname would drop it)", () => {
+    expect(audienceFromRegistryUrl("https://EXAMPLE.com:8443")).toBe("https://example.com:8443");
   });
 });
 
