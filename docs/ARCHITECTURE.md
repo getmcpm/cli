@@ -35,7 +35,7 @@ mcpm/
 │   ├── registry/
 │   │   ├── index.ts                — public API barrel export
 │   │   ├── client.ts               — RegistryClient (HTTP, injectable fetch)
-│   │   ├── publish-client.ts       — POST submit endpoint for `mcpm publish`
+│   │   ├── publish-client.ts       — `mcpm publish`: GitHub token/OIDC → registry JWT exchange, then POST /v0.1/publish
 │   │   ├── http-utils.ts           — shared capped-body reader (decompression-bomb cap)
 │   │   ├── schemas.ts              — Zod schemas for API responses
 │   │   ├── types.ts                — TypeScript types inferred from schemas.ts
@@ -464,5 +464,14 @@ the flagship enforcement path CI-verified.
 
 ### Publish (`publish.yml`)
 
-Runs on `v*` tag push. Builds, tests, and publishes to npm as `@getmcpm/cli` with provenance.
+Runs on `v*` tag push. Builds, tests, and publishes to npm as `@getmcpm/cli` with
+provenance. A separate `registry` job then runs `mcpm publish --github-oidc` to
+(re-)list the version on the official MCP registry, authenticating via a minted
+GitHub Actions OIDC token — no npm publish and no `--registry` secret involved.
+
+The workflow also accepts a `workflow_dispatch` trigger (a version string input) that
+runs ONLY the `registry` job, verifying the given version is already live on npm before
+re-listing it — for recovering a registry listing independently of a new npm release
+(e.g. when the `registry` job was skipped by a `publish`-job failure that happened
+after `pnpm publish` itself had already succeeded).
 
