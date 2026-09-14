@@ -9,6 +9,7 @@ import type { Finding } from "../../scanner/tier1.js";
 import type { TrustScore, TrustScoreInput } from "../../scanner/trust-score.js";
 import { PublishErrors } from "../../errors/publish-errors.js";
 import { levelColor } from "../../utils/format-trust.js";
+import { manifestToServerJson, resolveVersion } from "./manifest.js";
 
 const PLACEHOLDER_VERSION = "0.0.0";
 
@@ -17,10 +18,12 @@ export interface PublishCheckDeps {
   scanTier1: (entry: ServerEntry) => Finding[];
   computeTrustScore: (input: TrustScoreInput) => TrustScore;
   output: (text: string) => void;
+  cwd?: string;
 }
 
 export interface PublishCheckOptions {
   registryUrl?: string;
+  json?: boolean;
 }
 
 export function manifestToEntry(manifest: PublishManifest): ServerEntry {
@@ -100,16 +103,27 @@ export function assertTrustGate(findings: Finding[]): void {
 }
 
 export async function handlePublishCheck(
-  _options: PublishCheckOptions,
+  options: PublishCheckOptions,
   deps: PublishCheckDeps
 ): Promise<void> {
-  const { readManifest, scanTier1, computeTrustScore, output } = deps;
+  const { readManifest, scanTier1, computeTrustScore, output, cwd = process.cwd() } = deps;
 
   const manifest = await readManifest();
   if (!manifest) throw PublishErrors.manifestNotFound();
 
   const findings = scanTier1(manifestToEntry(manifest));
   assertTrustGate(findings);
+
+  const version = await resolveVersion(manifest, cwd);
+  const serverJson = manifestToServerJson(manifest, version);
+
+  // --json emits exactly the POST /v0.1/publish body — one parseable JSON
+  // value on stdout, nothing else (matching the rest of the CLI's --json
+  // convention), so it can be piped straight to `curl -d @- .../v0.1/validate`.
+  if (options.json) {
+    output(JSON.stringify(serverJson));
+    return;
+  }
 
   const score = computeTrustScore({
     findings,
@@ -124,5 +138,7 @@ export async function handlePublishCheck(
   if (manifest.homepage) output(`  Homepage:    ${manifest.homepage}`);
   output(`  Tags:        ${manifest.tags.join(", ") || "(none)"}`);
   output(`  Trust score: ${levelColor(score.level)} (${score.score}/100)`);
+  output(`\nRequest body (POST /v0.1/publish):`);
+  output(JSON.stringify(serverJson, null, 2));
   output(chalk.green("\nReady to publish. Run 'mcpm publish' to submit."));
 }

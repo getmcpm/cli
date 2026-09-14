@@ -1,8 +1,10 @@
 /**
  * Tests for src/commands/publish — written FIRST per TDD (Red → Green).
  *
- * Covers: check (dry-run), trust gate, missing manifest guard,
- * 404 registry fallback message, token from env only, --registry flag.
+ * Covers: check (dry-run, --json body), trust gate, missing manifest guard,
+ * token exchange (GITHUB_TOKEN and --github-oidc), and that a registry 404
+ * is now a real thrown error (fix/publish-live-registry — the endpoint is
+ * real; a 404 no longer means "not yet available").
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
@@ -16,6 +18,8 @@ import { RegistryError } from "../../registry/errors.js";
 // Fixtures
 // ---------------------------------------------------------------------------
 
+// version + transport are set explicitly so tests don't depend on reading a
+// real package.json from process.cwd() (resolveVersion's fallback).
 const MANIFEST = {
   name: "io.github.test/my-server",
   description: "A test MCP server",
@@ -25,6 +29,8 @@ const MANIFEST = {
     registryType: "npm" as const,
     identifier: "@test/my-server",
   },
+  version: "1.0.0",
+  transport: { type: "stdio" as const },
 };
 
 // ---------------------------------------------------------------------------
@@ -44,7 +50,7 @@ describe("handlePublishCheck", () => {
     readManifest = vi.fn().mockResolvedValue(MANIFEST);
   });
 
-  async function runCheck(opts: { registryUrl?: string } = {}) {
+  async function runCheck(opts: { registryUrl?: string; json?: boolean } = {}) {
     const { handlePublishCheck } = await import("../../commands/publish/check.js");
     await handlePublishCheck(opts, {
       readManifest,
@@ -110,6 +116,37 @@ describe("handlePublishCheck", () => {
     expect(findings).toHaveLength(1);
     expect(findings[0]).toMatchObject({ severity: "low", type: "install-script" });
     expect(findings[0].message).toContain("This launcher runs install scripts:");
+  });
+
+  // --json must emit exactly the POST /v0.1/publish body — one parseable
+  // JSON value, nothing else — so it can be piped straight into
+  // `curl -d @- .../v0.1/validate` (see the live-validation step in the PR).
+  it("--json emits exactly one parseable JSON body: the ServerJSON that would be POSTed", async () => {
+    await runCheck({ json: true });
+    expect(output).toHaveLength(1);
+    const body = JSON.parse(output[0]) as {
+      $schema: string;
+      name: string;
+      description: string;
+      version: string;
+      packages: Array<{ registryType: string; identifier: string; transport: { type: string } }>;
+    };
+    expect(body.$schema).toMatch(/^https:\/\/static\.modelcontextprotocol\.io\/schemas\//);
+    expect(body.name).toBe(MANIFEST.name);
+    expect(body.version).toBe("1.0.0");
+    expect(body.packages[0]).toMatchObject({
+      registryType: "npm",
+      identifier: "@test/my-server",
+      transport: { type: "stdio" },
+    });
+  });
+
+  it("--json still enforces the trust gate (blocks before emitting a body)", async () => {
+    scanTier1.mockReturnValue([
+      { type: "secret", severity: "critical", message: "Key leak", location: "x" } satisfies Finding,
+    ]);
+    await expect(runCheck({ json: true })).rejects.toThrow(/critical|high|blocked/i);
+    expect(output).toHaveLength(0);
   });
 });
 
@@ -244,26 +281,35 @@ describe("handlePublishSubmit", () => {
   let output: string[];
   let readManifest: ReturnType<typeof vi.fn>;
   let submitToRegistry: ReturnType<typeof vi.fn>;
+  let exchangeGitHubToken: ReturnType<typeof vi.fn>;
+  let exchangeGitHubOidcToken: ReturnType<typeof vi.fn>;
+  let fetchActionsOidcToken: ReturnType<typeof vi.fn>;
+  let audienceFromRegistryUrl: ReturnType<typeof vi.fn>;
   let getToken: ReturnType<typeof vi.fn>;
   let scanTier1: ReturnType<typeof vi.fn>;
-  let computeTrustScore: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
     output = [];
     readManifest = vi.fn().mockResolvedValue(MANIFEST);
     submitToRegistry = vi.fn().mockResolvedValue({ url: "https://registry.example.com/servers/my-server" });
+    exchangeGitHubToken = vi.fn().mockResolvedValue({ registryToken: "registry-jwt", expiresAt: 999 });
+    exchangeGitHubOidcToken = vi.fn().mockResolvedValue({ registryToken: "registry-jwt-oidc", expiresAt: 999 });
+    fetchActionsOidcToken = vi.fn().mockResolvedValue("actions-oidc-jwt");
+    audienceFromRegistryUrl = vi.fn().mockReturnValue("https://registry.modelcontextprotocol.io");
     getToken = vi.fn().mockReturnValue("ghp_test_token");
     scanTier1 = vi.fn().mockReturnValue([]);
-    computeTrustScore = vi.fn().mockReturnValue({ score: 85, level: "green", breakdown: {} });
   });
 
-  async function runSubmit(opts: { registryUrl?: string } = {}) {
+  async function runSubmit(opts: { registryUrl?: string; githubOidc?: boolean } = {}) {
     const { handlePublishSubmit } = await import("../../commands/publish/submit.js");
     await handlePublishSubmit(opts, {
       readManifest,
       scanTier1,
-      computeTrustScore,
       submitToRegistry,
+      exchangeGitHubToken,
+      exchangeGitHubOidcToken,
+      fetchActionsOidcToken,
+      audienceFromRegistryUrl,
       getToken,
       output: (t) => output.push(t),
     });
@@ -274,26 +320,55 @@ describe("handlePublishSubmit", () => {
     expect(output.join("")).toContain("registry.example.com");
   });
 
-  it("shows 'API not yet available' when registry returns 404", async () => {
-    submitToRegistry.mockRejectedValue(new RegistryError("Registry API returned 404", 404));
+  it("exchanges the GitHub token for a registry token, then submits with the EXCHANGED token — never the raw GitHub token", async () => {
     await runSubmit();
-    expect(output.join("")).toMatch(/not yet available|waitlist|endpoint/i);
+    expect(exchangeGitHubToken).toHaveBeenCalledWith(expect.any(String), "ghp_test_token");
+    expect(submitToRegistry).toHaveBeenCalledWith(expect.anything(), "registry-jwt", expect.any(String));
   });
 
-  it("throws when no token is available", async () => {
+  // The registry's publish endpoint is real (POST /v0.1/publish) — a 404 here
+  // is a genuine failure (bad --registry, endpoint moved), not "not yet
+  // available". Reverting the fix (restoring the old catch-and-print-exit-0
+  // special case) turns this back into a silent success and fails this test.
+  it("throws (does not silently print 'not yet available' and exit 0) when the registry 404s", async () => {
+    submitToRegistry.mockRejectedValue(new RegistryError("Registry API returned 404", 404));
+    await expect(runSubmit()).rejects.toThrow(RegistryError);
+    expect(output.join("")).not.toMatch(/not yet available/i);
+  });
+
+  it("throws when no token is available, without attempting a token exchange", async () => {
     getToken.mockReturnValue(null);
     await expect(runSubmit()).rejects.toThrow(/GITHUB_TOKEN|token|authentication/i);
+    expect(exchangeGitHubToken).not.toHaveBeenCalled();
   });
 
-  it("blocks submission when critical findings are present", async () => {
+  it("blocks submission when critical findings are present, before any token exchange or submit", async () => {
     scanTier1.mockReturnValue([
       { type: "secret", severity: "critical", message: "Key leak", location: "x" } satisfies Finding,
     ]);
     await expect(runSubmit()).rejects.toThrow(/critical|high|blocked/i);
+    expect(exchangeGitHubToken).not.toHaveBeenCalled();
+    expect(submitToRegistry).not.toHaveBeenCalled();
   });
 
-  it("does not call computeTrustScore during submit (trust gate is findings-only)", async () => {
-    await runSubmit();
-    expect(computeTrustScore).not.toHaveBeenCalled();
+  describe("--github-oidc", () => {
+    it("mints an Actions OIDC token and exchanges it, instead of reading GITHUB_TOKEN/MCPM_TOKEN", async () => {
+      await runSubmit({ githubOidc: true });
+      expect(getToken).not.toHaveBeenCalled();
+      expect(audienceFromRegistryUrl).toHaveBeenCalledWith("https://registry.modelcontextprotocol.io");
+      expect(fetchActionsOidcToken).toHaveBeenCalledWith(
+        "https://registry.modelcontextprotocol.io",
+        expect.anything()
+      );
+      expect(exchangeGitHubOidcToken).toHaveBeenCalledWith(expect.any(String), "actions-oidc-jwt");
+      expect(submitToRegistry).toHaveBeenCalledWith(expect.anything(), "registry-jwt-oidc", expect.any(String));
+    });
+
+    it("propagates a clear error when minting the OIDC token fails (e.g. no id-token: write)", async () => {
+      fetchActionsOidcToken.mockRejectedValue(new Error("mcpm publish --github-oidc: ... id-token: write ..."));
+      await expect(runSubmit({ githubOidc: true })).rejects.toThrow(/id-token: write/);
+      expect(exchangeGitHubOidcToken).not.toHaveBeenCalled();
+      expect(submitToRegistry).not.toHaveBeenCalled();
+    });
   });
 });

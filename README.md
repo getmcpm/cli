@@ -256,8 +256,8 @@ Those 20 points **inform the score but cannot clear a safety floor.** The MCP se
 | `mcpm outdated` | Show version drift for installed servers (use `mcpm audit` for current security findings) |
 | `mcpm secrets` | Manage MCP server credentials (AES-GCM encrypted at rest; key held in the OS keychain — macOS Keychain / libsecret / Windows DPAPI — so a copied store can't be decrypted off-machine, with a machine-derived-key fallback where no keychain is available). `mcpm secrets migrate` upgrades older entries |
 | `mcpm publish scaffold` | Create a .mcpm-publish.yaml manifest interactively |
-| `mcpm publish check` | Dry-run: show trust score and what would be submitted |
-| `mcpm publish` | Submit to the official MCP registry (requires GITHUB_TOKEN) |
+| `mcpm publish check` | Dry-run: show trust score and what would be submitted (`--json` emits the exact request body) |
+| `mcpm publish` | Submit to the official MCP registry (requires `GITHUB_TOKEN`/`MCPM_TOKEN`, or `--github-oidc` in GitHub Actions with `id-token: write`) |
 | `mcpm doctor` | Check MCP setup health and report issues (`--json` structured model, `--report` redacted paste-for-bug-reports snapshot) |
 | `mcpm init` | Scaffold a starter `mcpm.yaml` stack file in the current directory |
 | `mcpm disable <name>` | Disable an MCP server without removing it from config |

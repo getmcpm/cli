@@ -5,7 +5,15 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { readManifest, validateDescription } from "../../commands/publish/manifest.js";
+import {
+  readManifest,
+  validateDescription,
+  manifestToServerJson,
+  resolveVersion,
+  PublishManifestSchema,
+  SERVER_SCHEMA_URL,
+  type PublishManifest,
+} from "../../commands/publish/manifest.js";
 
 vi.mock("node:fs/promises");
 vi.mock("../../utils/fs.js");
@@ -155,5 +163,140 @@ describe("validateDescription", () => {
       "the MCP registry caps description at 100 characters (server.schema.json maxLength); yours is 101"
     );
     expect(fromReader.message).toContain(validateDescription("a".repeat(101)) as string);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// manifestToServerJson — the exact body POSTed to /v0.1/publish and
+// /v0.1/validate. Shapes pinned here were confirmed live against
+// registry.modelcontextprotocol.io on 2026-09-14: mutating any of `$schema`,
+// `packages[].transport`, the runtimeArguments Argument shape, or the
+// repository `source` (not `type`) field must fail these.
+// ---------------------------------------------------------------------------
+
+const BASE_RAW = {
+  name: "io.github.test/my-server",
+  description: "A test MCP server",
+  package: { registryType: "npm" as const, identifier: "@test/my-server" },
+};
+
+const BASE: PublishManifest = PublishManifestSchema.parse(BASE_RAW);
+
+describe("manifestToServerJson", () => {
+  it("sets $schema and the ServerJSON-required keys (name, description, version)", () => {
+    const result = manifestToServerJson(BASE, "1.2.3");
+    expect(result.$schema).toBe(SERVER_SCHEMA_URL);
+    expect(result).toMatchObject({
+      name: "io.github.test/my-server",
+      description: "A test MCP server",
+      version: "1.2.3",
+    });
+  });
+
+  it("packages[0].transport defaults to stdio when the manifest omits transport", () => {
+    const result = manifestToServerJson(BASE, "1.0.0");
+    expect(result.packages).toHaveLength(1);
+    expect(result.packages[0].transport).toEqual({ type: "stdio" });
+  });
+
+  it("packages[0].version matches the resolved version, not a placeholder", () => {
+    const result = manifestToServerJson(BASE, "9.9.9");
+    expect(result.packages[0].version).toBe("9.9.9");
+    expect(result.packages[0].registryType).toBe("npm");
+    expect(result.packages[0].identifier).toBe("@test/my-server");
+  });
+
+  it("maps the runtimeArguments string shorthand to registry positional Argument objects", () => {
+    const manifest = PublishManifestSchema.parse({ ...BASE_RAW, runtimeArguments: ["serve"] });
+    const result = manifestToServerJson(manifest, "1.0.0");
+    expect(result.packages[0].runtimeArguments).toEqual([{ type: "positional", value: "serve" }]);
+  });
+
+  it("omits runtimeArguments/runtimeHint/environmentVariables entirely when not set (no empty arrays)", () => {
+    const result = manifestToServerJson(BASE, "1.0.0");
+    expect(result.packages[0]).not.toHaveProperty("runtimeArguments");
+    expect(result.packages[0]).not.toHaveProperty("runtimeHint");
+    expect(result.packages[0]).not.toHaveProperty("environmentVariables");
+  });
+
+  it("maps repository as {source, url} — the registry's Repository schema has no `type` field", () => {
+    const manifest = PublishManifestSchema.parse({
+      ...BASE_RAW,
+      repository: { source: "github", url: "https://github.com/test/my-server" },
+    });
+    const result = manifestToServerJson(manifest, "1.0.0");
+    expect(result.repository).toEqual({ source: "github", url: "https://github.com/test/my-server" });
+    expect(result.repository).not.toHaveProperty("type");
+  });
+
+  it("uses homepage as websiteUrl when websiteUrl is not explicitly set", () => {
+    const manifest = PublishManifestSchema.parse({ ...BASE_RAW, homepage: "https://example.com" });
+    const result = manifestToServerJson(manifest, "1.0.0");
+    expect(result.websiteUrl).toBe("https://example.com");
+  });
+
+  it("prefers an explicit websiteUrl over homepage", () => {
+    const manifest = PublishManifestSchema.parse({
+      ...BASE_RAW,
+      homepage: "https://example.com/homepage",
+      websiteUrl: "https://example.com/site",
+    });
+    const result = manifestToServerJson(manifest, "1.0.0");
+    expect(result.websiteUrl).toBe("https://example.com/site");
+  });
+
+  it("passes environmentVariables through unchanged (already registry-shaped)", () => {
+    const manifest = PublishManifestSchema.parse({
+      ...BASE_RAW,
+      environmentVariables: [{ name: "API_KEY", isRequired: true, isSecret: true }],
+    });
+    const result = manifestToServerJson(manifest, "1.0.0");
+    expect(result.packages[0].environmentVariables).toEqual([
+      { name: "API_KEY", isRequired: true, isSecret: true },
+    ]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// resolveVersion — manifest.version → package.json in cwd → error.
+// ---------------------------------------------------------------------------
+
+describe("resolveVersion", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockIsEnoent.mockReturnValue(false);
+  });
+
+  it("uses the manifest's own version when set, without reading package.json", async () => {
+    const manifest = PublishManifestSchema.parse({ ...BASE_RAW, version: "9.9.9" });
+    const version = await resolveVersion(manifest, "/fake/cwd");
+    expect(version).toBe("9.9.9");
+    expect(mockReadFile).not.toHaveBeenCalled();
+  });
+
+  it("falls back to package.json's version in cwd when the manifest omits version", async () => {
+    mockReadFile.mockResolvedValue(JSON.stringify({ version: "2.3.4" }));
+    const version = await resolveVersion(BASE, "/fake/cwd");
+    expect(version).toBe("2.3.4");
+    expect(mockReadFile).toHaveBeenCalledWith(expect.stringContaining("package.json"), "utf-8");
+  });
+
+  it("throws a clear error when neither the manifest nor a package.json has a version (ENOENT)", async () => {
+    const notFound = Object.assign(new Error("ENOENT"), { code: "ENOENT" });
+    mockReadFile.mockRejectedValue(notFound);
+    mockIsEnoent.mockReturnValue(true);
+    await expect(resolveVersion(BASE, "/fake/cwd")).rejects.toThrow(/No version found/);
+  });
+
+  it("throws when package.json exists but has no version field", async () => {
+    mockReadFile.mockResolvedValue(JSON.stringify({ name: "x" }));
+    await expect(resolveVersion(BASE, "/fake/cwd")).rejects.toThrow(/No version found/);
+  });
+
+  it("rethrows non-ENOENT fs errors reading package.json", async () => {
+    const permError = Object.assign(new Error("EACCES"), { code: "EACCES" });
+    mockReadFile.mockRejectedValue(permError);
+    mockIsEnoent.mockReturnValue(false);
+    await expect(resolveVersion(BASE, "/fake/cwd")).rejects.toThrow("EACCES");
   });
 });
