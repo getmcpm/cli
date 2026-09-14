@@ -8,6 +8,22 @@ _Add entries here, never under a stamped version_ — a release commit renames t
 heading, and a branch that wrote beneath it merges without conflict straight into a
 published section (it happened to #170).
 
+### Added
+
+- **`mcpm publish --github-oidc`** — authenticate in GitHub Actions via a
+  minted Actions OIDC token exchanged for a registry JWT
+  (`POST /v0.1/auth/github-oidc`), instead of a `GITHUB_TOKEN`/`MCPM_TOKEN`
+  PAT. No secret needed beyond the job's own `id-token: write` permission.
+- **`mcpm publish check --json`** — emits exactly the `ServerJSON` body that
+  `mcpm publish` would POST to `/v0.1/publish`, one parseable JSON value on
+  stdout, so it can be piped straight into
+  `curl -d @- .../v0.1/validate`.
+
+This release is **MINOR by content**, the same rule the Decisions Log applies
+throughout: two new public flags are additive, but `mcpm publish`'s exit code
+on a registry 404 changes from `0` (the old "not yet available" special case)
+to non-zero — a changed outcome on a public CLI surface, not a pure bugfix.
+
 ### Fixed
 
 - **`mcpm publish` could not work against the registry as it exists — a wrong
