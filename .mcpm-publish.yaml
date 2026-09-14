@@ -7,6 +7,7 @@
 # now-known-wrong `repository.type: "git"` shape) has been deleted in favor
 # of this file — see fix/publish-live-registry.
 name: io.github.getmcpm/cli
+title: mcpm
 description: "MCP security guard + package manager: trust-scored installs, blocks prompt injection and rug-pulls."
 websiteUrl: https://github.com/getmcpm/cli
 repository:

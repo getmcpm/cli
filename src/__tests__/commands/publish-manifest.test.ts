@@ -193,6 +193,25 @@ describe("manifestToServerJson", () => {
     });
   });
 
+  // #216 review, MED 4: the live io.github.getmcpm/cli listing carries
+  // "title": "mcpm" (server.schema.json: title, min 1/max 100 chars,
+  // confirmed live via /v0.1/validate) — the manifest/ServerJson shapes had
+  // no field to carry it at all, so a re-publish would have dropped it.
+  it("omits title when the manifest doesn't set one (no empty string)", () => {
+    const result = manifestToServerJson(BASE, "1.0.0");
+    expect(result).not.toHaveProperty("title");
+  });
+
+  it("passes title through when the manifest sets one", () => {
+    const manifest = PublishManifestSchema.parse({ ...BASE_RAW, title: "mcpm" });
+    const result = manifestToServerJson(manifest, "1.0.0");
+    expect(result.title).toBe("mcpm");
+  });
+
+  it("PublishManifestSchema rejects a title over 100 characters", () => {
+    expect(() => PublishManifestSchema.parse({ ...BASE_RAW, title: "a".repeat(101) })).toThrow();
+  });
+
   it("packages[0].transport defaults to stdio when the manifest omits transport", () => {
     const result = manifestToServerJson(BASE, "1.0.0");
     expect(result.packages).toHaveLength(1);

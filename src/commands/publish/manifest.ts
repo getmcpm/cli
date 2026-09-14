@@ -76,6 +76,11 @@ export const PublishManifestSchema = z.object({
   description: z.string().min(1).max(DESCRIPTION_MAX, {
     error: (issue) => descriptionCapMessage(String(issue.input)),
   }),
+  // Optional display name (server.schema.json: title, minLength 1, maxLength
+  // 100 — confirmed live via /v0.1/validate, #216 review MED 4). Distinct
+  // from `name` (the registry identifier, e.g. "io.github.you/my-server");
+  // the live io.github.getmcpm/cli listing already carries "title": "mcpm".
+  title: z.string().min(1).max(100).optional(),
   homepage: z.string().url().optional(),
   tags: z.array(z.string()).default([]),
   package: z.object({
@@ -121,6 +126,7 @@ export interface ServerJson {
   $schema: string;
   name: string;
   description: string;
+  title?: string;
   version: string;
   websiteUrl?: string;
   repository?: { source: string; url: string };
@@ -171,6 +177,7 @@ export function manifestToServerJson(manifest: PublishManifest, version: string)
     $schema: SERVER_SCHEMA_URL,
     name: manifest.name,
     description: manifest.description,
+    ...(manifest.title ? { title: manifest.title } : {}),
     version,
     ...(websiteUrl ? { websiteUrl } : {}),
     ...(manifest.repository ? { repository: manifest.repository } : {}),
