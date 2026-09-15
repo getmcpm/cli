@@ -8,6 +8,22 @@ _Add entries here, never under a stamped version_ — a release commit renames t
 heading, and a branch that wrote beneath it merges without conflict straight into a
 published section (it happened to #170).
 
+### Added
+
+- **`mcpm publish --github-oidc`** — authenticate in GitHub Actions via a
+  minted Actions OIDC token exchanged for a registry JWT
+  (`POST /v0.1/auth/github-oidc`), instead of a `GITHUB_TOKEN`/`MCPM_TOKEN`
+  PAT. No secret needed beyond the job's own `id-token: write` permission.
+- **`mcpm publish check --json`** — emits exactly the `ServerJSON` body that
+  `mcpm publish` would POST to `/v0.1/publish`, one parseable JSON value on
+  stdout, so it can be piped straight into
+  `curl -d @- .../v0.1/validate`.
+
+This release is **MINOR by content**, the same rule the Decisions Log applies
+throughout: two new public flags are additive, but `mcpm publish`'s exit code
+on a registry 404 changes from `0` (the old "not yet available" special case)
+to non-zero — a changed outcome on a public CLI surface, not a pure bugfix.
+
 ### Changed
 
 - **Three dependencies bumped to the exact versions Dependabot proposed:
@@ -23,6 +39,49 @@ published section (it happened to #170).
   matters for the runtime `@inquirer/prompts` bump. `pnpm/action-setup`
   6.0.10 → 6.1.0 (#214) is a GitHub Action bump, unaffected by any of this,
   and lands separately.
+
+### Fixed
+
+- **`mcpm publish` could not work against the registry as it exists — a wrong
+  endpoint, a raw token the registry rejects, a body it 422s on, and a 404
+  from mcpm's own mistake silently reported as "not yet available" with
+  exit 0.** Shipped in v0.4.0 (`f2cd9c6`); the submit path was unchanged
+  through v0.39.2. Four independent defects, all in `submitToRegistry`
+  (`src/registry/publish-client.ts`) and `handlePublishSubmit`
+  (`src/commands/publish/submit.ts`):
+  1. It POSTed to `/v0.1/servers`, which is GET-only — the live registry
+     answers `404 {"detail":"Endpoint not found"}`. Publishing is
+     `POST /v0.1/publish`.
+  2. It sent the raw `GITHUB_TOKEN`/`MCPM_TOKEN` as the `Authorization:
+     Bearer` value. The registry requires a short-lived registry JWT
+     obtained by exchange first (`POST /v0.1/auth/github-at` with
+     `{github_token}`) — the raw token is never accepted at `/v0.1/publish`.
+  3. The submitted body was the raw `.mcpm-publish.yaml` manifest, missing
+     required `ServerJSON` fields (`$schema`, top-level `version`,
+     `packages[].transport`) that the registry 422s without.
+  4. `handlePublishSubmit` caught the 404 **it caused itself** and printed
+     "The official registry publish API is not yet available" — then
+     returned normally, exit 0. The registry has accepted publishes since
+     2025; no test pinned the endpoint path, only the (wrong) fallback
+     message. The live listing `io.github.getmcpm/cli` sat at 0.34.0 while
+     npm reached 0.39.2 as a direct result (backlog #75).
+
+  Fixed: `submitToRegistry` now posts to `/v0.1/publish` with an exchanged
+  registry token; new `exchangeGitHubToken`/`exchangeGitHubOidcToken`/
+  `fetchActionsOidcToken` handle the exchange (the last two power a new
+  `--github-oidc` flag for CI, minting a GitHub Actions OIDC token and
+  exchanging it — no PAT needed); a new pure `manifestToServerJson` builds
+  the exact registry-required body from an extended `.mcpm-publish.yaml`
+  schema (`version`, `transport`, `runtimeHint`, `runtimeArguments`,
+  `environmentVariables`, `repository`, `websiteUrl`); `mcpm publish check
+  --json` now prints that exact body; and the false "not yet available"
+  404/405 special case is deleted — any registry error is reported with its
+  real status and detail, exit non-zero. Verified live against
+  `registry.modelcontextprotocol.io/v0.1/validate`. `docs/registry-entry.json`
+  (a stale, unread hand-submission template — and, it turns out, itself
+  wrong: the registry's `Repository` schema has no `type` field, only
+  `source`) is deleted in favor of a root `.mcpm-publish.yaml`, the manifest
+  this command actually reads.
 
 ## [0.39.2] - 2026-09-12
 

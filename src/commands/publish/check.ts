@@ -9,6 +9,7 @@ import type { Finding } from "../../scanner/tier1.js";
 import type { TrustScore, TrustScoreInput } from "../../scanner/trust-score.js";
 import { PublishErrors } from "../../errors/publish-errors.js";
 import { levelColor } from "../../utils/format-trust.js";
+import { manifestToPackages, manifestToServerJson, resolveVersion } from "./manifest.js";
 
 const PLACEHOLDER_VERSION = "0.0.0";
 
@@ -17,13 +18,24 @@ export interface PublishCheckDeps {
   scanTier1: (entry: ServerEntry) => Finding[];
   computeTrustScore: (input: TrustScoreInput) => TrustScore;
   output: (text: string) => void;
+  cwd?: string;
 }
 
 export interface PublishCheckOptions {
   registryUrl?: string;
+  json?: boolean;
 }
 
+/**
+ * Builds the ServerEntry that scanTier1 sees for `publish check`/`publish`.
+ * Goes through the SAME `manifestToPackages` that builds the published
+ * ServerJSON (manifest.ts) — see the HIGH finding in #216 review: this used
+ * to hand-roll `environmentVariables: []` and omit `runtimeArguments`
+ * entirely, so the trust gate never saw fields the PR now actually publishes
+ * and scanTier1 actually scans (src/scanner/tier1.ts reads both).
+ */
 export function manifestToEntry(manifest: PublishManifest): ServerEntry {
+  const [pkg] = manifestToPackages(manifest, PLACEHOLDER_VERSION);
   return {
     server: {
       name: manifest.name,
@@ -32,11 +44,12 @@ export function manifestToEntry(manifest: PublishManifest): ServerEntry {
       repository: manifest.homepage ? { url: manifest.homepage } : undefined,
       packages: [
         {
-          registryType: manifest.package.registryType,
-          identifier: manifest.package.identifier,
-          version: PLACEHOLDER_VERSION,
-          transport: { type: "stdio" },
-          environmentVariables: [],
+          registryType: pkg.registryType,
+          identifier: pkg.identifier,
+          version: pkg.version,
+          transport: pkg.transport,
+          environmentVariables: pkg.environmentVariables ?? [],
+          runtimeArguments: pkg.runtimeArguments,
         },
       ],
       remotes: [],
@@ -64,9 +77,13 @@ const MEDIUM_BLOCK_THRESHOLD = 3;
  * launch flags in runtimeArguments) are DELIBERATELY counted toward
  * MEDIUM_BLOCK_THRESHOLD — the publisher can remediate by removing the flag
  * from their manifest. The unremediable launcher-class npm finding is
- * severity LOW and can never reach this medium aggregation by construction
- * (manifestToEntry also emits no runtimeArguments today, so the mediums
- * cannot occur on this path yet).
+ * severity LOW and can never reach this medium aggregation by construction —
+ * that is a property of detectInstallScriptShape's launcher classification,
+ * independent of runtimeArguments. (Corrected by #216 review: manifestToEntry
+ * now derives from manifestToPackages and DOES emit runtimeArguments, so the
+ * medium install-script findings described above are reachable on this path —
+ * the prior comment here claiming they "cannot occur on this path yet" was
+ * itself the HIGH finding's blind spot, restated as a false guarantee.)
  */
 export function assertTrustGate(findings: Finding[]): void {
   const criticalOrHigh = findings.filter(
@@ -100,16 +117,27 @@ export function assertTrustGate(findings: Finding[]): void {
 }
 
 export async function handlePublishCheck(
-  _options: PublishCheckOptions,
+  options: PublishCheckOptions,
   deps: PublishCheckDeps
 ): Promise<void> {
-  const { readManifest, scanTier1, computeTrustScore, output } = deps;
+  const { readManifest, scanTier1, computeTrustScore, output, cwd = process.cwd() } = deps;
 
   const manifest = await readManifest();
   if (!manifest) throw PublishErrors.manifestNotFound();
 
   const findings = scanTier1(manifestToEntry(manifest));
   assertTrustGate(findings);
+
+  const version = await resolveVersion(manifest, cwd);
+  const serverJson = manifestToServerJson(manifest, version);
+
+  // --json emits exactly the POST /v0.1/publish body — one parseable JSON
+  // value on stdout, nothing else (matching the rest of the CLI's --json
+  // convention), so it can be piped straight to `curl -d @- .../v0.1/validate`.
+  if (options.json) {
+    output(JSON.stringify(serverJson));
+    return;
+  }
 
   const score = computeTrustScore({
     findings,
@@ -124,5 +152,7 @@ export async function handlePublishCheck(
   if (manifest.homepage) output(`  Homepage:    ${manifest.homepage}`);
   output(`  Tags:        ${manifest.tags.join(", ") || "(none)"}`);
   output(`  Trust score: ${levelColor(score.level)} (${score.score}/100)`);
+  output(`\nRequest body (POST /v0.1/publish):`);
+  output(JSON.stringify(serverJson, null, 2));
   output(chalk.green("\nReady to publish. Run 'mcpm publish' to submit."));
 }

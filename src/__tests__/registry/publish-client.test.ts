@@ -1,26 +1,57 @@
 /**
  * Tests for src/registry/publish-client.ts
- * Covers: successful POST, non-ok response throws RegistryError,
- * network failure throws NetworkError, body.url fallback.
+ *
+ * Covers: the three live paths (POST /v0.1/publish, /v0.1/auth/github-at,
+ * /v0.1/auth/github-oidc), the Actions OIDC token mint, audience derivation,
+ * and the token-routing invariant — a GitHub token must reach only
+ * /v0.1/auth/github-at, and /v0.1/publish must receive only the exchanged
+ * registry token. Each is written so that reverting the fix (e.g. posting to
+ * /v0.1/servers again, or sending the GitHub token to /v0.1/publish) fails it.
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { submitToRegistry, validateRegistryUrl } from "../../registry/publish-client.js";
+import {
+  submitToRegistry,
+  validateRegistryUrl,
+  exchangeGitHubToken,
+  exchangeGitHubOidcToken,
+  fetchActionsOidcToken,
+  audienceFromRegistryUrl,
+} from "../../registry/publish-client.js";
 import { NetworkError, RegistryError } from "../../registry/errors.js";
+import type { ServerJson } from "../../commands/publish/manifest.js";
 
-const MANIFEST = {
+const SERVER_JSON: ServerJson = {
+  $schema: "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
   name: "io.github.test/my-server",
   description: "A test server",
-  tags: [],
-  package: { registryType: "npm" as const, identifier: "@test/my-server" },
+  version: "1.0.0",
+  packages: [
+    {
+      registryType: "npm",
+      identifier: "@test/my-server",
+      version: "1.0.0",
+      transport: { type: "stdio" },
+    },
+  ],
 };
 
 const REGISTRY_URL = "https://registry.example.com";
-const TOKEN = "ghp_test_token";
+const REGISTRY_TOKEN = "registry-jwt-token";
 
 describe("submitToRegistry", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
+  });
+
+  it("POSTs to /v0.1/publish, not the old (nonexistent) /v0.1/servers", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({}) });
+    vi.stubGlobal("fetch", fetchMock);
+    await submitToRegistry(SERVER_JSON, REGISTRY_TOKEN, REGISTRY_URL);
+    expect(fetchMock).toHaveBeenCalledWith(
+      `${REGISTRY_URL}/v0.1/publish`,
+      expect.anything()
+    );
   });
 
   it("returns the url from the response body on success", async () => {
@@ -29,18 +60,23 @@ describe("submitToRegistry", () => {
       json: async () => ({ url: "https://registry.example.com/servers/my-server" }),
     }));
 
-    const result = await submitToRegistry(MANIFEST, TOKEN, REGISTRY_URL);
+    const result = await submitToRegistry(SERVER_JSON, REGISTRY_TOKEN, REGISTRY_URL);
     expect(result.url).toBe("https://registry.example.com/servers/my-server");
   });
 
-  it("falls back to constructed url when body.url is missing", async () => {
+  // #216 review, MED 5: /v0.1/servers/<name> 404s live ("Endpoint not
+  // found") — the readable listing path is /v0.1/servers/<name>/versions
+  // (confirmed 200 live against registry.modelcontextprotocol.io). This is
+  // the path actually taken in production: the real /v0.1/publish response
+  // body has no `url` field at all.
+  it("falls back to /v0.1/servers/<name>/versions when body.url is missing (the real ServerResponse shape has none, and this is the only path that 200s)", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
       ok: true,
       json: async () => ({}),
     }));
 
-    const result = await submitToRegistry(MANIFEST, TOKEN, REGISTRY_URL);
-    expect(result.url).toContain("io.github.test%2Fmy-server");
+    const result = await submitToRegistry(SERVER_JSON, REGISTRY_TOKEN, REGISTRY_URL);
+    expect(result.url).toBe(`${REGISTRY_URL}/v0.1/servers/io.github.test%2Fmy-server/versions`);
   });
 
   it("throws RegistryError on non-ok response", async () => {
@@ -49,13 +85,81 @@ describe("submitToRegistry", () => {
       status: 404,
     }));
 
-    await expect(submitToRegistry(MANIFEST, TOKEN, REGISTRY_URL)).rejects.toThrow(RegistryError);
+    await expect(submitToRegistry(SERVER_JSON, REGISTRY_TOKEN, REGISTRY_URL)).rejects.toThrow(RegistryError);
+  });
+
+  it("surfaces detail + errors[].message from a problem+json 422 body, not just the bare status", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
+      ok: false,
+      status: 422,
+      headers: { get: () => null },
+      json: async () => ({
+        title: "Unprocessable Entity",
+        status: 422,
+        detail: "validation failed",
+        errors: [{ message: "expected required property $schema to be present", location: "body" }],
+      }),
+    }));
+
+    const err = await submitToRegistry(SERVER_JSON, REGISTRY_TOKEN, REGISTRY_URL).catch((e: Error) => e);
+    expect((err as Error).message).toContain("validation failed");
+    expect((err as Error).message).toContain("expected required property $schema to be present");
+  });
+
+  it("falls back to the bare status when the error body isn't readable (e.g. a mock with no .json())", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: false, status: 500 }));
+    const err = await submitToRegistry(SERVER_JSON, REGISTRY_TOKEN, REGISTRY_URL).catch((e: Error) => e);
+    expect((err as Error).message).toBe("Registry API returned 500");
+  });
+
+  // #216 review, MED 3: detail/title/errors[].message are registry-controlled
+  // and land in a thrown Error's .message, which publish/index.ts prints
+  // straight to the terminal — an ANSI/OSC/control-char escape sequence in
+  // any of them must not reach stdout/stderr unsanitized.
+  it("strips terminal escape sequences from a 422 body's detail/errors before they reach the thrown message", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
+      ok: false,
+      status: 422,
+      headers: { get: () => null },
+      json: async () => ({
+        title: "Unprocessable Entity",
+        status: 422,
+        detail: "[2J]0;pwnedvalidation failed",
+        errors: [{ message: "]0;evilbad field", location: "body" }],
+      }),
+    }));
+
+    const err = await submitToRegistry(SERVER_JSON, REGISTRY_TOKEN, REGISTRY_URL).catch((e: Error) => e);
+    const message = (err as Error).message;
+    expect(message).not.toContain("");
+    expect(message).not.toContain("");
+    expect(message).toContain("validation failed");
+    expect(message).toContain("bad field");
+  });
+
+  // #216 review, LOW 8: the registry echoes the whole submitted request body
+  // back in errors[].value on a 422 — that must never be interpolated into
+  // the thrown message (it can carry arbitrary manifest data).
+  it("never includes errors[].value in the thrown message", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
+      ok: false,
+      status: 422,
+      headers: { get: () => null },
+      json: async () => ({
+        title: "Unprocessable Entity",
+        status: 422,
+        errors: [{ message: "invalid", location: "body.name", value: { github_token: "SENTINEL" } }],
+      }),
+    }));
+
+    const err = await submitToRegistry(SERVER_JSON, REGISTRY_TOKEN, REGISTRY_URL).catch((e: Error) => e);
+    expect((err as Error).message).not.toContain("SENTINEL");
   });
 
   it("throws NetworkError when fetch rejects", async () => {
     vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("Network failure")));
 
-    await expect(submitToRegistry(MANIFEST, TOKEN, REGISTRY_URL)).rejects.toThrow(NetworkError);
+    await expect(submitToRegistry(SERVER_JSON, REGISTRY_TOKEN, REGISTRY_URL)).rejects.toThrow(NetworkError);
   });
 
   it("passes redirect:'manual' so a 3xx can't carry the token to the redirect target", async () => {
@@ -64,7 +168,7 @@ describe("submitToRegistry", () => {
       json: async () => ({ url: "https://registry.example.com/servers/x" }),
     });
     vi.stubGlobal("fetch", fetchMock);
-    await submitToRegistry(MANIFEST, TOKEN, REGISTRY_URL);
+    await submitToRegistry(SERVER_JSON, REGISTRY_TOKEN, REGISTRY_URL);
     expect(fetchMock).toHaveBeenCalledWith(
       expect.any(String),
       expect.objectContaining({ redirect: "manual" })
@@ -96,7 +200,7 @@ describe("submitToRegistry", () => {
       },
     }));
 
-    const result = await submitToRegistry(MANIFEST, TOKEN, REGISTRY_URL);
+    const result = await submitToRegistry(SERVER_JSON, REGISTRY_TOKEN, REGISTRY_URL);
     expect(result.url).toBe("https://registry.example.com/servers/streamed");
     expect(reader.read).toHaveBeenCalled();
   });
@@ -124,10 +228,220 @@ describe("submitToRegistry", () => {
       },
     }));
 
-    await expect(submitToRegistry(MANIFEST, TOKEN, REGISTRY_URL)).rejects.toThrow(/cap/i);
+    await expect(submitToRegistry(SERVER_JSON, REGISTRY_TOKEN, REGISTRY_URL)).rejects.toThrow(/cap/i);
     // Aborted partway: 10 MB cap / 2 MB chunks ⇒ ~6 pulls, far fewer than ∞.
     expect(pulls).toBeLessThan(10);
     expect(cancel).toHaveBeenCalled();
+  });
+});
+
+describe("exchangeGitHubToken", () => {
+  beforeEach(() => vi.restoreAllMocks());
+
+  it("POSTs {github_token} to /v0.1/auth/github-at", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ registry_token: "rt-123", expires_at: 999 }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await exchangeGitHubToken(REGISTRY_URL, "ghp_secret");
+    expect(result).toEqual({ registryToken: "rt-123", expiresAt: 999 });
+
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe(`${REGISTRY_URL}/v0.1/auth/github-at`);
+    expect(JSON.parse(init.body as string)).toEqual({ github_token: "ghp_secret" });
+  });
+
+  it("does not send the GitHub token as a Bearer header (the endpoint takes it in the body only)", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ registry_token: "rt", expires_at: 1 }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    await exchangeGitHubToken(REGISTRY_URL, "ghp_secret");
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    const headers = init.headers as Record<string, string>;
+    expect(headers.Authorization).toBeUndefined();
+  });
+
+  it("surfaces the registry's 401 detail on a bad token (live shape: {title,status,detail})", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
+      ok: false,
+      status: 401,
+      headers: { get: () => null },
+      json: async () => ({ title: "Unauthorized", status: 401, detail: "Token exchange failed" }),
+    }));
+    const err = await exchangeGitHubToken(REGISTRY_URL, "bad").catch((e: Error) => e);
+    expect(err).toBeInstanceOf(RegistryError);
+    expect((err as Error).message).toContain("Token exchange failed");
+  });
+
+  it("never calls fetch for an unsafe registry URL", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(exchangeGitHubToken("http://evil.example.com", "t")).rejects.toThrow(/https/);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("exchangeGitHubOidcToken", () => {
+  beforeEach(() => vi.restoreAllMocks());
+
+  it("POSTs {oidc_token} to /v0.1/auth/github-oidc", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ registry_token: "rt-oidc", expires_at: 42 }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await exchangeGitHubOidcToken(REGISTRY_URL, "eyJ.oidc.jwt");
+    expect(result).toEqual({ registryToken: "rt-oidc", expiresAt: 42 });
+
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe(`${REGISTRY_URL}/v0.1/auth/github-oidc`);
+    expect(JSON.parse(init.body as string)).toEqual({ oidc_token: "eyJ.oidc.jwt" });
+  });
+
+  // #216 review, MED 1: exchangeGitHubOidcToken had no test pinning that it
+  // calls validateRegistryUrl before fetch — the sibling exchangeGitHubToken
+  // describe block above has this test, exchangeGitHubOidcToken did not, and
+  // deleting its validateRegistryUrl(registryUrl) call left the full suite
+  // green.
+  it("never calls fetch for an unsafe registry URL", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(exchangeGitHubOidcToken("http://evil.example.com", "t")).rejects.toThrow(/https/);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+});
+
+// #216 review, MED 2: the reference implementation
+// (cmd/publisher/auth/github-oidc.go:182) uses Go's `u.Host`, which KEEPS the
+// port; this previously used `parsed.hostname`, which drops it — a
+// `--registry https://example.com:8443` minted a token whose audience
+// silently dropped ":8443", failing that registry's issuer check.
+describe("audienceFromRegistryUrl (parity with cmd/publisher/auth/github-oidc.go's u.Host)", () => {
+  it("derives scheme + lowercased host, matching the official publisher's audienceFromRegistryURL", () => {
+    expect(audienceFromRegistryUrl("https://registry.modelcontextprotocol.io")).toBe(
+      "https://registry.modelcontextprotocol.io"
+    );
+  });
+
+  it("lowercases a mixed-case host", () => {
+    expect(audienceFromRegistryUrl("https://Registry.ModelContextProtocol.IO")).toBe(
+      "https://registry.modelcontextprotocol.io"
+    );
+  });
+
+  it("drops path/query — audience is scheme+host only", () => {
+    expect(audienceFromRegistryUrl("https://registry.example.com/v0.1")).toBe(
+      "https://registry.example.com"
+    );
+  });
+
+  it("keeps a non-default port (u.Host includes it; parsed.hostname would drop it)", () => {
+    expect(audienceFromRegistryUrl("https://EXAMPLE.com:8443")).toBe("https://example.com:8443");
+  });
+});
+
+describe("fetchActionsOidcToken", () => {
+  beforeEach(() => vi.restoreAllMocks());
+
+  const ENV = {
+    ACTIONS_ID_TOKEN_REQUEST_URL: "https://pipelines.actions.githubusercontent.com/token?api-version=2.0",
+    ACTIONS_ID_TOKEN_REQUEST_TOKEN: "actions-request-token",
+  };
+
+  it("GETs the Actions token endpoint with the audience query param and Bearer request token", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ value: "the-oidc-jwt" }) });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const token = await fetchActionsOidcToken("https://registry.modelcontextprotocol.io", ENV);
+    expect(token).toBe("the-oidc-jwt");
+
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe(
+      `${ENV.ACTIONS_ID_TOKEN_REQUEST_URL}&audience=${encodeURIComponent("https://registry.modelcontextprotocol.io")}`
+    );
+    const headers = init.headers as Record<string, string>;
+    expect(headers.Authorization).toBe(`Bearer ${ENV.ACTIONS_ID_TOKEN_REQUEST_TOKEN}`);
+  });
+
+  it("throws a clear id-token:write error when ACTIONS_ID_TOKEN_REQUEST_URL is absent", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(
+      fetchActionsOidcToken("https://registry.modelcontextprotocol.io", {
+        ACTIONS_ID_TOKEN_REQUEST_TOKEN: "t",
+      })
+    ).rejects.toThrow(/id-token: write/);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("throws a clear id-token:write error when ACTIONS_ID_TOKEN_REQUEST_TOKEN is absent", async () => {
+    await expect(
+      fetchActionsOidcToken("https://registry.modelcontextprotocol.io", {
+        ACTIONS_ID_TOKEN_REQUEST_URL: "https://pipelines.example/token",
+      })
+    ).rejects.toThrow(/id-token: write/);
+  });
+
+  it("throws when the Actions endpoint responds without a value", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true, json: async () => ({}) }));
+    await expect(fetchActionsOidcToken("https://registry.modelcontextprotocol.io", ENV)).rejects.toThrow(
+      /no value/i
+    );
+  });
+
+  // #216 review, LOW 7: fetchActionsOidcToken had no redirect:"manual", no
+  // timeout, and read response.json() directly instead of readCappedBody —
+  // while carrying ACTIONS_ID_TOKEN_REQUEST_TOKEN as a Bearer header. A 3xx
+  // must not carry that token to a redirect target (same discipline as
+  // postJson for the registry endpoints).
+  it("passes redirect:'manual' and refuses to follow a 3xx (the request token must not reach a redirect target)", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ type: "opaqueredirect", status: 0, ok: false });
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(fetchActionsOidcToken("https://registry.modelcontextprotocol.io", ENV)).rejects.toThrow(
+      /redirect/i
+    );
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({ redirect: "manual" })
+    );
+  });
+});
+
+describe("token-routing invariant (security)", () => {
+  beforeEach(() => vi.restoreAllMocks());
+
+  it("a GitHub token passed to exchangeGitHubToken never reaches any URL other than /v0.1/auth/github-at", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ registry_token: "rt", expires_at: 1 }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    await exchangeGitHubToken(REGISTRY_URL, "super-secret-gh-token");
+
+    for (const call of fetchMock.mock.calls) {
+      const [url, init] = call as [string, RequestInit];
+      const serialized = JSON.stringify(init);
+      if (serialized.includes("super-secret-gh-token")) {
+        expect(url).toBe(`${REGISTRY_URL}/v0.1/auth/github-at`);
+      }
+    }
+  });
+
+  it("submitToRegistry sends the exchanged registry token to /v0.1/publish as a Bearer header, and it alone", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({}) });
+    vi.stubGlobal("fetch", fetchMock);
+    await submitToRegistry(SERVER_JSON, "the-registry-jwt", REGISTRY_URL);
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe(`${REGISTRY_URL}/v0.1/publish`);
+    const headers = init.headers as Record<string, string>;
+    expect(headers.Authorization).toBe("Bearer the-registry-jwt");
   });
 });
 
@@ -201,7 +515,7 @@ describe("validateRegistryUrl (security #17 — token-exfil guard)", () => {
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
     await expect(
-      submitToRegistry(MANIFEST, TOKEN, "http://evil.example.com")
+      submitToRegistry(SERVER_JSON, REGISTRY_TOKEN, "http://evil.example.com")
     ).rejects.toThrow(/https/);
     expect(fetchMock).not.toHaveBeenCalled();
   });

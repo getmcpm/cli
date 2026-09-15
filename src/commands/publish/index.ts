@@ -60,9 +60,10 @@ export function registerPublishCommand(program: Command): void {
     .command("check")
     .description("Dry-run: show trust score and what would be submitted")
     .option("--registry <url>", "Custom registry URL")
-    .action(async (opts: { registry?: string }) => {
+    .option("--json", "Emit exactly the request body that would be POSTed to /v0.1/publish")
+    .action(async (opts: { registry?: string; json?: boolean }) => {
       await handlePublishCheck(
-        { registryUrl: opts.registry },
+        { registryUrl: opts.registry, json: opts.json },
         { readManifest, scanTier1, computeTrustScore, output: stdoutOutput }
       ).catch((err: Error) => {
         console.error(chalk.red(err.message));
@@ -71,16 +72,27 @@ export function registerPublishCommand(program: Command): void {
     });
 
   pub
-    .description("Submit to the official MCP registry (requires GITHUB_TOKEN)")
+    .description("Submit to the official MCP registry (requires GITHUB_TOKEN, or --github-oidc in Actions)")
     .option("--registry <url>", "Custom registry URL")
-    .action(async (opts: { registry?: string }) => {
-      const { submitToRegistry } = await import("../../registry/publish-client.js");
+    .option("--github-oidc", "Authenticate via GitHub Actions OIDC instead of GITHUB_TOKEN/MCPM_TOKEN")
+    .action(async (opts: { registry?: string; githubOidc?: boolean }) => {
+      const {
+        submitToRegistry,
+        exchangeGitHubToken,
+        exchangeGitHubOidcToken,
+        fetchActionsOidcToken,
+        audienceFromRegistryUrl,
+      } = await import("../../registry/publish-client.js");
       await handlePublishSubmit(
-        { registryUrl: opts.registry },
+        { registryUrl: opts.registry, githubOidc: opts.githubOidc },
         {
           readManifest,
           scanTier1,
           submitToRegistry,
+          exchangeGitHubToken,
+          exchangeGitHubOidcToken,
+          fetchActionsOidcToken,
+          audienceFromRegistryUrl,
           getToken: getTokenFromEnv,
           output: stdoutOutput,
         }

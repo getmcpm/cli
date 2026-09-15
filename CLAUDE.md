@@ -395,7 +395,7 @@ The first **enforcement** primitive in mcpm-guard — every prior guard feature 
 
 ### V1.5 (community trust)
 
-- [x] `mcpm publish` — submit to official registry with mandatory security scan gate (shipped in **v0.4.0**; the gate is `assertTrustGate` in `src/commands/publish/submit.ts`, run before any submission)
+- [x] `mcpm publish` — submit to official registry with mandatory security scan gate (shipped in **v0.4.0**; the gate is `assertTrustGate` in `src/commands/publish/submit.ts`, run before any submission; the submit path itself POSTed to a nonexistent endpoint with the wrong auth and a body the registry rejects from v0.4.0 through v0.39.2 — fixed in #216)
 - [ ] User ratings and reviews (requires backend)
 - [ ] Verified publisher badge
 - [ ] Usage stats (installs, active users)

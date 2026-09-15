@@ -3,6 +3,19 @@ name: Publish
 on:
   push:
     tags: ['v*']
+  # Re-publish (or first-publish) the OFFICIAL REGISTRY LISTING for a version
+  # already released to npm, without cutting a new npm release — e.g. this
+  # fix's own backlog #75: v0.39.2 published to npm before `mcpm publish`
+  # could reach the live registry at all, so the listing lagged at 0.34.0.
+  # Deliberately does NOT run `dogfood`/`publish` (see each job's `if:`) —
+  # this only ever touches the registry job below, and it verifies the given
+  # version is already live on npm before doing anything.
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Already-published npm version to (re-)list on the official MCP registry, e.g. 0.39.2'
+        required: true
+        type: string
 
 # Least-privilege default for the workflow. The publish job below explicitly
 # opts into exactly what it needs (contents: write for the GitHub Release,
@@ -47,6 +60,10 @@ jobs:
   # dependency-floor half of that class is covered independently by engines-invariant.
   dogfood:
     name: pre-publish dogfood · node ${{ matrix.node }}
+    # Tag-push releases only. workflow_dispatch (registry-listing-only re-runs,
+    # see the trigger comment above) must never build/pack/smoke a new npm
+    # release — it isn't cutting one.
+    if: github.event_name == 'push'
     runs-on: ubuntu-latest
     strategy:
       # "26 is broken, 22 and 24 are fine" is the useful answer, and it is the answer you
@@ -79,7 +96,11 @@ jobs:
       - run: pnpm run dogfood:release
 
   publish:
-    # Fail-closed on the gate above: no leg green, no publish.
+    # Fail-closed on the gate above: no leg green, no publish. The explicit
+    # `success()` replicates the DEFAULT needs-gating (skip if `dogfood`
+    # failed) that an explicit `if:` would otherwise silently drop — this job
+    # must never run on a `dogfood` failure just because it's a tag push.
+    if: github.event_name == 'push' && success()
     needs: dogfood
     runs-on: ubuntu-latest
     permissions:
@@ -98,6 +119,12 @@ jobs:
           cache: pnpm
           registry-url: https://registry.npmjs.org
 
+      # $VERSION is quoted on every use below (and in the registry job's own
+      # workflow_dispatch step further down, which references this comment)
+      # so a value containing shell metacharacters can't be interpreted by
+      # `run:` — GITHUB_REF_NAME is push-trigger-controlled (a tag name, not
+      # attacker-free-text), but the same quoting discipline costs nothing
+      # and avoids depending on that distinction holding forever.
       - name: Set version from git tag
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
@@ -143,3 +170,71 @@ jobs:
             echo "No SBOM produced — creating release without asset."
             gh release create "$GITHUB_REF_NAME" --generate-notes --title "$GITHUB_REF_NAME"
           fi
+
+  # OFFICIAL REGISTRY LISTING: `mcpm publish --github-oidc` authenticates via a
+  # GitHub Actions OIDC token exchanged for a registry JWT (POST
+  # /v0.1/auth/github-oidc → /v0.1/publish) — no PAT/secret needed, just
+  # `id-token: write`. A SEPARATE job from `publish` on purpose: a registry
+  # failure must never roll back or block the npm publish that already
+  # happened in that job — `if: ${{ !failure() && !cancelled() }}` runs this
+  # even though `publish` is SKIPPED (not failed) on workflow_dispatch, but
+  # still skips it if `publish` (or `dogfood`) actually failed on a tag push.
+  # A failure HERE fails this job/run visibly; it does not touch npm.
+  #
+  # Known gap (the v0.17.0 SBOM-asset history, #216 review LOW 11): a
+  # `publish`-job failure AFTER `pnpm publish` already succeeded — e.g. the
+  # SBOM generation or GitHub Release step — still counts as a job failure,
+  # so `needs: publish` + this `if:` SKIP this job even though the npm
+  # release is real and would benefit from a registry listing. No behaviour
+  # change here; the recovery is the `workflow_dispatch` trigger at the top
+  # of this file with that version, which re-lists an already-published npm
+  # version independently of whether the `publish` job itself succeeded.
+  registry:
+    name: registry listing
+    needs: publish
+    if: ${{ !failure() && !cancelled() }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        with:
+          version: 10
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          cache: pnpm
+
+      # Tag push: list the version that was just published above.
+      - name: Set version from git tag
+        if: github.event_name == 'push'
+        run: npm pkg set version="${GITHUB_REF_NAME#v}"
+
+      # workflow_dispatch: re-list an ALREADY-published npm version (backlog
+      # #75) using whatever ref this workflow was dispatched on — i.e. this
+      # fix's own code, not the old broken publish path the tag originally
+      # shipped with. Refuses to proceed if npm doesn't actually have that
+      # version, so a typo'd input can't silently list nothing or the wrong
+      # thing. $VERSION is quoted throughout — see the security note above on
+      # not interpolating untrusted input directly into `run:` (this input is
+      # dispatch-trigger-permission-gated, not attacker-controlled, but the
+      # same quoting discipline applies either way).
+      - name: Verify npm has this version, then set it (workflow_dispatch)
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          PUBLISHED="$(npm view "@getmcpm/cli@$VERSION" version)"
+          if [ "$PUBLISHED" != "$VERSION" ]; then
+            echo "npm view @getmcpm/cli@$VERSION returned '$PUBLISHED', not '$VERSION' — refusing to list an unpublished version." >&2
+            exit 1
+          fi
+          npm pkg set version="$VERSION"
+
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm run build
+      - run: node dist/index.js publish --github-oidc

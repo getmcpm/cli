@@ -36,8 +36,9 @@ new failure modes, but the meanings above will not be repurposed within `0.x`.
 
 `--json` is available on `search`, `install`, `list`, `info`, `audit`, `update`,
 `outdated`, `diff`, `sync`, `why`, `doctor`, `verify`, `guard list-signatures`,
-`guard doctor-confine`, and `guard inspect`. **Treat these shapes as unstable in
-`0.x`** — fields may be added or renamed — with one exception:
+`guard doctor-confine`, `guard inspect`, and `publish check`. **Treat these
+shapes as unstable in `0.x`** — fields may be added or renamed — with one
+exception:
 
 - **`mcpm sync --json`** (the drift model) is **frozen** because CI consumes it
   alongside the exit-`2` contract above.

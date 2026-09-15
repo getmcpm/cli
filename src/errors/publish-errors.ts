@@ -35,16 +35,6 @@ export const PublishErrors = {
     );
   },
 
-  registryApiUnavailable(): Error {
-    return new Error(
-      [
-        "mcpm publish: The official registry publish API is not yet available.",
-        "  Cause: registry.modelcontextprotocol.io does not yet accept CLI submissions.",
-        "  Fix:   Watch https://github.com/getmcpm/cli for updates when publishing opens.",
-      ].join("\n")
-    );
-  },
-
   tokenRequired(): Error {
     return new Error(
       [

@@ -1,0 +1,21 @@
+# Publish manifest for mcpm's own MCP server listing (io.github.getmcpm/cli).
+# `version` is deliberately omitted: resolveVersion() falls back to this
+# repo's package.json, whose version the release workflow sets from the git
+# tag (npm pkg set version=<tag>) before build — the same value the npm
+# package publishes under. This is the single source of truth: docs/registry-
+# entry.json (a stale hand-submission template, unread by any code, with the
+# now-known-wrong `repository.type: "git"` shape) has been deleted in favor
+# of this file — see #216.
+name: io.github.getmcpm/cli
+title: mcpm
+description: "MCP security guard + package manager: trust-scored installs, blocks prompt injection and rug-pulls."
+websiteUrl: https://github.com/getmcpm/cli
+repository:
+  source: github
+  url: https://github.com/getmcpm/cli
+package:
+  registryType: npm
+  identifier: "@getmcpm/cli"
+runtimeHint: npx
+runtimeArguments:
+  - serve
