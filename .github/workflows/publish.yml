@@ -209,10 +209,31 @@ jobs:
           node-version: 24
           cache: pnpm
 
-      # Tag push: list the version that was just published above.
-      - name: Set version from git tag
+      # Tag push: list the version that was just published above — but WAIT for
+      # npm to actually serve it first. The MCP registry validates the coordinate
+      # before listing it and REFUSES a version it cannot see on npm; npm's
+      # read path lags its own publish by tens of seconds, so this job used to
+      # race it. v0.40.0's run is the measurement: `pnpm publish` succeeded and
+      # ~20s later this step's publish came back
+      # `400 — NPM package '@getmcpm/cli' exists, but version '0.40.0' was not
+      # found (status: 404)`. Bounded at 5 minutes and fails CLOSED, naming the
+      # workflow_dispatch recovery — never attempt a listing the registry will
+      # reject. $VERSION is quoted throughout, per the note in the publish job.
+      - name: Wait for npm to serve this version, then set it
         if: github.event_name == 'push'
-        run: npm pkg set version="${GITHUB_REF_NAME#v}"
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          for i in $(seq 1 30); do
+            if [ "$(npm view "@getmcpm/cli@$VERSION" version 2>/dev/null)" = "$VERSION" ]; then
+              echo "npm serves @getmcpm/cli@$VERSION (attempt $i)."
+              npm pkg set version="$VERSION"
+              exit 0
+            fi
+            echo "npm does not serve @getmcpm/cli@$VERSION yet (attempt $i/30); waiting 10s..."
+            sleep 10
+          done
+          echo "npm still does not serve @getmcpm/cli@$VERSION after 5 minutes — refusing to attempt a listing the registry would reject. Re-run this workflow via workflow_dispatch with version=$VERSION once npm has it." >&2
+          exit 1
 
       # workflow_dispatch: re-list an ALREADY-published npm version (backlog
       # #75) using whatever ref this workflow was dispatched on — i.e. this
