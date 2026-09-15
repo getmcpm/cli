@@ -151,7 +151,10 @@ export async function handlePublishCheck(
   output(`  Type:        ${manifest.package.registryType} (${manifest.package.identifier})`);
   if (manifest.homepage) output(`  Homepage:    ${manifest.homepage}`);
   output(`  Tags:        ${manifest.tags.join(", ") || "(none)"}`);
-  output(`  Trust score: ${levelColor(score.level)} (${score.score}/100)`);
+  // `maxPossible` is 80 here — `hasExternalScanner: false` drops the 20-point external
+  // bucket — so a literal /100 read a 53/80 (66%, mid-caution) as 53% (barely above risky).
+  // Same class as install's `--min-trust` denominator fix in v0.29.0; this site was missed.
+  output(`  Trust score: ${levelColor(score.level)} (${score.score}/${score.maxPossible})`);
   output(`\nRequest body (POST /v0.1/publish):`);
   output(JSON.stringify(serverJson, null, 2));
   output(chalk.green("\nReady to publish. Run 'mcpm publish' to submit."));
