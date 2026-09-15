@@ -10,6 +10,20 @@ published section (it happened to #170).
 
 ### Fixed
 
+- **`mcpm publish check` printed the trust score over a hardcoded `/100`
+  denominator; the real one is 80.** The command scores with
+  `hasExternalScanner: false`, which drops the 20-point external bucket, so
+  `score.maxPossible` is 80 — but the line rendered the literal `100`. Against
+  this repo's own manifest the published 0.40.0 binary printed
+  `caution (53/100)`, reading as 53% (barely above `risky`) where the honest
+  figure is `53/80`, 66%, mid-`caution`. Pre-existing since v0.4.0 — the
+  identical class v0.29.0 fixed for `install --min-trust` (`62/80`, not
+  `62/100`); this site was missed by that sweep. Now renders
+  `score.maxPossible`. It was the only `/100` literal left in `src/`
+  (the others are comments), and the existing test PINNED the wrong value
+  (`"53/100"`) — flipped to `53/80` and mutation-verified RED against the
+  literal. Display-only: `publish check --json` emits the ServerJSON body and
+  carries no score, so no `--json` shape changes.
 - **The `registry` job raced npm's own propagation and failed on its first
   ever run (v0.40.0).** The MCP registry validates the npm coordinate before
   listing it; `pnpm publish` had succeeded, but ~20 s later npm's read path

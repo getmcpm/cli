@@ -109,8 +109,11 @@ describe("handlePublishCheck", () => {
 
     const text = lines.join("");
     expect(text).toMatch(/ready to publish/i);
-    // health 15 + static (40 - 2) + external 0 + meta 0 = 53
-    expect(text).toContain("53/100");
+    // health 15 + static (40 - 2) + external 0 + meta 0 = 53, out of maxPossible 80
+    // (30 + 40 + 10; the external bucket is not credited). Regression pin for the
+    // hardcoded `/100` denominator — goes RED if the literal comes back.
+    expect(text).toContain("53/80");
+    expect(text).not.toContain("/100");
 
     const findings = ctsSpy.mock.calls[0][0].findings;
     expect(findings).toHaveLength(1);
