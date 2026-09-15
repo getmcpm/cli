@@ -8,6 +8,22 @@ _Add entries here, never under a stamped version_ — a release commit renames t
 heading, and a branch that wrote beneath it merges without conflict straight into a
 published section (it happened to #170).
 
+### Changed
+
+- **Three dependencies bumped to the exact versions Dependabot proposed:
+  `vitest` `^4.1.0` → `^5.0.0` and `@vitest/coverage-v8` `^4.1.0` → `^5.0.0`
+  (both dev-only), and `@inquirer/prompts` `^8.7.0` → `^8.7.2` (runtime).**
+  Dependabot's own PRs (#212, #213) were not merged — its regenerated
+  `pnpm-lock.yaml` drops the `pnpm.overrides` block (fast-uri and qs per #209, hono per #211 — nine
+  entries in all) and fails CI with
+  `ERR_PNPM_LOCKFILE_CONFIG_MISMATCH`, the same #204 precedent. Bumped
+  locally with `pnpm up` instead so the overrides survive. Full suite green
+  (2944 tests, running under vitest 5.0.0 itself), `tsc --noEmit` clean, and
+  the packed-tarball release dogfood passed on Node 24.20.0 — the gate that
+  matters for the runtime `@inquirer/prompts` bump. `pnpm/action-setup`
+  6.0.10 → 6.1.0 (#214) is a GitHub Action bump, unaffected by any of this,
+  and lands separately.
+
 ## [0.39.2] - 2026-09-12
 
 ### Fixed
