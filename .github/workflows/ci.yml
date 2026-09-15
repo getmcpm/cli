@@ -36,6 +36,8 @@ jobs:
 
       - run: pnpm run test:coverage
 
+      - run: bash scripts/probe-coverage-thresholds.sh
+
       # `@types/node` is pinned to the engines.node FLOOR (22), so the typecheck
       # above describes Node 22's API on every leg — including the legs running 24
       # and 26. Anything whose signature CHANGED in a later major goes unchecked;

@@ -35,6 +35,34 @@ published section (it happened to #170).
   recovery) rather than attempting a listing the registry will reject.
   v0.40.0's own listing was recovered that way and is live.
 
+### Internal
+
+- **`pnpm typecheck` now also type-checks the tooling configs it never saw**
+  — maintainer backlog #88, found by the #215 review. `tsconfig.json`'s
+  `rootDir: "src"` / `include: ["src"]` meant `vitest.config.ts`,
+  `vitest.setup.ts` and `tsup.config.ts` were never in the `tsc` program, so
+  a renamed or misspelled `test.*`/`coverage.*` key is accepted silently by
+  vitest — the 80%-lines/75%-branches coverage gate has survived every
+  vitest major bump by luck, not by a check. Reproduced before touching
+  anything: planting `bogusRenamedKeyProbe: true` in `vitest.config.ts` left
+  both `pnpm typecheck` and `pnpm test` exiting 0. New
+  `tsconfig.tooling.json` (extends `tsconfig.json`, `rootDir: "."`, includes
+  just those three files) type-checks clean today — zero backlog to clear —
+  and `typecheck` now runs `tsc --noEmit && tsc -p tsconfig.tooling.json`
+  (`lint` stays equal to `typecheck`). Measured, not assumed: renaming the
+  top-level key (`thresholds` → `limits`) fails `tsc`, and so does
+  misspelling a key nested inside it (`lines` → `linez`) — while
+  `vitest run` still accepts the nested misspelling silently, confirming
+  the typecheck is the only thing that sees it. New
+  `scripts/probe-coverage-thresholds.sh` (runs in CI, ~11s locally) is a
+  second, independent check that the CLI-flag threshold path still fails a
+  build: it treats only an exit-nonzero run carrying the exact `does not
+  meet global threshold (101%)` line as proof the gate fired, and
+  everything else — a clean exit, or a crash without that line — as
+  unproven, so a crashed measurement can't read as "enforced". It does not
+  itself verify the config file's `thresholds` key; the typecheck is what
+  pins that. No runtime change — `git diff -- src/` is empty.
+
 ## [0.40.0] - 2026-09-15
 
 ### Added

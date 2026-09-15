@@ -12,7 +12,7 @@ a Node a dependency does not support.
 
 ```
 pnpm install            # frozen lockfile
-pnpm run typecheck      # tsc --noEmit (this is also `lint`)
+pnpm run typecheck      # tsc --noEmit + tooling configs (this is also `lint`)
 pnpm run build          # tsup -> dist/
 pnpm test               # vitest
 pnpm run test:coverage  # with coverage
