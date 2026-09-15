@@ -63,7 +63,7 @@
       "hono": "^4.13.5",
       "@hono/node-server": "^2.0.5",
       "fast-uri": "^3.1.6",
-    "qs": "^6.16.0",
+      "qs": "^6.16.0",
       "postcss": "^8.5.18",
       "ip-address": "^10.1.1",
       "esbuild": "^0.28.1",
@@ -71,7 +71,7 @@
     }
   },
   "dependencies": {
-    "@inquirer/prompts": "^8.7.0",
+    "@inquirer/prompts": "^8.7.2",
     "@modelcontextprotocol/sdk": "^1.30.0",
     "@sigstore/bundle": "^5.0.0",
     "@sigstore/protobuf-specs": "^0.5.2",
@@ -89,9 +89,9 @@
   "devDependencies": {
     "@types/node": "^22.19.19",
     "@types/semver": "^7.8.0",
-    "@vitest/coverage-v8": "^4.1.0",
+    "@vitest/coverage-v8": "^5.0.0",
     "tsup": "^8.5.1",
     "typescript": "^5.9.3",
-    "vitest": "^4.1.0"
+    "vitest": "^5.0.0"
   }
 }

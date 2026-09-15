@@ -24,6 +24,22 @@ throughout: two new public flags are additive, but `mcpm publish`'s exit code
 on a registry 404 changes from `0` (the old "not yet available" special case)
 to non-zero — a changed outcome on a public CLI surface, not a pure bugfix.
 
+### Changed
+
+- **Three dependencies bumped to the exact versions Dependabot proposed:
+  `vitest` `^4.1.0` → `^5.0.0` and `@vitest/coverage-v8` `^4.1.0` → `^5.0.0`
+  (both dev-only), and `@inquirer/prompts` `^8.7.0` → `^8.7.2` (runtime).**
+  Dependabot's own PRs (#212, #213) were not merged — its regenerated
+  `pnpm-lock.yaml` drops the `pnpm.overrides` block (fast-uri and qs per #209, hono per #211 — nine
+  entries in all) and fails CI with
+  `ERR_PNPM_LOCKFILE_CONFIG_MISMATCH`, the same #204 precedent. Bumped
+  locally with `pnpm up` instead so the overrides survive. Full suite green
+  (2944 tests, running under vitest 5.0.0 itself), `tsc --noEmit` clean, and
+  the packed-tarball release dogfood passed on Node 24.20.0 — the gate that
+  matters for the runtime `@inquirer/prompts` bump. `pnpm/action-setup`
+  6.0.10 → 6.1.0 (#214) is a GitHub Action bump, unaffected by any of this,
+  and lands separately.
+
 ### Fixed
 
 - **`mcpm publish` could not work against the registry as it exists — a wrong
