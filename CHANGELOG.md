@@ -8,6 +8,19 @@ _Add entries here, never under a stamped version_ — a release commit renames t
 heading, and a branch that wrote beneath it merges without conflict straight into a
 published section (it happened to #170).
 
+### Fixed
+
+- **The `registry` job raced npm's own propagation and failed on its first
+  ever run (v0.40.0).** The MCP registry validates the npm coordinate before
+  listing it; `pnpm publish` had succeeded, but ~20 s later npm's read path
+  still 404'd the version, so the listing call returned
+  `400 — NPM package '@getmcpm/cli' exists, but version '0.40.0' was not
+  found`. The `workflow_dispatch` path already guarded this with an
+  `npm view` check — the tag-push path had no equivalent and now polls npm
+  for up to 5 minutes, failing closed (and naming the `workflow_dispatch`
+  recovery) rather than attempting a listing the registry will reject.
+  v0.40.0's own listing was recovered that way and is live.
+
 ## [0.40.0] - 2026-09-15
 
 ### Added
