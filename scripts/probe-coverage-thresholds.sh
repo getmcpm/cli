@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# Backlog #88: proves the vitest coverage threshold actually gates, since a
-# renamed test.coverage.thresholds key is accepted silently and never
-# type-checked (see tsconfig.tooling.json). Same script for CI and local use.
+# Backlog #88: proves the vitest coverage threshold still fails a build, at the
+# CLI-flag level. It does NOT see the config file's `thresholds` key — that is
+# pinned by `tsc -p tsconfig.tooling.json`. Same script for CI and local use.
 set -uo pipefail
 
 REPORTS_DIR="$(mktemp -d)"
