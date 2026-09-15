@@ -139,7 +139,7 @@ mcpm/
 ├── .github/workflows/
 │   ├── ci.yml                      — build + test on push/PR (Node 22, 24, 26) + the `confine-macos` Seatbelt dogfood leg
 │   ├── dogfood.yml                 — on-demand smoke of an ALREADY-PUBLISHED version on GitHub's machines
-│   ├── publish.yml                 — packed-artifact gate (Node 22, 24, 26) then npm publish + GitHub Release, on v* tags
+│   ├── publish.yml                 — packed-artifact gate (Node 22, 24, 26) then npm publish + GitHub Release, on v* tags; then a `registry` job listing the version on the official MCP registry via OIDC (also reachable alone via `workflow_dispatch`)
 │   └── scorecard.yml               — OpenSSF Scorecard supply-chain posture (weekly + on push to main)
 ├── .github/actions/mcpm-verify/    — composite Action wrapping `mcpm verify --json` for downstream CI
 ├── package.json                    — @getmcpm/cli, bin: mcpm

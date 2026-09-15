@@ -72,7 +72,7 @@ to non-zero — a changed outcome on a public CLI surface, not a pure bugfix.
   `--github-oidc` flag for CI, minting a GitHub Actions OIDC token and
   exchanging it — no PAT needed); a new pure `manifestToServerJson` builds
   the exact registry-required body from an extended `.mcpm-publish.yaml`
-  schema (`version`, `transport`, `runtimeHint`, `runtimeArguments`,
+  schema (`version`, `title`, `transport`, `runtimeHint`, `runtimeArguments`,
   `environmentVariables`, `repository`, `websiteUrl`); `mcpm publish check
   --json` now prints that exact body; and the false "not yet available"
   404/405 special case is deleted — any registry error is reported with its
