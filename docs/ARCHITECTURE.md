@@ -453,6 +453,7 @@ pnpm test:watch        # watch mode
 Runs on push to `main` and pull requests. Matrix: Node 22, 24, 26. All GitHub Actions are SHA-pinned.
 
 Steps: `pnpm install --frozen-lockfile` → `typecheck` → `build` → `test:coverage`
+→ `scripts/probe-coverage-thresholds.sh` (the coverage threshold must still fail a build)
 → `typecheck` again against `@types/node` for that leg's own Node major (the pinned
 `@types/node` tracks the engines floor, so the first typecheck only describes Node 22).
 
