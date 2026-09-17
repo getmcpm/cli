@@ -337,6 +337,13 @@ async function resolveServerVersion(
     const versions = await deps.getServerVersions(name);
     versionStrings = versions.map((v) => v.version);
   } catch (err) {
+    // Fetch the fallback FIRST, announce second: the registry 404s /versions
+    // for an unknown server, and getServer(name) 404s right behind it — so a
+    // notice printed before the fetch would claim a fallback that never
+    // happens, right above the "not found" it then fails with (measured on
+    // the built binary). If this throws, the caller sees exactly the error
+    // 0.40.1 showed.
+    const entry = await deps.getServer(name);
     // sanitizeForTerminal because err.message can echo registry-controlled
     // text back to a terminal.
     deps.output(
@@ -344,7 +351,6 @@ async function resolveServerVersion(
         err instanceof Error ? err.message : String(err)
       )} — falling back to the latest version only.`
     );
-    const entry = await deps.getServer(name);
     return resolveWithSingleVersion(name, versionSpec, entry.server.version)
       .resolved;
   }

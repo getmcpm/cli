@@ -192,6 +192,39 @@ servers:
     expect(outputCalls).toContain("falling back to the latest version only");
   });
 
+  it("does not announce a fallback when the fallback fetch itself fails (unknown server 404s both)", async () => {
+    // The live registry 404s /versions for a server that does not exist, and
+    // /versions/latest 404s right behind it. The user must see exactly what
+    // 0.40.1 showed — "Failed: <name> — Server not found" — and NOT a
+    // "falling back to the latest version only" notice describing a fallback
+    // that never happened.
+    const stackPath = await writeTempStackFile(`
+version: "1"
+servers:
+  io.github.test/missing:
+    version: "^1.0.0"
+`);
+
+    const notFound = () => Promise.reject(new Error("Server not found: io.github.test/missing"));
+    const deps = makeDeps({
+      getServerVersions: vi.fn().mockImplementation(notFound),
+      getServer: vi.fn().mockImplementation(notFound),
+    });
+
+    await expect(handleLock({ stackFile: stackPath }, deps)).rejects.toThrow(
+      "1 server(s) failed to resolve"
+    );
+
+    const outputCalls = (deps.output as ReturnType<typeof vi.fn>).mock.calls
+      .map((c) => c[0])
+      .join("\n");
+    expect(outputCalls).toContain(
+      "  Failed: io.github.test/missing — Server not found: io.github.test/missing"
+    );
+    expect(outputCalls).not.toContain("could not list versions");
+    expect(outputCalls).not.toContain("falling back");
+  });
+
   it("reports the real version list when a successfully-fetched list matches nothing — no fallback, no notice", async () => {
     // Pins 3f77a41: the builder's first cut wrapped resolveVersion inside the
     // fetch's try/catch, so a range that legitimately matched nothing fell into
