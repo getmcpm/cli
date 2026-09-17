@@ -320,20 +320,40 @@ async function resolveServer(
 
   // Step 1: Resolve version
   let resolvedVersion: string;
-  try {
-    const versions = await deps.getServerVersions(name);
-    const versionStrings = versions.map((v) => v.version);
-    const result = resolveVersion(name, server.version, versionStrings);
-    resolvedVersion = result.resolved;
-  } catch {
-    // Fallback: try with just the latest version
+  if (server.version === "latest") {
+    // "latest" only ever needs the registry's own isLatest pointer — the
+    // version-listing endpoint has nothing to add for it, so skip the call
+    // entirely: the majority path stays one request cheaper and never
+    // depends on getServerVersions succeeding.
     const entry = await deps.getServer(name);
-    const result = resolveWithSingleVersion(
-      name,
-      server.version,
-      entry.server.version
-    );
-    resolvedVersion = result.resolved;
+    resolvedVersion = entry.server.version;
+  } else {
+    try {
+      const versions = await deps.getServerVersions(name);
+      const versionStrings = versions.map((v) => v.version);
+      const result = resolveVersion(name, server.version, versionStrings);
+      resolvedVersion = result.resolved;
+    } catch (err) {
+      // The version-listing endpoint couldn't be read (network failure,
+      // 404, or a response that failed schema validation) — fall back to
+      // resolving against the single latest version, but SAY SO: a silent
+      // fallback here is what let a legal range or exact pin read as "not
+      // found" against a false "only version available" message for every
+      // caller (maintainer backlog #91). sanitizeForTerminal because
+      // err.message can echo registry-controlled text back to a terminal.
+      deps.output(
+        `  ⚠ could not list versions for ${name}: ${sanitizeForTerminal(
+          err instanceof Error ? err.message : String(err)
+        )} — falling back to the latest version only.`
+      );
+      const entry = await deps.getServer(name);
+      const result = resolveWithSingleVersion(
+        name,
+        server.version,
+        entry.server.version
+      );
+      resolvedVersion = result.resolved;
+    }
   }
 
   // Step 2: Fetch the resolved version's full entry

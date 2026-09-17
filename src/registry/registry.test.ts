@@ -32,6 +32,21 @@ const SEARCH_FILESYSTEM_FIXTURE = JSON.parse(
   )
 ) as unknown;
 
+// Real captured /v0.1/servers/io.github.getmcpm%2Fcli/versions payload,
+// captured 2026-09-17, trimmed from 6 to the first 3 entries (metadata.count
+// adjusted to match). This is a `ServerListResponse` — the SAME shape as
+// search, one full ServerEntry per version — never the bespoke
+// `{versions: [...]}` shape the old schema declared: the endpoint has
+// returned this shape since the registry's v0.1 API shipped, and a
+// hand-written fixture shaped to the new schema would certify nothing
+// (maintainer backlog #91).
+const VERSIONS_GETMCPM_CLI_FIXTURE = JSON.parse(
+  readFileSync(
+    new URL("./__fixtures__/versions-getmcpm-cli.json", import.meta.url),
+    "utf8"
+  )
+) as unknown;
+
 // ---------------------------------------------------------------------------
 // Fixtures
 // ---------------------------------------------------------------------------
@@ -519,44 +534,45 @@ describe("RegistryClient.getServer — happy path", () => {
 
 describe("RegistryClient.getServerVersions — happy path", () => {
   it("calls /v0.1/servers/{name}/versions", async () => {
-    const versionsResponse = {
-      versions: [
-        { version: "2.0.0", publishedAt: "2026-03-01T00:00:00Z" },
-        { version: "1.0.0", publishedAt: "2026-01-01T00:00:00Z" },
-      ],
-    };
-    const fetchImpl = mockFetch(versionsResponse);
+    const fetchImpl = mockFetch(VERSIONS_GETMCPM_CLI_FIXTURE);
     const client = new RegistryClient({ fetchImpl });
 
-    await client.getServerVersions("io.github.test/server-basic");
+    await client.getServerVersions("io.github.getmcpm/cli");
 
     const [url] = fetchImpl.mock.calls[0] as [string, ...unknown[]];
-    expect(url).toContain(
-      "/v0.1/servers/io.github.test%2Fserver-basic/versions"
-    );
+    expect(url).toContain("/v0.1/servers/io.github.getmcpm%2Fcli/versions");
   });
 
-  it("returns typed ServerVersion array", async () => {
-    const versionsResponse = {
-      versions: [
-        { version: "2.0.0", publishedAt: "2026-03-01T00:00:00Z" },
-        { version: "1.0.0", publishedAt: "2026-01-01T00:00:00Z" },
-      ],
-    };
-    const fetchImpl = mockFetch(versionsResponse);
+  it("parses the real ServerListResponse shape (servers[] + metadata) into ServerVersion[]", async () => {
+    // This is the regression test for maintainer backlog #91: the live
+    // endpoint returns one full ServerEntry per version, not `{versions: [...]}`.
+    const fetchImpl = mockFetch(VERSIONS_GETMCPM_CLI_FIXTURE);
     const client = new RegistryClient({ fetchImpl });
 
     const versions: ServerVersion[] = await client.getServerVersions(
-      "io.github.test/server-basic"
+      "io.github.getmcpm/cli"
     );
 
-    expect(versions).toHaveLength(2);
-    expect(versions[0].version).toBe("2.0.0");
-    expect(versions[1].version).toBe("1.0.0");
+    expect(versions).toEqual([
+      { version: "0.40.1" },
+      { version: "0.40.0" },
+      { version: "0.34.0" },
+    ]);
+  });
+
+  it("treats a null servers list as empty, not an error", async () => {
+    // The OpenAPI declares `servers` as `array | null` — a null list means
+    // no published versions, not a validation failure.
+    const fetchImpl = mockFetch({ servers: null, metadata: { count: 0 } });
+    const client = new RegistryClient({ fetchImpl });
+
+    const versions = await client.getServerVersions("io.github.test/server-basic");
+
+    expect(versions).toEqual([]);
   });
 
   it("returns empty array when server has no versions listed", async () => {
-    const fetchImpl = mockFetch({ versions: [] });
+    const fetchImpl = mockFetch({ servers: [], metadata: { count: 0 } });
     const client = new RegistryClient({ fetchImpl });
 
     const versions = await client.getServerVersions("io.github.test/server-basic");
@@ -565,7 +581,7 @@ describe("RegistryClient.getServerVersions — happy path", () => {
   });
 
   it("throws ValidationError when versions response has wrong shape", async () => {
-    const fetchImpl = mockFetch({ not_versions: "wrong" });
+    const fetchImpl = mockFetch({ not_servers: "wrong" });
     const client = new RegistryClient({ fetchImpl });
 
     await expect(

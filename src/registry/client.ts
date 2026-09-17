@@ -12,7 +12,7 @@
 import {
   SearchResponseSchema,
   ServerEntrySchema,
-  ServerVersionsResponseSchema,
+  ServerListResponseSchema,
 } from "./schemas.js";
 import type { SearchResult, ServerEntry, ServerVersion } from "./types.js";
 import {
@@ -153,13 +153,18 @@ export class RegistryClient {
 
   /**
    * Fetch all published versions for a given server name.
+   *
+   * The endpoint returns a `ServerListResponse` — the same shape as search,
+   * one full ServerEntry per version — not a bespoke `{versions: [...]}`
+   * list (maintainer backlog #91). A `null` `servers` (the OpenAPI's
+   * nullable field) means no versions, not an error.
    */
   async getServerVersions(name: string): Promise<ServerVersion[]> {
     const encodedName = encodeURIComponent(name);
     const url = `${this.baseUrl}/v0.1/servers/${encodedName}/versions`;
 
     const raw = await this.get(url, name);
-    const parsed = ServerVersionsResponseSchema.safeParse(raw);
+    const parsed = ServerListResponseSchema.safeParse(raw);
 
     if (!parsed.success) {
       throw new ValidationError(
@@ -169,7 +174,9 @@ export class RegistryClient {
     }
 
     // Return a new array (immutable)
-    return [...parsed.data.versions];
+    return (parsed.data.servers ?? []).map((entry) => ({
+      version: entry.server.version,
+    }));
   }
 
   // ---------------------------------------------------------------------------

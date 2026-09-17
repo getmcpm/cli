@@ -134,6 +134,64 @@ servers:
     expect(locked.version).toBe("1.0.5"); // ~1.0.0 → highest 1.0.x
   });
 
+  it('never calls getServerVersions when version is "latest"', async () => {
+    const stackPath = await writeTempStackFile(`
+version: "1"
+servers:
+  io.github.test/latest-server:
+    version: "latest"
+`);
+
+    const deps = makeDeps();
+    await handleLock({ stackFile: stackPath }, deps);
+
+    // "latest" only ever needs the registry's own isLatest pointer
+    // (getServer) — the listing endpoint has nothing to add and must never
+    // be called on this majority path (maintainer backlog #91).
+    expect(deps.getServerVersions).not.toHaveBeenCalled();
+    expect(deps.getServer).toHaveBeenCalledWith("io.github.test/latest-server");
+
+    const [, content] = (deps.writeLockFile as ReturnType<typeof vi.fn>).mock.calls[0];
+    const parsed = parseYaml(content);
+    const locked = parsed.servers["io.github.test/latest-server"];
+    expect(locked.version).toBe("1.2.0");
+  });
+
+  it("falls back to the single latest version AND announces it when getServerVersions fails for a range", async () => {
+    const stackPath = await writeTempStackFile(`
+version: "1"
+servers:
+  io.github.test/range-server:
+    version: "~1.2.0"
+`);
+
+    const deps = makeDeps({
+      getServerVersions: vi
+        .fn()
+        .mockRejectedValue(new Error("Invalid versions response: bad shape")),
+      getServer: vi
+        .fn()
+        .mockImplementation((name: string) => Promise.resolve(makeServerEntry(name, "1.2.0"))),
+    });
+
+    await handleLock({ stackFile: stackPath }, deps);
+
+    const [, content] = (deps.writeLockFile as ReturnType<typeof vi.fn>).mock.calls[0];
+    const parsed = parseYaml(content);
+    const locked = parsed.servers["io.github.test/range-server"];
+    // Fell back to the single latest version, which happens to satisfy ~1.2.0.
+    expect(locked.version).toBe("1.2.0");
+
+    // Never silent again: the fallback must announce itself, naming the
+    // server and the underlying error (maintainer backlog #91).
+    const outputCalls = (deps.output as ReturnType<typeof vi.fn>).mock.calls
+      .map((c) => c[0])
+      .join("\n");
+    expect(outputCalls).toContain("could not list versions for io.github.test/range-server");
+    expect(outputCalls).toContain("Invalid versions response: bad shape");
+    expect(outputCalls).toContain("falling back to the latest version only");
+  });
+
   it("pins URL entries directly without version resolution", async () => {
     const stackPath = await writeTempStackFile(`
 version: "1"

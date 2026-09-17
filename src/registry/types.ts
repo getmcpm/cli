@@ -16,9 +16,9 @@ import type {
   SearchMetadataSchema,
   SearchResponseSchema,
   ServerEntrySchema,
+  ServerListResponseSchema,
   ServerSchema,
   ServerVersionSchema,
-  ServerVersionsResponseSchema,
   TransportSchema,
 } from "./schemas.js";
 
@@ -36,6 +36,4 @@ export type ServerEntry = z.infer<typeof ServerEntrySchema>;
 export type SearchMetadata = z.infer<typeof SearchMetadataSchema>;
 export type SearchResult = z.infer<typeof SearchResponseSchema>;
 export type ServerVersion = z.infer<typeof ServerVersionSchema>;
-export type ServerVersionsResponse = z.infer<
-  typeof ServerVersionsResponseSchema
->;
+export type ServerListResponse = z.infer<typeof ServerListResponseSchema>;
