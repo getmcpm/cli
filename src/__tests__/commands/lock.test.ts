@@ -192,6 +192,33 @@ servers:
     expect(outputCalls).toContain("falling back to the latest version only");
   });
 
+  it("strips terminal escapes from the registry-echoed error in the fallback notice", async () => {
+    // err.message on this path can carry registry-controlled text (a Zod
+    // issue dump of the body, or a 404 body echo), so it goes through
+    // sanitizeForTerminal before reaching stdout.
+    const stackPath = await writeTempStackFile(`
+version: "1"
+servers:
+  io.github.test/range-server:
+    version: "~1.2.0"
+`);
+
+    const deps = makeDeps({
+      getServerVersions: vi
+        .fn()
+        .mockRejectedValue(new Error("bad shape \x1b[31mRED\x1b[0m\x07 end")),
+    });
+
+    await handleLock({ stackFile: stackPath }, deps);
+
+    const outputCalls = (deps.output as ReturnType<typeof vi.fn>).mock.calls
+      .map((c) => c[0])
+      .join("\n");
+    expect(outputCalls).toContain("could not list versions for io.github.test/range-server: bad shape RED end");
+    expect(outputCalls).not.toContain("\x1b");
+    expect(outputCalls).not.toContain("\x07");
+  });
+
   it("does not announce a fallback when the fallback fetch itself fails (unknown server 404s both)", async () => {
     // The live registry 404s /versions for a server that does not exist, and
     // /versions/latest 404s right behind it. The user must see exactly what
