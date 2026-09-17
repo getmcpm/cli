@@ -192,6 +192,41 @@ servers:
     expect(outputCalls).toContain("falling back to the latest version only");
   });
 
+  it("reports the real version list when a successfully-fetched list matches nothing — no fallback, no notice", async () => {
+    // Pins 3f77a41: the builder's first cut wrapped resolveVersion inside the
+    // fetch's try/catch, so a range that legitimately matched nothing fell into
+    // the fallback and printed the very "only version available" message this
+    // fix removes. Found by live dogfood, not by the suite — so pin it here.
+    const stackPath = await writeTempStackFile(`
+version: "1"
+servers:
+  io.github.test/range-server:
+    version: "^9.0.0"
+`);
+
+    const deps = makeDeps({
+      getServerVersions: vi
+        .fn()
+        .mockResolvedValue([{ version: "1.0.0" }, { version: "1.2.0" }]),
+    });
+
+    await expect(handleLock({ stackFile: stackPath }, deps)).rejects.toThrow(
+      "1 server(s) failed to resolve"
+    );
+
+    const outputCalls = (deps.output as ReturnType<typeof vi.fn>).mock.calls
+      .map((c) => c[0])
+      .join("\n");
+    // Anchored on the "Failed:" line: under the regression the NOTICE echoes
+    // resolveVersion's message too, so a bare toContain would pass either way.
+    expect(outputCalls).toContain(
+      '  Failed: io.github.test/range-server — No version satisfies "^9.0.0" for "io.github.test/range-server". Available: 1.2.0, 1.0.0'
+    );
+    expect(outputCalls).not.toContain("could not list versions");
+    expect(outputCalls).not.toContain("only version available");
+    expect(deps.writeLockFile).not.toHaveBeenCalled();
+  });
+
   it("pins URL entries directly without version resolution", async () => {
     const stackPath = await writeTempStackFile(`
 version: "1"
