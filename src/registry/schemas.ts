@@ -153,12 +153,23 @@ export const SearchResponseSchema = z.object({
 // Server versions schema
 // ---------------------------------------------------------------------------
 
-export const ServerVersionSchema = z.object({
-  version: z.string().max(MAX_NAME),
-  publishedAt: z.string().max(MAX_NAME).optional(),
-  updatedAt: z.string().max(MAX_NAME).optional(),
+/**
+ * `GET /v0.1/servers/<name>/versions` returns the SAME shape as search —
+ * `ServerListResponse` in the registry's OpenAPI (one ServerEntry per
+ * published version) — never the bespoke `{versions: [...]}` shape this
+ * schema used to declare (maintainer backlog #91: it never matched a live
+ * response). `servers` is nullable per the OpenAPI (the handler returns
+ * `Metadata{Count}` only — unpaginated); a null list means no versions, not
+ * an error. Kept separate from SearchResponseSchema (whose `servers` stays
+ * non-nullable) rather than widening search's contract for an endpoint that
+ * doesn't share it.
+ */
+export const ServerListResponseSchema = z.object({
+  servers: z.array(ServerEntrySchema).nullable(),
+  metadata: SearchMetadataSchema,
 });
 
-export const ServerVersionsResponseSchema = z.object({
-  versions: z.array(ServerVersionSchema),
+/** The internal, simplified per-version shape mcpm actually uses. */
+export const ServerVersionSchema = z.object({
+  version: z.string().max(MAX_NAME),
 });

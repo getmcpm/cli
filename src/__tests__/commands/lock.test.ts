@@ -134,6 +134,159 @@ servers:
     expect(locked.version).toBe("1.0.5"); // ~1.0.0 → highest 1.0.x
   });
 
+  it('never calls getServerVersions when version is "latest"', async () => {
+    const stackPath = await writeTempStackFile(`
+version: "1"
+servers:
+  io.github.test/latest-server:
+    version: "latest"
+`);
+
+    const deps = makeDeps();
+    await handleLock({ stackFile: stackPath }, deps);
+
+    // "latest" only ever needs the registry's own isLatest pointer
+    // (getServer) — the listing endpoint has nothing to add and must never
+    // be called on this majority path (maintainer backlog #91).
+    expect(deps.getServerVersions).not.toHaveBeenCalled();
+    expect(deps.getServer).toHaveBeenCalledWith("io.github.test/latest-server");
+
+    const [, content] = (deps.writeLockFile as ReturnType<typeof vi.fn>).mock.calls[0];
+    const parsed = parseYaml(content);
+    const locked = parsed.servers["io.github.test/latest-server"];
+    expect(locked.version).toBe("1.2.0");
+  });
+
+  it("falls back to the single latest version AND announces it when getServerVersions fails for a range", async () => {
+    const stackPath = await writeTempStackFile(`
+version: "1"
+servers:
+  io.github.test/range-server:
+    version: "~1.2.0"
+`);
+
+    const deps = makeDeps({
+      getServerVersions: vi
+        .fn()
+        .mockRejectedValue(new Error("Invalid versions response: bad shape")),
+      getServer: vi
+        .fn()
+        .mockImplementation((name: string) => Promise.resolve(makeServerEntry(name, "1.2.0"))),
+    });
+
+    await handleLock({ stackFile: stackPath }, deps);
+
+    const [, content] = (deps.writeLockFile as ReturnType<typeof vi.fn>).mock.calls[0];
+    const parsed = parseYaml(content);
+    const locked = parsed.servers["io.github.test/range-server"];
+    // Fell back to the single latest version, which happens to satisfy ~1.2.0.
+    expect(locked.version).toBe("1.2.0");
+
+    // Never silent again: the fallback must announce itself, naming the
+    // server and the underlying error (maintainer backlog #91).
+    const outputCalls = (deps.output as ReturnType<typeof vi.fn>).mock.calls
+      .map((c) => c[0])
+      .join("\n");
+    expect(outputCalls).toContain("could not list versions for io.github.test/range-server");
+    expect(outputCalls).toContain("Invalid versions response: bad shape");
+    expect(outputCalls).toContain("falling back to the latest version only");
+  });
+
+  it("strips terminal escapes from the registry-echoed error in the fallback notice", async () => {
+    // err.message on this path can carry registry-controlled text (a Zod
+    // issue dump of the body, or a 404 body echo), so it goes through
+    // sanitizeForTerminal before reaching stdout.
+    const stackPath = await writeTempStackFile(`
+version: "1"
+servers:
+  io.github.test/range-server:
+    version: "~1.2.0"
+`);
+
+    const deps = makeDeps({
+      getServerVersions: vi
+        .fn()
+        .mockRejectedValue(new Error("bad shape \x1b[31mRED\x1b[0m\x07 end")),
+    });
+
+    await handleLock({ stackFile: stackPath }, deps);
+
+    const outputCalls = (deps.output as ReturnType<typeof vi.fn>).mock.calls
+      .map((c) => c[0])
+      .join("\n");
+    expect(outputCalls).toContain("could not list versions for io.github.test/range-server: bad shape RED end");
+    expect(outputCalls).not.toContain("\x1b");
+    expect(outputCalls).not.toContain("\x07");
+  });
+
+  it("does not announce a fallback when the fallback fetch itself fails (unknown server 404s both)", async () => {
+    // The live registry 404s /versions for a server that does not exist, and
+    // /versions/latest 404s right behind it. The user must see exactly what
+    // 0.40.1 showed — "Failed: <name> — Server not found" — and NOT a
+    // "falling back to the latest version only" notice describing a fallback
+    // that never happened.
+    const stackPath = await writeTempStackFile(`
+version: "1"
+servers:
+  io.github.test/missing:
+    version: "^1.0.0"
+`);
+
+    const notFound = () => Promise.reject(new Error("Server not found: io.github.test/missing"));
+    const deps = makeDeps({
+      getServerVersions: vi.fn().mockImplementation(notFound),
+      getServer: vi.fn().mockImplementation(notFound),
+    });
+
+    await expect(handleLock({ stackFile: stackPath }, deps)).rejects.toThrow(
+      "1 server(s) failed to resolve"
+    );
+
+    const outputCalls = (deps.output as ReturnType<typeof vi.fn>).mock.calls
+      .map((c) => c[0])
+      .join("\n");
+    expect(outputCalls).toContain(
+      "  Failed: io.github.test/missing — Server not found: io.github.test/missing"
+    );
+    expect(outputCalls).not.toContain("could not list versions");
+    expect(outputCalls).not.toContain("falling back");
+  });
+
+  it("reports the real version list when a successfully-fetched list matches nothing — no fallback, no notice", async () => {
+    // Pins 3f77a41: the builder's first cut wrapped resolveVersion inside the
+    // fetch's try/catch, so a range that legitimately matched nothing fell into
+    // the fallback and printed the very "only version available" message this
+    // fix removes. Found by live dogfood, not by the suite — so pin it here.
+    const stackPath = await writeTempStackFile(`
+version: "1"
+servers:
+  io.github.test/range-server:
+    version: "^9.0.0"
+`);
+
+    const deps = makeDeps({
+      getServerVersions: vi
+        .fn()
+        .mockResolvedValue([{ version: "1.0.0" }, { version: "1.2.0" }]),
+    });
+
+    await expect(handleLock({ stackFile: stackPath }, deps)).rejects.toThrow(
+      "1 server(s) failed to resolve"
+    );
+
+    const outputCalls = (deps.output as ReturnType<typeof vi.fn>).mock.calls
+      .map((c) => c[0])
+      .join("\n");
+    // Anchored on the "Failed:" line: under the regression the NOTICE echoes
+    // resolveVersion's message too, so a bare toContain would pass either way.
+    expect(outputCalls).toContain(
+      '  Failed: io.github.test/range-server — No version satisfies "^9.0.0" for "io.github.test/range-server". Available: 1.2.0, 1.0.0'
+    );
+    expect(outputCalls).not.toContain("could not list versions");
+    expect(outputCalls).not.toContain("only version available");
+    expect(deps.writeLockFile).not.toHaveBeenCalled();
+  });
+
   it("pins URL entries directly without version resolution", async () => {
     const stackPath = await writeTempStackFile(`
 version: "1"

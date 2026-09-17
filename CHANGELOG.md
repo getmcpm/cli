@@ -8,6 +8,50 @@ _Add entries here, never under a stamped version_ — a release commit renames t
 heading, and a branch that wrote beneath it merges without conflict straight into a
 published section (it happened to #170).
 
+### Fixed
+
+- **MINOR.** `mcpm lock`, `mcpm up`'s auto-lock, and the `mcpm_up` MCP tool
+  have never resolved a semver range or an exact non-latest version pin
+  against the live registry — every caret/tilde range and every exact pin
+  other than the registry's current latest failed with a false "This is the
+  only version available from the registry" (or "Only version available")
+  message, while `version: "latest"` worked by accident. `getServerVersions` parsed
+  `GET /v0.1/servers/<name>/versions` with a bespoke `{versions: [...]}`
+  schema (`609b30b`) that never matched a live response: the endpoint has
+  returned the same `ServerListResponse` shape as search — one full
+  `ServerEntry` per version — since the registry's v0.1 API shipped
+  (`modelcontextprotocol/registry@1a7cd97`, 2025-10-14 — a commit in the
+  registry's repo, not this one). The registry did not change; the schema
+  never matched it. `lock.ts`'s bare `catch {}` (`f7f0b98`, v0.3.0) swallowed the
+  resulting `ValidationError` and silently fell back to resolving against
+  the single latest version. Reproduced against the published 0.40.1 binary
+  before this fix: `version: "~0.34.0"` and `version: "0.34.0"` both failed
+  against a server with 6 published versions, while `version: "latest"`
+  locked fine.
+  - `ServerListResponseSchema` replaces the old versions schema;
+    `getServerVersions` now maps the real response to the `{version}` shape
+    mcpm uses internally (a `null` `servers` list is empty, not an error).
+  - `version: "latest"` no longer calls the version-listing endpoint at
+    all — it never needed it, and skipping it makes the majority path one
+    request cheaper than before without changing its result (measured: the
+    lock a `latest` stack produces differs from 0.40.1's only in its two
+    timestamps).
+  - Any other failure to read the version list (network, 404, or a shape
+    mismatch) now announces itself — naming the server and the underlying
+    error — before resolving against the single latest version, instead of
+    failing silently. The notice is printed only once that fallback fetch
+    has succeeded: an unknown server 404s both endpoints, and there the
+    user sees exactly the `Server not found` that 0.40.1 showed, with no
+    notice about a fallback that never happened.
+  - A range that legitimately matches nothing in the fetched list (e.g.
+    `^9.0.0` against a 0.x server) now reports the real "No version
+    satisfies ... Available: ..." with the actual version list, where 0.40.1
+    printed the same false "only version available" message as every other
+    range (same defect, same swallowed catch).
+  - Not a security fix.
+
+  maintainer backlog #91
+
 ## [0.40.1] - 2026-09-16
 
 ### Fixed

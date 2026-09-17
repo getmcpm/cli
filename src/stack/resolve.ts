@@ -77,8 +77,10 @@ export function resolveVersion(
 /**
  * Resolve a version range using a single version (fallback path).
  *
- * When the registry only returns the latest version (no version listing
- * endpoint), check if the single version satisfies the range.
+ * Used when the version-listing endpoint could not be read (a network
+ * failure, a 404, or a response that failed schema validation) — the
+ * endpoint itself exists; this is the degraded path when it can't be
+ * trusted, not a workaround for its absence.
  */
 export function resolveWithSingleVersion(
   serverName: string,

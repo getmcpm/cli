@@ -301,6 +301,63 @@ function reportProvenanceDrift(
 // Per-server resolution
 // ---------------------------------------------------------------------------
 
+/**
+ * Resolve a stack server's declared `version` (an exact pin, a semver range,
+ * or "latest") to a concrete registry version string.
+ *
+ * "latest" only ever needs the registry's own isLatest pointer (getServer) —
+ * the version-listing endpoint has nothing to add for it, so it is never
+ * called on this majority path (one request cheaper, and never depends on
+ * getServerVersions succeeding).
+ *
+ * For anything else, getServerVersions is fetched and, ONLY if that fetch
+ * itself fails (network failure, 404, or a response that failed schema
+ * validation), falls back to resolving against the single latest version —
+ * announcing that fallback through deps.output rather than staying silent
+ * about it, which is what let a legal range or exact pin read as "not
+ * found" against a false "only version available" message for every caller
+ * (maintainer backlog #91). A SUCCESSFULLY-fetched list that simply
+ * contains no matching version (e.g. "^9.0.0" against a 0.x server) is not
+ * a reason to fall back — resolveVersion's own "No version satisfies ...
+ * Available: ..." propagates directly, since misreporting an empty match as
+ * an unreadable list would reintroduce the exact false message this fixes.
+ */
+async function resolveServerVersion(
+  name: string,
+  versionSpec: string,
+  deps: LockDeps
+): Promise<string> {
+  if (versionSpec === "latest") {
+    const entry = await deps.getServer(name);
+    return entry.server.version;
+  }
+
+  let versionStrings: string[];
+  try {
+    const versions = await deps.getServerVersions(name);
+    versionStrings = versions.map((v) => v.version);
+  } catch (err) {
+    // Fetch the fallback FIRST, announce second: the registry 404s /versions
+    // for an unknown server, and getServer(name) 404s right behind it — so a
+    // notice printed before the fetch would claim a fallback that never
+    // happens, right above the "not found" it then fails with (measured on
+    // the built binary). If this throws, the caller sees exactly the error
+    // 0.40.1 showed.
+    const entry = await deps.getServer(name);
+    // sanitizeForTerminal because err.message can echo registry-controlled
+    // text back to a terminal.
+    deps.output(
+      `  ⚠ could not list versions for ${name}: ${sanitizeForTerminal(
+        err instanceof Error ? err.message : String(err)
+      )} — falling back to the latest version only.`
+    );
+    return resolveWithSingleVersion(name, versionSpec, entry.server.version)
+      .resolved;
+  }
+
+  return resolveVersion(name, versionSpec, versionStrings).resolved;
+}
+
 async function resolveServer(
   name: string,
   server: StackServer,
@@ -319,22 +376,7 @@ async function resolveServer(
   }
 
   // Step 1: Resolve version
-  let resolvedVersion: string;
-  try {
-    const versions = await deps.getServerVersions(name);
-    const versionStrings = versions.map((v) => v.version);
-    const result = resolveVersion(name, server.version, versionStrings);
-    resolvedVersion = result.resolved;
-  } catch {
-    // Fallback: try with just the latest version
-    const entry = await deps.getServer(name);
-    const result = resolveWithSingleVersion(
-      name,
-      server.version,
-      entry.server.version
-    );
-    resolvedVersion = result.resolved;
-  }
+  const resolvedVersion = await resolveServerVersion(name, server.version, deps);
 
   // Step 2: Fetch the resolved version's full entry
   const serverEntry = await deps.getServer(name, resolvedVersion);
