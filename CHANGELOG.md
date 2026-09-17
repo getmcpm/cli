@@ -8,6 +8,44 @@ _Add entries here, never under a stamped version_ — a release commit renames t
 heading, and a branch that wrote beneath it merges without conflict straight into a
 published section (it happened to #170).
 
+### Fixed
+
+- **MINOR.** `mcpm lock`, `mcpm up`'s auto-lock, and the `mcpm_up` MCP tool
+  have never resolved a semver range or an exact non-latest version pin
+  against the live registry — every caret/tilde range and every exact pin
+  other than the currently-installed latest failed with a false "This is the
+  only version available from the registry" message, while `version:
+  "latest"` worked by accident. `getServerVersions` parsed
+  `GET /v0.1/servers/<name>/versions` with a bespoke `{versions: [...]}`
+  schema (`609b30b`) that never matched a live response: the endpoint has
+  returned the same `ServerListResponse` shape as search — one full
+  `ServerEntry` per version — since the registry's v0.1 API shipped
+  (`1a7cd97`, 2025-10-14). The registry did not change; the schema never
+  matched it. `lock.ts`'s bare `catch {}` (`f7f0b98`, v0.3.0) swallowed the
+  resulting `ValidationError` and silently fell back to resolving against
+  the single latest version. Reproduced against the published 0.40.1 binary
+  before this fix: `version: "~0.34.0"` and `version: "0.34.0"` both failed
+  against a server with 6 published versions, while `version: "latest"`
+  locked fine.
+  - `ServerListResponseSchema` replaces the old versions schema;
+    `getServerVersions` now maps the real response to the `{version}` shape
+    mcpm uses internally (a `null` `servers` list is empty, not an error).
+  - `version: "latest"` no longer calls the version-listing endpoint at
+    all — it never needed it, and skipping it makes the majority path one
+    request cheaper without changing its result.
+  - Any other failure to read the version list (network, 404, or a shape
+    mismatch) now announces itself — naming the server and the underlying
+    error — before falling back to the single-version resolution, instead
+    of failing silently.
+  - Also found while dogfooding the fix against the live registry: a range
+    that legitimately matches nothing in a successfully-fetched list (e.g.
+    `^9.0.0` against a 0.x server) no longer triggers the fallback notice or
+    the "only version available" message — it reports the real "No version
+    satisfies ... Available: ..." with the actual version list.
+  - Not a security fix.
+
+  maintainer backlog #91
+
 ## [0.40.1] - 2026-09-16
 
 ### Fixed
