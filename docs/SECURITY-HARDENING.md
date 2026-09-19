@@ -1,6 +1,6 @@
 # mcpm Security Hardening Plan — Supply Chain + Agent Tool-Call Defense
 
-> Status: **in delivery** (see *Delivery status* below) · Baseline: **v0.39.0** · Drafted: 2026-06-12 · Reconciled to shipped state: 2026-09-08
+> Status: **in delivery** (see *Delivery status* below) · Baseline: **v0.42.0** · Drafted: 2026-06-12 · Reconciled to shipped state: 2026-09-19
 >
 > **How this was produced:** a grounded multi-agent pass — (1) a file-and-function map of
 > mcpm's *current* protections and extension seams (`guard/`, `scanner/`, `stack/`,
@@ -18,7 +18,7 @@
 
 ---
 
-## Delivery status (reconciled to v0.19.0, 2026-07-05)
+## Delivery status (reconciled to v0.42.0, 2026-09-19)
 
 The recommended first slices (§7) shipped in **v0.10.0**. Status per control — the §5 bodies below
 retain the original design narrative, so cross-reference this table for what is actually built:
@@ -145,7 +145,7 @@ Most of this plan is *extension of existing seams*, not new architecture.
   JSON-RPC both ways; `action === "block"` drops the frame and synthesizes a `-32099
   BLOCKED` error (preserving id; notifications dropped silently). 64 MB/direction buffer cap.
 - **Inspection (`patterns.ts inspectMessage` + `targetSubtree`):** *(the 4-target / 3-signature
-  figures below are the **v0.5.0 baseline** this plan was written against — as of v0.39.0 it
+  figures below are the **v0.5.0 baseline** this plan was written against — as of v0.42.0 it
   is **8** `SignatureTarget`s (`src/guard/types.ts`) and **21** signatures
   (`src/guard/signatures.ts`); see README's "What it catches" and `docs/SIGNATURES.md` for
   the shipped set.)* At the baseline: exactly **4** `SignatureTarget`s — `tool_response`,

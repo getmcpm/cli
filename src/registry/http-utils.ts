@@ -8,7 +8,7 @@
  * larger than MAX_RESPONSE_BYTES. (security #21)
  */
 
-import { ValidationError } from "./errors.js";
+import { NetworkError, ValidationError } from "./errors.js";
 
 /**
  * Cap on response body size before parsing. A hostile (or 30x-redirected) host
@@ -171,4 +171,145 @@ async function readCappedStreamOrUndefined(
     await reader.cancel().catch(() => {});
   }
   return new TextDecoder().decode(concatChunks(chunks, total));
+}
+
+// ---------------------------------------------------------------------------
+// Deadline-covered body read + one bounded retry (maintainer backlog #90)
+// ---------------------------------------------------------------------------
+
+/**
+ * `readCappedBody`, but any failure that is NOT a ValidationError surfaces as a
+ * NetworkError.
+ *
+ * Every registry fetch runs under an AbortController deadline. Once that deadline
+ * also covers the body read (it did not — see the callers), a stalled body aborts
+ * mid-stream and `reader.read()` rejects with an AbortError, which is a network
+ * condition and should be classified and retried as one. A ValidationError
+ * (over-cap or unparseable body) is a fact about the payload, not the link, and
+ * is rethrown untouched so it is never retried.
+ */
+export async function readCappedBodyWithinDeadline(
+  url: string,
+  response: Response
+): Promise<unknown> {
+  try {
+    return await readCappedBody(url, response);
+  } catch (err) {
+    if (err instanceof ValidationError) throw err;
+    throw new NetworkError(
+      `Response body read failed: ${url}`,
+      err instanceof Error ? err : new Error(String(err))
+    );
+  }
+}
+
+/**
+ * Delay before the single retry. Deliberately short: this covers a transient
+ * blip or a request that lost a race with tail latency, NOT an outage. Measured
+ * registry tail latency (2026-09-17, 17 samples) reached 10-24 s on 4 of them,
+ * which one retry of a 10 s-deadline GET covers and a longer backoff would not.
+ */
+export const RETRY_DELAY_MS = 400;
+
+const defaultSleep = (ms: number): Promise<void> =>
+  new Promise((resolve) => setTimeout(resolve, ms));
+
+/**
+ * Run `attempt`; if it throws something `shouldRetry` accepts, run it exactly
+ * ONCE more after a short delay and return that outcome.
+ *
+ * One retry, not N: mcpm's registry reads sit in front of a human or an agent
+ * waiting on a command, so an unbounded backoff ladder trades a visible failure
+ * for an invisible hang. `attempt` takes its own AbortController per call, so
+ * the retry gets a fresh, full deadline rather than the remains of the first.
+ */
+export async function withOneRetry<T>(
+  attempt: () => Promise<T>,
+  shouldRetry: (err: unknown) => boolean,
+  sleep: (ms: number) => Promise<void> = defaultSleep
+): Promise<T> {
+  try {
+    return await attempt();
+  } catch (err) {
+    if (!shouldRetry(err)) throw err;
+    await sleep(RETRY_DELAY_MS);
+    return await attempt();
+  }
+}
+
+/**
+ * The outcome of a fail-open fetch. `status === undefined` means BOTH attempts
+ * threw — a network failure, never an answer from the server.
+ */
+export interface FailOpenFetchResult {
+  readonly status: number | undefined;
+  readonly type: string | undefined;
+  readonly ok: boolean;
+  /** Parsed JSON body, or undefined for a non-ok, unreadable or over-cap body. */
+  readonly json: unknown;
+}
+
+/**
+ * Fetch + capped JSON body read under ONE deadline, retried once on a thrown
+ * network failure, never throwing. Shared by the two npm tripwires
+ * (npm-integrity, npm-provenance), which are contracted to fail open.
+ *
+ * Both halves of that contract matter here. The deadline covers the body read,
+ * so a stalled body can no longer hang a command forever (it used to be cleared
+ * in the fetch's own `finally`). And the single retry exists because failing
+ * open is not free on this path: `up --frozen` / `mcpm verify` BLOCK on
+ * "could-not-verify", so a one-off blip fetching a manifest fails a CI install
+ * over a network hiccup rather than over any fact about the package.
+ *
+ * The body is only read when the response is ok, so a 404 — the ONLY path to
+ * "unsigned" in npm-provenance — still resolves without touching the body.
+ */
+export async function fetchJsonFailOpenWithOneRetry(
+  url: string,
+  init: Omit<RequestInit, "signal">,
+  opts: {
+    timeoutMs: number;
+    capBytes: number;
+    fetchImpl: typeof fetch;
+    sleep?: (ms: number) => Promise<void>;
+  }
+): Promise<FailOpenFetchResult> {
+  const sleep = opts.sleep ?? defaultSleep;
+  const NETWORK_FAILURE: FailOpenFetchResult = {
+    status: undefined,
+    type: undefined,
+    ok: false,
+    json: undefined,
+  };
+
+  const once = async (): Promise<FailOpenFetchResult> => {
+    // A fresh controller per attempt, so the retry gets a full deadline rather
+    // than the remains of the first one.
+    const controller = new AbortController();
+    const timerId = setTimeout(() => controller.abort(), opts.timeoutMs);
+    try {
+      let response: Response;
+      try {
+        response = await opts.fetchImpl(url, { ...init, signal: controller.signal });
+      } catch {
+        return NETWORK_FAILURE;
+      }
+      if (!response.ok) {
+        return { status: response.status, type: response.type, ok: false, json: undefined };
+      }
+      return {
+        status: response.status,
+        type: response.type,
+        ok: true,
+        json: await readCappedJsonOrUndefined(response, opts.capBytes),
+      };
+    } finally {
+      clearTimeout(timerId);
+    }
+  };
+
+  const first = await once();
+  if (first.status !== undefined) return first;
+  await sleep(RETRY_DELAY_MS);
+  return once();
 }

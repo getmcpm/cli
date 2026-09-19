@@ -150,6 +150,7 @@ matters (the payload fired at `tools/list`).
 | PulseMCP              | Best metadata enrichment, 12,870+ servers | No install tooling                             | Low                                |
 | JFrog MCP Registry    | Enterprise governance, security scanning  | $532M company, enterprise pricing, not OSS     | High (enterprise)                  |
 | GitHub MCP Gallery    | VS Code integration, curated              | IDE-locked, Microsoft-controlled               | Medium                             |
+| Agent-skill scanners  | Cisco `skill-scanner` (2,535★), NVIDIA `SkillSpector` (~17.8k★), Snyk `agent-scan` — real scanning on the **skills/plugins** carrier | Static scan only, no installer, lockfile, runtime relay or confinement; a different carrier from MCP servers | Low — adjacent H2 carrier, not an MCP-runtime competitor. Notable because VISION.md's "tooling is zero" claim for skills/hooks is now false (corrected 2026-09-19). Anthropic's own Enterprise scanning states verbatim that "MCP servers and hooks, which aren't scanned at this time", and the only unoccupied row the 2026-09-19 re-scout found is OS-level isolation of an executing hook |
 
 ### VC-Backed Players to Watch
 

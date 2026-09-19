@@ -11,6 +11,11 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import type { InstalledServer } from "../../store/servers.js";
 import type { ServerEntry } from "../../registry/types.js";
+import {
+  NetworkError,
+  NotFoundError,
+  ValidationError,
+} from "../../registry/errors.js";
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -116,7 +121,11 @@ describe("handleOutdated", () => {
       makeInstalled("io.github.b/srv", "1.0.0"),
     ]);
     getServer
-      .mockRejectedValueOnce(new Error("Network error"))
+      // #92: a REAL NetworkError, not a bare Error. This test used to feed
+      // `new Error("Network error")` — an input the client never produces — so
+      // it asserted the label "unavailable" against a class the code could not
+      // actually have classified. The dependency the code names, not a stand-in.
+      .mockRejectedValueOnce(new NetworkError("boom", new Error("ECONNREFUSED")))
       .mockResolvedValueOnce(makeEntry("io.github.b/srv", "2.0.0"));
     await run();
     const text = output.join("");
@@ -124,6 +133,29 @@ describe("handleOutdated", () => {
     expect(text).toContain("unavailable");
     expect(text).toContain("io.github.b/srv");
     expect(text).toContain("2.0.0");
+  });
+
+  // #92: each registry failure class must report ITSELF. All four used to
+  // collapse into the single label "Registry unavailable", which is true only
+  // of NetworkError — so a delisted server (the E9a signal) and a registry that
+  // answered with an unrecognised shape both sent the reader hunting a network
+  // problem that did not exist.
+  it("reports a 404 as a delisting, not as the registry being unavailable", async () => {
+    getInstalledServers.mockResolvedValue([makeInstalled("io.github.a/srv", "1.0.0")]);
+    getServer.mockRejectedValue(new NotFoundError("io.github.a/srv"));
+    await run();
+    const text = output.join("");
+    expect(text).toMatch(/delisted/i);
+    expect(text).not.toMatch(/unavailable/i);
+  });
+
+  it("reports an unparseable response as a response problem, not as unavailable", async () => {
+    getInstalledServers.mockResolvedValue([makeInstalled("io.github.a/srv", "1.0.0")]);
+    getServer.mockRejectedValue(new ValidationError("bad shape"));
+    await run();
+    const text = output.join("");
+    expect(text).toMatch(/could not parse/i);
+    expect(text).not.toMatch(/unavailable/i);
   });
 
   it("outputs valid JSON array with --json flag", async () => {

@@ -22,7 +22,7 @@ import {
   ValidationError,
 } from "./errors.js";
 import { isPrivateHost } from "./publish-client.js";
-import { readCappedBody } from "./http-utils.js";
+import { readCappedBodyWithinDeadline, withOneRetry } from "./http-utils.js";
 
 const DEFAULT_BASE_URL = "https://registry.modelcontextprotocol.io";
 const DEFAULT_TIMEOUT_MS = 10_000;
@@ -188,50 +188,68 @@ export class RegistryClient {
    * @param serverName — optionally provided for 404 error messages
    */
   private async get(url: string, serverName?: string): Promise<unknown> {
+    // #90: ONE bounded retry, and only on NetworkError — a transient blip or a
+    // request that lost a race with the registry's tail latency. A 404, a 5xx, a
+    // refused redirect and an unparseable body are all deterministic answers;
+    // asking again just doubles the wait. Each attempt builds its OWN
+    // AbortController so the retry gets a full fresh deadline.
+    return withOneRetry(
+      () => this.getOnce(url, serverName),
+      (err) => err instanceof NetworkError
+    );
+  }
+
+  private async getOnce(url: string, serverName?: string): Promise<unknown> {
     const controller = new AbortController();
     const timerId = setTimeout(() => controller.abort(), this.timeout);
 
-    let response: Response;
+    // #90: the deadline must stay armed through the BODY read. clearTimeout used
+    // to run in the fetch's own `finally`, so a response whose headers arrived
+    // promptly and whose body then stalled hung forever with no timeout left to
+    // fire. The timer is now cleared in an outer finally that wraps both.
     try {
-      // redirect:"manual" — never silently follow a 3xx to an attacker-chosen
-      // (possibly internal) host. A redirect surfaces as an opaqueredirect /
-      // status-0 response and is rejected below. (security #21)
-      response = await this.fetchImpl(url, {
-        redirect: "manual",
-        signal: controller.signal,
-      });
-    } catch (err) {
-      throw new NetworkError(
-        `Network request failed: ${url}`,
-        err instanceof Error ? err : new Error(String(err))
-      );
+      let response: Response;
+      try {
+        // redirect:"manual" — never silently follow a 3xx to an attacker-chosen
+        // (possibly internal) host. A redirect surfaces as an opaqueredirect /
+        // status-0 response and is rejected below. (security #21)
+        response = await this.fetchImpl(url, {
+          redirect: "manual",
+          signal: controller.signal,
+        });
+      } catch (err) {
+        throw new NetworkError(
+          `Network request failed: ${url}`,
+          err instanceof Error ? err : new Error(String(err))
+        );
+      }
+
+      // A 3xx surfaces as an opaqueredirect (status 0) under redirect:"manual",
+      // or as a 3xx status if the runtime exposes it. Treat both as an error —
+      // we do not follow cross-origin redirects. (security #21)
+      if (
+        response.type === "opaqueredirect" ||
+        (response.status >= 300 && response.status < 400)
+      ) {
+        throw new RegistryError(
+          `Registry returned a redirect (${response.status}) for ${url}; refusing to follow it.`,
+          response.status
+        );
+      }
+
+      if (!response.ok) {
+        if (response.status === 404) {
+          throw new NotFoundError(serverName ?? url);
+        }
+        throw new RegistryError(
+          `Registry API returned ${response.status} for ${url}`,
+          response.status
+        );
+      }
+
+      return await readCappedBodyWithinDeadline(url, response);
     } finally {
       clearTimeout(timerId);
     }
-
-    // A 3xx surfaces as an opaqueredirect (status 0) under redirect:"manual",
-    // or as a 3xx status if the runtime exposes it. Treat both as an error —
-    // we do not follow cross-origin redirects. (security #21)
-    if (
-      response.type === "opaqueredirect" ||
-      (response.status >= 300 && response.status < 400)
-    ) {
-      throw new RegistryError(
-        `Registry returned a redirect (${response.status}) for ${url}; refusing to follow it.`,
-        response.status
-      );
-    }
-
-    if (!response.ok) {
-      if (response.status === 404) {
-        throw new NotFoundError(serverName ?? url);
-      }
-      throw new RegistryError(
-        `Registry API returned ${response.status} for ${url}`,
-        response.status
-      );
-    }
-
-    return readCappedBody(url, response);
   }
 }

@@ -5,7 +5,7 @@
 > covers the developer- and enterprise-**adoption** track (distribution, org policy,
 > SIEM/SBOM evidence, client reach). This file is the security/DevX **feature** track.
 >
-> Status: in delivery · Baseline: **v0.39.0** · Drafted: 2026-06-09 · Reconciled: 2026-09-08
+> Status: in delivery · Baseline: **v0.42.0** · Drafted: 2026-06-09 · Reconciled: 2026-09-19
 >
 > **Delivery log:**
 > - ✅ **F4 — Release-age cooldown + install-script-shape awareness** — shipped (PR #70,
@@ -302,7 +302,7 @@ Sequenced to keep momentum and the Dependabot surface clean (the v0.9–v0.15 se
 > - **Deferred:** Linux `bwrap`, the **strict tier** (below), orig-hash **Phase-2 fail-closed**, and the
 >   per-server `guard confine <server>` / `--off` / `--show` / `--require` / `--allow-read/-write/-net`
 >   command (per-server confine is achievable today via `enable --confine --server X` + `disable
->   --server X`). **Honest caveats:** the macOS `sandbox-exec` path is not exercised in ubuntu-only CI
+>   --server X`). **Honest caveats:** the macOS `sandbox-exec` path IS exercised in CI as of v0.17.0 (the `confine-macos` job on `macos-latest`); this line said "not exercised in ubuntu-only CI" until 2026-09-19, four minors after it stopped being true
 >   (mocked arg-vector unit tests + local darwin verification — same gap as the os-keychain shell-outs);
 >   confine is opt-in (without it enable/disable is unchanged); net is launcher-permissive so this does
 >   NOT stop network exfil in general; and it does NOT defend a same-user attacker who can rewrite BOTH
@@ -317,7 +317,7 @@ Sequenced to keep momentum and the Dependabot surface clean (the v0.9–v0.15 se
 - **New `src/guard/confine/`:** `profile.ts` (platform-neutral `ConfineProfile` + Zod) · `derive.ts` (`deriveDefaultProfile` from server name/command/args/declared-env/registry-meta — reads-allow = package dir + cwd RO + system exec paths; write-allow = `~/.mcpm/sandbox/<server>/tmp`; net-allow = `none` or the single declared remote host:443; deny-always = the secret-dir list) · `backend-macos.ts` (renders a Seatbelt `.sb`, rewrites launcher to `/usr/bin/sandbox-exec -f …`) · `backend-linux.ts` (`bwrap` argv `--ro-bind`/`--bind` scratch/`--unshare-net`/`--die-with-parent`, Landlock+seccomp fallback) · `apply.ts` (`wrapForConfinement → {command,args}|null`; null on Windows/no-backend) · `store.ts` (`~/.mcpm/guard-confine.yaml`, **same integrity-sidecar + atomic-write + Zod-on-read + fail-closed** discipline as `policy.ts`).
 - **The single load-bearing insertion:** `enable --confine` embeds `--confine-profile-hash <sha256>` into the wrap marker (parallel to the existing `--orig-hash`); at spawn, `run-inner.ts` loads the profile, **verifies hash matches the marker (fail-closed, identical to PINS-READ-ERROR at `run-inner.ts:131`)**, calls `wrapForConfinement`, hands the result to `startRelay` — **one call site changes** (`run-inner.ts:234`). The relay, inspection, drift, and event log are untouched: the MITM now wraps a contained process.
 - **Degrades gracefully** (Windows / missing backend → unconfined-but-relayed, *loudly* reported via `doctor-confine` + one-time warning). Violations append `confine-violation` to `guard-events.jsonl`.
-- **Zero new npm deps** — uses OS binaries (`sandbox-exec`, `bwrap`), the os-keychain shell-out precedent. **Risks:** Seatbelt is deprecated-but-shipped (isolate behind `backend-macos.ts`); false-denies (mitigated by opt-in default-off + standard tier + `--allow-*` widening); no macOS CI (Seatbelt repeats the os-keychain "verified locally, untested in CI" gap).
+- **Zero new npm deps** — uses OS binaries (`sandbox-exec`, `bwrap`), the os-keychain shell-out precedent. **Risks:** Seatbelt is deprecated-but-shipped (isolate behind `backend-macos.ts`); false-denies (mitigated by opt-in default-off + standard tier + `--allow-*` widening); no macOS CI (Seatbelt repeats the os-keychain "verified locally, untested in CI" gap) — **closed in v0.17.0 by the `confine-macos` CI leg; corrected here 2026-09-19**.
 
 **Why it's the bet (the whole strategic case).** Every other roadmap item is **detection** — it reasons about bytes/metadata and decides whether to warn. They share one ceiling: a server that *decides* to read `~/.ssh` or exfil never expresses that intent through inspectable JSON-RPC. Confinement is the only proposal that adds a **categorically new enforcement primitive** for that non-inspectable half. Cursor confines only its own spawn path; hosted gateways need a backend — mcpm rides the guard wrap marker so the **same confined config projects into every adapter**, zero backend, zero-install OS primitives: the literal embodiment of local-first security. Fund v0.9's five cheap detectors first for momentum, then spend the major version turning mcpm *from a tool that watches into one that contains.* (Distinct from the backlog's `mcpm try` = *ephemeral pre-install* trial; this is *persistent confinement of installed, guard-wrapped* servers — they share the profile/backend core, so this de-risks `try`.)
 

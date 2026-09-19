@@ -579,8 +579,8 @@ export async function handleInstall(
 
     if (trustScore.level === "risky") {
       if (!jsonMode) {
-        output("\u001b[31mWARNING: This server has a low trust score and may be risky to install.\u001b[0m");
-        output("\u001b[31mSecurity findings indicate potential dangers. Proceed with extreme caution.\u001b[0m");
+        output(chalk.red("WARNING: This server has a low trust score and may be risky to install."));
+        output(chalk.red("Security findings indicate potential dangers. Proceed with extreme caution."));
       }
       shouldProceed = await confirm(
         "I understand the risks and want to install this server anyway. Continue?"
@@ -594,13 +594,13 @@ export async function handleInstall(
       // Still says what was NOT checked: quieter, not silent.
       if (!jsonMode) {
         output(
-          "\u001b[36mNo findings. The health check runs after install, so this is not a verified pass.\u001b[0m"
+          chalk.cyan("No findings. The health check runs after install, so this is not a verified pass.")
         );
       }
       shouldProceed = await confirm(`Install '${name}'?`);
     } else if (trustScore.level === "caution") {
       if (!jsonMode) {
-        output("\u001b[33mCAUTION: This server has a moderate trust score. Review the details above.\u001b[0m");
+        output(chalk.yellow("CAUTION: This server has a moderate trust score. Review the details above."));
       }
       shouldProceed = await confirm(`Install '${name}'? (caution recommended)`);
     } else {
@@ -738,10 +738,12 @@ export async function handleInstall(
     if (!alreadyConsented) {
       if (!jsonMode) {
         output(
-          "\x1b[33m⚠ UNGUARDED: this URL/HTTP-transport server runs WITHOUT runtime " +
-            "inspection (the guard relay only wraps stdio servers). This grants consent — " +
-            "it does NOT add protection. The only true fix is a streamable-HTTP relay " +
-            "(not yet implemented).\x1b[0m"
+          chalk.yellow(
+            "⚠ UNGUARDED: this URL/HTTP-transport server runs WITHOUT runtime " +
+              "inspection (the guard relay only wraps stdio servers). This grants consent — " +
+              "it does NOT add protection. The only true fix is a streamable-HTTP relay " +
+              "(not yet implemented)."
+          )
         );
       }
       if (deps.recordUnguardedConsent) {
@@ -779,20 +781,24 @@ export async function handleInstall(
   if (!options.json) {
     if (secretsMode === "keychain" && storedSecretCount > 0) {
       output(
-        `\x1b[32mStored ${storedSecretCount} secret(s) encrypted at rest in ~/.mcpm. ` +
-        "With an OS keychain this protects against other-user/offline access (not " +
-        "same-user processes); without one a machine-derived key is used that guards " +
-        "casual local inspection only, NOT file exfiltration — run `mcpm secrets migrate` " +
-        "once a keychain is available. " +
-        "Run `mcpm guard enable` (then restart your IDE) so they resolve at launch — " +
-        "until guard wraps this server it receives the literal placeholder.\x1b[0m"
+        chalk.green(
+          `Stored ${storedSecretCount} secret(s) encrypted at rest in ~/.mcpm. ` +
+          "With an OS keychain this protects against other-user/offline access (not " +
+          "same-user processes); without one a machine-derived key is used that guards " +
+          "casual local inspection only, NOT file exfiltration — run `mcpm secrets migrate` " +
+          "once a keychain is available. " +
+          "Run `mcpm guard enable` (then restart your IDE) so they resolve at launch — " +
+          "until guard wraps this server it receives the literal placeholder."
+        )
       );
     } else {
       const hasSecrets = envVarDefs.some((ev) => ev.isSecret && resolvedEnvVars[ev.name]);
       if (hasSecrets) {
         output(
-          "\x1b[33mNote: API keys are stored as plaintext in client config files. " +
-          "Ensure config files have appropriate permissions (chmod 600).\x1b[0m"
+          chalk.yellow(
+            "Note: API keys are stored as plaintext in client config files. " +
+            "Ensure config files have appropriate permissions (chmod 600)."
+          )
         );
       }
     }
@@ -828,7 +834,7 @@ export async function handleInstall(
   }
 
   const clientList = installedClients.join(", ");
-  output(`\u001b[32mInstalled '${name}' successfully into: ${clientList}\u001b[0m`);
+  output(chalk.green(`Installed '${name}' successfully into: ${clientList}`));
 }
 
 // ---------------------------------------------------------------------------

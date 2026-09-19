@@ -14,7 +14,7 @@
  */
 
 import type { NpmIntegritySnapshot } from "../stack/schema.js";
-import { readCappedJsonOrUndefined } from "./http-utils.js";
+import { fetchJsonFailOpenWithOneRetry } from "./http-utils.js";
 
 export type { NpmIntegritySnapshot } from "../stack/schema.js";
 
@@ -85,32 +85,31 @@ async function fetchManifest(
   fetchImpl: typeof fetch,
   timeoutMs: number
 ): Promise<unknown> {
-  const controller = new AbortController();
-  const timerId = setTimeout(() => controller.abort(), timeoutMs);
+  // redirect:"manual" — never follow a 3xx to an attacker-chosen (possibly
+  // internal) host. A redirect surfaces as an opaqueredirect (status 0) or a
+  // 3xx status; both resolve to undefined (fail-open). This endpoint does not
+  // redirect in practice. Mirrors client.ts / publish-client.ts (security #21).
+  // #90: the shared helper keeps the deadline armed through the body read and
+  // retries ONCE on a thrown network failure — failing open here is not free,
+  // because `up --frozen` / `mcpm verify` BLOCK on "could-not-verify".
+  const res = await fetchJsonFailOpenWithOneRetry(
+    url,
+    { redirect: "manual" },
+    { timeoutMs, capBytes: BODY_CAP_BYTES, fetchImpl }
+  );
 
-  let response: Response;
-  try {
-    // redirect:"manual" — never follow a 3xx to an attacker-chosen (possibly
-    // internal) host. A redirect surfaces as an opaqueredirect (status 0) or a
-    // 3xx status; both resolve to undefined (fail-open). This endpoint does not
-    // redirect in practice. Mirrors client.ts / publish-client.ts (security #21).
-    response = await fetchImpl(url, { redirect: "manual", signal: controller.signal });
-  } catch {
-    return undefined;
-  } finally {
-    clearTimeout(timerId);
-  }
+  if (res.status === undefined) return undefined; // both attempts threw
 
   if (
-    response.type === "opaqueredirect" ||
-    (response.status >= 300 && response.status < 400)
+    res.type === "opaqueredirect" ||
+    (res.status >= 300 && res.status < 400)
   ) {
     return undefined;
   }
 
-  if (!response.ok) return undefined;
+  if (!res.ok) return undefined;
 
-  return readCappedJsonOrUndefined(response, BODY_CAP_BYTES);
+  return res.json;
 }
 
 // ---------------------------------------------------------------------------

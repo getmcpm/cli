@@ -83,15 +83,15 @@
     "ora": "^9.4.0",
     "proper-lockfile": "^4.1.2",
     "semver": "^7.8.1",
-    "yaml": "^2.9.0",
-    "zod": "^4.5.4"
+    "yaml": "^2.9.1",
+    "zod": "^4.6.5"
   },
   "devDependencies": {
-    "@types/node": "^22.19.19",
+    "@types/node": "^22.20.3",
     "@types/semver": "^7.8.0",
-    "@vitest/coverage-v8": "^5.0.0",
+    "@vitest/coverage-v8": "^5.0.1",
     "tsup": "^8.5.1",
     "typescript": "^5.9.3",
-    "vitest": "^5.0.0"
+    "vitest": "^5.0.1"
   }
 }

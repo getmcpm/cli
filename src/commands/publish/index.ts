@@ -83,12 +83,19 @@ export function registerPublishCommand(program: Command): void {
         fetchActionsOidcToken,
         audienceFromRegistryUrl,
       } = await import("../../registry/publish-client.js");
+      const { RegistryClient } = await import("../../registry/client.js");
       await handlePublishSubmit(
         { registryUrl: opts.registry, githubOidc: opts.githubOidc },
         {
           readManifest,
           scanTier1,
           submitToRegistry,
+          // #90: only consulted to recover from a submit timeout. Same base URL
+          // as the submit, so a custom --registry is honoured.
+          getServerVersions: async (name, registryUrl) =>
+            (await new RegistryClient({ baseUrl: registryUrl }).getServerVersions(name)).map(
+              (v) => v.version
+            ),
           exchangeGitHubToken,
           exchangeGitHubOidcToken,
           fetchActionsOidcToken,

@@ -15,6 +15,12 @@ import type { Finding } from "../../scanner/tier1.js";
 import type { TrustScore } from "../../scanner/trust-score.js";
 import type { ClientId } from "../../config/paths.js";
 import { CLEAN_PENDING_LABEL } from "../../utils/format-trust.js";
+import {
+  NetworkError,
+  NotFoundError,
+  RegistryError,
+  ValidationError,
+} from "../../registry/errors.js";
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -296,6 +302,27 @@ describe("handleAudit — registry unavailable for one server", () => {
     await handleAudit({}, { ...deps, output: (t) => lines.push(t) });
     const out = lines.join("\n");
     expect(out).toMatch(/registry|unavailable|error|failed/i);
+  });
+
+  // #92: audit used to print "Registry unavailable — could not fetch metadata"
+  // for ALL FOUR failure classes. It is true of exactly one of them. Each class
+  // is driven here with the error type the registry client really throws — the
+  // pre-existing tests above feed a bare `Error`, which the client never
+  // produces, so they could not tell the labels apart.
+  it.each([
+    ["a 404", () => new NotFoundError("io.github.test/server"), /delisted/i],
+    ["an unparseable body", () => new ValidationError("bad shape"), /could not parse/i],
+    [
+      "a network failure",
+      () => new NetworkError("boom", new Error("ECONNREFUSED")),
+      /unavailable/i,
+    ],
+    ["a 500", () => new RegistryError("server error", 500), /HTTP 500/],
+  ])("reports %s as itself, not as a generic outage", async (_label, makeErr, expected) => {
+    const deps = makeDeps({ getServer: vi.fn().mockRejectedValue(makeErr()) });
+    const lines: string[] = [];
+    await handleAudit({}, { ...deps, output: (t) => lines.push(t) });
+    expect(lines.join("\n")).toMatch(expected);
   });
 
   it("still scans the successful server when one fails", async () => {

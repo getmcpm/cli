@@ -406,3 +406,72 @@ describe("compareIntegrity", () => {
     expect(compareIntegrity(SHA256_A, SHA256_B)).toBe("differ");
   });
 });
+
+// ---------------------------------------------------------------------------
+// #90 — deadline covers the body read, and ONE bounded retry
+// ---------------------------------------------------------------------------
+
+describe("fetchNpmIntegrity — deadline + retry (#90)", () => {
+  // Failing open is NOT free on this path: `up --frozen` and `mcpm verify`
+  // BLOCK on "could-not-verify", so a one-off blip fetching a manifest fails a
+  // CI install over a network hiccup rather than over any fact about the
+  // package. One retry, never a loop.
+  it("retries once on a thrown network failure and succeeds on the second attempt", async () => {
+    let calls = 0;
+    const fetchImpl = (async () => {
+      calls += 1;
+      if (calls === 1) throw new TypeError("fetch failed");
+      return new Response(JSON.stringify({ dist: { integrity: "sha512-abc" } }), { status: 200 });
+    }) as unknown as typeof fetch;
+
+    const snap = await fetchNpmIntegrity("@test/pkg", "1.0.0", { fetchImpl });
+
+    expect(snap).toEqual({ npmVersion: "1.0.0", integrity: "sha512-abc" });
+    expect(calls).toBe(2);
+  });
+
+  it("gives up after exactly one retry", async () => {
+    let calls = 0;
+    const fetchImpl = (async () => {
+      calls += 1;
+      throw new TypeError("fetch failed");
+    }) as unknown as typeof fetch;
+
+    expect(await fetchNpmIntegrity("@test/pkg", "1.0.0", { fetchImpl })).toBeUndefined();
+    expect(calls).toBe(2);
+  });
+
+  it("does NOT retry a 404 — a deterministic answer", async () => {
+    let calls = 0;
+    const fetchImpl = (async () => {
+      calls += 1;
+      return new Response("{}", { status: 404 });
+    }) as unknown as typeof fetch;
+
+    expect(await fetchNpmIntegrity("@test/pkg", "1.0.0", { fetchImpl })).toBeUndefined();
+    expect(calls).toBe(1);
+  });
+
+  it("fails open on a stalled body instead of hanging forever", async () => {
+    let calls = 0;
+    const fetchImpl = (async (_url: string, init?: RequestInit) => {
+      calls += 1;
+      const signal = init!.signal as AbortSignal;
+      const body = new ReadableStream<Uint8Array>({
+        start(controller) {
+          signal.addEventListener("abort", () => controller.error(new Error("aborted")), {
+            once: true,
+          });
+        },
+      });
+      return new Response(body, { status: 200 });
+    }) as unknown as typeof fetch;
+
+    // Before the fix clearTimeout ran in the fetch's own `finally`, so the
+    // deadline was already disarmed when the body stalled: this never settled.
+    expect(
+      await fetchNpmIntegrity("@test/pkg", "1.0.0", { fetchImpl, timeoutMs: 40 })
+    ).toBeUndefined();
+    expect(calls).toBe(1); // an aborted body is not a thrown fetch — no retry
+  }, 10_000);
+});

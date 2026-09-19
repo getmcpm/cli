@@ -25,7 +25,7 @@ import type {
   ProvenanceIdentity,
 } from "../stack/schema.js";
 import { NpmProvenanceSnapshotSchema } from "../stack/schema.js";
-import { readCappedJsonOrUndefined } from "./http-utils.js";
+import { fetchJsonFailOpenWithOneRetry } from "./http-utils.js";
 
 export type { NpmProvenanceSnapshot, ProvenanceIdentity } from "../stack/schema.js";
 
@@ -83,27 +83,30 @@ export async function fetchNpmProvenance(
     const spec = encodeURIComponent(`${identifier}@${npmVersion}`);
     const url = `https://${NPM_REGISTRY_HOST}/-/npm/v1/attestations/${spec}`;
 
-    const controller = new AbortController();
-    const timerId = setTimeout(() => controller.abort(), timeoutMs);
-    let response: Response;
-    try {
-      response = await fetchImpl(url, { redirect: "manual", signal: controller.signal });
-    } catch {
-      return undefined; // network error / abort → fail-open
-    } finally {
-      clearTimeout(timerId);
-    }
+    // #90: the shared helper keeps the deadline armed through the BODY read (it
+    // used to be cleared in the fetch's own `finally`, so a stalled body hung
+    // forever) and retries ONCE on a thrown network failure, so a transient blip
+    // cannot silently downgrade a signed package to "could not verify". The
+    // deadline covers the network round trip only — the OFFLINE crypto
+    // verification below is deliberately outside it.
+    const res = await fetchJsonFailOpenWithOneRetry(
+      url,
+      { redirect: "manual" },
+      { timeoutMs, capBytes: BODY_CAP_BYTES, fetchImpl }
+    );
+
+    if (res.status === undefined) return undefined; // network error / abort → fail-open
 
     // A definitive 404 is the ONLY path to "unsigned".
-    if (response.status === 404) {
+    if (res.status === 404) {
       return { npmVersion, status: "unsigned", mode: "registry-record" };
     }
     // Refuse redirects and any other non-2xx → fail-open (NOT unsigned).
-    if (response.type === "opaqueredirect") return undefined;
-    if (response.status >= 300 && response.status < 400) return undefined;
-    if (!response.ok) return undefined;
+    if (res.type === "opaqueredirect") return undefined;
+    if (res.status >= 300 && res.status < 400) return undefined;
+    if (!res.ok) return undefined;
 
-    const raw = await readCappedJsonOrUndefined(response, BODY_CAP_BYTES);
+    const raw = res.json;
     if (raw === undefined) return undefined; // oversize / unreadable body → fail-open
 
     const identity = extractIdentity(raw);

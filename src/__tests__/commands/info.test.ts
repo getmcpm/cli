@@ -263,7 +263,7 @@ describe("handleInfo — minimal server entry", () => {
 
     await expect(
       handleInfo("io.github.test/minimal", {}, { registryClient: client as any, output })
-    ).resolves.toBeUndefined();
+    ).resolves.toBe(0);
   });
 
   it("handles server with no packages gracefully", async () => {
@@ -273,7 +273,7 @@ describe("handleInfo — minimal server entry", () => {
 
     await expect(
       handleInfo("io.github.test/minimal", {}, { registryClient: client as any, output })
-    ).resolves.toBeUndefined();
+    ).resolves.toBe(0);
 
     expect(lines.join("\n")).toContain("io.github.test/minimal");
   });
@@ -285,7 +285,7 @@ describe("handleInfo — minimal server entry", () => {
 
     await expect(
       handleInfo("io.github.test/minimal", {}, { registryClient: client as any, output })
-    ).resolves.toBeUndefined();
+    ).resolves.toBe(0);
   });
 
   it("handles server with no published date gracefully", async () => {
@@ -295,7 +295,7 @@ describe("handleInfo — minimal server entry", () => {
 
     await expect(
       handleInfo("io.github.test/minimal", {}, { registryClient: client as any, output })
-    ).resolves.toBeUndefined();
+    ).resolves.toBe(0);
   });
 });
 
@@ -386,9 +386,11 @@ describe("handleInfo — error handling", () => {
     };
     const output = vi.fn();
 
+    // F4: the message is unchanged, but a server that does not exist is now a
+    // FAILED invocation — exit 1, matching install/remove and CONTRACTS.md.
     await expect(
       handleInfo("io.github.test/missing", {}, { registryClient: client as any, output })
-    ).resolves.toBeUndefined();
+    ).resolves.toBe(1);
   });
 
   it("throws NetworkError to the caller (non-recoverable)", async () => {

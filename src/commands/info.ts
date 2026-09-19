@@ -88,14 +88,16 @@ function renderRemotesSection(remotes: Remote[], lines: string[]): void {
 
 /**
  * Core handler for `mcpm info <name>`.
- * NotFoundError is handled gracefully (prints message, no throw).
- * All other errors propagate to the caller.
+ * NotFoundError is handled gracefully (prints message, no throw) and reported as
+ * exit code 1. All other errors propagate to the caller.
+ *
+ * @returns the process exit code — 0 on success, 1 when the server is not found.
  */
 export async function handleInfo(
   name: string,
   options: InfoOptions,
   deps: InfoDeps
-): Promise<void> {
+): Promise<number> {
   const { registryClient, output } = deps;
 
   const spinner = ora({ text: "Fetching...", isSilent: !process.stdout.isTTY }).start();
@@ -106,8 +108,13 @@ export async function handleInfo(
   } catch (err) {
     spinner.stop();
     if (err instanceof NotFoundError) {
+      // Exit 1, not 0: "the server you named does not exist" is a failed
+      // invocation, the same condition `install`/`remove` already exit 1 for, and
+      // docs/CONTRACTS.md says a command exits 1 when it cannot do what was asked.
+      // Exiting 0 made `mcpm info X && <next step>` run the next step on a server
+      // that is not there. The message and its stream (stdout) are unchanged.
       output(`Server '${name}' not found`);
-      return;
+      return 1;
     }
     throw err;
   }
@@ -134,7 +141,7 @@ export async function handleInfo(
       isLatest: official?.isLatest ?? null,
     };
     output(JSON.stringify(jsonData, null, 2));
-    return;
+    return 0;
   }
 
   // Render full detail view.
@@ -181,6 +188,7 @@ export async function handleInfo(
   lines.push(divider);
 
   output(lines.join("\n"));
+  return 0;
 }
 
 // ---------------------------------------------------------------------------
@@ -198,7 +206,9 @@ export function registerInfo(program: Command): void {
     .action(async (name: string, opts: { json?: boolean }) => {
       const { RegistryClient } = await import("../registry/client.js");
       const client = new RegistryClient();
-      await handleInfo(
+      // process.exitCode (not process.exit): stdout may be a pipe, and exiting
+      // outright can truncate unflushed output. Same discipline as guard inspect.
+      process.exitCode = await handleInfo(
         name,
         { json: opts.json },
         { registryClient: client, output: stdoutOutput }

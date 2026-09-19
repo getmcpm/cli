@@ -36,7 +36,7 @@ mcpm/
 │   │   ├── index.ts                — public API barrel export
 │   │   ├── client.ts               — RegistryClient (HTTP, injectable fetch)
 │   │   ├── publish-client.ts       — `mcpm publish`: GitHub token/OIDC → registry JWT exchange, then POST /v0.1/publish
-│   │   ├── http-utils.ts           — shared capped-body reader (decompression-bomb cap)
+│   │   ├── http-utils.ts           — shared capped-body reader (decompression-bomb cap) + the deadline-covered body read and the one bounded retry
 │   │   ├── schemas.ts              — Zod schemas for API responses
 │   │   ├── types.ts                — TypeScript types inferred from schemas.ts
 │   │   ├── argument-tokens.ts      — shared extractor of scannable string tokens from a runtime Argument
@@ -44,7 +44,7 @@ mcpm/
 │   │   ├── npm-provenance.ts       — parse-only Sigstore attestation identity + the lazy crypto verdict (F8)
 │   │   ├── sigstore-verify.ts      — offline Sigstore verification; the ONLY module that may conclude "verified"
 │   │   ├── sigstore-trusted-root.json — vendored sigstore/root-signing trusted root
-│   │   └── errors.ts               — RegistryError, NotFoundError, NetworkError
+│   │   └── errors.ts               — RegistryError, NotFoundError, NetworkError, ValidationError + describeRegistryError (the shared failure classifier)
 │   ├── config/
 │   │   ├── paths.ts                — OS-aware config file paths
 │   │   ├── detector.ts             — detect installed AI clients
@@ -433,7 +433,7 @@ All config writes use atomic file operations (write to `.tmp`, then `fs.rename`)
 ## Testing
 
 - **Framework**: vitest with `@vitest/coverage-v8`
-- **Test count**: 2,931 tests
+- **Test count**: 3,049 tests (measured 2026-09-19 at v0.42.0)
 - **Coverage thresholds**: lines 80%, branches 75%
 - **Test locations**: `src/__tests__/` (commands, config, output, registry, server, smoke, stack, store) + colocated `*.test.ts` (registry, scanner, stack, guard — `src/guard/__tests__/`)
 - **Approach**: injectable `fetchImpl` for registry tests (no network calls), temp directories for config adapter tests
@@ -468,7 +468,11 @@ the flagship enforcement path CI-verified.
 Runs on `v*` tag push. Builds, tests, and publishes to npm as `@getmcpm/cli` with
 provenance. A separate `registry` job then runs `mcpm publish --github-oidc` to
 (re-)list the version on the official MCP registry, authenticating via a minted
-GitHub Actions OIDC token — no npm publish and no `--registry` secret involved.
+GitHub Actions OIDC token — no npm publish and no `--registry` secret involved. On the
+tag-push path that `registry` job first POLLS npm for up to 5 minutes (30 attempts, 10 s
+apart) until npm's read path actually serves the new version, and FAILS CLOSED naming the
+`workflow_dispatch` recovery if it never does — the MCP registry validates the npm
+coordinate before listing it, and v0.40.0's first-ever run lost that race.
 
 The workflow also accepts a `workflow_dispatch` trigger (a version string input) that
 runs ONLY the `registry` job, verifying the given version is already live on npm before

@@ -15,6 +15,11 @@ import type { TrustScore } from "../../scanner/trust-score.js";
 import type { Finding } from "../../scanner/tier1.js";
 import type { ClientId } from "../../config/paths.js";
 import { CLEAN_PENDING_LABEL } from "../../utils/format-trust.js";
+import {
+  NetworkError,
+  NotFoundError,
+  ValidationError,
+} from "../../registry/errors.js";
 import type { ConfigAdapter } from "../../config/adapters/index.js";
 
 // ---------------------------------------------------------------------------
@@ -490,6 +495,25 @@ describe("handleUpdate — registry unavailable", () => {
     });
     await handleUpdate({}, deps);
     expect(lines.join("\n")).toMatch(/error|unavailable|failed|could not/i);
+  });
+
+  // #92: same collapse as audit — each class must report itself.
+  it.each([
+    ["a 404", () => new NotFoundError("io.github.test/server"), /delisted/i],
+    ["an unparseable body", () => new ValidationError("bad shape"), /could not parse/i],
+    [
+      "a network failure",
+      () => new NetworkError("boom", new Error("ECONNREFUSED")),
+      /unavailable/i,
+    ],
+  ])("reports %s as itself, not as a generic outage", async (_label, makeErr, expected) => {
+    const lines: string[] = [];
+    const deps = makeDeps({
+      getServer: vi.fn().mockRejectedValue(makeErr()),
+      output: (t: string) => lines.push(t),
+    });
+    await handleUpdate({}, deps);
+    expect(lines.join("\n")).toMatch(expected);
   });
 
   it("does not call addInstalledServer when registry fails", async () => {

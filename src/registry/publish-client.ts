@@ -12,7 +12,7 @@
 import type { ServerJson } from "../commands/publish/manifest.js";
 import type { SubmitResult } from "../commands/publish/submit.js";
 import { NetworkError, RegistryError } from "./errors.js";
-import { readCappedBody } from "./http-utils.js";
+import { readCappedBody, readCappedBodyWithinDeadline, withOneRetry } from "./http-utils.js";
 import { sanitizeForTerminal } from "../guard/sanitize.js";
 
 const DEFAULT_TIMEOUT_MS = 15_000;
@@ -126,38 +126,43 @@ async function postJson(
   const controller = new AbortController();
   const timerId = setTimeout(() => controller.abort(), DEFAULT_TIMEOUT_MS);
 
-  let response: Response;
+  // #90: one outer try/finally so the deadline stays armed through the BODY read.
+  // It used to be cleared in the fetch's own `finally`, leaving a stalled body
+  // with no timeout left to fire.
   try {
-    response = await fetch(url, {
-      method: "POST",
-      // redirect:"manual" — a 3xx must NOT carry the Authorization token to the
-      // redirect target. A redirect surfaces as a non-ok response and errors below.
-      redirect: "manual",
-      headers: { "Content-Type": "application/json", ...headers },
-      body: JSON.stringify(body),
-      signal: controller.signal,
-    });
-  } catch (err) {
-    throw new NetworkError(
-      `Network request failed: ${url}`,
-      err instanceof Error ? err : new Error(String(err))
-    );
+    let response: Response;
+    try {
+      response = await fetch(url, {
+        method: "POST",
+        // redirect:"manual" — a 3xx must NOT carry the Authorization token to the
+        // redirect target. A redirect surfaces as a non-ok response and errors below.
+        redirect: "manual",
+        headers: { "Content-Type": "application/json", ...headers },
+        body: JSON.stringify(body),
+        signal: controller.signal,
+      });
+    } catch (err) {
+      throw new NetworkError(
+        `Network request failed: ${url}`,
+        err instanceof Error ? err : new Error(String(err))
+      );
+    }
+
+    if (response.type === "opaqueredirect" || response.status === 0) {
+      throw new RegistryError(
+        "Registry attempted a redirect (3xx); refusing to follow it with the auth token. Check the --registry URL.",
+        0
+      );
+    }
+
+    if (!response.ok) {
+      throw new RegistryError(await describeError(url, response), response.status);
+    }
+
+    return await readCappedBodyWithinDeadline(url, response);
   } finally {
     clearTimeout(timerId);
   }
-
-  if (response.type === "opaqueredirect" || response.status === 0) {
-    throw new RegistryError(
-      "Registry attempted a redirect (3xx); refusing to follow it with the auth token. Check the --registry URL.",
-      0
-    );
-  }
-
-  if (!response.ok) {
-    throw new RegistryError(await describeError(url, response), response.status);
-  }
-
-  return readCappedBody(url, response);
 }
 
 /**
@@ -218,7 +223,13 @@ export async function exchangeGitHubToken(
   githubToken: string
 ): Promise<RegistryTokenResponse> {
   validateRegistryUrl(registryUrl);
-  const body = (await postJson(`${registryUrl}/v0.1/auth/github-at`, { github_token: githubToken }, {})) as {
+  // #90: one bounded retry on a NetworkError. Minting a short-lived JWT is
+  // idempotent — a second exchange simply supersedes a first one that never
+  // reached us — so unlike the publish POST below this is safe to re-send.
+  const body = (await withOneRetry(
+    () => postJson(`${registryUrl}/v0.1/auth/github-at`, { github_token: githubToken }, {}),
+    (err) => err instanceof NetworkError
+  )) as {
     registry_token: string;
     expires_at: number;
   };
@@ -235,7 +246,11 @@ export async function exchangeGitHubOidcToken(
   oidcToken: string
 ): Promise<RegistryTokenResponse> {
   validateRegistryUrl(registryUrl);
-  const body = (await postJson(`${registryUrl}/v0.1/auth/github-oidc`, { oidc_token: oidcToken }, {})) as {
+  // #90: one bounded retry on a NetworkError — see exchangeGitHubToken.
+  const body = (await withOneRetry(
+    () => postJson(`${registryUrl}/v0.1/auth/github-oidc`, { oidc_token: oidcToken }, {}),
+    (err) => err instanceof NetworkError
+  )) as {
     registry_token: string;
     expires_at: number;
   };
@@ -272,35 +287,38 @@ async function getJson(
   const controller = new AbortController();
   const timerId = setTimeout(() => controller.abort(), DEFAULT_TIMEOUT_MS);
 
-  let response: Response;
+  // #90: outer try/finally so the deadline also covers the body read.
   try {
-    response = await fetch(url, {
-      method: "GET",
-      redirect: "manual",
-      headers,
-      signal: controller.signal,
-    });
-  } catch (err) {
-    throw new NetworkError(
-      `Network request failed: ${url}`,
-      err instanceof Error ? err : new Error(String(err))
-    );
+    let response: Response;
+    try {
+      response = await fetch(url, {
+        method: "GET",
+        redirect: "manual",
+        headers,
+        signal: controller.signal,
+      });
+    } catch (err) {
+      throw new NetworkError(
+        `Network request failed: ${url}`,
+        err instanceof Error ? err : new Error(String(err))
+      );
+    }
+
+    if (response.type === "opaqueredirect" || response.status === 0) {
+      throw new RegistryError(
+        "GitHub Actions OIDC token endpoint attempted a redirect (3xx); refusing to follow it with the request token.",
+        0
+      );
+    }
+
+    if (!response.ok) {
+      throw new RegistryError(`GitHub Actions OIDC token request returned ${response.status}`, response.status);
+    }
+
+    return { status: response.status, body: await readCappedBodyWithinDeadline(url, response) };
   } finally {
     clearTimeout(timerId);
   }
-
-  if (response.type === "opaqueredirect" || response.status === 0) {
-    throw new RegistryError(
-      "GitHub Actions OIDC token endpoint attempted a redirect (3xx); refusing to follow it with the request token.",
-      0
-    );
-  }
-
-  if (!response.ok) {
-    throw new RegistryError(`GitHub Actions OIDC token request returned ${response.status}`, response.status);
-  }
-
-  return { status: response.status, body: await readCappedBody(url, response) };
 }
 
 /**
@@ -328,10 +346,17 @@ export async function fetchActionsOidcToken(
   }
 
   const url = `${requestUrl}&audience=${encodeURIComponent(audience)}`;
-  const { status, body: rawBody } = await getJson(url, {
-    Authorization: `Bearer ${requestToken}`,
-    Accept: "application/json",
-  });
+  // #90: one bounded retry on a NetworkError. A GET that mints an OIDC token is
+  // idempotent from our side; GitHub's endpoint is the same one the whole job
+  // depends on, and losing a release to a single blip here is not worth it.
+  const { status, body: rawBody } = await withOneRetry(
+    () =>
+      getJson(url, {
+        Authorization: `Bearer ${requestToken}`,
+        Accept: "application/json",
+      }),
+    (err) => err instanceof NetworkError
+  );
   const body = rawBody as { value?: string };
   if (!body.value) {
     throw new RegistryError("GitHub Actions OIDC token response had no value", status);
@@ -350,6 +375,12 @@ export async function submitToRegistry(
   registryUrl: string
 ): Promise<SubmitResult> {
   validateRegistryUrl(registryUrl);
+  // #90: deliberately NOT retried here. The POST is not idempotent — the
+  // registry answers a second submission of the same version with
+  // `400 ... already exists`, so a blind re-send converts a timeout whose
+  // request may well have LANDED into a hard, misleading failure. The recovery
+  // is to ASK instead of re-sending, and it lives in handlePublishSubmit, which
+  // can consult the version listing.
   const url = `${registryUrl}/v0.1/publish`;
   const body = (await postJson(url, serverJson, { Authorization: `Bearer ${registryToken}` })) as {
     url?: string;

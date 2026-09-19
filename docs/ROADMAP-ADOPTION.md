@@ -1,6 +1,6 @@
 # mcpm Roadmap — Developer & Enterprise Adoption
 
-> Status: **Active plan of record** · Current: **v0.39.0** · Baseline drafted at v0.16.0 (2026-07-03)
+> Status: **Active plan of record** · Current: **v0.42.0** · Baseline drafted at v0.16.0 (2026-07-03)
 >
 > Companion to [`VISION.md`](./VISION.md) (the strategy layer both roadmaps hang off) and
 > [`ROADMAP.md`](./ROADMAP.md) (the security/DevX feature roadmap, now ~80%
@@ -369,7 +369,7 @@ decision, not a drift).
 - **v0.18** — ✅ D1 (Claude Code adapter) + the SBOM-under-immutable-releases fix.
 - **v0.19** — ✅ the rest of Wave 1 together: D4a (Gemini CLI) + D7 (`doctor --json`/
   `--report`) + D2 (`mcpm verify` + Action) + D3 (`audit --sarif`) + D6 (distribution).
-- **v0.20** — ~~E5 + E2 + E4 + E6 + E10a (the enterprise self-serve evidence kit)~~ — **did not happen.** v0.20.0 shipped F10 (credential-egress DLP) instead; the kit was re-penciled to v0.21, then v0.22 … v0.25, and is **unscheduled — never shipped as of v0.39.0**.
+- **v0.20** — ~~E5 + E2 + E4 + E6 + E10a (the enterprise self-serve evidence kit)~~ — **did not happen.** v0.20.0 shipped F10 (credential-egress DLP) instead; the kit was re-penciled to v0.21, then v0.22 … v0.25, and is **unscheduled — never shipped as of v0.42.0**.
 - **v1.0** — E1 + B2 (managed policy, Linux confine — the "enterprise-ready" claim
   becomes true, and 1.0 signals the semver discipline enterprises ask for) + D5 as the
   launch content. **B3 has already shipped** (v0.22.0–v0.24.0) and is no longer part of
