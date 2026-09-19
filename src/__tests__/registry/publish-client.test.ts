@@ -9,7 +9,7 @@
  * /v0.1/servers again, or sending the GitHub token to /v0.1/publish) fails it.
  */
 
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import {
   submitToRegistry,
   validateRegistryUrl,
@@ -381,6 +381,82 @@ describe("audienceFromRegistryUrl (parity with cmd/publisher/auth/github-oidc.go
 
   it("keeps a non-default port (u.Host includes it; parsed.hostname would drop it)", () => {
     expect(audienceFromRegistryUrl("https://EXAMPLE.com:8443")).toBe("https://example.com:8443");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// #90 — the deadline must stay armed through the BODY read, at BOTH helpers
+// ---------------------------------------------------------------------------
+
+/**
+ * Fable's review of PR #223 found this gap: moving `clearTimeout` back to just
+ * after the fetch resolves — i.e. reverting the fix at THIS file's two helpers —
+ * left all 40 tests here green. The fix was real in code and pinned at three of
+ * the five sites; these two were the certifies-nothing shape.
+ *
+ * A stalled body is a server that answered its headers promptly and then went
+ * quiet. With the deadline already disarmed the read never settles and the
+ * command hangs forever, which a test observes as a timeout rather than a
+ * failure — so the assertion is that it REJECTS, as a NetworkError, once the
+ * deadline fires. Fake timers because `DEFAULT_TIMEOUT_MS` is 15 s and not
+ * injectable; a real wait would put 30 s into the suite.
+ */
+describe("publish-client — the deadline covers the body read (#90)", () => {
+  /** A Response whose body never yields and errors when the signal aborts. */
+  function stalledBody(signal: AbortSignal): Response {
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        signal.addEventListener("abort", () => controller.error(new Error("aborted")), {
+          once: true,
+        });
+      },
+    });
+    return new Response(body, { status: 200, headers: { "content-type": "application/json" } });
+  }
+
+  beforeEach(() => {
+    vi.restoreAllMocks();
+    vi.useFakeTimers();
+  });
+  afterEach(() => vi.useRealTimers());
+
+  it("postJson: a stalled body rejects as NetworkError instead of hanging", async () => {
+    const fetchMock = vi.fn((_url: string, init?: RequestInit) =>
+      Promise.resolve(stalledBody(init!.signal as AbortSignal))
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    // submitToRegistry, deliberately: it is the one postJson caller with NO
+    // retry, so exactly one deadline has to do the work.
+    const pending = expect(
+      submitToRegistry(SERVER_JSON, REGISTRY_TOKEN, REGISTRY_URL)
+    ).rejects.toBeInstanceOf(NetworkError);
+
+    await vi.advanceTimersByTimeAsync(15_000);
+    await pending;
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("getJson: a stalled body on the Actions OIDC mint rejects as NetworkError", async () => {
+    const fetchMock = vi.fn((_url: string, init?: RequestInit) =>
+      Promise.resolve(stalledBody(init!.signal as AbortSignal))
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const pending = expect(
+      fetchActionsOidcToken("https://registry.modelcontextprotocol.io", {
+        ACTIONS_ID_TOKEN_REQUEST_URL: "https://pipelines.actions.githubusercontent.com/token?api-version=2.0",
+        ACTIONS_ID_TOKEN_REQUEST_TOKEN: "actions-request-token",
+      })
+    ).rejects.toBeInstanceOf(NetworkError);
+
+    await vi.advanceTimersByTimeAsync(15_000); // first deadline
+    await vi.advanceTimersByTimeAsync(400); // the one retry's backoff
+    await vi.advanceTimersByTimeAsync(15_000); // second deadline
+    await pending;
+    // An aborted body IS a NetworkError, so this path is retried once — the
+    // deadline fires on both attempts rather than the first one hanging.
+    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 });
 
