@@ -39,6 +39,7 @@ import { stdoutOutput } from "../utils/output.js";
 import type { ClientId } from "../config/paths.js";
 import type { ConfigAdapter } from "../config/adapters/index.js";
 import { parseMinTrust } from "./install.js";
+import { describeRegistryError } from "../registry/errors.js";
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -300,13 +301,14 @@ export async function handleAudit(
     let entry: ServerEntry;
     try {
       entry = await getServer(installedServer.name);
-    } catch {
+    } catch (err) {
       results.push({
         name: installedServer.name,
         installedServer,
         score: { score: 0, maxPossible: 80, level: "risky", breakdown: { healthCheck: 0, staticScan: 0, externalScan: 0, registryMeta: 0 } },
         findings: [],
-        error: "Registry unavailable — could not fetch metadata",
+        // #92: a 404 (delisted) and an unparseable response are not "unavailable".
+        error: describeRegistryError(err).message,
       });
       continue;
     }
@@ -524,6 +526,19 @@ export async function handleAudit(
         ? chalk.green(summaryLine)
         : chalk.cyan(summaryLine)
   );
+
+  // #92: name WHY each unreachable server is unreachable. The table can only
+  // afford `N/A / unknown / —`, and the summary only counts them, so until now
+  // the reason existed solely in `--json` — the human surface said a server
+  // could not be scored and never said whether it had been delisted, whether
+  // the registry was down, or whether its response no longer parsed. Those are
+  // three different next actions.
+  if (registryErrors > 0) {
+    for (const r of results) {
+      if (r.error === undefined) continue;
+      output(chalk.gray(`  ${sanitizeForTerminal(r.name)}: ${r.error}`));
+    }
+  }
 
   // --fix step (non-JSON mode)
   if (options.fix === true) {

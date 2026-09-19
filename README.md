@@ -122,6 +122,14 @@ an `npx -y` launcher draws one `low` install-script finding, which is also why i
 `caution` rather than `clean · not run`: that label requires the scan to have found
 *nothing*, not merely a top-band score.
 
+`audit` also does not apply the **release-age cooldown** finding that `why`, `install`,
+`up` and `lock` do (`src/scanner/cooldown.ts` is an install-gate signal — it exists to
+arm `install --min-release-age` / `policy.minReleaseAgeHours`, and re-penalising an
+*already-installed* server for being young is not a decision `audit` is making). For a
+release under 24 h old that is a `medium`, so `mcpm audit` can read **5 points higher**
+than `mcpm why` for the same server at the same moment. Neither number is wrong; they
+answer different questions.
+
 ### Cross-IDE support
 
 One tool for all your AI clients. mcpm reads and writes the correct config format for each.
@@ -335,7 +343,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: getmcpm/cli/.github/actions/mcpm-verify@v0.39.2   # or: run: npx @getmcpm/cli verify
+      - uses: getmcpm/cli/.github/actions/mcpm-verify@v0.42.0   # or: run: npx @getmcpm/cli verify
 ```
 
 The Action writes a job step summary from `--json`; the same verb works as a

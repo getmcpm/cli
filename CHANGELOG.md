@@ -8,6 +8,125 @@ _Add entries here, never under a stamped version_ — a release commit renames t
 heading, and a branch that wrote beneath it merges without conflict straight into a
 published section (it happened to #170).
 
+### Fixed
+
+- **MINOR.** Four surfaces reported every registry failure as the one failure it
+  usually was not, and the MCP surface reported none of it at all. `src/registry/errors.ts`
+  has distinguished `NetworkError` / `NotFoundError` (404 — the E9a delisting signal) /
+  `ValidationError` (a response shape mcpm does not recognise) since v0.1, but
+  `mcpm audit`, `mcpm update` and `mcpm outdated` all printed the single string
+  "Registry unavailable", which is true of exactly one of the three; a delisted server
+  and a registry whose response no longer parses both sent the reader hunting a network
+  problem that did not exist. Worse on the `mcpm_audit` MCP tool, where the catch pushed
+  a `{score: 0, maxPossible: 80, level: "risky"}` placeholder and **nothing else** — an
+  agent could not distinguish a genuinely risky server from one whose metadata had simply
+  failed to load, and stderr is not a channel that surface has. One shared
+  `describeRegistryError(err)` now feeds all four sites; `mcpm_audit` rows gain
+  `error: string | null` (stated on every row, `null` on success — the placeholder score
+  is unchanged so existing consumers keep working); `mcpm audit`'s human output names the
+  reason per unreachable server, which until now lived only in `--json`. Separately,
+  `mcpm_up` consulted `outputLines` **only** in its no-record fallback, so on the normal
+  path every advisory `handleUp` prints — provenance identity drift, the frozen-integrity
+  coverage notice, #219's version-list fallback line — reached nobody; they are now
+  returned as `notices: string[]`, always present. The pre-existing "registry unavailable"
+  tests fed a bare `Error("Network failure")`, an input the registry client never
+  produces, so they asserted the label against a class the code could not have classified;
+  each site is now driven with the real error types. Both MCP additions are recorded in
+  `docs/CONTRACTS.md`, which had no statement about the MCP tool surface at all.
+  (maintainer backlog #92)
+
+- **MINOR.** `mcpm info <unknown>` and `mcpm why <unknown>` printed
+  `Server '<name>' not found` and exited **`0`**, while `install` and `remove` exit `1`
+  for the same condition and `docs/CONTRACTS.md` states that a command exits `1` when it
+  cannot do what was asked — so `mcpm info X && <next step>` ran the next step against a
+  server that is not there. Both now exit `1`. The message and its stream (stdout) are
+  unchanged; the handlers return an exit code and the command sets `process.exitCode`
+  rather than calling `process.exit`, so piped output is never truncated.
+
+- Piping any mcpm output to a consumer that closes early crashed the process.
+  `mcpm guard list-signatures | head -1` printed its first line and then
+  `node:events:505 throw er; // Unhandled 'error' event`, a 29-line stack and exit 1
+  (reproduced against the published 0.41.0). EPIPE means "nobody is reading any more",
+  which is a normal end: stdout and stderr now exit `0` quietly on it and rethrow every
+  other I/O error unchanged. `guard inspect`'s `process.exitCode` discipline is untouched.
+
+- `mcpm search` truncated long server names. The Name column held a fixed 40 characters
+  with `wordWrap`, and a registry coordinate has no spaces — so cli-table3 could not wrap
+  it and cut it with an ellipsis instead, handing the user a string `mcpm install` rejects
+  (seen live: `io.github.Digital-Defiance/mcp-filesy…`). Measured over 100 registry
+  entries, 4 names are ≥ 40 characters and the longest is 43. The column is now
+  auto-sized; `--json` is unaffected.
+
+- The guard's `generic-bearer-token-disclosure` signature fired on documentation.
+  An API-doc sample header written as `Authorization: Bearer eyJhbGciOiJIUzI1NiIs...`
+  matched, because `.` is inside the token character class and the elision was swallowed
+  into the match. A truncation-marker suppression was measured before shipping rather
+  than reasoned about: across 385 files of a 200-skill public corpus this was the corpus's
+  only match and it goes **1 → 0**, while across all 86 guard fixtures the one attack that
+  fires this signature still fires (**1 → 1**). A single trailing period is sentence
+  punctuation and is deliberately still matched. Cost stated plainly: a real credential
+  that genuinely ends in `...` now passes this signature. A separate U+2026 clause was
+  written, measured to be unreachable (NFKC folds U+2026 to three ASCII periods before the
+  pattern ever runs, so deleting the clause left the whole suite green) and **deleted**
+  rather than left in with a test that cannot fail.
+
+- **Registry requests could hang forever, and nothing retried.** `clearTimeout` ran in the
+  fetch's own `finally`, so a response whose headers arrived promptly and whose body then
+  stalled had no deadline left to fire — the same shape in `client.ts`,
+  `publish-client.ts` (both helpers), `npm-integrity.ts` and `npm-provenance.ts`. The
+  deadline now covers the body read at all five sites, and a deadline that fires mid-body
+  surfaces as a `NetworkError` rather than an unclassified abort. On top of that, one
+  bounded retry (400 ms, never a loop) on `NetworkError` only, for the idempotent reads:
+  the registry GET, the npm integrity and provenance tripwires, and the two token
+  exchanges plus the Actions OIDC mint. A 404, a 5xx, a refused redirect and an
+  unparseable body are deterministic answers and are not retried. The publish POST is
+  **not** retried — the registry answers a repeat submission with `400 ... already exists`
+  — so a timeout there is recovered by ASKING: `handlePublishSubmit` reads the version
+  listing (which works since #219) and treats an already-listed version as published.
+  v0.40.1's `registry` job hit exactly that, a `POST /v0.1/publish` exceeding its 15 s
+  deadline while a plain GET against the same host took 35 s. No timeout was widened.
+  (maintainer backlog #90)
+
+- `mcpm install`'s success line was built as a hand-written SGR escape rather than through
+  chalk, so it bypassed chalk's TTY detection and emitted colour into pipes, log files and
+  CI transcripts while every line around it came out plain. Grepping for the pattern found
+  eight more sites in `install.ts` and `guard/cli.ts`; all nine now go through chalk,
+  and a source invariant test fails the build on the next hand-written escape.
+
+### Changed
+
+- `yaml` `^2.9.0` → `^2.9.1`, `zod` `^4.5.4` → `^4.6.5`, `@types/node` `^22.19.19` →
+  `^22.20.3`, `vitest` and `@vitest/coverage-v8` `^5.0.0` → `^5.0.1`. Bumped locally with
+  the `pnpm.overrides` block preserved, rather than by merging Dependabot's regenerated
+  lockfile, which drops it (the #204/#215 precedent). Supersedes #220, #221, #222.
+
+### Documentation
+
+- `mcpm audit` does not apply the release-age cooldown finding that `why`, `install`, `up`
+  and `lock` do, so for a release under 24 h old `audit` can read **5 points higher** than
+  `why` for the same server at the same moment. That is structural — `src/scanner/cooldown.ts`
+  is an install-gate signal — and it was undocumented. README now says so.
+- `docs/VISION.md`'s claim that skills/hooks tooling "is zero" is struck with a dated
+  correction: Cisco `skill-scanner` (2,535★), NVIDIA `SkillSpector` (~17.8k★), Snyk
+  `agent-scan`, Microsoft APM skill installs and Anthropic's own Enterprise skill/plugin
+  scanning all exist. The unoccupied ground is narrower and is now stated as such — the
+  2026-09-19 re-scout found one row nobody occupies, OS-level isolation of an executing
+  hook. "It has no incumbent" is softened the same way. `CLAUDE.md`'s Competitive
+  Landscape gains an "Agent-skill scanners" row.
+- Header/baseline bumps on `ROADMAP.md`, `ROADMAP-ADOPTION.md`, `SIGNATURES.md` and
+  `SECURITY-HARDENING.md`, and this time the BODIES were re-read against the headers
+  (the v0.39.1 lesson). That caught three statements the 2026-09-08 reconcile had left
+  behind: `ROADMAP.md` twice claiming the macOS `sandbox-exec` path "is not exercised in
+  ubuntu-only CI", which the `confine-macos` job on `macos-latest` has falsified since
+  v0.17.0; and `SECURITY-HARDENING.md`'s delivery-status heading still reading
+  "reconciled to v0.19.0, 2026-07-05" eighteen lines under a header claiming 2026-09-08.
+- `ARCHITECTURE.md`: the test count is re-measured (2,931 → 3,049), the `src/registry/`
+  tree names the new shared pieces, and the Publish section documents the tag-push path's
+  npm-propagation poll — added in v0.40.0 and absent from the file that same release's own
+  audit lesson was written about.
+- The `mcpm-verify` Action pin in `README.md` and the Action's own README moves
+  `@v0.39.2` → `@v0.42.0`.
+
 ## [0.41.0] - 2026-09-19
 
 ### Fixed

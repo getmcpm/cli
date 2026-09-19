@@ -28,6 +28,7 @@ import type { Finding } from "../scanner/tier1.js";
 import type { TrustScore, TrustScoreInput } from "../scanner/trust-score.js";
 import { levelColor, levelLabel, extractRegistryMeta } from "../utils/format-trust.js";
 import { stdoutOutput } from "../utils/output.js";
+import { describeRegistryError } from "../registry/errors.js";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -82,7 +83,7 @@ async function checkVersionDrift(
       let entry: ServerEntry;
       try {
         entry = await getServer(s.name);
-      } catch {
+      } catch (err) {
         return {
           name: s.name,
           installedVersion: s.version,
@@ -91,7 +92,8 @@ async function checkVersionDrift(
           latestLevel: null,
           latestLevelLabel: null,
           versionChange: "unknown",
-          error: "Registry unavailable",
+          // #92: a 404 (delisted) and an unparseable response are not "unavailable".
+          error: describeRegistryError(err).message,
         };
       }
 

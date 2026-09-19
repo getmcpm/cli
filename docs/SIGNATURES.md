@@ -1,4 +1,4 @@
-# mcpm-guard signature reference (v0.39.0)
+# mcpm-guard signature reference (v0.42.0)
 
 The shipped signature catalog + how to add one. See `docs/GUARD.md` for the runtime model.
 

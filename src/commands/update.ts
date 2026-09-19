@@ -26,6 +26,7 @@ import { levelColor, levelLabel, extractRegistryMeta } from "../utils/format-tru
 import { resolveInstallEntry } from "./install.js";
 import { stdoutOutput } from "../utils/output.js";
 import { sanitizeForTerminal } from "../guard/sanitize.js";
+import { describeRegistryError } from "../registry/errors.js";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -180,8 +181,9 @@ export async function handleUpdate(
       try {
         const entry = await getServer(installed.name);
         return { kind: "ok", installed, entry };
-      } catch {
-        return { kind: "error", installed, error: "Registry unavailable — could not fetch metadata" };
+      } catch (err) {
+        // #92: a 404 (delisted) and an unparseable response are not "unavailable".
+        return { kind: "error", installed, error: describeRegistryError(err).message };
       }
     })
   );

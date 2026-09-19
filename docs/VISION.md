@@ -40,7 +40,10 @@ cannot replicate:
 payments, agent-to-agent traffic — faster than anyone builds trust mechanisms
 for them. Every new capability is a new supply chain plus a new injection
 surface. The category is **agent supply-chain security**, it is being born now,
-and it has no incumbent.
+and ~~it has no incumbent~~ ⚠ **softened 2026-09-19** — it has no incumbent *for
+the combined install-time + runtime + confinement plane*, which is the claim the
+evidence supports. Point scanners now exist on the adjacent skills carrier (see
+H2 below), and Microsoft APM occupies the cross-client installer lane.
 
 ## The constraint has flipped: trust, not features
 
@@ -109,7 +112,16 @@ absence of incumbents:
 1. **Skills / plugins / hooks / rules files** (agent skills, editor rules,
    `AGENTS.md`, install-time hooks). This supply chain is *worse* than MCP —
    hooks are code-execution-at-install, prompt files are standing injection —
-   and tooling is zero. The existing detectors map one-to-one:
+   and ~~tooling is zero~~ ⚠ **corrected 2026-09-19** — skill scanners now
+   exist: [cisco-ai-defense/skill-scanner](https://github.com/cisco-ai-defense/skill-scanner)
+   (2,535★), [NVIDIA/SkillSpector](https://github.com/NVIDIA/SkillSpector)
+   (~17.8k★), Snyk's `agent-scan`, Microsoft APM's skill installs, and
+   Anthropic's own Enterprise skill/plugin scanning. The *unoccupied* ground is
+   narrower than this paragraph claimed and should be stated as such: Anthropic's
+   scanning says verbatim that "MCP servers and hooks, which aren't scanned at
+   this time", and the 2026-09-19 re-scout found exactly one row nobody occupies
+   — **OS-level isolation of an executing hook**, which is `--confine`'s engine
+   pointed at a different carrier. The existing detectors map one-to-one:
    carrier-surface + hidden-char scanning, name-shadowing, content-hash
    pinning + drift, integrity tripwires. It is also protocol-free — a file
    walker feeding the existing signature engine, no relay required. First

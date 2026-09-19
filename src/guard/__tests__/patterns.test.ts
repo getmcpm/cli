@@ -752,6 +752,59 @@ describe("patterns: generic Bearer-token disclosure (TODOS #53)", () => {
     expect(r.findings.some((f) => f.signature_id === SIG_ID)).toBe(true);
   });
 
+  // Review 2026-09-19 (F5): API documentation writes an elided sample header to
+  // show its SHAPE. `.` is inside the token character class, so the elision was
+  // swallowed into the match and the sample read as a live credential. Found in
+  // a public third-party skill file; measured over a 200-skill / 385-file public
+  // corpus this was the corpus's ONLY match, and it goes 1 -> 0 here while all
+  // 86 guard fixtures are unchanged.
+  test("does NOT warn on a documentation sample truncated with an ASCII ellipsis", () => {
+    const r = inspectMessage(resp("Authorization: Bearer eyJhbGciOiJIUzI1NiIs..."), OWASP_MCP_TOP_10);
+    expect(r.findings.some((f) => f.signature_id === SIG_ID)).toBe(false);
+  });
+
+  test("does NOT warn on a documentation sample truncated with U+2026", () => {
+    // There is no U+2026 clause in the pattern and there must not be one:
+    // `normalizeSegment` NFKC-normalizes every leaf before matching, and NFKC
+    // folds U+2026 into three ASCII periods, so this case is carried by the same
+    // lookbehind as the ASCII one. A dedicated clause was written, MEASURED to be
+    // unreachable, and deleted. Codepoint-asserted so a literal "..." pasted here
+    // by a later editor cannot silently turn this into a duplicate of the test
+    // above.
+    const ELLIPSIS = "\u2026";
+    expect(ELLIPSIS.codePointAt(0)).toBe(0x2026);
+    expect(ELLIPSIS).toHaveLength(1);
+    const r = inspectMessage(resp(`Authorization: Bearer abc123def456ghi789jkl${ELLIPSIS}`), OWASP_MCP_TOP_10);
+    expect(r.findings.some((f) => f.signature_id === SIG_ID)).toBe(false);
+  });
+
+  test("STILL warns on a token ending in a single sentence-final period", () => {
+    // One period is punctuation, not truncation. The suppression must not eat it
+    // — that would be a much larger, unmeasured widening of the miss.
+    const r = inspectMessage(
+      resp("The header was Authorization: Bearer abc123def456ghi789jklm."),
+      OWASP_MCP_TOP_10,
+    );
+    expect(r.findings.some((f) => f.signature_id === SIG_ID)).toBe(true);
+  });
+
+  test("STILL warns on a token ending in exactly TWO periods", () => {
+    // Two periods is not a truncation marker in any documentation convention, so
+    // the suppression must be anchored at three. Pinned because a `(?<!\.\.)`
+    // lookbehind passes every other test in this file while silently widening
+    // the accepted miss.
+    const r = inspectMessage(resp("Authorization: Bearer abc123def456ghi789jklm.."), OWASP_MCP_TOP_10);
+    expect(r.findings.some((f) => f.signature_id === SIG_ID)).toBe(true);
+  });
+
+  test("STILL warns on a token containing an internal ... that is not at its end", () => {
+    const r = inspectMessage(
+      resp("Authorization: Bearer abc123...def456ghi789jklmnop"),
+      OWASP_MCP_TOP_10,
+    );
+    expect(r.findings.some((f) => f.signature_id === SIG_ID)).toBe(true);
+  });
+
   test("REDACTS the caught token from the finding excerpt", () => {
     const r = inspectMessage(resp("Authorization: Bearer a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6"), OWASP_MCP_TOP_10);
     const f = r.findings.find((fi) => fi.signature_id === SIG_ID);

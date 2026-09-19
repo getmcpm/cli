@@ -350,3 +350,35 @@ servers:
     expect(result.error).toBeUndefined();
   });
 });
+
+// ---------------------------------------------------------------------------
+// #92 — advisory lines must reach the calling agent
+// ---------------------------------------------------------------------------
+
+describe("handleMcpUp — notices (#92)", () => {
+  const STACK = `
+version: "1"
+servers:
+  io.github.test/server-a:
+    version: "^1.0.0"
+`;
+
+  // `outputLines` was consulted ONLY in the no-record fallback, so on the normal
+  // path — the one every real invocation takes — every advisory handleUp printed
+  // (provenance identity drift, the frozen-integrity coverage notice, #219's
+  // version-list fallback line) went nowhere: the CLI writes them to stdout and
+  // this surface has no stdout the agent can see. Same class as the v0.37.0
+  // `update --json` finding.
+  it("returns the advisory lines handleUp printed, on the normal (records) path", async () => {
+    await writeStack(STACK, lockFor("io.github.test/server-a", "@test/server-a"));
+    const result = await handleMcpUp({}, makeDeps());
+
+    // The normal path is the one where per-server records exist — the fallback
+    // branch is only reached when handleUp throws before processing anything.
+    expect(result.installed.length + result.blocked.length + result.failed.length).toBeGreaterThan(0);
+    expect(Array.isArray(result.notices)).toBe(true);
+    expect(result.notices.length).toBeGreaterThan(0);
+    // The field is always present, so an agent never has to branch on absence.
+    expect(result).toHaveProperty("notices");
+  });
+});

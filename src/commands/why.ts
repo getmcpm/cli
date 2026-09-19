@@ -144,11 +144,12 @@ function provenanceLines(snap: NpmProvenanceSnapshot | undefined): string[] {
 // Handler
 // ---------------------------------------------------------------------------
 
+/** @returns the process exit code — 0 on success, 1 when the server is not found. */
 export async function handleWhy(
   name: string,
   options: WhyOptions,
   deps: WhyDeps
-): Promise<void> {
+): Promise<number> {
   const { registryClient, scanTier1, checkScannerAvailable, scanTier2, computeTrustScore, output } = deps;
 
   const spinner = ora({ text: "Assessing...", isSilent: !process.stdout.isTTY }).start();
@@ -159,8 +160,12 @@ export async function handleWhy(
   } catch (err) {
     spinner.stop();
     if (err instanceof NotFoundError) {
+      // Exit 1, not 0: "the server you named does not exist" is a failed
+      // invocation, the same condition `install`/`remove` already exit 1 for, and
+      // docs/CONTRACTS.md says a command exits 1 when it cannot do what was asked.
+      // The message and its stream (stdout) are unchanged.
       output(`Server '${name}' not found`);
-      return;
+      return 1;
     }
     throw err;
   }
@@ -235,7 +240,7 @@ export async function handleWhy(
         2
       )
     );
-    return;
+    return 0;
   }
 
   const { score, maxPossible, breakdown } = trust;
@@ -293,6 +298,7 @@ export async function handleWhy(
   }
 
   output(lines.join("\n"));
+  return 0;
 }
 
 // ---------------------------------------------------------------------------
@@ -313,7 +319,9 @@ export function registerWhyCommand(program: Command): void {
       const { fetchNpmIntegrity } = await import("../registry/npm-integrity.js");
 
       try {
-        await handleWhy(
+        // process.exitCode (not process.exit): stdout may be a pipe, and exiting
+        // outright can truncate unflushed output. Same discipline as guard inspect.
+        process.exitCode = await handleWhy(
           name,
           { json: opts.json },
           {

@@ -526,9 +526,13 @@ async function warnUnresolvablePlaceholders(opts: DisableOpts): Promise<void> {
   if (affected.length === 0) return;
 
   opts.write(
-    "\n\x1b[33mwarning: these servers reference encrypted secrets " +
-      "(mcpm:keychain:…) that only resolve while mcpm guard is enabled. Without " +
-      "guard they receive the literal placeholder and will fail to start:\x1b[0m\n",
+    "\n" +
+      chalk.yellow(
+        "warning: these servers reference encrypted secrets " +
+          "(mcpm:keychain:…) that only resolve while mcpm guard is enabled. Without " +
+          "guard they receive the literal placeholder and will fail to start:"
+      ) +
+      "\n",
   );
   for (const a of affected) {
     opts.write(

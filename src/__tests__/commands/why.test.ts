@@ -174,7 +174,9 @@ describe("mcpm why", () => {
     const deps = makeDeps({
       registryClient: { getServer: vi.fn().mockRejectedValue(new NotFoundError("ghost")) },
     });
-    await expect(handleWhy("ghost", {}, deps)).resolves.toBeUndefined();
+    // F4: prints (stdout, unchanged wording) rather than throwing, but reports
+    // exit 1 — a server that does not exist is a failed invocation.
+    await expect(handleWhy("ghost", {}, deps)).resolves.toBe(1);
     expect(out(deps)).toMatch(/not found/);
   });
 });

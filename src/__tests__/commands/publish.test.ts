@@ -12,7 +12,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Finding } from "../../scanner/tier1.js";
-import { RegistryError } from "../../registry/errors.js";
+import { NetworkError, RegistryError } from "../../registry/errors.js";
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -343,9 +343,11 @@ describe("handlePublishSubmit", () => {
   let audienceFromRegistryUrl: ReturnType<typeof vi.fn>;
   let getToken: ReturnType<typeof vi.fn>;
   let scanTier1: ReturnType<typeof vi.fn>;
+  let getServerVersions: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
     output = [];
+    getServerVersions = vi.fn().mockResolvedValue([]);
     readManifest = vi.fn().mockResolvedValue(MANIFEST);
     submitToRegistry = vi.fn().mockResolvedValue({ url: "https://registry.example.com/servers/my-server" });
     exchangeGitHubToken = vi.fn().mockResolvedValue({ registryToken: "registry-jwt", expiresAt: 999 });
@@ -362,6 +364,10 @@ describe("handlePublishSubmit", () => {
       readManifest,
       scanTier1,
       submitToRegistry,
+      getServerVersions: getServerVersions as unknown as (
+        name: string,
+        registryUrl: string
+      ) => Promise<string[]>,
       exchangeGitHubToken,
       exchangeGitHubOidcToken,
       fetchActionsOidcToken,
@@ -370,6 +376,49 @@ describe("handlePublishSubmit", () => {
       output: (t) => output.push(t),
     });
   }
+
+  // #90: the publish POST is NOT idempotent — the registry answers a repeat
+  // submission with `400 ... already exists` — so a timeout is recovered by
+  // ASKING the version listing, never by re-sending. The v0.40.1 release hit
+  // exactly this: POST /v0.1/publish exceeded its 15 s deadline while a plain
+  // GET against the same host took 35 s.
+  describe("submit timeout recovery (#90)", () => {
+    const timeout = () => new NetworkError("timed out", new Error("AbortError"));
+
+    it("treats an already-listed version as published when the POST times out", async () => {
+      submitToRegistry.mockRejectedValue(timeout());
+      getServerVersions.mockResolvedValue(["0.9.0", "1.0.0"]);
+
+      await runSubmit();
+
+      expect(output.join("")).toMatch(/already listed/i);
+      expect(output.join("")).toMatch(/Published successfully/i);
+      // Recovered by ASKING, never by re-POSTing.
+      expect(submitToRegistry).toHaveBeenCalledTimes(1);
+    });
+
+    it("rethrows the timeout when the version is NOT listed", async () => {
+      submitToRegistry.mockRejectedValue(timeout());
+      getServerVersions.mockResolvedValue(["0.9.0"]);
+
+      await expect(runSubmit()).rejects.toBeInstanceOf(NetworkError);
+      expect(output.join("")).not.toMatch(/Published successfully/i);
+    });
+
+    it("rethrows the timeout when the listing itself fails", async () => {
+      submitToRegistry.mockRejectedValue(timeout());
+      getServerVersions.mockRejectedValue(new Error("also down"));
+
+      await expect(runSubmit()).rejects.toBeInstanceOf(NetworkError);
+    });
+
+    it("does NOT consult the listing for a non-network failure", async () => {
+      submitToRegistry.mockRejectedValue(new RegistryError("bad request", 400));
+
+      await expect(runSubmit()).rejects.toBeInstanceOf(RegistryError);
+      expect(getServerVersions).not.toHaveBeenCalled();
+    });
+  });
 
   it("shows registry URL after successful submission", async () => {
     await runSubmit();

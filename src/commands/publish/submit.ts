@@ -19,6 +19,7 @@ import { PublishErrors } from "../../errors/publish-errors.js";
 import { manifestToEntry, assertTrustGate } from "./check.js";
 import { manifestToServerJson, resolveVersion } from "./manifest.js";
 import { validateRegistryUrl } from "../../registry/publish-client.js";
+import { NetworkError } from "../../registry/errors.js";
 
 export interface SubmitResult {
   url: string;
@@ -28,6 +29,11 @@ export interface PublishSubmitDeps {
   readManifest: () => Promise<PublishManifest | null>;
   scanTier1: (entry: ServerEntry) => Finding[];
   submitToRegistry: (serverJson: ServerJson, registryToken: string, registryUrl: string) => Promise<SubmitResult>;
+  /**
+   * #90: read the versions already listed for a server. Used ONLY to recover
+   * from a network failure on the submit POST — see the call site.
+   */
+  getServerVersions: (name: string, registryUrl: string) => Promise<string[]>;
   exchangeGitHubToken: (registryUrl: string, githubToken: string) => Promise<RegistryTokenResponse>;
   exchangeGitHubOidcToken: (registryUrl: string, oidcToken: string) => Promise<RegistryTokenResponse>;
   fetchActionsOidcToken: (audience: string, env: Record<string, string | undefined>) => Promise<string>;
@@ -53,6 +59,7 @@ export async function handlePublishSubmit(
     readManifest,
     scanTier1,
     submitToRegistry,
+    getServerVersions,
     exchangeGitHubToken,
     exchangeGitHubOidcToken,
     fetchActionsOidcToken,
@@ -96,7 +103,30 @@ export async function handlePublishSubmit(
 
   const serverJson = manifestToServerJson(manifest, version);
 
-  const result = await submitToRegistry(serverJson, registryToken, registryUrl);
+  const versionsUrl = `${registryUrl}/v0.1/servers/${encodeURIComponent(serverJson.name)}/versions`;
+
+  let result: SubmitResult;
+  try {
+    result = await submitToRegistry(serverJson, registryToken, registryUrl);
+  } catch (err) {
+    // #90: the POST is NOT idempotent — re-sending an already-accepted version
+    // returns `400 ... already exists` — so a timeout is recovered by ASKING
+    // rather than by re-sending. A request that timed out may well have landed:
+    // the v0.40.1 release hit exactly this, a `POST /v0.1/publish` exceeding the
+    // 15 s deadline while a plain GET against the same host took 35 s. Only a
+    // NetworkError (which now includes the deadline firing) is recoverable this
+    // way; a 4xx/5xx is a real answer and is rethrown untouched.
+    if (!(err instanceof NetworkError)) throw err;
+    const listed = await getServerVersions(serverJson.name, registryUrl).catch(() => null);
+    if (listed === null || !listed.includes(version)) throw err;
+    output(
+      chalk.yellow(
+        `\nThe publish request timed out, but ${serverJson.name}@${version} is already listed — treating it as published.`
+      )
+    );
+    result = { url: versionsUrl };
+  }
+
   output(chalk.green(`\nPublished successfully!`));
   output(`  Registry URL: ${chalk.cyan(result.url)}`);
 }

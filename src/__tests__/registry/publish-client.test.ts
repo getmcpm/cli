@@ -253,6 +253,45 @@ describe("exchangeGitHubToken", () => {
     expect(JSON.parse(init.body as string)).toEqual({ github_token: "ghp_secret" });
   });
 
+  // #90: minting a short-lived JWT is idempotent — a second exchange simply
+  // supersedes a first that never reached us — so unlike the publish POST this
+  // is safe to re-send, and losing a release to a single blip is not.
+  it("retries a network failure exactly once, then succeeds", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockRejectedValueOnce(new TypeError("fetch failed"))
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ registry_token: "rt-after-retry", expires_at: 5 }),
+      });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await exchangeGitHubToken(REGISTRY_URL, "ghp_secret");
+    expect(result.registryToken).toBe("rt-after-retry");
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("gives up after that single retry — it does not loop", async () => {
+    const fetchMock = vi.fn().mockRejectedValue(new TypeError("fetch failed"));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(exchangeGitHubToken(REGISTRY_URL, "ghp_secret")).rejects.toThrow(NetworkError);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("does NOT retry a 401 — a deterministic answer about the token", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 401,
+      headers: { get: () => null },
+      json: async () => ({ title: "Unauthorized", status: 401, detail: "nope" }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(exchangeGitHubToken(REGISTRY_URL, "bad")).rejects.toThrow();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
   it("does not send the GitHub token as a Bearer header (the endpoint takes it in the body only)", async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,

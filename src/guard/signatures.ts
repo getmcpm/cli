@@ -463,7 +463,28 @@ export const OWASP_MCP_TOP_10: readonly Signature[] = [
       "A generic Bearer-prefixed credential (typically no distinctive vendor prefix) in a tool response",
     target: "tool_response",
     redact: true,
-    patterns: [/Bearer\s+(?=[A-Za-z0-9._~+/=-]{20,})[A-Za-z0-9._~+/=-]*[0-9][A-Za-z0-9._~+/=-]*/],
+    // The trailing two assertions are a TRUNCATION-MARKER suppression, added
+    // after a measured FP: API documentation writes `Authorization: Bearer
+    // eyJhbGciOiJIUzI1NiIs...` to show the header's shape, and `.` is inside the
+    // token class, so the elided sample read as a live credential (found in a
+    // public third-party skill file, 2026-09-19).
+    //   (?![A-Za-z0-9._~+/=-])  forces the token run to be MAXIMAL. Without it
+    //     the engine simply backtracks off the dots and matches the prefix, which
+    //     is why a bare lookbehind on its own does nothing here.
+    //   (?<!\.\.\.)              rejects a run ending in an ellipsis.
+    // U+2026 needs NO clause of its own: `normalizeSegment` NFKC-normalizes every
+    // leaf before matching, and NFKC folds U+2026 to the three ASCII periods the
+    // lookbehind already rejects. A dedicated `(?!\u2026)` was written, measured
+    // to be unreachable (deleting it left the whole suite green), and DELETED
+    // rather than left in with a test that cannot fail — the v0.31.0 unpinned-
+    // pattern lesson. The U+2026 case is still pinned, through this lookbehind.
+    // A single trailing period is sentence punctuation, not truncation, and is
+    // deliberately still matched. Measured before shipping: over 385 files of a
+    // 200-skill public corpus the one documentation FP goes 1 -> 0, and over all
+    // 86 guard fixtures the one attack that fires this signature still fires
+    // (1 -> 1). Cost stated plainly: a real credential that genuinely ends in
+    // "..." now passes this signature.
+    patterns: [/Bearer\s+(?=[A-Za-z0-9._~+/=-]{20,})[A-Za-z0-9._~+/=-]*[0-9][A-Za-z0-9._~+/=-]*(?![A-Za-z0-9._~+/=-])(?<!\.\.\.)/],
     remediation:
       "A tool response contained a generic `Bearer <token>` credential (e.g. an OAuth session " +
       "token or API bearer token, typically with no distinctive vendor prefix). CVE-2026-25650 " +

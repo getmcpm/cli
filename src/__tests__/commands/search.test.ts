@@ -482,3 +482,52 @@ describe("handleSearch — terminal-escape sanitization", () => {
     expect(parsed[0].description).toBe(MALICIOUS_DESC);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Name column must never truncate (review 2026-09-19, F3)
+// ---------------------------------------------------------------------------
+
+describe("handleSearch — the Name column is the install coordinate", () => {
+  // Under the old fixed 40-char Name column, cli-table3 could not WRAP a
+  // registry coordinate (it contains no spaces) and TRUNCATED it with an
+  // ellipsis instead — handing the user a string that `mcpm install` rejects.
+  // Seen live: `io.github.Digital-Defiance/mcp-filesy…`. Measured over 100
+  // registry entries, 4 names are >= 40 chars and the longest is 43.
+  const LONG_NAME = "io.github.Digital-Defiance/mcp-filesystem-x"; // 43 chars
+
+  it("renders a 43-character name in full, with no ellipsis", async () => {
+    expect(LONG_NAME).toHaveLength(43);
+    const entry = {
+      ...BASE_SERVER_ENTRY,
+      server: { ...BASE_SERVER_ENTRY.server, name: LONG_NAME },
+    };
+    const client = makeMockClient(makeSearchResult([entry]));
+    const lines: string[] = [];
+
+    await handleSearch("filesy", { limit: 20 }, { registryClient: client as any, output: (t: string) => lines.push(t) });
+
+    const text = lines.join("\n");
+    expect(text).toContain(LONG_NAME);
+    // The horizontal-ellipsis cli-table3 truncates with (U+2026). Asserted by
+    // codepoint so the check cannot pass against a visually similar "...".
+    expect("…".codePointAt(0)).toBe(0x2026);
+    expect(text).not.toContain("mcp-filesy…");
+  });
+
+  it("--json is unaffected by the column change", async () => {
+    const entry = {
+      ...BASE_SERVER_ENTRY,
+      server: { ...BASE_SERVER_ENTRY.server, name: LONG_NAME },
+    };
+    const client = makeMockClient(makeSearchResult([entry]));
+    const lines: string[] = [];
+
+    await handleSearch(
+      "filesy",
+      { limit: 20, json: true },
+      { registryClient: client as any, output: (t: string) => lines.push(t) }
+    );
+
+    expect(JSON.parse(lines.join("\n"))[0].name).toBe(LONG_NAME);
+  });
+});

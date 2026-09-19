@@ -122,7 +122,16 @@ export async function handleSearch(
     ],
     style: { head: [], border: [] },
     wordWrap: true,
-    colWidths: [40, 40, 12, 12, 12],
+    // Name is AUTO-SIZED (null), every other column stays fixed. The Name cell
+    // holds the registry coordinate you paste into `mcpm install`, and a
+    // coordinate has no spaces — so under a fixed width cli-table3 cannot wrap
+    // it and TRUNCATES with an ellipsis instead, handing the user a string that
+    // does not work. Measured over 100 live registry entries: 4 names are >= 40
+    // chars, the longest 43, so auto-sizing costs a few columns in practice; the
+    // registry schema caps a name at 1024 chars, which is the honest worst case.
+    // Truncating the one field that must be copied verbatim is worse than a wide
+    // table. `--json` is unaffected.
+    colWidths: [null, 40, 12, 12, 12],
   });
 
   for (const entry of entries) {

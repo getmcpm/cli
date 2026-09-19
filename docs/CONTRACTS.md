@@ -21,6 +21,7 @@ do-not-proceed.
 | `mcpm doctor` | no blocking issues | `1` | health check; the cross-client advisory section never changes the exit code |
 | `mcpm install` | installed | `1` | non-zero on a policy/trust block (`--min-trust`, `--min-release-age`, a registry-**deleted** server) or any failure |
 | `mcpm guard run` (relay) | child exit `0` | child's code; `1` | propagates the wrapped child's exit; **fails closed with `1`** on a confine hash mismatch, a stripped required marker, or a pins-integrity error |
+| `mcpm info` / `mcpm why` | found | `1` when the named server is not in the registry | **Changed in 0.42.0:** both printed `Server '<name>' not found` and exited **`0`**, so `mcpm info X && <next step>` ran the next step on a server that is not there. The message and its stream (stdout) are unchanged; only the code moved, to match `install`/`remove` and the general rule below |
 
 Any command exits `1` on an unhandled error. New non-zero codes may be *added* for
 new failure modes, but the meanings above will not be repurposed within `0.x`.
@@ -31,6 +32,25 @@ new failure modes, but the meanings above will not be repurposed within `0.x`.
   added; a breaking change bumps this and ships a documented migration.
 - **`mcpm-lock.yaml`** carries `lockfileVersion: 1`. The `integrity` block is
   additive/optional (older locks still parse); a breaking change bumps the number.
+
+## MCP tool-result shapes (UNSTABLE)
+
+The `mcpm serve` tool surface (`mcpm_search`, `mcpm_install`, `mcpm_audit`,
+`mcpm_up`, …) has the same stability posture as `--json`: **unstable in `0.x`**,
+fields may be added or renamed. Recorded here because it had no statement at all
+before 0.42.0, not because anything froze.
+
+**Added in 0.42.0, both additive (#92):**
+
+- `mcpm_audit` — every per-server row now carries `error: string | null`. It is
+  `null` on a row that scored, and a specific reason on a row that did not. The
+  `{score: 0, maxPossible: 80, level: "risky"}` placeholder on a failed row is
+  UNCHANGED, so a consumer that only reads the score keeps working; previously
+  the reason existed nowhere on this surface and an agent could not tell a
+  delisted server from a network blip from a genuinely risky one.
+- `mcpm_up` — a new `notices: string[]`, always present (`[]` when empty),
+  carrying the advisory lines `handleUp` printed, in order. These reached only
+  the CLI's stdout before, which this surface does not have.
 
 ## `--json` output (mostly UNSTABLE for now)
 

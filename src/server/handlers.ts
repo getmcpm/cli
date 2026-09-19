@@ -20,6 +20,7 @@ import { buildDoctorModel, makeCheckConfigExists, execCheckDefault } from "../co
 import { fetchNpmIntegrity as _fetchNpmIntegrity } from "../registry/npm-integrity.js";
 import { fetchNpmProvenance as _fetchNpmProvenance } from "../registry/npm-provenance.js";
 import { readPins as _readPins } from "../guard/pins.js";
+import { describeRegistryError } from "../registry/errors.js";
 
 // ---------------------------------------------------------------------------
 // Input validation for MCP server tool arguments
@@ -386,7 +387,16 @@ export async function handleRemove(
 
 export async function handleAudit(deps: ServerDeps): Promise<object> {
   const clients = await deps.detectClients();
-  const results: Array<{ name: string; client: string; trustScore: TrustScore }> = [];
+  // #92: `error` is stated on EVERY row (null on success) rather than only on the
+  // failing ones, so an agent reading a `risky` placeholder score can tell a
+  // genuinely risky server from one whose metadata mcpm could not fetch. The
+  // placeholder score is unchanged — existing consumers keep working.
+  const results: Array<{
+    name: string;
+    client: string;
+    trustScore: TrustScore;
+    error: string | null;
+  }> = [];
   // #23 follow-up (adversarial review): surfaced in the result for the same
   // reason as handleList — stderr is invisible to the calling agent, and a
   // server invalid to mcpm but valid to the client would otherwise be silently
@@ -404,12 +414,13 @@ export async function handleAudit(deps: ServerDeps): Promise<object> {
       try {
         const entry = await deps.registryGetServer(name);
         const trust = computeTrust(entry, deps);
-        results.push({ name, client: clientId, trustScore: trust });
-      } catch {
+        results.push({ name, client: clientId, trustScore: trust, error: null });
+      } catch (err) {
         results.push({
           name,
           client: clientId,
           trustScore: { score: 0, maxPossible: 80, level: "risky", breakdown: { healthCheck: 0, staticScan: 0, externalScan: 0, registryMeta: 0 } },
+          error: describeRegistryError(err).message,
         });
       }
     }
@@ -587,6 +598,8 @@ export async function handleMcpUp(
   blocked: string[];
   failed: string[];
   skipped: string[];
+  /** #92: every advisory line handleUp printed, in order. Always present. */
+  notices: string[];
   error?: string;
   note?: string;
 }> {
@@ -760,6 +773,14 @@ export async function handleMcpUp(
     blocked,
     failed,
     skipped,
+    // #92: `outputLines` was consulted ONLY in the no-record fallback below, so on
+    // the normal path every advisory handleUp prints — provenance identity drift,
+    // the frozen-integrity coverage notice, #219's version-list fallback line —
+    // reached nobody: the CLI writes them to stdout, and this surface has no
+    // stdout the calling agent can see. Same class as the v0.37.0 `update --json`
+    // finding. Byte-faithful (the JSON-surface convention, v0.20.1), unfiltered
+    // (classifying by emoji is the fragile scrape `records` exists to replace).
+    notices: outputLines,
     ...(thrownError !== undefined ? { error: thrownError } : {}),
     ...(installed.length > 0
       ? { note: "Restart your AI client to use the newly installed servers." }
