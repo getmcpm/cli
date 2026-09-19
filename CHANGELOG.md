@@ -8,6 +8,8 @@ _Add entries here, never under a stamped version_ — a release commit renames t
 heading, and a branch that wrote beneath it merges without conflict straight into a
 published section (it happened to #170).
 
+## [0.41.0] - 2026-09-19
+
 ### Fixed
 
 - **MINOR.** `mcpm lock`, `mcpm up`'s auto-lock, and the `mcpm_up` MCP tool
