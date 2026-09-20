@@ -468,7 +468,7 @@ the flagship enforcement path CI-verified.
 Runs on `v*` tag push. Builds, tests, and publishes to npm as `@getmcpm/cli` with
 provenance. A separate `registry` job then runs `mcpm publish --github-oidc` to
 (re-)list the version on the official MCP registry, authenticating via a minted
-GitHub Actions OIDC token — no npm publish and no `--registry` secret involved. On the
+GitHub Actions OIDC token — no npm publish and no `--registry` secret involved. The npm publish itself is ALSO OIDC (npm Trusted Publishing, tokens disallowed on the package since 2026-09-20): the `publish` job holds no `NPM_TOKEN` and `id-token: write` is its only credential. On the
 tag-push path that `registry` job first POLLS npm for up to 5 minutes (30 attempts, 10 s
 apart) until npm's read path actually serves the new version, and FAILS CLOSED naming the
 `workflow_dispatch` recovery if it never does — the MCP registry validates the npm
