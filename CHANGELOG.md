@@ -8,6 +8,20 @@ _Add entries here, never under a stamped version_ — a release commit renames t
 heading, and a branch that wrote beneath it merges without conflict straight into a
 published section (it happened to #170).
 
+### Changed
+
+- **Release pipeline only, no runtime change:** `publish.yml` no longer passes a
+  long-lived `NPM_TOKEN` to `pnpm publish`. The package is configured on npmjs.com
+  for OIDC **Trusted Publishing** with tokens disallowed, so the workflow's
+  `id-token: write` permission is the whole credential and the repository secret is
+  deleted. `pnpm publish` hands the upload to the npm CLI (11.x on Node 24, above
+  the 11.5.1 floor npm documents), which performs the OIDC exchange; pnpm 10.30.x is
+  the version pnpm's own tracker records as reaching trusted publishing
+  (pnpm/pnpm#11566). Provenance attestations are automatic under trusted publishing;
+  the `--provenance` flag stays as a no-op. The first tag after this change is the
+  only real test of the path — if it fails with npm's masked `E404 PUT`, the fix is
+  the trusted-publisher entry on npmjs.com, not a token.
+
 ## [0.42.0] - 2026-09-19
 
 ### Fixed

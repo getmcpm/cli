@@ -136,9 +136,21 @@ jobs:
       - run: pnpm run build
       - run: pnpm run test
 
+      # npm auth is OIDC Trusted Publishing, NOT a token. The package's npm
+      # settings require a trusted publisher (this repo + this workflow file) and
+      # disallow tokens, so `NODE_AUTH_TOKEN`/`NPM_TOKEN` are gone on purpose:
+      # `id-token: write` above is the whole credential. `pnpm publish` spawns the
+      # npm CLI for the upload and that CLI (>= 11.5.1; Node 24 ships 11.x) does
+      # the OIDC exchange — pnpm 10.30.x is the version pnpm's own tracker records
+      # as working with trusted publishing (pnpm/pnpm#11566; the 11.0 regression
+      # was fixed via pnpm/action-setup, and `version: 10` never resolves 11).
+      # `--provenance` is redundant under trusted publishing (attestations are
+      # automatic) and kept as a belt-and-braces no-op. If this step ever fails
+      # with a masked `E404 PUT https://registry.npmjs.org/@getmcpm%2fcli`, that
+      # is npm's OIDC-rejection shape: check the trusted-publisher entry on
+      # npmjs.com (repo `getmcpm/cli`, workflow `publish.yml`, no environment),
+      # not the token — there is no token to check.
       - run: pnpm publish --no-git-checks --provenance
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
       # SBOM generation runs AFTER publish and is best-effort, so a SBOM-tool
       # hiccup can never block the npm release. If it fails, the release is still
