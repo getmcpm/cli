@@ -859,3 +859,78 @@ describe("wireDirection — Promise-returning inspect (issue #27)", () => {
     expect(received).toEqual([first, second]);
   });
 });
+
+// ─────────── inspect() that THROWS or REJECTS fails closed on that frame ───────────
+//
+// A synchronous throw from inspect() used to escape wireDirection's stdout
+// `data` handler as an uncaughtException: the guard process died and the IDE
+// restarted the server straight back into it. Found by the fast-check totality
+// property (a server answering tools/list with `tools: [null]`), reproduced on
+// the built relay. The rejection branch was added in v0.34.1 and had no test.
+// Both now share one synthetic-block path and are pinned here at the relay
+// level: the offending frame is replaced by a guard error, the frame AFTER it
+// is still forwarded, and the process is still alive to do so.
+describe("wireDirection — a throwing or rejecting inspect fails closed on that one frame", () => {
+  const run = async (inspect: (msg: JSONRPCMessage) => InspectResult | Promise<InspectResult>) => {
+    const fakeChild = makeFakeChild();
+    const parentOut = new PassThrough();
+    const outBuffer = new ReadBuffer();
+    const received: JSONRPCMessage[] = [];
+    const events: GuardEvent[] = [];
+    parentOut.on("data", (c: Buffer) => {
+      outBuffer.append(c);
+      let msg = outBuffer.readMessage();
+      while (msg !== null) {
+        received.push(msg);
+        msg = outBuffer.readMessage();
+      }
+    });
+    startRelay({
+      command: "x",
+      args: [],
+      parentIn: new PassThrough(),
+      parentOut,
+      spawnChild: () => fakeChild,
+      inspectChildResponse: inspect,
+      onEvent: (e) => events.push(e),
+    });
+    const poison = makeResponse(1, "poison");
+    const after = makeResponse(2, "after");
+    fakeChild.stdout.write(serializeMessage(poison));
+    fakeChild.stdout.write(serializeMessage(after));
+    for (let i = 0; i < 4; i++) await new Promise((r) => setImmediate(r));
+    return { received, events };
+  };
+
+  const expectFailedClosed = ({ received, events }: { received: JSONRPCMessage[]; events: GuardEvent[] }) => {
+    expect(received).toHaveLength(2);
+    // Frame 1: a synthetic guard error carrying the original id, not the poison.
+    const [first, second] = received as Array<{ id?: unknown; error?: { code?: number }; result?: unknown }>;
+    expect(first?.id).toBe(1);
+    expect(first?.error?.code).toBe(-32099);
+    expect(first?.result).toBeUndefined();
+    // Frame 2 forwarded untouched — the relay survived to keep draining.
+    expect(second).toEqual(makeResponse(2, "after"));
+    expect(events.map((e) => e.action)).toEqual(["block"]);
+    expect(events[0]?.findings[0]?.signature_id).toBe("inspect-rejected");
+    expect(events[0]?.findings[0]?.matched_text_excerpt).toBe("detector tripped");
+  };
+
+  test("synchronous throw", async () => {
+    expectFailedClosed(
+      await run((msg) => {
+        if ((msg as { id?: unknown }).id === 1) throw new Error("detector tripped");
+        return { action: "pass", findings: [] };
+      }),
+    );
+  });
+
+  test("rejected promise (v0.34.1 branch, previously unpinned)", async () => {
+    expectFailedClosed(
+      await run(async (msg) => {
+        if ((msg as { id?: unknown }).id === 1) throw new Error("detector tripped");
+        return { action: "pass", findings: [] };
+      }),
+    );
+  });
+});
