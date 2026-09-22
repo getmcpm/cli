@@ -59,6 +59,18 @@ published section (it happened to #170).
   the `--provenance` flag stays as a no-op. The first tag after this change is the
   only real test of the path — if it fails with npm's masked `E404 PUT`, the fix is
   the trusted-publisher entry on npmjs.com, not a token.
+- **Release pipeline only, no runtime change:** every GitHub Release now carries a
+  keyless Sigstore signature over its SBOM, attached as `mcpm.cdx.json.sigstore.json`
+  beside `mcpm.cdx.json` (`cosign sign-blob --bundle`, signed by the workflow's own
+  OIDC identity under the `id-token: write` the npm provenance already uses). Verify
+  with `cosign verify-blob --bundle mcpm.cdx.json.sigstore.json mcpm.cdx.json
+  --certificate-identity-regexp '^https://github.com/getmcpm/cli/'
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com`. Best-effort
+  like the SBOM step: a Sigstore outage cannot block a release that already reached
+  npm. Only the SBOM is signed — the tarball is not a release asset (`pnpm publish`
+  re-packs, so a locally packed copy would not be the published bytes) and its
+  signature is the npm provenance attestation. Closes the OpenSSF Scorecard
+  `Signed-Releases` row, which scored 0 against an unsigned SBOM.
 
 ## [0.42.0] - 2026-09-19
 

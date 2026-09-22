@@ -164,24 +164,45 @@ jobs:
           upload-artifact: false
           upload-release-assets: false
 
-      - name: Create GitHub Release + attach SBOM
+      # Keyless Sigstore signature over the SBOM, attached beside it as a
+      # standard Sigstore bundle (`.sigstore.json`). Same `id-token: write` the
+      # npm provenance already uses; the signing identity is this workflow's
+      # OIDC identity, which is what a verifier pins:
+      #   cosign verify-blob --bundle mcpm.cdx.json.sigstore.json mcpm.cdx.json \
+      #     --certificate-identity-regexp '^https://github.com/getmcpm/cli/' \
+      #     --certificate-oidc-issuer https://token.actions.githubusercontent.com
+      # Best-effort like the SBOM step it depends on: a Fulcio/Rekor blip must
+      # not block the npm release that already happened. Signs ONLY the SBOM —
+      # the npm tarball is not a release asset (`pnpm publish` re-packs from
+      # source, so a locally packed copy would not be the published bytes), and
+      # its own signature is the npm provenance attestation. This closes the
+      # OpenSSF Scorecard Signed-Releases row, which was 0 with an unsigned SBOM.
+      - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+      - name: Sign SBOM (keyless, Sigstore)
+        if: hashFiles('mcpm.cdx.json') != ''
+        continue-on-error: true
+        run: cosign sign-blob --yes --bundle mcpm.cdx.json.sigstore.json mcpm.cdx.json
+
+      - name: Create GitHub Release + attach SBOM and its signature
         env:
           GH_TOKEN: ${{ github.token }}
-        # Attach the SBOM AT CREATION TIME. GitHub immutable releases seal a
+        # Attach assets AT CREATION TIME. GitHub immutable releases seal a
         # release's assets on creation and reject any later `gh release upload`
-        # with HTTP 422, so the SBOM must be passed to `gh release create` as a
-        # positional asset — not uploaded in a follow-up step. Idempotent: a
+        # with HTTP 422, so every asset must be passed to `gh release create` as
+        # a positional argument — not uploaded in a follow-up step. Idempotent: a
         # release may already exist (manual create, or a re-run); we don't fail
-        # the publish, but we also can't amend an immutable one.
+        # the publish, but we also can't amend an immutable one. Each asset is
+        # attached only if its best-effort step above actually produced it.
         run: |
           if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
             echo "Release $GITHUB_REF_NAME already exists — skipping (immutable releases can't be amended)."
-          elif [ -f mcpm.cdx.json ]; then
-            gh release create "$GITHUB_REF_NAME" mcpm.cdx.json --generate-notes --title "$GITHUB_REF_NAME"
-          else
-            echo "No SBOM produced — creating release without asset."
-            gh release create "$GITHUB_REF_NAME" --generate-notes --title "$GITHUB_REF_NAME"
+            exit 0
           fi
+          ASSETS=()
+          for f in mcpm.cdx.json mcpm.cdx.json.sigstore.json; do
+            [ -f "$f" ] && ASSETS+=("$f") || echo "No $f produced — releasing without it."
+          done
+          gh release create "$GITHUB_REF_NAME" "${ASSETS[@]}" --generate-notes --title "$GITHUB_REF_NAME"
 
   # OFFICIAL REGISTRY LISTING: `mcpm publish --github-oidc` authenticates via a
   # GitHub Actions OIDC token exchanged for a registry JWT (POST
