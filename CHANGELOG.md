@@ -8,6 +8,44 @@ _Add entries here, never under a stamped version_ — a release commit renames t
 heading, and a branch that wrote beneath it merges without conflict straight into a
 published section (it happened to #170).
 
+### Fixed
+
+- **A server whose `tools/list` (or `resources/read` / `prompts/get`) carried a
+  non-object array element crashed the guard.** `targetSubtree` dereferenced
+  server-authored array elements unchecked, so `tools: [null]` threw a `TypeError`;
+  the relay's `drain` ran the inspector without a try/catch, so the throw escaped
+  the child-stdout `data` handler as an `uncaughtException`, the guard process
+  exited 1, and the IDE restarted the server straight back into it. Reproduced on
+  the built relay. Not a detection bypass — the server died with the guard — but a
+  crash any wrapped server could trigger with one malformed frame. Non-object
+  elements are now skipped before the leaf walk (a primitive can hide nothing; the
+  `"str".description → undefined` path already ignored them), and a
+  **synchronous** inspector throw now fails closed on that one frame with the same
+  synthetic `inspect-rejected` block the v0.34.1 rejection branch uses — which had
+  no test of its own until now; both branches are pinned at the relay level.
+  Found by the new fast-check totality property on its first run with non-string
+  carrier slots; the shapes it found are kept as a fixed regression table.
+
+### Added
+
+- **Property-based tests on the guard's shared match pipeline** (`fast-check`,
+  devDependency). Two invariants the hand-written suites pinned only at chosen
+  strings: (1) *evasion-invariance* — for printable ASCII, any interleaving of
+  `PATTERN_BREAKERS` characters and any substitution of letters by their fullwidth
+  or Cyrillic/Greek look-alikes normalizes back to the plain string byte for byte
+  (the v0.20.0 zero-width bypass and security #30, stated generally); (2)
+  *totality* — `inspectFrame` returns a verdict for arbitrary JSON in every
+  carrier slot, never throws. The look-alike and breaker lists are spec-side in
+  the test, not imported from `patterns.ts`: a generator built from the code's
+  own table stops producing a glyph the moment the code stops folding it, and
+  measured, deleting a confusable mapping left a table-derived version green.
+  Five mutations (a breaker un-stripped, a fold removed, NFKC removed, the
+  `objectElements` guard reverted, the relay try/catch removed) each turn a suite
+  red. Idempotence is deliberately not asserted — NFKC composes a folded `o` with
+  a following combining mark on the second pass, so it is false in a way a
+  generator hits only sometimes. Closes the OpenSSF Scorecard `Fuzzing` row
+  (code-scanning alert #6), whose JS/TS detector is exactly a `fast-check` import.
+
 ### Changed
 
 - **Release pipeline only, no runtime change:** `publish.yml` no longer passes a
