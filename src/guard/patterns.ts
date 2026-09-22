@@ -276,7 +276,7 @@ const PATTERN_BREAKERS = /[­​-‏‪-‮⁠-⁯﻿]|[\u{E0000}-\u{E007F}]/gu;
 // that appear in the injection signatures' alphabet. Kept as an explicit allowlist
 // (not a broad "non-ASCII → strip") so we never corrupt legitimate non-Latin text
 // in a way that fabricates a match. (security #30)
-const CONFUSABLES: Readonly<Record<string, string>> = {
+export const CONFUSABLES: Readonly<Record<string, string>> = {
   // ── Cyrillic → Latin ──
   "а": "a", "А": "A", // а А
   "е": "e", "Е": "E", // е Е
