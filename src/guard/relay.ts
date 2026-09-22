@@ -36,6 +36,29 @@ export type InspectFn = (msg: JSONRPCMessage) => InspectResult | Promise<Inspect
  * caller in a different realm (e.g. a vm context) could hand back a foreign
  * thenable that fails an `instanceof` check yet still needs awaiting.
  */
+/**
+ * The verdict for a frame whose inspection THREW or REJECTED: fail closed on
+ * that one frame (synthetic block, same path as a real block) rather than
+ * forward it uninspected or let the error take the guard process down.
+ */
+function inspectFailedDecision(err: unknown): InspectResult {
+  return {
+    action: "block",
+    findings: [
+      {
+        signature_id: "inspect-rejected",
+        category: "RELAY",
+        severity: "critical",
+        target: "tool_response",
+        matched_text_excerpt: err instanceof Error ? err.message : String(err),
+        remediation:
+          "An inspection callback threw or rejected while evaluating this frame; it was " +
+          "dropped (fail-closed) instead of forwarded uninspected.",
+      },
+    ],
+  };
+}
+
 function isThenable(value: InspectResult | Promise<InspectResult>): value is Promise<InspectResult> {
   return typeof (value as { then?: unknown }).then === "function";
 }
@@ -488,7 +511,25 @@ function wireDirection(w: DirectionWiring): void {
     }
     while (msg !== null) {
       bufferedBytes = 0; // reset on every consumed frame
-      const maybeDecision = w.inspect?.(msg) ?? { action: "pass", findings: [] };
+      let maybeDecision: InspectResult | Promise<InspectResult>;
+      try {
+        maybeDecision = w.inspect?.(msg) ?? { action: "pass", findings: [] };
+      } catch (err: unknown) {
+        // A SYNCHRONOUS throw from inspect() — a detector tripping over a
+        // malformed server frame — used to escape this stdout `data` handler as
+        // an uncaughtException: the guard process died and the IDE restarted
+        // the server straight back into it. Same fail-closed shape as the
+        // rejection branch below: block this one frame, keep draining.
+        dispatch(msg, inspectFailedDecision(err));
+        try {
+          msg = buffer.readMessage();
+        } catch {
+          w.onEvent?.(malformedFrameEvent(w.direction));
+          w.source.destroy();
+          return;
+        }
+        continue;
+      }
       if (isThenable(maybeDecision)) {
         // Issue #27: stop draining synchronously — resume via `drain()` once
         // the awaited decision lands, so a message already buffered (or one
@@ -514,23 +555,7 @@ function wireDirection(w: DirectionWiring): void {
             // (same synthetic-error path as a normal block verdict) and keep
             // draining everything after it.
             awaiting = false;
-            if (!w.source.destroyed) {
-              dispatch(current, {
-                action: "block",
-                findings: [
-                  {
-                    signature_id: "inspect-rejected",
-                    category: "RELAY",
-                    severity: "critical",
-                    target: "tool_response",
-                    matched_text_excerpt: err instanceof Error ? err.message : String(err),
-                    remediation:
-                      "An inspection callback rejected while evaluating this frame; it was " +
-                      "dropped (fail-closed) instead of forwarded uninspected.",
-                  },
-                ],
-              });
-            }
+            if (!w.source.destroyed) dispatch(current, inspectFailedDecision(err));
             drain();
           },
         );

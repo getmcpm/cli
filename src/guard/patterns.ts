@@ -84,6 +84,23 @@ function unhandledTarget(_: never): null {
   return null;
 }
 
+/**
+ * The object elements of an untrusted array, or `[]` for anything else. Every
+ * carrier below reads server-authored arrays whose elements it then
+ * dereferences (`t.description`, `c.text`, `m.content`); a server that returns
+ * `tools: [null]` or `tools: {}` — a protocol violation the SDK client would
+ * reject anyway — used to throw here instead, and the relay's `drain` ran the
+ * inspector without a try/catch, so the guard process died with an
+ * uncaughtException and the IDE restarted the server into the same crash.
+ * Found by the fast-check totality property, reproduced on the built relay.
+ * Primitive elements are skipped, not scanned, which is what the old
+ * `"str".description` → `undefined` path already did.
+ */
+function objectElements(v: unknown): Array<Record<string, unknown>> {
+  if (!Array.isArray(v)) return [];
+  return v.filter((e): e is Record<string, unknown> => typeof e === "object" && e !== null);
+}
+
 function targetSubtree(msg: JSONRPCMessage, target: SignatureTarget): unknown {
   switch (target) {
     case "tool_response": {
@@ -121,22 +138,18 @@ function targetSubtree(msg: JSONRPCMessage, target: SignatureTarget): unknown {
       // Poison in inputSchema.properties.*.description / enum / title is a known
       // tool-poisoning vector that scanning only `description` would miss. (#16)
       if ("result" in msg) {
-        const result = (msg as {
-          result?: { tools?: Array<{ description?: unknown; title?: unknown; inputSchema?: unknown }> };
-        }).result;
-        const tools = result?.tools;
+        const tools = (msg as { result?: { tools?: unknown } }).result?.tools;
         if (!tools) return null;
-        return tools.map((t) => [t.description ?? "", t.title ?? "", t.inputSchema ?? null]);
+        return objectElements(tools).map((t) => [t.description ?? "", t.title ?? "", t.inputSchema ?? null]);
       }
       return null;
     }
     case "tool_annotations": {
       // tools/list response → result.tools[*].annotations
       if ("result" in msg) {
-        const result = (msg as { result?: { tools?: Array<{ annotations?: unknown }> } }).result;
-        const tools = result?.tools;
+        const tools = (msg as { result?: { tools?: unknown } }).result?.tools;
         if (!tools) return null;
-        return tools.map((t) => t.annotations ?? null);
+        return objectElements(tools).map((t) => t.annotations ?? null);
       }
       return null;
     }
@@ -146,10 +159,9 @@ function targetSubtree(msg: JSONRPCMessage, target: SignatureTarget): unknown {
       // perf risk). Retrieved DATA carrier — the warn-only clamp in inspectMessage
       // degrades a match here to `warn` so a poisoned README is annotated, not dropped.
       if ("result" in msg) {
-        const result = (msg as { result?: { contents?: Array<{ text?: unknown }> } }).result;
-        const contents = result?.contents;
+        const contents = (msg as { result?: { contents?: unknown } }).result?.contents;
         if (!Array.isArray(contents)) return null;
-        return contents.map((c) => c.text ?? null);
+        return objectElements(contents).map((c) => c.text ?? null);
       }
       return null;
     }
@@ -164,10 +176,9 @@ function targetSubtree(msg: JSONRPCMessage, target: SignatureTarget): unknown {
       // bounded by normalizeForMatch's cap). Retrieved DATA carrier — warn-only
       // via the inspectMessage clamp. (security: H1 array-content bypass)
       if ("result" in msg) {
-        const result = (msg as { result?: { messages?: Array<{ content?: unknown }> } }).result;
-        const messages = result?.messages;
+        const messages = (msg as { result?: { messages?: unknown } }).result?.messages;
         if (!Array.isArray(messages)) return null;
-        return messages.map((m) => m.content ?? null);
+        return objectElements(messages).map((m) => m.content ?? null);
       }
       return null;
     }
