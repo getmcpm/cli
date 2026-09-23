@@ -19,7 +19,8 @@ on:
 
 # Least-privilege default for the workflow. The publish job below explicitly
 # opts into exactly what it needs (contents: write for the GitHub Release,
-# id-token: write for npm provenance), which fully overrides this default for
+# id-token: write for npm OIDC Trusted Publishing, provenance and the Sigstore
+# SBOM signature), which fully overrides this default for
 # that job — so publishing is unaffected; any other/future step defaults to read.
 permissions:
   contents: read
@@ -169,15 +170,20 @@ jobs:
       # npm provenance already uses; the signing identity is this workflow's
       # OIDC identity, which is what a verifier pins:
       #   cosign verify-blob --bundle mcpm.cdx.json.sigstore.json mcpm.cdx.json \
-      #     --certificate-identity-regexp '^https://github.com/getmcpm/cli/' \
+      #     --certificate-identity-regexp '^https://github.com/getmcpm/cli/\.github/workflows/publish\.yml@refs/tags/v' \
       #     --certificate-oidc-issuer https://token.actions.githubusercontent.com
       # Best-effort like the SBOM step it depends on: a Fulcio/Rekor blip must
       # not block the npm release that already happened. Signs ONLY the SBOM —
       # the npm tarball is not a release asset (`pnpm publish` re-packs from
       # source, so a locally packed copy would not be the published bytes), and
-      # its own signature is the npm provenance attestation. This closes the
-      # OpenSSF Scorecard Signed-Releases row, which was 0 with an unsigned SBOM.
+      # its own signature is the npm provenance attestation. It starts the
+      # OpenSSF Scorecard Signed-Releases row off 0; the check averages the last
+      # five releases with assets, so it takes five signed releases to top out.
+      # The installer is best-effort too: without it a cosign download failure
+      # would abort the job after npm publish and cost the GitHub Release and
+      # the registry listing.
       - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+        continue-on-error: true
       - name: Sign SBOM (keyless, Sigstore)
         if: hashFiles('mcpm.cdx.json') != ''
         continue-on-error: true

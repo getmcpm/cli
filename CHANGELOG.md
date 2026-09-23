@@ -11,11 +11,13 @@ published section (it happened to #170).
 ### Fixed
 
 - **A server whose `tools/list` (or `resources/read` / `prompts/get`) carried a
-  non-object array element crashed the guard.** `targetSubtree` dereferenced
+  `null` element, or a non-array value where the list belongs, crashed the
+  guard.** `targetSubtree` dereferenced
   server-authored array elements unchecked, so `tools: [null]` threw a `TypeError`;
   the relay's `drain` ran the inspector without a try/catch, so the throw escaped
-  the child-stdout `data` handler as an `uncaughtException`, the guard process
-  exited 1, and the IDE restarted the server straight back into it. Reproduced on
+  the child-stdout `data` handler as an `uncaughtException` and the guard process
+  exited 1 (whether the client then restarts the server into the same frame
+  depends on the client). Reproduced on
   the built relay. Not a detection bypass — the server died with the guard — but a
   crash any wrapped server could trigger with one malformed frame. Non-object
   elements are now skipped before the leaf walk (a primitive can hide nothing; the
@@ -25,6 +27,16 @@ published section (it happened to #170).
   no test of its own until now; both branches are pinned at the relay level.
   Found by the new fast-check totality property on its first run with non-string
   carrier slots; the shapes it found are kept as a fixed regression table.
+- **`mcpm guard inspect` no longer stops at such a frame.** On 0.42.0 a
+  `tools: [null]` frame in an NDJSON stream aborted the command with a `TypeError`,
+  exit 1 and no verdicts at all, so an attack frame after it went unreported; it now
+  emits one verdict per frame as documented. One verdict changes as a side effect,
+  on no frame in the published corpus (100 fixture and corpus frames give
+  byte-identical verdicts on 0.42.0 and 0.42.1): a benign `tools/list` padded with
+  tens of thousands of primitive entries was a `block` (`guard-inspection-truncated`,
+  because the leaf budget counted the primitives) and is now `pass`, because
+  primitives are no longer walked. An injection hidden in the same padding still
+  blocks on its own signature.
 
 ### Added
 
@@ -34,14 +46,17 @@ published section (it happened to #170).
   `PATTERN_BREAKERS` characters and any substitution of letters by their fullwidth
   or Cyrillic/Greek look-alikes normalizes back to the plain string byte for byte
   (the v0.20.0 zero-width bypass and security #30, stated generally); (2)
-  *totality* — `inspectFrame` returns a verdict for arbitrary JSON in every
-  carrier slot, never throws. The look-alike and breaker lists are spec-side in
+  *totality* — `inspectFrame` returns a verdict for arbitrary JSON in the carrier
+  slots its generator builds, never throws (the `resources/read` and `prompts/get`
+  shapes are covered by the fixed regression table). The look-alike and breaker lists are spec-side in
   the test, not imported from `patterns.ts`: a generator built from the code's
   own table stops producing a glyph the moment the code stops folding it, and
   measured, deleting a confusable mapping left a table-derived version green.
   Five mutations (a breaker un-stripped, a fold removed, NFKC removed, the
   `objectElements` guard reverted, the relay try/catch removed) each turn a suite
-  red. Idempotence is deliberately not asserted — NFKC composes a folded `o` with
+  red — four of them on every run; the fold removal only on a share of runs,
+  because fast-check draws random cases, so a deterministic look-alike table is a
+  filed follow-up. Idempotence is deliberately not asserted — NFKC composes a folded `o` with
   a following combining mark on the second pass, so it is false in a way a
   generator hits only sometimes. Closes the OpenSSF Scorecard `Fuzzing` row
   (code-scanning alert #6), whose JS/TS detector is exactly a `fast-check` import.
@@ -53,24 +68,26 @@ published section (it happened to #170).
   for OIDC **Trusted Publishing** with tokens disallowed, so the workflow's
   `id-token: write` permission is the whole credential and the repository secret is
   deleted. `pnpm publish` hands the upload to the npm CLI (11.x on Node 24, above
-  the 11.5.1 floor npm documents), which performs the OIDC exchange; pnpm 10.30.x is
-  the version pnpm's own tracker records as reaching trusted publishing
-  (pnpm/pnpm#11566). Provenance attestations are automatic under trusted publishing;
+  the 11.5.1 floor npm documents), which performs the OIDC exchange; pnpm 10, which
+  the workflow pins by major, hands the packed tarball to `npm publish`, so the npm
+  version is the one that matters. Provenance attestations are automatic under trusted publishing;
   the `--provenance` flag stays as a no-op. The first tag after this change is the
   only real test of the path — if it fails with npm's masked `E404 PUT`, the fix is
   the trusted-publisher entry on npmjs.com, not a token.
-- **Release pipeline only, no runtime change:** every GitHub Release now carries a
+- **Release pipeline only, no runtime change:** each GitHub Release now carries a
   keyless Sigstore signature over its SBOM, attached as `mcpm.cdx.json.sigstore.json`
   beside `mcpm.cdx.json` (`cosign sign-blob --bundle`, signed by the workflow's own
   OIDC identity under the `id-token: write` the npm provenance already uses). Verify
   with `cosign verify-blob --bundle mcpm.cdx.json.sigstore.json mcpm.cdx.json
-  --certificate-identity-regexp '^https://github.com/getmcpm/cli/'
+  --certificate-identity-regexp '^https://github.com/getmcpm/cli/\.github/workflows/publish\.yml@refs/tags/v'
   --certificate-oidc-issuer https://token.actions.githubusercontent.com`. Best-effort
-  like the SBOM step: a Sigstore outage cannot block a release that already reached
-  npm. Only the SBOM is signed — the tarball is not a release asset (`pnpm publish`
+  like the SBOM step, installer included: a Sigstore or cosign-download failure
+  cannot cost the GitHub Release or the registry listing, and cannot block a release
+  that already reached npm. Only the SBOM is signed — the tarball is not a release asset (`pnpm publish`
   re-packs, so a locally packed copy would not be the published bytes) and its
-  signature is the npm provenance attestation. Closes the OpenSSF Scorecard
-  `Signed-Releases` row, which scored 0 against an unsigned SBOM.
+  signature is the npm provenance attestation. Starts the OpenSSF Scorecard
+  `Signed-Releases` row off 0: the check averages the last five releases that carry
+  assets, so it reaches its ceiling only after five consecutive signed releases.
 
 ## [0.42.0] - 2026-09-19
 
