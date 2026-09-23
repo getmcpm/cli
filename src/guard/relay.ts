@@ -56,11 +56,12 @@ function inspectFailedDecision(err: unknown): InspectResult {
 
 /**
  * The verdict for a frame that PASSED inspection (or landed a warn) but could
- * not be RE-SERIALIZED for forwarding. V8's `JSON.parse` accepts nesting far
- * deeper than `JSON.stringify` (inside `serializeMessage`) can walk without
- * overflowing the call stack, so a frame nested deep enough in a carrier the
- * inspector doesn't choke on (e.g. `result.structuredContent`) parses cleanly,
- * passes inspection, and only then throws — outside the inspect() try/catch.
+ * not be RE-SERIALIZED for forwarding. V8's `JSON.parse` is iterative, but
+ * `JSON.stringify` (inside `serializeMessage`) recurses on its general path —
+ * which V8 13.8+ still takes for, e.g., objects with array-index keys — so a
+ * frame nested deep enough in a carrier the inspector doesn't choke on (e.g.
+ * `result.structuredContent`) parses cleanly, passes inspection, and only then
+ * throws `RangeError` — outside the inspect() try/catch.
  * Deliberately its OWN signature id, not a reuse of `inspect-rejected`: no
  * inspection callback threw here, so that id's remediation text would be
  * false. `decision.findings` are carried forward (after this new finding) so
