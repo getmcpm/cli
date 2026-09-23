@@ -63,8 +63,8 @@ function inspectFailedDecision(err: unknown): InspectResult {
  * passes inspection, and only then throws — outside the inspect() try/catch.
  * Deliberately its OWN signature id, not a reuse of `inspect-rejected`: no
  * inspection callback threw here, so that id's remediation text would be
- * `decision.findings` are carried forward (after this new finding) so a warn
- * verdict's own findings (e.g. a truncation finding) aren't silently lost —
+ * false. `decision.findings` are carried forward (after this new finding) so
+ * a warn verdict's own findings (e.g. a truncation finding) aren't silently lost —
  * this new finding goes first because `makeBlockResponse` puts `findings[0]`
  * into the synthesized error's `data`.
  */
