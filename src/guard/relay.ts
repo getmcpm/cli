@@ -32,11 +32,6 @@ import type { InspectResult } from "./types.js";
 export type InspectFn = (msg: JSONRPCMessage) => InspectResult | Promise<InspectResult>;
 
 /**
- * Duck-typed rather than `instanceof Promise`: InspectFn is exported, so a
- * caller in a different realm (e.g. a vm context) could hand back a foreign
- * thenable that fails an `instanceof` check yet still needs awaiting.
- */
-/**
  * The verdict for a frame whose inspection THREW or REJECTED: fail closed on
  * that one frame (synthetic block, same path as a real block) rather than
  * forward it uninspected or let the error take the guard process down.
@@ -59,6 +54,44 @@ function inspectFailedDecision(err: unknown): InspectResult {
   };
 }
 
+/**
+ * The verdict for a frame that PASSED inspection (or landed a warn) but could
+ * not be RE-SERIALIZED for forwarding. V8's `JSON.parse` accepts nesting far
+ * deeper than `JSON.stringify` (inside `serializeMessage`) can walk without
+ * overflowing the call stack, so a frame nested deep enough in a carrier the
+ * inspector doesn't choke on (e.g. `result.structuredContent`) parses cleanly,
+ * passes inspection, and only then throws — outside the inspect() try/catch.
+ * Deliberately its OWN signature id, not a reuse of `inspect-rejected`: no
+ * inspection callback threw here, so that id's remediation text would be
+ * `decision.findings` are carried forward (after this new finding) so a warn
+ * verdict's own findings (e.g. a truncation finding) aren't silently lost —
+ * this new finding goes first because `makeBlockResponse` puts `findings[0]`
+ * into the synthesized error's `data`.
+ */
+function forwardSerializeFailedDecision(err: unknown, decision: InspectResult): InspectResult {
+  return {
+    action: "block",
+    findings: [
+      {
+        signature_id: "forward-serialize-failed",
+        category: "RELAY",
+        severity: "critical",
+        target: "tool_response",
+        matched_text_excerpt: err instanceof Error ? err.message : String(err),
+        remediation:
+          "This frame passed inspection but could not be re-serialized for forwarding " +
+          "(e.g. nested too deep); it was dropped (fail-closed) instead of crashing the guard.",
+      },
+      ...decision.findings,
+    ],
+  };
+}
+
+/**
+ * Duck-typed rather than `instanceof Promise`: InspectFn is exported, so a
+ * caller in a different realm (e.g. a vm context) could hand back a foreign
+ * thenable that fails an `instanceof` check yet still needs awaiting.
+ */
 function isThenable(value: InspectResult | Promise<InspectResult>): value is Promise<InspectResult> {
   return typeof (value as { then?: unknown }).then === "function";
 }
@@ -489,8 +522,23 @@ function wireDirection(w: DirectionWiring): void {
         else w.parentOut.write(serializeMessage(errResp));
       }
     } else {
+      // Serialize FIRST, before logging or writing. A frame nested deep
+      // enough (parse accepts it; stringify doesn't) throws here — re-enter
+      // dispatch with a synthetic block instead of forwarding nothing and
+      // letting the throw escape as an uncaughtException. The block branch
+      // above only ever serializes the small synthetic error response (its
+      // `id` is the original message's zod-validated string|number, copied
+      // verbatim — not re-derived from the poisoned payload), so it cannot
+      // recurse into this same failure.
+      let bytes: string;
+      try {
+        bytes = serializeMessage(msg);
+      } catch (err: unknown) {
+        dispatch(msg, forwardSerializeFailedDecision(err, decision));
+        return;
+      }
       logEvent(decision, w.direction, w.onEvent);
-      w.target(serializeMessage(msg));
+      w.target(bytes);
     }
   };
 

@@ -8,6 +8,44 @@ _Add entries here, never under a stamped version_ — a release commit renames t
 heading, and a branch that wrote beneath it merges without conflict straight into a
 published section (it happened to #170).
 
+### Fixed
+
+- **A deeply-nested response crashed the guard on the RE-SERIALIZE, not the
+  parse — a fail-open gap #226's `inspect()` try/catch didn't cover.**
+  `wireDirection`'s pass/warn branch called `serializeMessage` (`JSON.stringify` +
+  `"\n"`) OUTSIDE any try/catch. V8's `JSON.parse` accepts nesting far deeper than
+  `JSON.stringify` can walk without overflowing the call stack — measured on Node
+  24.20.0: at plain top-level script scope, `JSON.stringify(JSON.parse(...))` on a
+  `[`×N`]`×N array still succeeds at depth 6,166 and throws `RangeError: Maximum
+  call stack size exceeded` at 6,167; through the real relay (`npx
+  @getmcpm/cli@0.42.1`, `guard run --inner` wrapping a throwaway stdio server) the
+  boundary is lower — still fine at depth 5,500, crashing by depth 6,000 — because
+  the relay's own call frames (module loading, the stdio `Socket` data handler,
+  `drain`, `dispatch`) eat into the same stack budget before `serializeMessage` is
+  even reached. So a frame nested deep enough in a carrier the inspector doesn't
+  choke on (e.g. `result.structuredContent`) parsed fine, passed inspection, and
+  only then threw — past the point `#226`'s try/catch around `inspect()` covers —
+  escaping the child-stdout `data` handler as an uncaughtException and exiting the
+  guard process 1 (the IDE then restarts the wrapped server straight back into the
+  same frame). Reproduced on the published `@getmcpm/cli@0.42.0` and `@0.42.1`
+  binaries (identical stack trace shape on both, `serializeMessage` →
+  `dispatch` → `drain`), so the bug is pre-existing in both, not new to this
+  branch. Not a detection bypass — nothing was forwarded, the process just died —
+  but any wrapped server could trigger it with one sufficiently-nested response,
+  and a `warn`-tier verdict (e.g. `guard-inspection-truncated` clamped to warn on a
+  retrieved-data carrier) crashed exactly the same way, since both take the same
+  forward branch. Fixed by serializing FIRST, inside a try/catch: on success,
+  logging and forwarding proceed exactly as before; on a throw, the frame is
+  dropped fail-closed with a new, honest signature id — `forward-serialize-failed`
+  (deliberately not a reuse of `inspect-rejected`, whose remediation text claims an
+  inspection callback threw, which would be false here) — and the original
+  decision's own findings (e.g. a warn's truncation finding) are preserved in the
+  synthesized block event rather than silently dropped. The tiny synthetic error
+  response this path writes back can't recurse into the same failure: its `id` is
+  the original message's zod-validated `string | number`, copied verbatim.
+  Verified the fix holds far past the reproduced depths: the built relay forwards
+  or fail-closes correctly up to depth 1,000,000 without crashing.
+
 ## [0.42.1] - 2026-09-24
 
 ### Fixed

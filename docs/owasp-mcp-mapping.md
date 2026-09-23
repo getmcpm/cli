@@ -106,7 +106,9 @@ bucket things fall into:
 
 - **Inspection / relay health** — `guard-inspection-truncated` (the leaf-walk
   budget was exhausted, so the frame was not fully inspected),
-  `inspect-rejected`, `malformed-frame`, `spawn-failure`.
+  `inspect-rejected`, `forward-serialize-failed` (a frame passed inspection but
+  could not be re-serialized for forwarding — e.g. nested too deep for
+  `JSON.stringify`), `malformed-frame`, `spawn-failure`.
 - **Store and marker integrity** — `pins-integrity-failure`,
   `orig-hash-mismatch`.
 - **Confine spawn decisions** (`src/guard/confine/decide.ts`, logged by

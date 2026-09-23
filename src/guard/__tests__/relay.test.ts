@@ -934,3 +934,186 @@ describe("wireDirection — a throwing or rejecting inspect fails closed on that
     );
   });
 });
+
+// ──── forward-serialize-failed: parse accepts nesting stringify can't (backlog #100) ────
+//
+// V8's JSON.parse tolerates far deeper nesting than JSON.stringify can walk
+// without overflowing the call stack. Measured on Node 24.20.0 at plain
+// top-level script scope (`node -e`, binary search over a `[`x N `]`x N
+// array): JSON.stringify(JSON.parse(...)) still succeeds at depth 6,166 and
+// throws `RangeError: Maximum call stack size exceeded` at depth 6,167; inside
+// vitest + the relay's own call frames the real budget is smaller still. A
+// frame nested deep enough in a carrier the inspector doesn't choke on
+// (`result.structuredContent`, which the guard's leaf-walk does not recurse
+// into arrays-of-empty-arrays for) therefore parses cleanly, passes
+// inspection, and only then blows the stack in `serializeMessage` — OUTSIDE
+// the `inspect()` try/catch #226 added.
+// DEEP_NESTING_DEPTH = 20,000 is chosen well above the measured 6,166
+// top-level boundary, to leave headroom for the smaller stack budget available
+// once nested inside vitest/relay call frames and for any difference on the
+// Node 22/26 CI legs (not independently measured in this suite).
+const DEEP_NESTING_DEPTH = 20_000;
+
+/** A raw, already-framed JSON-RPC response line — built as a STRING, never via
+ * `serializeMessage`, because producing it that way is exactly the bug. */
+const deepFrame = (id: number): string =>
+  `{"jsonrpc":"2.0","id":${id},"result":{"structuredContent":{"x":` +
+  "[".repeat(DEEP_NESTING_DEPTH) +
+  "]".repeat(DEEP_NESTING_DEPTH) +
+  "}}}\n";
+
+describe("wireDirection — a frame that passes inspection but cannot be re-serialized for forwarding (backlog #100)", () => {
+  test("pass verdict: blocked fail-closed under its own signature id; frame 2 still forwarded", async () => {
+    const fakeChild = makeFakeChild();
+    const parentOut = new PassThrough();
+    const outBuffer = new ReadBuffer();
+    const received: JSONRPCMessage[] = [];
+    const events: GuardEvent[] = [];
+    parentOut.on("data", (c: Buffer) => {
+      outBuffer.append(c);
+      let msg = outBuffer.readMessage();
+      while (msg !== null) {
+        received.push(msg);
+        msg = outBuffer.readMessage();
+      }
+    });
+
+    startRelay({
+      command: "x",
+      args: [],
+      parentIn: new PassThrough(),
+      parentOut,
+      spawnChild: () => fakeChild,
+      inspectChildResponse: () => ({ action: "pass", findings: [] }),
+      onEvent: (e) => events.push(e),
+    });
+
+    fakeChild.stdout.write(deepFrame(1));
+    fakeChild.stdout.write(serializeMessage(makeResponse(2, "after")));
+    for (let i = 0; i < 4; i++) await new Promise((r) => setImmediate(r));
+
+    expect(received).toHaveLength(2);
+    const [first, second] = received as Array<{
+      id?: unknown;
+      error?: { code?: number; data?: { signature_id?: string } };
+      result?: unknown;
+    }>;
+    // Frame 1: a synthetic guard error carrying the original id, not the
+    // unserializable payload — and no `result` at all.
+    expect(first?.id).toBe(1);
+    expect(first?.error?.code).toBe(-32099);
+    expect(first?.result).toBeUndefined();
+    expect(first?.error?.data?.signature_id).toBe("forward-serialize-failed");
+    // Frame 2 forwarded untouched — the relay survived to keep draining.
+    expect(second).toEqual(makeResponse(2, "after"));
+
+    // Exactly one event: the original pass verdict for frame 1 carried no
+    // findings (logEvent no-ops on an empty findings array), so only the
+    // synthesized block is logged.
+    expect(events).toHaveLength(1);
+    expect(events[0]?.action).toBe("block");
+    expect(events[0]?.findings[0]?.signature_id).toBe("forward-serialize-failed");
+  });
+
+  test("warn verdict: the warn's own finding is preserved, appended after forward-serialize-failed", async () => {
+    const fakeChild = makeFakeChild();
+    const parentOut = new PassThrough();
+    const outBuffer = new ReadBuffer();
+    const received: JSONRPCMessage[] = [];
+    const events: GuardEvent[] = [];
+    parentOut.on("data", (c: Buffer) => {
+      outBuffer.append(c);
+      let msg = outBuffer.readMessage();
+      while (msg !== null) {
+        received.push(msg);
+        msg = outBuffer.readMessage();
+      }
+    });
+
+    const truncationFinding = {
+      signature_id: "guard-inspection-truncated",
+      category: "RELAY",
+      severity: "high",
+      target: "tool_response",
+      matched_text_excerpt: "leaf walk budget exceeded",
+      remediation: "Re-run with a smaller frame; the truncated portion was not inspected.",
+    } as const;
+
+    startRelay({
+      command: "x",
+      args: [],
+      parentIn: new PassThrough(),
+      parentOut,
+      spawnChild: () => fakeChild,
+      inspectChildResponse: (msg) => {
+        const id = (msg as { id?: unknown }).id;
+        if (id === 1) return { action: "warn", findings: [truncationFinding] };
+        return { action: "pass", findings: [] };
+      },
+      onEvent: (e) => events.push(e),
+    });
+
+    fakeChild.stdout.write(deepFrame(1));
+    fakeChild.stdout.write(serializeMessage(makeResponse(2, "after")));
+    for (let i = 0; i < 4; i++) await new Promise((r) => setImmediate(r));
+
+    expect(received).toHaveLength(2);
+    const [first, second] = received as Array<{ id?: unknown; error?: { code?: number }; result?: unknown }>;
+    expect(first?.id).toBe(1);
+    expect(first?.error?.code).toBe(-32099);
+    expect(second).toEqual(makeResponse(2, "after"));
+
+    expect(events).toHaveLength(1);
+    const [event] = events;
+    expect(event?.action).toBe("block");
+    // The warn's own finding survives in the block event, SECOND — the new
+    // finding goes first because makeBlockResponse puts findings[0] into the
+    // synthesized error's `data`.
+    expect(event?.findings).toHaveLength(2);
+    expect(event?.findings[0]?.signature_id).toBe("forward-serialize-failed");
+    expect(event?.findings[1]?.signature_id).toBe("guard-inspection-truncated");
+  });
+
+  test("parent->child direction: nothing deep reaches child stdin, the error goes to parentOut, relay survives", async () => {
+    const fakeChild = makeFakeChild();
+    const parentIn = new PassThrough();
+    const parentOut = new PassThrough();
+    const outBuffer = new ReadBuffer();
+    const received: JSONRPCMessage[] = [];
+    let childStdinBytes = 0;
+    fakeChild.stdin.on("data", (c: Buffer) => {
+      childStdinBytes += c.byteLength;
+    });
+    parentOut.on("data", (c: Buffer) => {
+      outBuffer.append(c);
+      let msg = outBuffer.readMessage();
+      while (msg !== null) {
+        received.push(msg);
+        msg = outBuffer.readMessage();
+      }
+    });
+
+    startRelay({
+      command: "x",
+      args: [],
+      parentIn,
+      parentOut,
+      spawnChild: () => fakeChild,
+    });
+
+    parentIn.write(deepFrame(1));
+    for (let i = 0; i < 4; i++) await new Promise((r) => setImmediate(r));
+
+    // Nothing deep (or anything else) reached the wrapped server's stdin.
+    expect(childStdinBytes).toBe(0);
+    expect(received).toHaveLength(1);
+    const [first] = received as Array<{ id?: unknown; error?: { code?: number } }>;
+    expect(first?.id).toBe(1);
+    expect(first?.error?.code).toBe(-32099);
+
+    // Relay survives: a normal request afterward still reaches the child.
+    parentIn.write(serializeMessage(makeRequest(2, "tools/call")));
+    for (let i = 0; i < 4; i++) await new Promise((r) => setImmediate(r));
+    expect(childStdinBytes).toBeGreaterThan(0);
+  });
+});
