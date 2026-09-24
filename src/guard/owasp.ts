@@ -134,6 +134,7 @@ export const _SIGNATURE_OWASP_TABLE: Readonly<Record<string, PinState>> = Object
   "orig-hash-mismatch": "unpinnable",
   "spawn-failure": "unpinnable",
   "inspect-rejected": "unpinnable",
+  "forward-serialize-failed": "unpinnable",
   "malformed-frame": "unpinnable",
   ...CONFINE_EVENT_OWASP,
 });

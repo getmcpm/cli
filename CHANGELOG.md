@@ -8,6 +8,25 @@ _Add entries here, never under a stamped version_ — a release commit renames t
 heading, and a branch that wrote beneath it merges without conflict straight into a
 published section (it happened to #170).
 
+### Fixed
+
+- **A deeply nested frame crashed the guard when the relay re-serialized it to
+  forward it.** The relay inspected a frame and then called `serializeMessage`
+  (`JSON.stringify`) with no try/catch, after #226's try/catch around `inspect()`.
+  `JSON.parse` is iterative and `JSON.stringify` recurses, so a frame nested past
+  the stack limit passed inspection and then threw as an `uncaughtException`, exiting
+  the guard 1. Reproduced on the published 0.42.0 and 0.42.1 under Node 24.20.0:
+  nested arrays in `result.structuredContent` were forwarded at depth 5,500 and
+  crashed the guard at 6,000; objects keyed `"0"` crashed it at 3,000. Pass and warn
+  verdicts crashed alike, in both directions, and so did the first `tools/list` held
+  for its pin write (#27), as an unhandled rejection. Nothing was forwarded, so this
+  was a crash any wrapped server could trigger, not a detection bypass. The frame is
+  now serialized before it is logged or written; if that throws, it is blocked under
+  a new relay-health id, `forward-serialize-failed` (a warn's own findings follow it
+  in the event), and the relay keeps draining. Not measured on Node 26: its newer V8
+  serializes plain nesting iteratively, but objects with array-index keys still
+  overflow (checked in Chromium 152's V8, not in Node 26 itself).
+
 ## [0.42.1] - 2026-09-24
 
 ### Fixed

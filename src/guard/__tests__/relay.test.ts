@@ -934,3 +934,171 @@ describe("wireDirection — a throwing or rejecting inspect fails closed on that
     );
   });
 });
+
+// ──── forward-serialize-failed: parse accepts nesting stringify can't (backlog #100) ────
+//
+// V8's JSON.parse is iterative; the JSON.stringify inside `serializeMessage`
+// recurses, so a frame nested deeply enough parses, passes inspection, and
+// only then throws `RangeError` — outside #226's try/catch around inspect().
+//
+// The fixture nests OBJECTS keyed "0", not arrays. V8 13.8+ (Node 26's 14.6)
+// serializes plain arrays/objects on an ITERATIVE fast path that may never
+// overflow; objects with array-index keys are documented to take the
+// recursive general path instead (v8.dev/blog/json-stringify). Measured with
+// `node -e` at top-level scope, this shape overflows from depth ~2,800 on
+// Node 24.20.0 and ~3,650 on 22.17.0; 20,000 leaves headroom. The first test
+// asserts that precondition so a runtime that CAN serialize the fixture fails
+// there, by name, instead of in the assertions below.
+const DEEP_NESTING_DEPTH = 20_000;
+
+/** A raw, already-framed JSON-RPC response line — built as a STRING, never via
+ * `serializeMessage`, because producing it that way is exactly the bug. */
+const deepFrame = (id: number): string =>
+  `{"jsonrpc":"2.0","id":${id},"result":{"structuredContent":{"x":` +
+  '{"0":'.repeat(DEEP_NESTING_DEPTH) +
+  "1" +
+  "}".repeat(DEEP_NESTING_DEPTH) +
+  "}}}\n";
+
+type Wire = { id?: unknown; error?: { code?: number; data?: { signature_id?: string } }; result?: unknown };
+
+describe("wireDirection — a frame that passes inspection but cannot be re-serialized for forwarding (backlog #100)", () => {
+  /** Child writes the deep frame (id 1) then a normal one (id 2); returns what the parent saw. */
+  const run = async (inspect: (msg: JSONRPCMessage) => InspectResult | Promise<InspectResult>, first = deepFrame(1)) => {
+    const fakeChild = makeFakeChild();
+    const parentOut = new PassThrough();
+    const outBuffer = new ReadBuffer();
+    const received: Wire[] = [];
+    const events: GuardEvent[] = [];
+    parentOut.on("data", (c: Buffer) => {
+      outBuffer.append(c);
+      let msg = outBuffer.readMessage();
+      while (msg !== null) {
+        received.push(msg as Wire);
+        msg = outBuffer.readMessage();
+      }
+    });
+    startRelay({
+      command: "x",
+      args: [],
+      parentIn: new PassThrough(),
+      parentOut,
+      spawnChild: () => fakeChild,
+      inspectChildResponse: inspect,
+      onEvent: (e) => events.push(e),
+    });
+    fakeChild.stdout.write(first);
+    fakeChild.stdout.write(serializeMessage(makeResponse(2, "after")));
+    for (let i = 0; i < 4; i++) await new Promise((r) => setImmediate(r));
+    fakeChild.emit("exit", 0); // detach startRelay's SIGINT/SIGTERM handlers
+    return { received, events };
+  };
+
+  const expectBlockedThenForwarded = (received: Wire[]) => {
+    expect(received).toHaveLength(2);
+    const [first, second] = received;
+    // Frame 1: a synthetic guard error carrying the original id — no `result`.
+    expect(first?.id).toBe(1);
+    expect(first?.error?.code).toBe(-32099);
+    expect(first?.result).toBeUndefined();
+    expect(first?.error?.data?.signature_id).toBe("forward-serialize-failed");
+    // Frame 2 forwarded untouched — the relay survived to keep draining.
+    expect(second).toEqual(makeResponse(2, "after"));
+  };
+
+  test("precondition: this runtime's JSON.stringify overflows on the fixture", () => {
+    expect(() => serializeMessage(JSON.parse(deepFrame(1)) as JSONRPCMessage)).toThrow(RangeError);
+  });
+
+  test("pass verdict: blocked fail-closed under its own signature id; frame 2 still forwarded", async () => {
+    const { received, events } = await run(() => ({ action: "pass", findings: [] }));
+    expectBlockedThenForwarded(received);
+    // The pass carried no findings (logEvent no-ops on those), so only the block is logged.
+    expect(events.map((e) => e.action)).toEqual(["block"]);
+    expect(events[0]?.findings[0]?.signature_id).toBe("forward-serialize-failed");
+    expect(events[0]?.findings[0]?.matched_text_excerpt).toMatch(/call stack/i);
+  });
+
+  test("warn verdict: the warn's own finding is preserved, after forward-serialize-failed", async () => {
+    const truncation = {
+      signature_id: "guard-inspection-truncated",
+      category: "MCP-GUARD-INTEGRITY",
+      severity: "critical", // clamped to warn on this retrieved-data carrier
+      target: "prompt_content",
+      matched_text_excerpt: "leaf walk budget exceeded",
+      remediation: "n/a",
+    } as const;
+    const { received, events } = await run((msg) =>
+      (msg as { id?: unknown }).id === 1 ? { action: "warn", findings: [truncation] } : { action: "pass", findings: [] },
+    );
+    expectBlockedThenForwarded(received);
+    // One event, not a warn followed by a block. The new finding goes first
+    // because makeBlockResponse puts findings[0] into the error's `data`.
+    expect(events.map((e) => e.action)).toEqual(["block"]);
+    expect(events[0]?.findings.map((f) => f.signature_id)).toEqual([
+      "forward-serialize-failed",
+      "guard-inspection-truncated",
+    ]);
+  });
+
+  test("Promise-returning inspect (issue #27 hold path) routes through the same fail-closed dispatch", async () => {
+    // Before the fix the throw landed inside the `.then` callback: an
+    // unhandled rejection, which also crashes the guard (reproduced on 0.42.1
+    // with a first-ever tools/list carrying deep `_meta`).
+    const { received, events } = await run(async () => ({ action: "pass", findings: [] }));
+    expectBlockedThenForwarded(received);
+    expect(events.map((e) => e.action)).toEqual(["block"]);
+  });
+
+  test("control: a serializable warn frame is forwarded and logged once as warn", async () => {
+    const finding = {
+      signature_id: "some-warn",
+      category: "RELAY",
+      severity: "medium",
+      target: "tool_response",
+      matched_text_excerpt: "x",
+      remediation: "n/a",
+    } as const;
+    const { received, events } = await run(
+      (msg) => ((msg as { id?: unknown }).id === 1 ? { action: "warn", findings: [finding] } : { action: "pass", findings: [] }),
+      serializeMessage(makeResponse(1, "fine")),
+    );
+    expect(received).toEqual([makeResponse(1, "fine"), makeResponse(2, "after")]);
+    expect(events.map((e) => e.action)).toEqual(["warn"]);
+  });
+
+  test("parent->child direction: nothing reaches child stdin, the error goes to parentOut, relay survives", async () => {
+    const fakeChild = makeFakeChild();
+    const parentIn = new PassThrough();
+    const parentOut = new PassThrough();
+    const outBuffer = new ReadBuffer();
+    const received: Wire[] = [];
+    let childStdinBytes = 0;
+    fakeChild.stdin.on("data", (c: Buffer) => {
+      childStdinBytes += c.byteLength;
+    });
+    parentOut.on("data", (c: Buffer) => {
+      outBuffer.append(c);
+      let msg = outBuffer.readMessage();
+      while (msg !== null) {
+        received.push(msg as Wire);
+        msg = outBuffer.readMessage();
+      }
+    });
+
+    startRelay({ command: "x", args: [], parentIn, parentOut, spawnChild: () => fakeChild });
+
+    parentIn.write(deepFrame(1));
+    for (let i = 0; i < 4; i++) await new Promise((r) => setImmediate(r));
+    expect(childStdinBytes).toBe(0);
+    expect(received).toHaveLength(1);
+    expect(received[0]?.id).toBe(1);
+    expect(received[0]?.error?.data?.signature_id).toBe("forward-serialize-failed");
+
+    // Relay survives: a normal request afterward still reaches the child.
+    parentIn.write(serializeMessage(makeRequest(2, "tools/call")));
+    for (let i = 0; i < 4; i++) await new Promise((r) => setImmediate(r));
+    expect(childStdinBytes).toBeGreaterThan(0);
+    fakeChild.emit("exit", 0);
+  });
+});
