@@ -108,8 +108,8 @@ bucket things fall into:
   budget was exhausted, so the frame was not fully inspected),
   `inspect-rejected`, `forward-serialize-failed` (a frame passed inspection but
   could not be re-serialized for forwarding — e.g. nested too deep for
-  `JSON.stringify`), `malformed-frame`, `spawn-failure`, `frame-too-large` (a
-  single JSON-RPC frame exceeded the relay's 10MiB buffer cap).
+  `JSON.stringify`), `malformed-frame`, `spawn-failure`, `frame-too-large` (the
+  relay's 10 MiB read buffer overflowed, normally on one oversize frame).
 - **Store and marker integrity** — `pins-integrity-failure`,
   `orig-hash-mismatch`.
 - **Confine spawn decisions** (`src/guard/confine/decide.ts`, logged by

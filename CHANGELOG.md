@@ -26,29 +26,22 @@ published section (it happened to #170).
   in the event), and the relay keeps draining. Not measured on Node 26: its newer V8
   serializes plain nesting iteratively, but objects with array-index keys still
   overflow (checked in Chromium 152's V8, not in Node 26 itself).
-- **A single JSON-RPC frame over 10MiB — delivered as ordinary small pipe chunks,
-  not one giant write — crashed the guard instead of being blocked.** `wireDirection`
-  constructed the SDK's `ReadBuffer` with no cap, so `append()` threw the SDK's own
-  `STDIO_DEFAULT_MAX_BUFFER_SIZE` (10MiB) error outside any try/catch — an
-  `uncaughtException` that exited the guard 1, with nothing forwarded. mcpm's own
-  `MAX_BUFFER_BYTES` (documented at 64MB) was dead code: it was a separate counter
-  checked before `append()`, so the SDK's 10MiB throw always fired first. Reproduced
-  on the published 0.42.1 under Node 24.20.0: a 9MiB response forwards, an 11MiB one
-  exits 1; present in every mcpm release from v0.30.0 on, the first to resolve
-  `@modelcontextprotocol/sdk` >= 1.30.0 (the version that introduced the buffer
-  limit, PR modelcontextprotocol/typescript-sdk#2239). The cap stays at 10MiB rather
-  than being raised to a working 64MB: a `ReadBuffer` pass is roughly quadratic in
-  frame size (measured on Node 24.20.0: 9MiB ~117ms, 20MiB ~500ms, 40MiB ~2.2s), so
-  a larger cap would hand a malicious server a CPU/RAM amplification knob, and any
-  MCP TS-SDK client already refuses a frame this large (`StdioClientTransport` wraps
-  the same `append()` in try/catch at the same default). `ReadBuffer` is now
-  constructed with an explicit `maxBufferSize`, and the throw is caught and
-  fail-closed the same way a malformed frame already is, under a new relay-health
-  id, `frame-too-large`. Every fail-closed teardown on the client-to-server
-  direction now also ends the wrapped server's stdin (it previously only tore
-  down the read side, so `destroy()`'s 'close' never gave the child EOF and a
-  server idling on stdin stayed half-open forever instead of exiting) — the same
-  shared fix also closes this pre-existing hang in the malformed-frame branch.
+- **A JSON-RPC frame over 10 MiB crashed the guard instead of being blocked.**
+  `@modelcontextprotocol/sdk` 1.30.0 (typescript-sdk#2239, released 2026-07-27) made
+  `ReadBuffer.append()` throw past its default 10 MiB, and `wireDirection` called it
+  outside any try/catch, so an oversize frame in either direction exited the guard 1;
+  mcpm's own 64 MB cap never got to fire. That covers every install resolving SDK
+  1.30.0 or later: v0.30.0 onward, and fresh installs of v0.5.0–v0.29.x, whose
+  `^1.29.0` admits it. On a build of `main` under Node 24.20.0, a 9 MiB response
+  forwards and an 11 MiB one exits 1. The cap stays at 10 MiB, now set by mcpm:
+  `ReadBuffer` is quadratic in frame size (10 MiB costs ~0.1 s and ~0.6 GiB RSS, 63 MiB
+  ~5 s and ~3.5 GiB), and the SDK's `StdioClientTransport` closes the connection at the
+  same default unless its `maxBufferSize` is raised. An overflow is now a fail-closed
+  teardown under a new relay-health id, `frame-too-large`. Teardowns on the
+  client-to-server side now also end the server's stdin, so a server that exits on EOF
+  takes the guard with it; a malformed client frame used to leave both hanging. And the
+  guard now finishes writing `guard-events.jsonl` before it exits: every spawn-failure
+  event was being lost.
 
 ## [0.42.1] - 2026-09-24
 
