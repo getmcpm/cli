@@ -8,6 +8,8 @@ _Add entries here, never under a stamped version_ — a release commit renames t
 heading, and a branch that wrote beneath it merges without conflict straight into a
 published section (it happened to #170).
 
+## [0.42.2] - 2026-09-25
+
 ### Fixed
 
 - **A deeply nested frame crashed the guard when the relay re-serialized it to
