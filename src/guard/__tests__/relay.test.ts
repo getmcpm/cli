@@ -1143,8 +1143,9 @@ describe("fail-closed teardown closes the wrapped server like the SDK client (ba
     fakeChild.stdin.on("data", (c: Buffer) => {
       childStdinBytes += c.byteLength;
     });
+    // Same tick, so the client frame is drained right after end() — before
+    // the ended stdin is destroyed (the window a `!destroyed` check misses).
     fakeChild.stdout.write("banner\n");
-    await tick();
     parentIn.write(serializeMessage(makeRequest(1, "initialize")));
     await tick();
     await tick();
