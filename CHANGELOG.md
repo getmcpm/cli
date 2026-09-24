@@ -37,10 +37,12 @@ published section (it happened to #170).
   `ReadBuffer` is quadratic in frame size (10 MiB costs ~0.1 s and ~0.6 GiB RSS, 63 MiB
   ~5 s and ~3.5 GiB), and the SDK's `StdioClientTransport` closes the connection at the
   same default unless its `maxBufferSize` is raised. An overflow is now a fail-closed
-  teardown under a new relay-health id, `frame-too-large`. Teardowns on the
-  client-to-server side now also end the server's stdin, so a server that exits on EOF
-  takes the guard with it; a malformed client frame used to leave both hanging. And the
-  guard now finishes writing `guard-events.jsonl` before it exits: every spawn-failure
+  teardown under a new relay-health id, `frame-too-large`. Every fail-closed teardown,
+  in either direction, now closes the wrapped server the way the SDK client does (stdin
+  EOF, then SIGTERM, then SIGKILL, 2 s apart), so the guard exits instead of staying
+  half-open. `main` hung after a malformed client frame, and after a startup banner on
+  the server's stdout whenever the `initialize` answer fitted in the pipe. The guard
+  also now finishes writing `guard-events.jsonl` before it exits; every spawn-failure
   event was being lost.
 
 ## [0.42.1] - 2026-09-24
