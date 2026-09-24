@@ -23,9 +23,10 @@ published section (it happened to #170).
   was a crash any wrapped server could trigger, not a detection bypass. The frame is
   now serialized before it is logged or written; if that throws, it is blocked under
   a new relay-health id, `forward-serialize-failed` (a warn's own findings follow it
-  in the event), and the relay keeps draining. Not measured on Node 26: its newer V8
-  serializes plain nesting iteratively, but objects with array-index keys still
-  overflow (checked in Chromium 152's V8, not in Node 26 itself).
+  in the event), and the relay keeps draining. Newer V8 (13.8+, as in Node 26)
+  serializes plain nesting iteratively (measured in Chromium 152, not in Node 26), but
+  objects with array-index keys still overflow; the regression tests nest those and
+  pass on Node 26.10.0 in CI. (#227)
 - **A JSON-RPC frame over 10 MiB crashed the guard instead of being blocked.**
   `@modelcontextprotocol/sdk` 1.30.0 (typescript-sdk#2239, released 2026-07-27) made
   `ReadBuffer.append()` throw past its default 10 MiB, and `wireDirection` called it
@@ -43,7 +44,7 @@ published section (it happened to #170).
   half-open. `main` hung after a malformed client frame, and after a startup banner on
   the server's stdout whenever the `initialize` answer fitted in the pipe. The guard
   also now finishes writing `guard-events.jsonl` before it exits; every spawn-failure
-  event was being lost.
+  event was being lost. (#228)
 
 ## [0.42.1] - 2026-09-24
 
