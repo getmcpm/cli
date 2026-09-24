@@ -594,13 +594,11 @@ describe("startRelay — child-spawn failure fails closed (H9 B.2)", () => {
   // (no real subprocess forked).
   //
   // backlog #103: updated from the original 64MB cap to the current 10MiB one
-  // (see relay.ts's MAX_BUFFER_BYTES comment — the 64MB counter never actually
-  // enforced anything in production; the SDK's own ReadBuffer threw at 10MiB
-  // first, outside a try/catch, crashing the guard). Now also asserts the
-  // `frame-too-large` finding the fix adds — this describe block's other two
-  // tests below still pin the boundary values themselves (10MiB cap, no false
-  // block under it); this one covers "one huge write" specifically, distinct
-  // from the chunked-delivery tests in the describe block further down.
+  // (see relay.ts's MAX_BUFFER_BYTES comment — from SDK 1.30.0 the SDK's own
+  // ReadBuffer threw at 10MiB first, outside a try/catch, crashing the guard
+  // before the 64MB counter could fire), and asserts the `frame-too-large`
+  // finding. Writing cap+1 in ONE write pins the cap from above to the byte;
+  // test B below pins it from below.
   test("a child withholding the newline delimiter past 10MiB is torn down as a block, not buffered forever", async () => {
     const fakeChild = makeFakeChild();
     const parentIn = new PassThrough();
@@ -789,8 +787,7 @@ describe("startRelay — child-spawn failure fails closed (H9 B.2)", () => {
 //
 // These tests write in ordinary 64KB chunks (like a real pipe), not one
 // artificial oversized write, to prove the fix against the ACTUAL reported
-// shape. Tests A and B together pin the cap value from both sides — a
-// mutation to 64MB or to 1MiB must fail one of them.
+// shape. Test B and the one-write cap+1 test above pin the cap to the byte.
 describe("wireDirection — an oversize frame fails closed instead of crashing the guard (backlog #103)", () => {
   const PIPE_CHUNK = 64 * 1024;
 
@@ -858,7 +855,7 @@ describe("wireDirection — an oversize frame fails closed instead of crashing t
     expect(parentOut.writableEnded).toBe(false);
   });
 
-  test("B (boundary): a frame just under the 10MiB cap, delivered in 64KB chunks, is forwarded intact", async () => {
+  test("B (boundary): a frame of exactly the 10MiB cap, delivered in 64KB chunks, is forwarded intact", async () => {
     const fakeChild = makeFakeChild();
     const parentOut = new PassThrough();
     const outBuffer = new ReadBuffer();
@@ -882,11 +879,13 @@ describe("wireDirection — an oversize frame fails closed instead of crashing t
       spawnChild: () => fakeChild,
     });
 
-    // A few KB of JSON-RPC envelope overhead subtracted so the whole FRAME —
-    // not just the payload — lands under the cap.
-    const response = makeResponse(3, "x".repeat(10 * 1024 * 1024 - 4 * 1024));
+    // The whole FRAME, newline included, is exactly the cap: the SDK refuses
+    // only `> max`, so this must forward (a cap one byte lower fails here; the
+    // one-write test above fails a cap one byte higher).
+    const envelope = serializeMessage(makeResponse(3, "")).length;
+    const response = makeResponse(3, "x".repeat(10 * 1024 * 1024 - envelope));
     const frame = Buffer.from(serializeMessage(response), "utf8");
-    expect(frame.length).toBeLessThan(10 * 1024 * 1024);
+    expect(frame.length).toBe(10 * 1024 * 1024);
 
     await writeInPipeChunks(fakeChild.stdout, frame);
     await new Promise((r) => setImmediate(r));
