@@ -974,6 +974,84 @@ describe("wireDirection — an oversize frame fails closed instead of crashing t
     expect(fakeChild.stdin.writableEnded).toBe(true);
     fakeChild.emit("exit", 0);
   });
+
+  // `drain()` has THREE separate readMessage() catches (in addition to the
+  // `append()` catch Tests A/C/D exercise), each reachable only by a specific
+  // shape of buffer content. E and F below isolate the two this file had no
+  // coverage for at all, by packing a first (parseable) frame and a malformed
+  // second line into ONE write, so both land in the buffer before drain's
+  // while loop runs — exercising the SECOND readMessage() call inside that
+  // loop, not the first one Test D covers.
+  test("E: a normally-forwarded frame followed by a malformed second line still ends the child's stdin", async () => {
+    const fakeChild = makeFakeChild();
+    const parentIn = new PassThrough();
+    let childStdinBytes = 0;
+    fakeChild.stdin.on("data", (c: Buffer) => {
+      childStdinBytes += c.byteLength;
+    });
+
+    const events: GuardEvent[] = [];
+    startRelay({
+      command: "x",
+      args: [],
+      parentIn,
+      parentOut: new PassThrough(),
+      onEvent: (e) => events.push(e),
+      spawnChild: () => fakeChild,
+    });
+
+    // No inspect callback — msg 1 takes the default "pass" path and is
+    // forwarded (dispatch's else branch) BEFORE the second readMessage() call
+    // (inside the while loop, not the one before it) hits the malformed line.
+    parentIn.write(serializeMessage(makeRequest(20, "tools/call")) + "not json-rpc\n");
+    await new Promise((r) => setImmediate(r));
+    await new Promise((r) => setImmediate(r));
+
+    // The first, well-formed frame DID reach the child before the teardown.
+    expect(childStdinBytes).toBeGreaterThan(0);
+    const block = events.find((e) => e.action === "block");
+    expect(block).toBeDefined();
+    expect(block?.findings[0]?.signature_id).toBe("malformed-frame");
+    expect(fakeChild.stdin.writableEnded).toBe(true);
+    fakeChild.emit("exit", 0);
+  });
+
+  test("F: a throwing inspect on the first frame, then a malformed second line, still ends the child's stdin", async () => {
+    const fakeChild = makeFakeChild();
+    const parentIn = new PassThrough();
+    let childStdinBytes = 0;
+    fakeChild.stdin.on("data", (c: Buffer) => {
+      childStdinBytes += c.byteLength;
+    });
+
+    const events: GuardEvent[] = [];
+    startRelay({
+      command: "x",
+      args: [],
+      parentIn,
+      parentOut: new PassThrough(),
+      onEvent: (e) => events.push(e),
+      spawnChild: () => fakeChild,
+      // Synchronous throw on msg 1 routes through the inspectFailedDecision
+      // branch's OWN readMessage() call (distinct from both Test D's and
+      // Test E's call sites) to reach the malformed second line.
+      inspectParentRequest: () => {
+        throw new Error("inspect boom");
+      },
+    });
+
+    parentIn.write(serializeMessage(makeRequest(21, "tools/call")) + "not json-rpc\n");
+    await new Promise((r) => setImmediate(r));
+    await new Promise((r) => setImmediate(r));
+
+    // Neither message reached the child: msg 1 was blocked (inspect-rejected,
+    // replied to the client, never forwarded) and msg 2 never parsed.
+    expect(childStdinBytes).toBe(0);
+    const blocks = events.filter((e) => e.action === "block");
+    expect(blocks.map((e) => e.findings[0]?.signature_id)).toEqual(["inspect-rejected", "malformed-frame"]);
+    expect(fakeChild.stdin.writableEnded).toBe(true);
+    fakeChild.emit("exit", 0);
+  });
 });
 
 // ─────────── Issue #27: wireDirection awaits a Promise-returning inspect ───────────
