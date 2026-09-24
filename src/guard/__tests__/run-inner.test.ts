@@ -35,6 +35,7 @@ import {
   type PinsFile,
 } from "../pins.js";
 import type { InspectResult } from "../types.js";
+import type { GuardEvent } from "../relay.js";
 
 // ──────────────────────── helpers ────────────────────────
 
@@ -1404,5 +1405,72 @@ describe("runInner — inspectChildResponse pin-commit wait (issue #27)", () => 
 
     const real = capturedInspectChildResponse!(toolsList("read", "v1"));
     expect(real).toBeInstanceOf(Promise);
+  });
+});
+
+// ─────────── backlog #103: the exit waits for the event that explains it ───────────
+//
+// `mcpm guard run` calls process.exit(code) as soon as runInner resolves. A relay
+// event emitted just before the child exits (spawn-failure; a fail-closed teardown
+// that ends the child's stdin, so the child exits on EOF) was persisted with a
+// fire-and-forget appendEvent — measured with a fast-exiting child (`cat`), the
+// guard-events.jsonl line was lost 6 runs in 6.
+describe("runInner — relay exit waits for pending event-log writes (backlog #103)", () => {
+  let releaseAppend!: () => void;
+  let stderrSpy: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    vi.resetModules();
+    stderrSpy = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+    const appendGate = new Promise<void>((resolve) => {
+      releaseAppend = resolve;
+    });
+    vi.doMock("../event-log.js", async () => {
+      const actual = await vi.importActual<typeof import("../event-log.js")>("../event-log.js");
+      return { ...actual, appendEvent: async () => appendGate };
+    });
+    vi.doMock("../pins.js", async () => {
+      const actual = await vi.importActual<typeof import("../pins.js")>("../pins.js");
+      return { ...actual, readPins: async (): Promise<PinsFile> => actual.emptyPinsFile() };
+    });
+    vi.doMock("../policy.js", async () => {
+      const actual = await vi.importActual<typeof import("../policy.js")>("../policy.js");
+      return { ...actual, readPolicy: async () => ({}) };
+    });
+    vi.doMock("../relay.js", async () => {
+      const actual = await vi.importActual<typeof import("../relay.js")>("../relay.js");
+      return {
+        ...actual,
+        // The child exits in the same tick the relay reports the block.
+        startRelay: (opts: { onEvent?: (e: GuardEvent) => void }) => {
+          opts.onEvent?.({ ts: "t", direction: "parent->child", action: "block", findings: [] });
+          return { child: {} as never, exit: Promise.resolve(0) };
+        },
+      };
+    });
+  });
+
+  afterEach(() => {
+    stderrSpy.mockRestore();
+    vi.resetModules();
+    vi.doUnmock("../event-log.js");
+    vi.doUnmock("../pins.js");
+    vi.doUnmock("../policy.js");
+    vi.doUnmock("../relay.js");
+  });
+
+  test("runInner does not resolve until the block event's append has settled", async () => {
+    const { runInner } = await import("../run-inner.js");
+    let resolved = false;
+    const done = runInner({ serverName: "victim", command: "node", args: ["server.js"], declaredEnvKeys: [] }).then(
+      (code) => {
+        resolved = true;
+        return code;
+      },
+    );
+    await new Promise((r) => setTimeout(r, 20));
+    expect(resolved).toBe(false);
+    releaseAppend();
+    expect(await done).toBe(0);
   });
 });
