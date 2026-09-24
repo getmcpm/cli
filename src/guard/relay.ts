@@ -165,24 +165,27 @@ export function buildSafeEnv(source: NodeJS.ProcessEnv = process.env): NodeJS.Pr
  * frame over the cap is the same DoS/oversize shape.
  *
  * backlog #103: this used to be 64MB, enforced by a separate `bufferedBytes`
- * counter checked BEFORE `buffer.append(chunk)` — but the SDK's own
- * `ReadBuffer` (constructed with no options, so its default
+ * counter checked BEFORE `buffer.append(chunk)` — but from SDK 1.30.0 the
+ * SDK's own `ReadBuffer` (then constructed with no options, so its default
  * `STDIO_DEFAULT_MAX_BUFFER_SIZE`) throws inside `append()` at 10MiB first,
  * outside any try/catch, crashing the relay with an uncaughtException before
- * the 64MB counter could ever fire. The 64MB counter was therefore dead code
- * in production; the effective cap was always the SDK's 10MiB, just enforced
- * as a crash instead of a fail-closed teardown.
+ * the 64MB counter could ever fire. From then on the effective cap was the
+ * SDK's 10MiB, just enforced as a crash instead of a fail-closed teardown.
  *
  * The cap STAYS at 10MiB rather than being raised to (a working) 64MB: a
  * single ReadBuffer.append()+readMessage() pass is O(n) in the buffer's
  * current size (Buffer.concat + indexOf over the whole thing per chunk), so
  * cost is roughly QUADRATIC in frame size — measured on Node 24.20.0 with
- * 64KB chunks: 9MiB ~117ms/~610MB RSS, 20MiB ~500ms/~1.3GB RSS, 40MiB
- * ~2.2s/~2.6GB RSS. Raising the cap would hand a malicious server a CPU/RAM
- * amplification knob, not just a bigger buffer. It is also not a new
- * restriction: the SDK's own `StdioClientTransport` wraps `ReadBuffer.append`
- * in a try/catch at this same 10MiB default, so any MCP TS-SDK client
- * already refuses a frame this large.
+ * 64KB chunks: 10MiB ~0.1s/~0.6GiB RSS, 40MiB ~2s/~2.5GiB, 63MiB ~5s/~3.5GiB.
+ * Raising the cap would hand a malicious server a CPU/RAM amplification knob,
+ * not just a bigger buffer. The SDK's own `StdioClientTransport` (1.30.0+)
+ * also closes the connection at this default unless its `maxBufferSize` is
+ * raised.
+ *
+ * The SDK checks `buffered + chunk > max` BEFORE splitting lines, so a frame
+ * within one pipe read (<=64KB) under the cap can still trip it when the next
+ * frame's first bytes arrive in the same read — as can complete frames piling
+ * up during an issue-#27 hold. `frameTooLargeEvent`'s wording allows for both.
  */
 const MAX_BUFFER_BYTES = 10 * 1024 * 1024;
 
@@ -546,7 +549,10 @@ function wireDirection(w: DirectionWiring): void {
   // deliberately the no-op `() => undefined` ("never end parentOut on child
   // exit" — see startRelay); convergence there instead comes from the CHILD's
   // own next write to its now-destroyed stdout erroring (EPIPE), which is
-  // what ends the child (measured, unchanged by this fix).
+  // what ends the child. Measured limit: a child whose oversize frame fit in
+  // the pipe (so its write completed) and that never writes again keeps the
+  // guard up, and the client's request unanswered, until the client sends
+  // something that makes the child write.
   const failClosed = (event: GuardEvent): void => {
     w.onEvent?.(event);
     w.source.destroy();
@@ -723,12 +729,13 @@ function malformedFrameEvent(direction: GuardEvent["direction"]): GuardEvent {
 }
 
 /**
- * Build the RELAY block event for a single JSON-RPC frame (or an
- * unterminated one) that exceeded MAX_BUFFER_BYTES. The SDK's `ReadBuffer`
- * enforces the cap itself and `clear()`s its internal buffer before
- * throwing; this gives the resulting teardown an attributable finding
- * (backlog #103) instead of the empty `findings: []` the old counter-based
- * branch emitted. Mirrors `malformedFrameEvent` above.
+ * Build the RELAY block event for a read buffer that passed MAX_BUFFER_BYTES —
+ * normally one oversize (or unterminated) frame; see MAX_BUFFER_BYTES for the
+ * near-cap cases that also trip it. The SDK's `ReadBuffer` enforces the cap
+ * itself and `clear()`s its internal buffer before throwing; this gives the
+ * resulting teardown an attributable finding (backlog #103) instead of the
+ * empty `findings: []` the old counter-based branch emitted. Mirrors
+ * `malformedFrameEvent` above.
  */
 function frameTooLargeEvent(direction: GuardEvent["direction"]): GuardEvent {
   return {
@@ -741,10 +748,10 @@ function frameTooLargeEvent(direction: GuardEvent["direction"]): GuardEvent {
         category: "RELAY",
         severity: "critical",
         target: "tool_response",
-        matched_text_excerpt: `frame exceeded the relay's ${MAX_BUFFER_BYTES}-byte limit`,
+        matched_text_excerpt: `read buffer exceeded the relay's ${MAX_BUFFER_BYTES}-byte limit`,
         remediation:
-          "The wrapped MCP server (or client) sent a single JSON-RPC frame larger than the relay's " +
-          `${MAX_BUFFER_BYTES}-byte limit; it was dropped and the channel closed instead of crashing the guard.`,
+          `The relay's read buffer passed its ${MAX_BUFFER_BYTES}-byte limit — normally one JSON-RPC frame ` +
+          "at or over that size from the wrapped MCP server (or client) — so the channel was closed instead of crashing the guard.",
       },
     ],
   };
