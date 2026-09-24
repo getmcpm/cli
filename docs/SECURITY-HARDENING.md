@@ -143,7 +143,9 @@ Most of this plan is *extension of existing seams*, not new architecture.
 
 - **Relay (`relay.ts`):** spawns the real child, `wireDirection()` parses newline-framed
   JSON-RPC both ways; `action === "block"` drops the frame and synthesizes a `-32099
-  BLOCKED` error (preserving id; notifications dropped silently). 64 MB/direction buffer cap.
+  BLOCKED` error (preserving id; notifications dropped silently). 10 MiB/direction buffer cap
+  (backlog #103 — the previously-documented 64 MB counter never actually enforced; the SDK's
+  own `ReadBuffer` throws at 10 MiB first).
 - **Inspection (`patterns.ts inspectMessage` + `targetSubtree`):** *(the 4-target / 3-signature
   figures below are the **v0.5.0 baseline** this plan was written against — as of v0.42.0 it
   is **8** `SignatureTarget`s (`src/guard/types.ts`) and **21** signatures

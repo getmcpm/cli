@@ -26,6 +26,25 @@ published section (it happened to #170).
   in the event), and the relay keeps draining. Not measured on Node 26: its newer V8
   serializes plain nesting iteratively, but objects with array-index keys still
   overflow (checked in Chromium 152's V8, not in Node 26 itself).
+- **A single JSON-RPC frame over 10MiB — delivered as ordinary small pipe chunks,
+  not one giant write — crashed the guard instead of being blocked.** `wireDirection`
+  constructed the SDK's `ReadBuffer` with no cap, so `append()` threw the SDK's own
+  `STDIO_DEFAULT_MAX_BUFFER_SIZE` (10MiB) error outside any try/catch — an
+  `uncaughtException` that exited the guard 1, with nothing forwarded. mcpm's own
+  `MAX_BUFFER_BYTES` (documented at 64MB) was dead code: it was a separate counter
+  checked before `append()`, so the SDK's 10MiB throw always fired first. Reproduced
+  on the published 0.42.1 under Node 24.20.0: a 9MiB response forwards, an 11MiB one
+  exits 1; present in every mcpm release from v0.30.0 on, the first to resolve
+  `@modelcontextprotocol/sdk` >= 1.30.0 (the version that introduced the buffer
+  limit, PR modelcontextprotocol/typescript-sdk#2239). The cap stays at 10MiB rather
+  than being raised to a working 64MB: a `ReadBuffer` pass is roughly quadratic in
+  frame size (measured on Node 24.20.0: 9MiB ~117ms, 20MiB ~500ms, 40MiB ~2.2s), so
+  a larger cap would hand a malicious server a CPU/RAM amplification knob, and any
+  MCP TS-SDK client already refuses a frame this large (`StdioClientTransport` wraps
+  the same `append()` in try/catch at the same default). `ReadBuffer` is now
+  constructed with an explicit `maxBufferSize`, and the throw is caught and
+  fail-closed the same way a malformed frame already is, under a new relay-health
+  id, `frame-too-large`.
 
 ## [0.42.1] - 2026-09-24
 

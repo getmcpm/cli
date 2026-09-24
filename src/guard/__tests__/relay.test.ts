@@ -587,7 +587,16 @@ describe("startRelay — child-spawn failure fails closed (H9 B.2)", () => {
   // delimiter indefinitely to grow the relay's buffer unboundedly; this proves
   // the cap actually trips, using the same fakeChild + spawnChild test seam
   // (no real subprocess forked).
-  test("a child withholding the newline delimiter past 64MB is torn down as a block, not buffered forever", async () => {
+  //
+  // backlog #103: updated from the original 64MB cap to the current 10MiB one
+  // (see relay.ts's MAX_BUFFER_BYTES comment — the 64MB counter never actually
+  // enforced anything in production; the SDK's own ReadBuffer threw at 10MiB
+  // first, outside a try/catch, crashing the guard). Now also asserts the
+  // `frame-too-large` finding the fix adds — this describe block's other two
+  // tests below still pin the boundary values themselves (10MiB cap, no false
+  // block under it); this one covers "one huge write" specifically, distinct
+  // from the chunked-delivery tests in the describe block further down.
+  test("a child withholding the newline delimiter past 10MiB is torn down as a block, not buffered forever", async () => {
     const fakeChild = makeFakeChild();
     const parentIn = new PassThrough();
     const parentOut = new PassThrough();
@@ -607,9 +616,9 @@ describe("startRelay — child-spawn failure fails closed (H9 B.2)", () => {
       spawnChild: () => fakeChild,
     });
 
-    // One newline-free write past the 64MB cap — no JSON-RPC frame ever
+    // One newline-free write past the 10MiB cap — no JSON-RPC frame ever
     // completes, so this is purely the buffer-cap branch, not the parser.
-    const oversized = "x".repeat(64 * 1024 * 1024 + 1);
+    const oversized = "x".repeat(10 * 1024 * 1024 + 1);
     expect(() => fakeChild.stdout.write(oversized)).not.toThrow();
     await new Promise((r) => setImmediate(r));
     await new Promise((r) => setImmediate(r));
@@ -617,12 +626,13 @@ describe("startRelay — child-spawn failure fails closed (H9 B.2)", () => {
     const block = events.find((e) => e.action === "block");
     expect(block).toBeDefined();
     expect(block?.direction).toBe("child->parent");
-    // Empty findings distinguishes the buffer-cap branch from the
-    // malformed-frame branch (which carries a "malformed-frame" finding).
-    expect(block?.findings).toEqual([]);
-    // The findings:[] discriminator above is only reliable if this is the
-    // ONE block event — pin that directly rather than relying on it by
-    // accident of an unrelated invariant elsewhere (logEvent).
+    // A real finding (not empty findings) distinguishes the buffer-cap branch
+    // from other RELAY-category branches and makes the event attributable in
+    // guard-events.jsonl / the BLOCKED-by-mcpm-guard error's `data`.
+    expect(block?.findings[0]?.signature_id).toBe("frame-too-large");
+    expect(block?.findings[0]?.category).toBe("RELAY");
+    // Pin directly that this is the ONE block event, rather than relying on
+    // it by accident of an unrelated invariant elsewhere (logEvent).
     expect(events.filter((e) => e.action === "block")).toHaveLength(1);
     // Fail closed: none of the oversized payload reached the client.
     expect(parentOutBytes).toBe(0);
@@ -634,7 +644,7 @@ describe("startRelay — child-spawn failure fails closed (H9 B.2)", () => {
   // control — mutation-verified, shrinking MAX_BUFFER_BYTES to 1024 left
   // every relay test green. A guard that sits inline on every MCP frame must
   // not false-block a legitimate large response.
-  test("a single well-formed frame comfortably under the 64MB cap is forwarded, not blocked", async () => {
+  test("a single well-formed frame comfortably under the 10MiB cap is forwarded, not blocked", async () => {
     const fakeChild = makeFakeChild();
     const parentIn = new PassThrough();
     const parentOut = new PassThrough();
@@ -654,7 +664,7 @@ describe("startRelay — child-spawn failure fails closed (H9 B.2)", () => {
       spawnChild: () => fakeChild,
     });
 
-    // 1MB payload — "large" but comfortably under the 64MB cap.
+    // 1MB payload — "large" but comfortably under the 10MiB cap.
     const bigResponse = makeResponse(1, "x".repeat(1024 * 1024));
     fakeChild.stdout.write(serializeMessage(bigResponse));
     await new Promise((r) => setImmediate(r));
@@ -667,9 +677,18 @@ describe("startRelay — child-spawn failure fails closed (H9 B.2)", () => {
   // #20 follow-up (test-coverage review): mutation-verified, deleting the
   // `bufferedBytes = 0` reset-on-consumed-frame (relay.ts) also left every
   // existing relay test green. Without that reset, a long-lived session whose
-  // CUMULATIVE traffic crosses 64MB — entirely normal complete, well-formed
-  // frames — would be torn down as a false DoS block. This pins the reset.
-  test("many complete frames whose CUMULATIVE bytes exceed 64MB are all forwarded, not blocked", async () => {
+  // CUMULATIVE traffic crosses the cap — entirely normal complete, well-formed
+  // frames — would be torn down as a false DoS block.
+  //
+  // backlog #103: the standalone `bufferedBytes` counter this test originally
+  // pinned is gone — the cap is now enforced by the SDK's own `ReadBuffer`
+  // (constructed with `maxBufferSize`), whose internal buffer shrinks via
+  // `subarray` every time `readMessage()` consumes a complete frame. This
+  // test still matters: it proves that per-message consumption, not a
+  // hand-rolled byte counter, is what protects a long session from a false
+  // block once its CUMULATIVE traffic crosses the cap. Cap lowered 64MB ->
+  // 10MiB, so far fewer frames are needed to clear it with margin.
+  test("many complete frames whose CUMULATIVE bytes exceed 10MiB are all forwarded, not blocked", async () => {
     const fakeChild = makeFakeChild();
     const parentIn = new PassThrough();
     const parentOut = new PassThrough();
@@ -689,8 +708,8 @@ describe("startRelay — child-spawn failure fails closed (H9 B.2)", () => {
       spawnChild: () => fakeChild,
     });
 
-    // 100 complete, individually-under-cap frames (~700KB each), each written
-    // in its OWN `.write()` call — cumulative total well past 64MB, but no
+    // 20 complete, individually-under-cap frames (~700KB each), each written
+    // in its OWN `.write()` call — cumulative total well past 10MiB, but no
     // single write (and so no single 'data' event, confirmed via a PassThrough
     // probe: one write = one data event, regardless of size) is anywhere near
     // the cap on its own. This mirrors how a real child's stdout — piped
@@ -698,9 +717,9 @@ describe("startRelay — child-spawn failure fails closed (H9 B.2)", () => {
     // unlike a single giant write which would arrive as one oversized chunk
     // and trip the cap for a reason that has nothing to do with this test.
     // Each frame is fully consumed (newline-terminated) before the next
-    // arrives, so only the per-frame reset — not a smaller per-write cap —
+    // arrives, so only per-message consumption — not a smaller per-write cap —
     // protects this from a false block.
-    const FRAME_COUNT = 100;
+    const FRAME_COUNT = 20;
     const PAYLOAD_SIZE = 700 * 1024;
     let totalWritten = 0;
     for (let i = 0; i < FRAME_COUNT; i++) {
@@ -709,11 +728,11 @@ describe("startRelay — child-spawn failure fails closed (H9 B.2)", () => {
       fakeChild.stdout.write(frame);
       await new Promise((r) => setImmediate(r));
     }
-    expect(totalWritten).toBeGreaterThan(64 * 1024 * 1024);
+    expect(totalWritten).toBeGreaterThan(10 * 1024 * 1024);
     await new Promise((r) => setImmediate(r));
 
     expect(events.some((e) => e.action === "block")).toBe(false);
-    expect(parentOutBytes).toBeGreaterThan(64 * 1024 * 1024);
+    expect(parentOutBytes).toBeGreaterThan(10 * 1024 * 1024);
   });
 
   test("after spawn-failure the child stdout is destroyed — no late bytes reach parentOut", async () => {
@@ -742,6 +761,164 @@ describe("startRelay — child-spawn failure fails closed (H9 B.2)", () => {
     expect(fakeChild.stdout.write("late uninspected bytes\n")).toBe(false);
     await new Promise((r) => setImmediate(r));
     expect(parentOutBytes).toBe(0);
+  });
+});
+
+// ──── backlog #103: an oversize frame fails closed instead of crashing the guard ────
+//
+// `wireDirection`'s ReadBuffer used a default (implicit, SDK-owned) cap while a
+// separate `bufferedBytes` counter — checked BEFORE `buffer.append(chunk)` —
+// was the only thing enforcing MAX_BUFFER_BYTES (then 64MB). But the SDK's own
+// `ReadBuffer.append()` throws at its `STDIO_DEFAULT_MAX_BUFFER_SIZE` (10MiB)
+// FIRST, outside any try/catch here — so a real child delivering an oversize
+// frame over an ordinary OS pipe (arriving as a series of small, e.g. 64KB,
+// chunks — never one giant write) crashed the relay with an uncaughtException
+// before the 64MB counter could ever fire. Reported live: on 0.42.1 a 9MB
+// response forwards, an 11MB one exits 1.
+//
+// Fix: `ReadBuffer` is now constructed with `maxBufferSize: MAX_BUFFER_BYTES`
+// (10MiB — see relay.ts's comment on why the cap stays there rather than
+// being raised to a working 64MB), and `buffer.append(chunk)` is wrapped in a
+// try/catch that fails closed the same way the malformed-frame branch does:
+// one attributable block event, source torn down, nothing forwarded.
+//
+// These tests write in ordinary 64KB chunks (like a real pipe), not one
+// artificial oversized write, to prove the fix against the ACTUAL reported
+// shape. Tests A and B together pin the cap value from both sides — a
+// mutation to 64MB or to 1MiB must fail one of them.
+describe("wireDirection — an oversize frame fails closed instead of crashing the guard (backlog #103)", () => {
+  const PIPE_CHUNK = 64 * 1024;
+
+  /** Writes `data` to `stream` in ordinary 64KB pipe-sized chunks, stopping early
+   * if the stream is destroyed mid-write (the fail-closed teardown under test). */
+  const writeInPipeChunks = async (stream: PassThrough, data: Buffer): Promise<void> => {
+    for (let offset = 0; offset < data.length; offset += PIPE_CHUNK) {
+      if (stream.destroyed) return;
+      stream.write(data.subarray(offset, offset + PIPE_CHUNK));
+      await new Promise((r) => setImmediate(r));
+    }
+  };
+
+  test("A: an ~11MiB child response delivered in 64KB chunks is blocked, not forwarded — a prior frame still was", async () => {
+    const fakeChild = makeFakeChild();
+    const parentIn = new PassThrough();
+    const parentOut = new PassThrough();
+    const outBuffer = new ReadBuffer();
+    const received: JSONRPCMessage[] = [];
+    parentOut.on("data", (c: Buffer) => {
+      outBuffer.append(c);
+      let msg = outBuffer.readMessage();
+      while (msg !== null) {
+        received.push(msg);
+        msg = outBuffer.readMessage();
+      }
+    });
+
+    const events: GuardEvent[] = [];
+    startRelay({
+      command: "x",
+      args: [],
+      parentIn,
+      parentOut,
+      onEvent: (e) => events.push(e),
+      spawnChild: () => fakeChild,
+    });
+
+    // A normal frame BEFORE the oversize one — its own consumption (readMessage
+    // popping it off the SDK's internal buffer) must not interfere with the cap.
+    fakeChild.stdout.write(serializeMessage(makeResponse(1, "before")));
+    await new Promise((r) => setImmediate(r));
+
+    const oversizeFrame = Buffer.from(serializeMessage(makeResponse(2, "x".repeat(11 * 1024 * 1024))), "utf8");
+    expect(oversizeFrame.length).toBeGreaterThan(10 * 1024 * 1024);
+    await writeInPipeChunks(fakeChild.stdout, oversizeFrame);
+    await new Promise((r) => setImmediate(r));
+
+    // The earlier frame got through untouched.
+    expect(received).toHaveLength(1);
+    expect(received[0]).toEqual(makeResponse(1, "before"));
+
+    const block = events.find((e) => e.action === "block");
+    expect(block).toBeDefined();
+    expect(block?.direction).toBe("child->parent");
+    expect(block?.findings[0]?.signature_id).toBe("frame-too-large");
+    expect(block?.findings[0]?.category).toBe("RELAY");
+    expect(events.filter((e) => e.action === "block")).toHaveLength(1);
+    // No crash (the whole point): no unhandled exception reached this point.
+    expect(fakeChild.stdout.destroyed).toBe(true);
+  });
+
+  test("B (boundary): a frame just under the 10MiB cap, delivered in 64KB chunks, is forwarded intact", async () => {
+    const fakeChild = makeFakeChild();
+    const parentOut = new PassThrough();
+    const outBuffer = new ReadBuffer();
+    const received: JSONRPCMessage[] = [];
+    parentOut.on("data", (c: Buffer) => {
+      outBuffer.append(c);
+      let msg = outBuffer.readMessage();
+      while (msg !== null) {
+        received.push(msg);
+        msg = outBuffer.readMessage();
+      }
+    });
+
+    const events: GuardEvent[] = [];
+    startRelay({
+      command: "x",
+      args: [],
+      parentIn: new PassThrough(),
+      parentOut,
+      onEvent: (e) => events.push(e),
+      spawnChild: () => fakeChild,
+    });
+
+    // A few KB of JSON-RPC envelope overhead subtracted so the whole FRAME —
+    // not just the payload — lands under the cap.
+    const response = makeResponse(3, "x".repeat(10 * 1024 * 1024 - 4 * 1024));
+    const frame = Buffer.from(serializeMessage(response), "utf8");
+    expect(frame.length).toBeLessThan(10 * 1024 * 1024);
+
+    await writeInPipeChunks(fakeChild.stdout, frame);
+    await new Promise((r) => setImmediate(r));
+
+    expect(events.some((e) => e.action === "block")).toBe(false);
+    expect(received).toHaveLength(1);
+    expect(received[0]).toEqual(response);
+    fakeChild.emit("exit", 0);
+  });
+
+  test("C: an ~11MiB parent request delivered in 64KB chunks is blocked — nothing reaches the child's stdin", async () => {
+    const fakeChild = makeFakeChild();
+    const parentIn = new PassThrough();
+    let childStdinBytes = 0;
+    fakeChild.stdin.on("data", (c: Buffer) => {
+      childStdinBytes += c.byteLength;
+    });
+
+    const events: GuardEvent[] = [];
+    startRelay({
+      command: "x",
+      args: [],
+      parentIn,
+      parentOut: new PassThrough(),
+      onEvent: (e) => events.push(e),
+      spawnChild: () => fakeChild,
+    });
+
+    const oversizeFrame = Buffer.from(
+      serializeMessage(makeRequest(4, "tools/call", { arg: "x".repeat(11 * 1024 * 1024) })),
+      "utf8",
+    );
+    await writeInPipeChunks(parentIn, oversizeFrame);
+    await new Promise((r) => setImmediate(r));
+
+    expect(childStdinBytes).toBe(0);
+    const block = events.find((e) => e.action === "block");
+    expect(block).toBeDefined();
+    expect(block?.direction).toBe("parent->child");
+    expect(block?.findings[0]?.signature_id).toBe("frame-too-large");
+    expect(parentIn.destroyed).toBe(true);
+    fakeChild.emit("exit", 0); // detach startRelay's SIGINT/SIGTERM handlers
   });
 });
 
