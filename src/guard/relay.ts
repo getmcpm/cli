@@ -189,6 +189,9 @@ export function buildSafeEnv(source: NodeJS.ProcessEnv = process.env): NodeJS.Pr
  */
 const MAX_BUFFER_BYTES = 10 * 1024 * 1024;
 
+/** Grace before each close escalation step — SDK 1.30.0 StdioClientTransport.close()'s 2000ms. */
+const CLOSE_GRACE_MS = 2000;
+
 // ---------------------------------------------------------------------------
 // Subprocess relay (production)
 // ---------------------------------------------------------------------------
@@ -317,14 +320,40 @@ export function startRelay(opts: RelayOptions): RelayHandle {
   // .write returns false when not writable but does not throw thanks to the
   // error handler above. Reused by the parent->child `target` and the
   // child->parent `replyToSource` (H7 block-to-origin → write back to server).
+  // `writable`, not just `!destroyed`: once `closeServer` has ended stdin, a
+  // later client frame must be dropped, not raise write-after-end (which the
+  // error listener above would log as a spurious warn).
   const writeToChild = (bytes: string): void => {
-    if (child.stdin && !child.stdin.destroyed) child.stdin.write(bytes);
+    if (child.stdin?.writable) child.stdin.write(bytes);
+  };
+
+  // backlog #103: every fail-closed teardown, in either direction, closes the
+  // server the way SDK 1.30.0's StdioClientTransport.close() closes it on the
+  // same overflow: stdin EOF; SIGTERM if it has not exited 2s later; SIGKILL
+  // 2s after that. Without the signals, a server that ignores stdin EOF (an
+  // open DB pool, a file watcher) kept the guard half-open forever. One-shot
+  // (both directions may tear down); `settled` skips a child that has already
+  // exited; unref'd so the timers never hold the guard open. Not
+  // `forwardSignal`: its `!child.killed` guard would skip the SIGKILL.
+  let closing = false;
+  const closeServer = (): void => {
+    if (closing) return;
+    closing = true;
+    child.stdin?.end();
+    setTimeout(() => {
+      if (settled) return;
+      child.kill("SIGTERM");
+      setTimeout(() => {
+        if (!settled) child.kill("SIGKILL");
+      }, CLOSE_GRACE_MS).unref();
+    }, CLOSE_GRACE_MS).unref();
   };
 
   wireDirection({
     source: opts.parentIn,
     target: writeToChild,
     targetEnd: () => child.stdin?.end(),
+    closeServer,
     parentOut: opts.parentOut,
     inspect: opts.inspectParentRequest,
     direction: "parent->child",
@@ -339,6 +368,7 @@ export function startRelay(opts: RelayOptions): RelayHandle {
       source: child.stdout,
       target: (bytes) => opts.parentOut.write(bytes),
       targetEnd: () => undefined, // never end parentOut on child exit
+      closeServer,
       parentOut: opts.parentOut,
       inspect: opts.inspectChildResponse,
       direction: "child->parent",
@@ -502,6 +532,8 @@ interface DirectionWiring {
   readonly source: Readable;
   readonly target: (bytes: string) => void;
   readonly targetEnd: () => void;
+  /** Fail-closed teardown: close the wrapped server (startRelay's `closeServer`), whichever direction tore down. */
+  readonly closeServer: () => void;
   readonly parentOut: Writable;
   readonly inspect: InspectFn | undefined;
   readonly direction: GuardEvent["direction"];
@@ -528,35 +560,25 @@ function wireDirection(w: DirectionWiring): void {
   // `.then` calls `drain()` again to pick up wherever it left off.
   let awaiting = false;
 
-  // backlog #103 round 2: every fail-closed teardown below tears down BOTH
-  // ends of this direction, not just the read side.
+  // backlog #103: every fail-closed teardown below stops reading this
+  // direction AND closes the wrapped server, in either direction.
   //
   // No-arg destroy() — NOT destroy(new Error(...)): the source (child.stdout)
   // has no 'error' listener, so destroy(err) re-emits as an uncaughtException
   // and crash-loops the relay.
   //
-  // `targetEnd()` matters on the OPPOSITE side from `destroy()`: destroying
-  // `source` only stops the guard from reading MORE bytes from it; it does
-  // NOT give the other end EOF (`destroy()` emits 'close', not 'end'). On the
-  // parent->child direction, `targetEnd` is `child.stdin?.end()` (see
-  // startRelay) — without it, a child idling on stdin never sees EOF, never
-  // exits, and the guard stays half-open forever (measured: a fake server
-  // with no self-exit timer sits there indefinitely; only a server that acts
-  // on stdin EOF converges). Calling it here lets a well-behaved child exit
-  // on its own EOF handling, and the EXISTING `child.on("exit", ...)` path in
-  // startRelay then ends the guard process with the child's code — no new
-  // exit mechanism needed. On the child->parent direction `targetEnd` is
-  // deliberately the no-op `() => undefined` ("never end parentOut on child
-  // exit" — see startRelay); convergence there instead comes from the CHILD's
-  // own next write to its now-destroyed stdout erroring (EPIPE), which is
-  // what ends the child. Measured limit: a child whose oversize frame fit in
-  // the pipe (so its write completed) and that never writes again keeps the
-  // guard up, and the client's request unanswered, until the client sends
-  // something that makes the child write.
+  // Destroying `source` gives nobody EOF (`destroy()` emits 'close', not
+  // 'end'), so on its own it left the guard half-open: a server idling on
+  // stdin never exited, and on child->parent the channel only died if the
+  // server wrote again and hit EPIPE. `closeServer` (startRelay) closes it the
+  // way the SDK client does — stdin EOF, then SIGTERM at 2s, then SIGKILL at
+  // 4s — and the EXISTING `child.on("exit", ...)` path then ends the guard.
+  // `targetEnd` is deliberately NOT called: on child->parent it would be
+  // parentOut, which is never ended.
   const failClosed = (event: GuardEvent): void => {
     w.onEvent?.(event);
     w.source.destroy();
-    w.targetEnd();
+    w.closeServer();
   };
 
   const dispatch = (msg: JSONRPCMessage, decision: InspectResult): void => {
@@ -685,7 +707,7 @@ function wireDirection(w: DirectionWiring): void {
       // crashed the guard (a single frame over 10MiB, dropped with nothing
       // forwarded, took the whole relay down with it). Same fail-closed
       // teardown as the malformed-frame branch above: emit an attributable
-      // block event, tear the source down, end the target.
+      // block event, tear the source down, close the server.
       failClosed(frameTooLargeEvent(w.direction));
       return;
     }

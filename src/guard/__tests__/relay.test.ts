@@ -10,7 +10,7 @@
  * line-delimited only (closed in OQ1 spike).
  */
 
-import { describe, expect, test } from "vitest";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { EventEmitter } from "node:events";
 import { PassThrough } from "node:stream";
 import type { ChildProcess } from "node:child_process";
@@ -468,20 +468,27 @@ describe("relay block-to-origin invariant (H7 server-initiated request)", () => 
  * signal Node emits when spawn fails — e.g. ENOENT command-not-found) without
  * forking a real subprocess. Only the surface startRelay touches is modelled.
  */
-function makeFakeChild(): ChildProcess & { emitError: (err: Error) => void } {
+function makeFakeChild(): ChildProcess & { emitError: (err: Error) => void; signals: string[] } {
   const emitter = new EventEmitter() as EventEmitter & {
     stdin: PassThrough;
     stdout: PassThrough;
     killed: boolean;
-    kill: () => boolean;
+    kill: (sig?: string) => boolean;
     emitError: (err: Error) => void;
+    signals: string[];
   };
   emitter.stdin = new PassThrough();
   emitter.stdout = new PassThrough();
   emitter.killed = false;
-  emitter.kill = () => true;
+  emitter.signals = [];
+  // Like ChildProcess: a delivered signal sets `killed` (it does NOT mean exited).
+  emitter.kill = (sig = "SIGTERM") => {
+    emitter.signals.push(sig);
+    emitter.killed = true;
+    return true;
+  };
   emitter.emitError = (err: Error) => emitter.emit("error", err);
-  return emitter as unknown as ChildProcess & { emitError: (err: Error) => void };
+  return emitter as unknown as ChildProcess & { emitError: (err: Error) => void; signals: string[] };
 }
 
 describe("startRelay — child-spawn failure fails closed (H9 B.2)", () => {
@@ -1050,6 +1057,101 @@ describe("wireDirection — an oversize frame fails closed instead of crashing t
     expect(blocks.map((e) => e.findings[0]?.signature_id)).toEqual(["inspect-rejected", "malformed-frame"]);
     expect(fakeChild.stdin.writableEnded).toBe(true);
     fakeChild.emit("exit", 0);
+  });
+});
+
+// ──── backlog #103: a fail-closed teardown closes the server like StdioClientTransport.close() ────
+//
+// Either direction's teardown ends the server's stdin, then SIGTERMs it at 2s
+// and SIGKILLs it at 4s unless it has exited — SDK 1.30.0's close() sequence.
+// Measured on the real binary before this: a server that ignores stdin EOF kept
+// the guard up forever after a child->parent teardown.
+describe("fail-closed teardown closes the wrapped server like the SDK client (backlog #103)", () => {
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  const setup = () => {
+    const fakeChild = makeFakeChild();
+    const parentIn = new PassThrough();
+    const parentOut = new PassThrough();
+    const events: GuardEvent[] = [];
+    startRelay({ command: "x", args: [], parentIn, parentOut, onEvent: (e) => events.push(e), spawnChild: () => fakeChild });
+    return { fakeChild, parentIn, parentOut, events };
+  };
+  const tick = () => new Promise((r) => setImmediate(r));
+
+  test("child->parent overflow: stdin ended at once, SIGTERM at 2s, SIGKILL at 4s; parentOut never ended", async () => {
+    const { fakeChild, parentOut, events } = setup();
+    fakeChild.stdout.write("x".repeat(10 * 1024 * 1024 + 1));
+    await tick();
+    expect(events[0]?.findings[0]?.signature_id).toBe("frame-too-large");
+    expect(fakeChild.stdin.writableEnded).toBe(true);
+    await vi.advanceTimersByTimeAsync(1999);
+    expect(fakeChild.signals).toEqual([]);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(fakeChild.signals).toEqual(["SIGTERM"]);
+    await vi.advanceTimersByTimeAsync(1999);
+    expect(fakeChild.signals).toEqual(["SIGTERM"]);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(fakeChild.signals).toEqual(["SIGTERM", "SIGKILL"]);
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(fakeChild.signals).toEqual(["SIGTERM", "SIGKILL"]);
+    expect(parentOut.writableEnded).toBe(false);
+    fakeChild.emit("exit", null, "SIGKILL");
+  });
+
+  test("child->parent malformed (a startup banner): stdin ended; a child that exits in the grace window is never signalled", async () => {
+    const { fakeChild, events } = setup();
+    fakeChild.stdout.write("Starting server v1.0...\n");
+    await tick();
+    expect(events[0]?.findings[0]?.signature_id).toBe("malformed-frame");
+    expect(fakeChild.stdin.writableEnded).toBe(true);
+    await vi.advanceTimersByTimeAsync(1000);
+    fakeChild.emit("exit", 0, null);
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(fakeChild.signals).toEqual([]);
+  });
+
+  test("a child that exits after SIGTERM is not SIGKILLed", async () => {
+    const { fakeChild, parentIn } = setup();
+    parentIn.write("not json-rpc\n");
+    await tick();
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(fakeChild.signals).toEqual(["SIGTERM"]);
+    fakeChild.emit("exit", null, "SIGTERM");
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(fakeChild.signals).toEqual(["SIGTERM"]);
+  });
+
+  test("one-shot: teardowns on both directions schedule a single escalation", async () => {
+    const { fakeChild, parentIn } = setup();
+    fakeChild.stdout.write("banner\n");
+    parentIn.write("not json-rpc\n");
+    await tick();
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(fakeChild.signals).toEqual(["SIGTERM", "SIGKILL"]);
+    fakeChild.emit("exit", null, "SIGKILL");
+  });
+
+  test("after a child->parent teardown, a later client frame is dropped, not written to the ended stdin", async () => {
+    const { fakeChild, parentIn, events } = setup();
+    let childStdinBytes = 0;
+    fakeChild.stdin.on("data", (c: Buffer) => {
+      childStdinBytes += c.byteLength;
+    });
+    fakeChild.stdout.write("banner\n");
+    await tick();
+    parentIn.write(serializeMessage(makeRequest(1, "initialize")));
+    await tick();
+    await tick();
+    expect(childStdinBytes).toBe(0);
+    // No write-after-end surfacing as a spurious warn from the stdin error listener.
+    expect(events.map((e) => e.action)).toEqual(["block"]);
+    fakeChild.emit("exit", 0, null);
   });
 });
 
