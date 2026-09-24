@@ -202,6 +202,11 @@ export async function runInner(parsed: RunInnerArgs): Promise<number> {
     }
   }
 
+  // `mcpm guard run` calls process.exit() the moment runInner resolves, so the
+  // returned exit waits on this chain (appendEvent never rejects). Without it
+  // the event that EXPLAINS the exit — a spawn-failure, or a fail-closed
+  // teardown the child exits on (backlog #103) — never reached the log.
+  let eventsPersisted: Promise<void> = Promise.resolve();
   const logEvent = (event: GuardEvent): void => {
     if (event.action === "block" || event.action === "warn") {
       process.stderr.write(
@@ -209,7 +214,7 @@ export async function runInner(parsed: RunInnerArgs): Promise<number> {
           `${event.findings.map((f) => f.signature_id).join(",")}\n`,
       );
       // Persist to ~/.mcpm/guard-events.jsonl best-effort (Step 10).
-      void appendEvent(event, parsed.serverName);
+      eventsPersisted = eventsPersisted.then(() => appendEvent(event, parsed.serverName));
     }
   };
 
@@ -587,7 +592,9 @@ export async function runInner(parsed: RunInnerArgs): Promise<number> {
     onEvent: logEvent,
   });
 
-  return handle.exit;
+  const code = await handle.exit;
+  await eventsPersisted;
+  return code;
 }
 
 // ---------------------------------------------------------------------------

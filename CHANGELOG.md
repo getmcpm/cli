@@ -26,6 +26,24 @@ published section (it happened to #170).
   in the event), and the relay keeps draining. Not measured on Node 26: its newer V8
   serializes plain nesting iteratively, but objects with array-index keys still
   overflow (checked in Chromium 152's V8, not in Node 26 itself).
+- **A JSON-RPC frame over 10 MiB crashed the guard instead of being blocked.**
+  `@modelcontextprotocol/sdk` 1.30.0 (typescript-sdk#2239, released 2026-07-27) made
+  `ReadBuffer.append()` throw past its default 10 MiB, and `wireDirection` called it
+  outside any try/catch, so an oversize frame in either direction exited the guard 1;
+  mcpm's own 64 MB cap never got to fire. That covers every install resolving SDK
+  1.30.0 or later: v0.30.0 onward, and fresh installs of v0.5.0–v0.29.x, whose
+  `^1.29.0` admits it. On a build of `main` under Node 24.20.0, a 9 MiB response
+  forwards and an 11 MiB one exits 1. The cap stays at 10 MiB, now set by mcpm:
+  `ReadBuffer` is quadratic in frame size (10 MiB costs ~0.1 s and ~0.6 GiB RSS, 63 MiB
+  ~5 s and ~3.5 GiB), and the SDK's `StdioClientTransport` closes the connection at the
+  same default unless its `maxBufferSize` is raised. An overflow is now a fail-closed
+  teardown under a new relay-health id, `frame-too-large`. Every fail-closed teardown,
+  in either direction, now closes the wrapped server the way the SDK client does (stdin
+  EOF, then SIGTERM, then SIGKILL, 2 s apart), so the guard exits instead of staying
+  half-open. `main` hung after a malformed client frame, and after a startup banner on
+  the server's stdout whenever the `initialize` answer fitted in the pipe. The guard
+  also now finishes writing `guard-events.jsonl` before it exits; every spawn-failure
+  event was being lost.
 
 ## [0.42.1] - 2026-09-24
 

@@ -521,7 +521,7 @@ the registry concept end-to-end before we launch publicly.
        │   Or short-circuit pass-through if paused_until in future
        │
        ├── Production relay (src/guard/relay.ts)
-       │   SDK ReadBuffer + serializeMessage, 64MB buffer cap,
+       │   SDK ReadBuffer + serializeMessage, 10MiB buffer cap,
        │   signal forwarding, child.stdin error swallow
        │
        └── Event log writer (src/guard/event-log.ts)

@@ -159,12 +159,38 @@ export function buildSafeEnv(source: NodeJS.ProcessEnv = process.env): NodeJS.Pr
 }
 
 /**
- * Cap per-direction buffer growth. A malicious child that withholds the
- * newline delimiter can otherwise grow the buffer unboundedly, exhausting
- * relay memory. 64MB is far above any legitimate MCP response and gives
- * a clean DoS signal when crossed.
+ * Cap per-direction buffer growth. A malicious/misbehaving child (or, on the
+ * parent->child direction, client) that withholds the newline delimiter can
+ * otherwise grow the buffer unboundedly, exhausting relay memory; a single
+ * frame over the cap is the same DoS/oversize shape.
+ *
+ * backlog #103: this used to be 64MB, enforced by a separate `bufferedBytes`
+ * counter checked BEFORE `buffer.append(chunk)` — but from SDK 1.30.0 the
+ * SDK's own `ReadBuffer` (then constructed with no options, so its default
+ * `STDIO_DEFAULT_MAX_BUFFER_SIZE`) throws inside `append()` at 10MiB first,
+ * outside any try/catch, crashing the relay with an uncaughtException before
+ * the 64MB counter could ever fire. From then on the effective cap was the
+ * SDK's 10MiB, just enforced as a crash instead of a fail-closed teardown.
+ *
+ * The cap STAYS at 10MiB rather than being raised to (a working) 64MB: a
+ * single ReadBuffer.append()+readMessage() pass is O(n) in the buffer's
+ * current size (Buffer.concat + indexOf over the whole thing per chunk), so
+ * cost is roughly QUADRATIC in frame size — measured on Node 24.20.0 with
+ * 64KB chunks: 10MiB ~0.1s/~0.6GiB RSS, 40MiB ~2s/~2.5GiB, 63MiB ~5s/~3.5GiB.
+ * Raising the cap would hand a malicious server a CPU/RAM amplification knob,
+ * not just a bigger buffer. The SDK's own `StdioClientTransport` (1.30.0+)
+ * also closes the connection at this default unless its `maxBufferSize` is
+ * raised.
+ *
+ * The SDK checks `buffered + chunk > max` BEFORE splitting lines, so a frame
+ * within one pipe read (<=64KB) under the cap can still trip it when the next
+ * frame's first bytes arrive in the same read — as can complete frames piling
+ * up during an issue-#27 hold. `frameTooLargeEvent`'s wording allows for both.
  */
-const MAX_BUFFER_BYTES = 64 * 1024 * 1024;
+const MAX_BUFFER_BYTES = 10 * 1024 * 1024;
+
+/** Grace before each close escalation step — SDK 1.30.0 StdioClientTransport.close()'s 2000ms. */
+const CLOSE_GRACE_MS = 2000;
 
 // ---------------------------------------------------------------------------
 // Subprocess relay (production)
@@ -294,14 +320,40 @@ export function startRelay(opts: RelayOptions): RelayHandle {
   // .write returns false when not writable but does not throw thanks to the
   // error handler above. Reused by the parent->child `target` and the
   // child->parent `replyToSource` (H7 block-to-origin → write back to server).
+  // `writable`, not just `!destroyed`: once `closeServer` has ended stdin, a
+  // later client frame must be dropped, not raise write-after-end (which the
+  // error listener above would log as a spurious warn).
   const writeToChild = (bytes: string): void => {
-    if (child.stdin && !child.stdin.destroyed) child.stdin.write(bytes);
+    if (child.stdin?.writable) child.stdin.write(bytes);
+  };
+
+  // backlog #103: every fail-closed teardown, in either direction, closes the
+  // server the way SDK 1.30.0's StdioClientTransport.close() closes it on the
+  // same overflow: stdin EOF; SIGTERM if it has not exited 2s later; SIGKILL
+  // 2s after that. Without the signals, a server that ignores stdin EOF (an
+  // open DB pool, a file watcher) kept the guard half-open forever. One-shot
+  // (both directions may tear down); `settled` skips a child that has already
+  // exited; unref'd so the timers never hold the guard open. Not
+  // `forwardSignal`: its `!child.killed` guard would skip the SIGKILL.
+  let closing = false;
+  const closeServer = (): void => {
+    if (closing) return;
+    closing = true;
+    child.stdin?.end();
+    setTimeout(() => {
+      if (settled) return;
+      child.kill("SIGTERM");
+      setTimeout(() => {
+        if (!settled) child.kill("SIGKILL");
+      }, CLOSE_GRACE_MS).unref();
+    }, CLOSE_GRACE_MS).unref();
   };
 
   wireDirection({
     source: opts.parentIn,
     target: writeToChild,
     targetEnd: () => child.stdin?.end(),
+    closeServer,
     parentOut: opts.parentOut,
     inspect: opts.inspectParentRequest,
     direction: "parent->child",
@@ -316,6 +368,7 @@ export function startRelay(opts: RelayOptions): RelayHandle {
       source: child.stdout,
       target: (bytes) => opts.parentOut.write(bytes),
       targetEnd: () => undefined, // never end parentOut on child exit
+      closeServer,
       parentOut: opts.parentOut,
       inspect: opts.inspectChildResponse,
       direction: "child->parent",
@@ -479,6 +532,8 @@ interface DirectionWiring {
   readonly source: Readable;
   readonly target: (bytes: string) => void;
   readonly targetEnd: () => void;
+  /** Fail-closed teardown: close the wrapped server (startRelay's `closeServer`), whichever direction tore down. */
+  readonly closeServer: () => void;
   readonly parentOut: Writable;
   readonly inspect: InspectFn | undefined;
   readonly direction: GuardEvent["direction"];
@@ -495,14 +550,36 @@ interface DirectionWiring {
 }
 
 function wireDirection(w: DirectionWiring): void {
-  const buffer = new ReadBuffer();
-  let bufferedBytes = 0;
+  // backlog #103: own the cap explicitly (not the SDK's implicit default) so
+  // MAX_BUFFER_BYTES above is the ONE place that decides it.
+  const buffer = new ReadBuffer({ maxBufferSize: MAX_BUFFER_BYTES });
   // Issue #27: true while a Promise-returning inspect() (the rare first-ever
   // tools/list pin-commit wait) is outstanding. `drain` bails out immediately
   // when set, so a later "data" event can never read + forward the NEXT
   // message ahead of the one still awaiting its verdict; the await's own
   // `.then` calls `drain()` again to pick up wherever it left off.
   let awaiting = false;
+
+  // backlog #103: every fail-closed teardown below stops reading this
+  // direction AND closes the wrapped server, in either direction.
+  //
+  // No-arg destroy() — NOT destroy(new Error(...)): the source (child.stdout)
+  // has no 'error' listener, so destroy(err) re-emits as an uncaughtException
+  // and crash-loops the relay.
+  //
+  // Destroying `source` gives nobody EOF (`destroy()` emits 'close', not
+  // 'end'), so on its own it left the guard half-open: a server idling on
+  // stdin never exited, and on child->parent the channel only died if the
+  // server wrote again and hit EPIPE. `closeServer` (startRelay) closes it the
+  // way the SDK client does — stdin EOF, then SIGTERM at 2s, then SIGKILL at
+  // 4s — and the EXISTING `child.on("exit", ...)` path then ends the guard.
+  // `targetEnd` is deliberately NOT called: on child->parent it would be
+  // parentOut, which is never ended.
+  const failClosed = (event: GuardEvent): void => {
+    w.onEvent?.(event);
+    w.source.destroy();
+    w.closeServer();
+  };
 
   const dispatch = (msg: JSONRPCMessage, decision: InspectResult): void => {
     if (decision.action === "block") {
@@ -554,12 +631,10 @@ function wireDirection(w: DirectionWiring): void {
       // buffer-cap branch: emit a RELAY block event and tear the source down —
       // NO bytes forwarded (the throw is before any target write) — instead of
       // letting it propagate as an uncaughtException and crash the guard.
-      w.onEvent?.(malformedFrameEvent(w.direction));
-      w.source.destroy();
+      failClosed(malformedFrameEvent(w.direction));
       return;
     }
     while (msg !== null) {
-      bufferedBytes = 0; // reset on every consumed frame
       let maybeDecision: InspectResult | Promise<InspectResult>;
       try {
         maybeDecision = w.inspect?.(msg) ?? { action: "pass", findings: [] };
@@ -573,8 +648,7 @@ function wireDirection(w: DirectionWiring): void {
         try {
           msg = buffer.readMessage();
         } catch {
-          w.onEvent?.(malformedFrameEvent(w.direction));
-          w.source.destroy();
+          failClosed(malformedFrameEvent(w.direction));
           return;
         }
         continue;
@@ -614,32 +688,29 @@ function wireDirection(w: DirectionWiring): void {
       try {
         msg = buffer.readMessage();
       } catch {
-        w.onEvent?.(malformedFrameEvent(w.direction));
-        w.source.destroy();
+        failClosed(malformedFrameEvent(w.direction));
         return;
       }
     }
   };
 
   w.source.on("data", (chunk: Buffer) => {
-    bufferedBytes += chunk.byteLength;
-    if (bufferedBytes > MAX_BUFFER_BYTES) {
-      // Malicious child can withhold newline indefinitely to exhaust relay RAM.
-      // 64MB is far above any legitimate MCP frame; crossing it is a DoS signal.
-      w.onEvent?.({
-        ts: new Date().toISOString(),
-        direction: w.direction,
-        action: "block",
-        findings: [],
-      });
-      // No-arg destroy() — NOT destroy(new Error(...)): the source (child.stdout)
-      // has no 'error' listener, so destroy(err) re-emits as an uncaughtException
-      // and crash-loops the relay. Same fail-closed teardown as the malformed
-      // branch below; the block event above already records the DoS signal.
-      w.source.destroy();
+    try {
+      buffer.append(chunk);
+    } catch {
+      // backlog #103: the SDK's ReadBuffer enforces MAX_BUFFER_BYTES itself
+      // (constructed above with `maxBufferSize`) and `clear()`s its internal
+      // buffer before throwing — arriving as ordinary ≤64KB pipe chunks, not
+      // one giant write, so this is reachable by a ROUTINE oversize frame,
+      // not just a pathological single write. Previously this throw was
+      // OUTSIDE any try/catch here, so it escaped as an uncaughtException and
+      // crashed the guard (a single frame over 10MiB, dropped with nothing
+      // forwarded, took the whole relay down with it). Same fail-closed
+      // teardown as the malformed-frame branch above: emit an attributable
+      // block event, tear the source down, close the server.
+      failClosed(frameTooLargeEvent(w.direction));
       return;
     }
-    buffer.append(chunk);
     drain();
   });
   w.source.on("end", () => {
@@ -674,6 +745,35 @@ function malformedFrameEvent(direction: GuardEvent["direction"]): GuardEvent {
         matched_text_excerpt: "malformed JSON-RPC frame on stdio",
         remediation:
           "The wrapped MCP server emitted a non-JSON-RPC line (e.g. a startup banner). It must write only JSON-RPC frames to stdout.",
+      },
+    ],
+  };
+}
+
+/**
+ * Build the RELAY block event for a read buffer that passed MAX_BUFFER_BYTES —
+ * normally one oversize (or unterminated) frame; see MAX_BUFFER_BYTES for the
+ * near-cap cases that also trip it. The SDK's `ReadBuffer` enforces the cap
+ * itself and `clear()`s its internal buffer before throwing; this gives the
+ * resulting teardown an attributable finding (backlog #103) instead of the
+ * empty `findings: []` the old counter-based branch emitted. Mirrors
+ * `malformedFrameEvent` above.
+ */
+function frameTooLargeEvent(direction: GuardEvent["direction"]): GuardEvent {
+  return {
+    ts: new Date().toISOString(),
+    direction,
+    action: "block",
+    findings: [
+      {
+        signature_id: "frame-too-large",
+        category: "RELAY",
+        severity: "critical",
+        target: "tool_response",
+        matched_text_excerpt: `read buffer exceeded the relay's ${MAX_BUFFER_BYTES}-byte limit`,
+        remediation:
+          `The relay's read buffer passed its ${MAX_BUFFER_BYTES}-byte limit — normally one JSON-RPC frame ` +
+          "at or over that size from the wrapped MCP server (or client) — so the channel was closed instead of crashing the guard.",
       },
     ],
   };
