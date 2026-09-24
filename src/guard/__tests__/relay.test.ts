@@ -585,10 +585,7 @@ describe("startRelay — child-spawn failure fails closed (H9 B.2)", () => {
     expect(parentOutBytes).toBe(0);
     // Source torn down so no further uninspected bytes can flow.
     expect(fakeChild.stdout.destroyed).toBe(true);
-    // backlog #103 round 2: on child->parent, targetEnd is the deliberate
-    // no-op — a malformed child does NOT get parentOut (the CLIENT) ended.
-    // Only the child->parent SOURCE is torn down; the client channel itself
-    // stays open (e.g. for other guarded servers, or a future reconnect).
+    // backlog #103: the teardown closes the SERVER, never parentOut (the CLIENT).
     expect(parentOut.writableEnded).toBe(false);
   });
 
@@ -855,10 +852,9 @@ describe("wireDirection — an oversize frame fails closed instead of crashing t
     expect(events.filter((e) => e.action === "block")).toHaveLength(1);
     // No crash (the whole point): no unhandled exception reached this point.
     expect(fakeChild.stdout.destroyed).toBe(true);
-    // round 2: child->parent's targetEnd is a deliberate no-op ("never end
-    // parentOut on child exit") — the CLIENT channel stays open. Convergence
-    // on this direction comes from the CHILD's own next stdout write EPIPEing
-    // once its read side (child.stdout) is destroyed, not from ending anything.
+    // The teardown closes the SERVER (its stdin is ended; the signal
+    // escalation is pinned in the SDK-close describe below), never parentOut.
+    expect(fakeChild.stdin.writableEnded).toBe(true);
     expect(parentOut.writableEnded).toBe(false);
   });
 
@@ -934,13 +930,9 @@ describe("wireDirection — an oversize frame fails closed instead of crashing t
     expect(block?.direction).toBe("parent->child");
     expect(block?.findings[0]?.signature_id).toBe("frame-too-large");
     expect(parentIn.destroyed).toBe(true);
-    // round 2 (the half-open hang): destroying parentIn only stops the guard
-    // reading MORE from the client — it does NOT give the CHILD's stdin EOF
-    // (destroy() emits 'close', not 'end'). Without also ending child.stdin,
-    // a child idling on stdin never exits and the guard stays half-open
-    // forever (measured live in the dogfood run). child.stdin.end() lets a
-    // well-behaved child exit on its own EOF handling, converging via the
-    // existing child.on("exit", ...) path.
+    // Destroying parentIn gives the CHILD no EOF (destroy() emits 'close',
+    // not 'end'); without ending child.stdin a child idling on stdin never
+    // exited and the guard stayed half-open (measured live).
     expect(fakeChild.stdin.writableEnded).toBe(true);
     fakeChild.emit("exit", 0); // detach startRelay's SIGINT/SIGTERM handlers
   });
