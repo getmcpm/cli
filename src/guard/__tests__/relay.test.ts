@@ -1104,6 +1104,14 @@ describe("fail-closed teardown closes the wrapped server like the SDK client (ba
     fakeChild.emit("exit", null, "SIGKILL");
   });
 
+  test("the child's stdout ending normally still never ends parentOut (targetEnd stays a no-op)", async () => {
+    const { fakeChild, parentOut } = setup();
+    fakeChild.stdout.end();
+    await tick();
+    expect(parentOut.writableEnded).toBe(false);
+    fakeChild.emit("exit", 0, null);
+  });
+
   test("child->parent malformed (a startup banner): stdin ended; a child that exits in the grace window is never signalled", async () => {
     const { fakeChild, events } = setup();
     fakeChild.stdout.write("Starting server v1.0...\n");
