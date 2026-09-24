@@ -525,6 +525,34 @@ function wireDirection(w: DirectionWiring): void {
   // `.then` calls `drain()` again to pick up wherever it left off.
   let awaiting = false;
 
+  // backlog #103 round 2: every fail-closed teardown below tears down BOTH
+  // ends of this direction, not just the read side.
+  //
+  // No-arg destroy() — NOT destroy(new Error(...)): the source (child.stdout)
+  // has no 'error' listener, so destroy(err) re-emits as an uncaughtException
+  // and crash-loops the relay.
+  //
+  // `targetEnd()` matters on the OPPOSITE side from `destroy()`: destroying
+  // `source` only stops the guard from reading MORE bytes from it; it does
+  // NOT give the other end EOF (`destroy()` emits 'close', not 'end'). On the
+  // parent->child direction, `targetEnd` is `child.stdin?.end()` (see
+  // startRelay) — without it, a child idling on stdin never sees EOF, never
+  // exits, and the guard stays half-open forever (measured: a fake server
+  // with no self-exit timer sits there indefinitely; only a server that acts
+  // on stdin EOF converges). Calling it here lets a well-behaved child exit
+  // on its own EOF handling, and the EXISTING `child.on("exit", ...)` path in
+  // startRelay then ends the guard process with the child's code — no new
+  // exit mechanism needed. On the child->parent direction `targetEnd` is
+  // deliberately the no-op `() => undefined` ("never end parentOut on child
+  // exit" — see startRelay); convergence there instead comes from the CHILD's
+  // own next write to its now-destroyed stdout erroring (EPIPE), which is
+  // what ends the child (measured, unchanged by this fix).
+  const failClosed = (event: GuardEvent): void => {
+    w.onEvent?.(event);
+    w.source.destroy();
+    w.targetEnd();
+  };
+
   const dispatch = (msg: JSONRPCMessage, decision: InspectResult): void => {
     if (decision.action === "block") {
       logEvent(decision, w.direction, w.onEvent);
@@ -575,8 +603,7 @@ function wireDirection(w: DirectionWiring): void {
       // buffer-cap branch: emit a RELAY block event and tear the source down —
       // NO bytes forwarded (the throw is before any target write) — instead of
       // letting it propagate as an uncaughtException and crash the guard.
-      w.onEvent?.(malformedFrameEvent(w.direction));
-      w.source.destroy();
+      failClosed(malformedFrameEvent(w.direction));
       return;
     }
     while (msg !== null) {
@@ -593,8 +620,7 @@ function wireDirection(w: DirectionWiring): void {
         try {
           msg = buffer.readMessage();
         } catch {
-          w.onEvent?.(malformedFrameEvent(w.direction));
-          w.source.destroy();
+          failClosed(malformedFrameEvent(w.direction));
           return;
         }
         continue;
@@ -634,8 +660,7 @@ function wireDirection(w: DirectionWiring): void {
       try {
         msg = buffer.readMessage();
       } catch {
-        w.onEvent?.(malformedFrameEvent(w.direction));
-        w.source.destroy();
+        failClosed(malformedFrameEvent(w.direction));
         return;
       }
     }
@@ -653,14 +678,9 @@ function wireDirection(w: DirectionWiring): void {
       // OUTSIDE any try/catch here, so it escaped as an uncaughtException and
       // crashed the guard (a single frame over 10MiB, dropped with nothing
       // forwarded, took the whole relay down with it). Same fail-closed
-      // teardown as the malformed-frame branch below: emit an attributable
-      // block event, tear the source down, forward nothing.
-      w.onEvent?.(frameTooLargeEvent(w.direction));
-      // No-arg destroy() — NOT destroy(new Error(...)): the source (child.stdout)
-      // has no 'error' listener, so destroy(err) re-emits as an uncaughtException
-      // and crash-loops the relay. Same fail-closed teardown as the malformed
-      // branch below.
-      w.source.destroy();
+      // teardown as the malformed-frame branch above: emit an attributable
+      // block event, tear the source down, end the target.
+      failClosed(frameTooLargeEvent(w.direction));
       return;
     }
     drain();

@@ -578,6 +578,11 @@ describe("startRelay — child-spawn failure fails closed (H9 B.2)", () => {
     expect(parentOutBytes).toBe(0);
     // Source torn down so no further uninspected bytes can flow.
     expect(fakeChild.stdout.destroyed).toBe(true);
+    // backlog #103 round 2: on child->parent, targetEnd is the deliberate
+    // no-op — a malformed child does NOT get parentOut (the CLIENT) ended.
+    // Only the child->parent SOURCE is torn down; the client channel itself
+    // stays open (e.g. for other guarded servers, or a future reconnect).
+    expect(parentOut.writableEnded).toBe(false);
   });
 
   // #20: the buffer-cap DoS guard (MAX_BUFFER_BYTES, relay.ts) lived entirely
@@ -846,6 +851,11 @@ describe("wireDirection — an oversize frame fails closed instead of crashing t
     expect(events.filter((e) => e.action === "block")).toHaveLength(1);
     // No crash (the whole point): no unhandled exception reached this point.
     expect(fakeChild.stdout.destroyed).toBe(true);
+    // round 2: child->parent's targetEnd is a deliberate no-op ("never end
+    // parentOut on child exit") — the CLIENT channel stays open. Convergence
+    // on this direction comes from the CHILD's own next stdout write EPIPEing
+    // once its read side (child.stdout) is destroyed, not from ending anything.
+    expect(parentOut.writableEnded).toBe(false);
   });
 
   test("B (boundary): a frame just under the 10MiB cap, delivered in 64KB chunks, is forwarded intact", async () => {
@@ -918,7 +928,51 @@ describe("wireDirection — an oversize frame fails closed instead of crashing t
     expect(block?.direction).toBe("parent->child");
     expect(block?.findings[0]?.signature_id).toBe("frame-too-large");
     expect(parentIn.destroyed).toBe(true);
+    // round 2 (the half-open hang): destroying parentIn only stops the guard
+    // reading MORE from the client — it does NOT give the CHILD's stdin EOF
+    // (destroy() emits 'close', not 'end'). Without also ending child.stdin,
+    // a child idling on stdin never exits and the guard stays half-open
+    // forever (measured live in the dogfood run). child.stdin.end() lets a
+    // well-behaved child exit on its own EOF handling, converging via the
+    // existing child.on("exit", ...) path.
+    expect(fakeChild.stdin.writableEnded).toBe(true);
     fakeChild.emit("exit", 0); // detach startRelay's SIGINT/SIGTERM handlers
+  });
+
+  test("D: a malformed / non-JSON-RPC parent request also ends the child's stdin (same teardown as A/C)", async () => {
+    const fakeChild = makeFakeChild();
+    const parentIn = new PassThrough();
+    let childStdinBytes = 0;
+    fakeChild.stdin.on("data", (c: Buffer) => {
+      childStdinBytes += c.byteLength;
+    });
+
+    const events: GuardEvent[] = [];
+    startRelay({
+      command: "x",
+      args: [],
+      parentIn,
+      parentOut: new PassThrough(),
+      onEvent: (e) => events.push(e),
+      spawnChild: () => fakeChild,
+    });
+
+    // A client sending a non-JSON-RPC line — same malformed-frame branch as
+    // the existing child->parent test above, but on parent->child, which had
+    // no dedicated test before this backlog item widened the shared teardown
+    // to cover it too.
+    expect(() => parentIn.write("not json-rpc\n")).not.toThrow();
+    await new Promise((r) => setImmediate(r));
+    await new Promise((r) => setImmediate(r));
+
+    expect(childStdinBytes).toBe(0);
+    const block = events.find((e) => e.action === "block");
+    expect(block).toBeDefined();
+    expect(block?.direction).toBe("parent->child");
+    expect(block?.findings[0]?.signature_id).toBe("malformed-frame");
+    expect(parentIn.destroyed).toBe(true);
+    expect(fakeChild.stdin.writableEnded).toBe(true);
+    fakeChild.emit("exit", 0);
   });
 });
 

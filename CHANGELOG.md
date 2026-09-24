@@ -44,7 +44,11 @@ published section (it happened to #170).
   the same `append()` in try/catch at the same default). `ReadBuffer` is now
   constructed with an explicit `maxBufferSize`, and the throw is caught and
   fail-closed the same way a malformed frame already is, under a new relay-health
-  id, `frame-too-large`.
+  id, `frame-too-large`. Every fail-closed teardown on the client-to-server
+  direction now also ends the wrapped server's stdin (it previously only tore
+  down the read side, so `destroy()`'s 'close' never gave the child EOF and a
+  server idling on stdin stayed half-open forever instead of exiting) — the same
+  shared fix also closes this pre-existing hang in the malformed-frame branch.
 
 ## [0.42.1] - 2026-09-24
 
