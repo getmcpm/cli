@@ -16,9 +16,11 @@
  *   - `--json` writes exactly one verdict object per input frame, in INPUT
  *     ORDER — positional correlation is what lets a harness zip verdicts back
  *     to its own case ids without mcpm needing to know about them
- *   - an unparseable frame yields `{"action":"error"}`, never a silent skip and
- *     never a fabricated "pass" (a harness must be able to tell "my guard said
- *     this is safe" apart from "my guard fell over")
+ *   - an unparseable frame, OR one that makes a detector throw, yields
+ *     `{"action":"error"}` for THAT frame only and does not abort the run —
+ *     never a silent skip and never a fabricated "pass" (a harness must be
+ *     able to tell "my guard said this is safe" apart from "my guard fell
+ *     over"), and never at the cost of every later frame's verdict (#104)
  *   - each `--json` finding carries `owasp` (backlog #71) — the OWASP MCP Top
  *     10 pin from `owasp.ts`, additive
  *
@@ -40,7 +42,7 @@ import type { JSONRPCMessage } from "@modelcontextprotocol/sdk/types.js";
 import { inspectFrame } from "./inspect-frame.js";
 import { sanitizeForTerminal } from "./sanitize.js";
 import { owaspPinFor } from "./owasp.js";
-import type { InspectAction, InspectFinding } from "./types.js";
+import type { InspectAction, InspectFinding, InspectResult } from "./types.js";
 
 export interface InspectCliOpts {
   /** Raw input text: one JSON frame, or NDJSON with one frame per line. */
@@ -174,7 +176,26 @@ export function runInspectCommand(opts: InspectCliOpts): InspectCliResult {
       return;
     }
 
-    const result = inspectFrame(entry.frame);
+    let result: InspectResult;
+    try {
+      result = inspectFrame(entry.frame);
+    } catch (err) {
+      // A detector tripping over one pathological frame (#104: a deeply nested
+      // `tools/call` argument) must not abort the whole run and lose every
+      // verdict after it — the same fail-closed-on-one-frame shape the relay
+      // already uses for a synchronous inspect() throw (relay.ts's
+      // `inspectFailedDecision`). Counts as an error like a parse failure, so
+      // "the guard fell over on this frame" stays distinguishable from both
+      // "safe" and "unparseable".
+      errors += 1;
+      const message = `inspection failed: ${err instanceof Error ? err.message : String(err)}`;
+      if (json) {
+        opts.write(`${jsonLine({ action: "error", error: message })}\n`);
+      } else {
+        humanLines.push(`frame ${i + 1} — error: ${sanitizeForTerminal(message)}`);
+      }
+      return;
+    }
     tally[result.action] += 1;
     if (ACTION_RANK[result.action] > ACTION_RANK[worst]) worst = result.action;
 
