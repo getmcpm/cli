@@ -31,7 +31,7 @@ published section (it happened to #170).
   error, and carries on. Not fixed here: the relay's drift hash (`hashLeaf` in
   `pins.ts`) recurses too, so a `tools/list` input schema or `initialize`
   capabilities nested past ~2,600 array levels (~2,750 object levels) is blocked
-  as `inspect-rejected`, and a blocked `initialize` ends the session. (#104)
+  as `inspect-rejected`, and a blocked `initialize` ends the session. (#230)
 
 ## [0.42.2] - 2026-09-25
 
