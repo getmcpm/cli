@@ -461,7 +461,7 @@ mcpm guard inspect suspicious-response.json
 cat frames.ndjson | mcpm guard inspect --json
 ```
 
-Exit status makes it a CI gate over recorded traffic: `0` all clear, `1` something warns (or a frame wouldn't parse), `2` something would be blocked.
+Exit status makes it a CI gate over recorded traffic: `0` all clear, `1` something warns (or a frame wouldn't parse or couldn't be inspected), `2` something would be blocked.
 
 Verdicts are the signature catalog's default actions, including the warn-only carrier clamp — so an injection in a `resources/read` body reports `warn` here exactly as it would inline. Your local policy overrides (mutes, `log_only`) are deliberately *not* applied: this answers "what do the signatures see", not "what would my config do".
 

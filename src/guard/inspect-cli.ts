@@ -55,7 +55,7 @@ export interface InspectCliOpts {
 export interface InspectCliResult {
   /** Worst action across all frames — drives the process exit code. */
   readonly action: InspectAction;
-  /** Frames that could not be parsed as a JSON-RPC object. */
+  /** Frames that could not be parsed as a JSON-RPC object, or whose inspection threw. */
   readonly errors: number;
   /** Frames actually inspected, including the unparseable ones. */
   readonly frames: number;

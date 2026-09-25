@@ -88,7 +88,8 @@ describe("guard inspect — a detector throwing on one frame (backstop, independ
     vi.resetModules();
     vi.doMock("../inspect-frame.js", () => ({
       inspectFrame: (msg: { id?: number }) => {
-        if (msg.id === 2) throw new Error("synthetic detector crash");
+        // U+2028 splits a line for readline, the documented consumer.
+        if (msg.id === 2) throw new Error("synthetic detector crash ");
         return { action: "pass", findings: [] };
       },
     }));
@@ -108,7 +109,8 @@ describe("guard inspect — a detector throwing on one frame (backstop, independ
     expect(lines).toHaveLength(3);
     expect(lines[0]).toEqual({ action: "pass", findings: [] });
     expect(lines[1].action).toBe("error");
-    expect(lines[1].error).toBe("inspection failed: synthetic detector crash");
+    expect(lines[1].error).toBe("inspection failed: synthetic detector crash ");
+    expect(out).not.toContain(" ");
     expect(lines[2]).toEqual({ action: "pass", findings: [] });
 
     // Counts like a parse error: contributes to `errors`, not to the pass/warn/block tally.
@@ -122,7 +124,7 @@ describe("guard inspect — a detector throwing on one frame (backstop, independ
     vi.resetModules();
     vi.doMock("../inspect-frame.js", () => ({
       inspectFrame: () => {
-        throw new Error("synthetic detector crash");
+        throw new Error("synthetic detector crash\u001b[31m\u009b31m");
       },
     }));
 
@@ -136,7 +138,8 @@ describe("guard inspect — a detector throwing on one frame (backstop, independ
     });
 
     expect(out).toMatch(/error/i);
-    expect(out).toContain("synthetic detector crash");
+    expect(out).toContain("frame 1 — error: inspection failed: synthetic detector crash");
+    expect(out).not.toMatch(/[\u001b\u009b]/);
     expect(result).toEqual({ action: "pass", errors: 1, frames: 1 });
 
     vi.doUnmock("../inspect-frame.js");

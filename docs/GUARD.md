@@ -182,7 +182,8 @@ cat frames.ndjson | mcpm guard inspect --json   # one verdict line per frame
 ```
 
 Exit status makes it a CI gate over captured traffic: `2` if anything would be
-blocked, `1` if anything warns (or a frame would not parse), `0` if all pass.
+blocked, `1` if anything warns (or a frame would not parse or could not be
+inspected), `0` if all pass.
 
 Verdicts are the same default actions the relay applies, **including the
 warn-only carrier clamp**. Local policy overrides (mutes, `log_only`) are

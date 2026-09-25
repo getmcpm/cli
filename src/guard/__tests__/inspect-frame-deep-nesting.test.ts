@@ -12,6 +12,12 @@
  * runs before any recursive step regardless of shape. This file is the
  * measurement that confirms those carriers hold, not an assumption.
  *
+ * Scope: `inspectFrame` only. The relay's drift hashing (pins.ts `hashLeaf`,
+ * a recursive `JSON.stringify` with a replacer) runs OUTSIDE it on
+ * `tools/list` and `initialize` results, and it does overflow — measured at
+ * ~2,600 array levels / ~2,750 plain-keyed object levels on Node 24.20.0,
+ * which the relay turns into an `inspect-rejected` block. Not covered here.
+ *
  * Two deep shapes, matching the two the CHANGELOG's v0.42.2 entry measured for
  * the sibling relay bug: 100,000-deep nested ARRAYS (walked transparently by
  * every recursive-array unwrap in this codebase) and 20,000-deep `"0"`-keyed
@@ -121,6 +127,25 @@ const CARRIERS: readonly Carrier[] = [
         result: { protocolVersion: "2025-06-18", instructions: "hi", serverInfo: deep },
       }) as unknown as JSONRPCMessage,
   },
+  {
+    name: "JSON-RPC error response error.data",
+    build: (deep) =>
+      ({
+        jsonrpc: "2.0",
+        id: 10,
+        error: { code: -32000, message: "m", data: deep },
+      }) as unknown as JSONRPCMessage,
+  },
+  {
+    name: "elicitation/create request params.requestedSchema (server-initiated)",
+    build: (deep) =>
+      ({
+        jsonrpc: "2.0",
+        id: 11,
+        method: "elicitation/create",
+        params: { message: "m", requestedSchema: { type: "object", properties: { a: deep } } },
+      }) as unknown as JSONRPCMessage,
+  },
 ];
 
 describe("inspectFrame — deep-nesting sweep across every carrier (#104)", () => {
@@ -135,4 +160,16 @@ describe("inspectFrame — deep-nesting sweep across every carrier (#104)", () =
       expect(() => inspectFrame(msg)).not.toThrow();
     });
   }
+
+  // The inputSchema carrier above never reaches exfilKeys' own recursion: it
+  // descends only through `properties`, which neither deep shape contains.
+  test('tools/list inputSchema nested 20,000 levels through "properties" does not throw', () => {
+    const schema = JSON.parse('{"properties":'.repeat(20_000) + '"x"' + "}".repeat(20_000)) as unknown;
+    const msg = {
+      jsonrpc: "2.0",
+      id: 12,
+      result: { tools: [{ name: "t", description: "d", inputSchema: schema }] },
+    } as unknown as JSONRPCMessage;
+    expect(() => inspectFrame(msg)).not.toThrow();
+  });
 });
