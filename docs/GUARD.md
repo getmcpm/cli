@@ -190,10 +190,12 @@ deliberately **not** applied — this answers "what do the signatures see", not
 "what would this machine's config do". Use `guard status` for the latter.
 
 `--json` emits exactly one verdict per input frame **in input order**, and an
-unparseable frame yields an explicit `{"action":"error"}` rather than being
-skipped. Both are contract guarantees external harnesses depend on: one line per
+unparseable frame — or one that makes a detector throw — yields an explicit
+`{"action":"error"}` for that frame only, rather than being skipped or aborting
+the run. Both are contract guarantees external harnesses depend on: one line per
 verdict is what makes positional correlation safe, and an explicit error is what
-keeps "the guard says this is safe" distinguishable from "the guard fell over".
+keeps "the guard says this is safe" distinguishable from "the guard fell over" —
+without losing every verdict after it (#104).
 Output is escaped so no character in an attacker-controlled excerpt — including
 U+2028/U+2029 and 8-bit C1 controls — can split a line or reach a terminal as a
 control sequence.
