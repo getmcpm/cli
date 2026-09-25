@@ -10,50 +10,28 @@ published section (it happened to #170).
 
 ### Fixed
 
-- **`mcpm guard inspect --json` aborted an entire NDJSON run — losing every
-  verdict after the failing frame — when one `tools/call` argument was nested
-  deep enough in arrays.** `stringArgLeaves` (`tool-call-args-walk.ts`, shared
-  by the three structural `tool_call_args` detectors — shell-metachar,
-  query-control, CLI-flag-injection — since all three shipped in v0.31.0) was
-  a recursive generator that unwrapped arrays TRANSPARENTLY with no depth or
-  node-count check gating the unwrap, unlike `stringLeaves`' iterative,
-  budgeted walk (fixed for the same class of bug in v0.26.0). A `tools/call`
-  argument wrapped in enough nested arrays threw `RangeError: Maximum call
-  stack size exceeded` — measured on this machine under Node 24.20.0 at
-  ~2,500 levels, well BELOW the ~6,000 that overflows `JSON.stringify` for the
-  same shape (v0.42.2's relay fix). `runInspectCommand` called `inspectFrame`
-  with no try/catch, so that throw escaped the whole command: the verdict for
-  frame 1 printed, then the crash, then exit 1 with no verdict at all for
-  frame 3 — the CLI's own documented contract (one verdict per input frame, in
-  input order, never a silent drop) broken by exactly the shape it exists to
-  survive. Reachable since `mcpm guard inspect` first unified onto
-  `inspectFrame` in v0.27.0, for every `tools/call` frame once the three arg
-  detectors landed in v0.31.0. `stringArgLeaves` is now iterative (an explicit
-  heap-allocated stack, no recursion) with output byte-identical to the prior
-  recursive walk — order, the top-level-plus-one-nested-object depth cap, and
-  array transparency all pinned by a golden-order regression test — so its
-  cost is bounded by nodes visited, not stack depth, however deep a value is
-  nested. `runInspectCommand` also now wraps the per-frame `inspectFrame` call
-  in a try/catch: a throw from any detector, on any frame, yields an `error`
-  verdict for THAT frame alone (counted like a parse failure) and the run
-  keeps going — the same fail-closed-on-one-frame shape the relay already
-  uses for a synchronous `inspect()` throw. On the live relay this exact
-  overflow was already caught by that existing per-frame try/catch
-  (`run-inner.ts`'s `wireDirection`, closed by #226/#228) and reported as a
-  synthetic `inspect-rejected` block rather than crashing the guard process —
-  so a `tools/call` with array-nested arguments between roughly 2,500 and
-  6,000 levels deep was being wrongly BLOCKED on the relay, though it would
-  have serialized and forwarded fine; it now passes through the same as any
-  other frame these detectors don't flag. A sweep confirmed every OTHER
-  recursive walker reachable from `inspectFrame` already tolerates a
-  100,000-deep nested array or a 20,000-deep `"0"`-keyed object without
-  throwing, in every carrier position (`tools/list` `inputSchema` and
-  `annotations`, tool-response `structuredContent` and `content[]`,
-  `sampling/createMessage` params, `resources/read` contents, `prompts/get`
-  messages, `initialize` result): `stringLeaves` has been iterative and
-  node-budgeted since v0.26.0, and `exfilKeys` (F5) checks its depth cap
-  before any recursive step regardless of shape, so `stringArgLeaves` was the
-  one genuine bug. (#104)
+- **A `tools/call` whose argument was nested deep in arrays stopped
+  `mcpm guard inspect` mid-run, and the relay crashed or blocked on it.**
+  `stringArgLeaves` (`tool-call-args-walk.ts`), the argument walk behind the
+  shell-metacharacter and query-control detectors (v0.31.0) and the CLI-flag
+  detector (v0.32.0), recursed once per array level with no bound: its depth cap
+  counts objects only, so that batch-style arguments stay covered (TODOS #50).
+  Under Node 24.20.0 it overflowed at 2,610 array levels, where `JSON.stringify`
+  holds to ~6,200. `guard inspect --json` printed the verdicts before that frame,
+  then `Maximum call stack size exceeded`, exit 1, and nothing after it; human
+  output printed no verdicts at all. On the relay it is the MCP client's own
+  request: v0.31.0 through v0.42.0 crashed the guard (reproduced on 0.42.0 at
+  4,000 levels: exit 1, no responses), and v0.42.1–v0.42.2 blocked it as
+  `inspect-rejected` through #226's try/catch in `relay.ts`, refusing calls that
+  would forward fine. The walk is now iterative, one cursor per container, and
+  yields what the recursive walk did (a property test runs the old walk as the
+  oracle); 4,000 levels now forwards, and past ~6,200 the relay blocks it as
+  `forward-serialize-failed`, as in v0.42.2. `guard inspect` also now reports a
+  frame whose inspection throws as `{"action":"error"}`, counted like a parse
+  error, and carries on. Not fixed here: the relay's drift hash (`hashLeaf` in
+  `pins.ts`) recurses too, so a `tools/list` input schema or `initialize`
+  capabilities nested past ~2,600 array levels (~2,750 object levels) is blocked
+  as `inspect-rejected`, and a blocked `initialize` ends the session. (#104)
 
 ## [0.42.2] - 2026-09-25
 

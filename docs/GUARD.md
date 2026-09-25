@@ -196,7 +196,7 @@ unparseable frame — or one that makes a detector throw — yields an explicit
 the run. Both are contract guarantees external harnesses depend on: one line per
 verdict is what makes positional correlation safe, and an explicit error is what
 keeps "the guard says this is safe" distinguishable from "the guard fell over" —
-without losing every verdict after it (#104).
+without losing every verdict after it.
 Output is escaped so no character in an attacker-controlled excerpt — including
 U+2028/U+2029 and 8-bit C1 controls — can split a line or reach a terminal as a
 control sequence.
