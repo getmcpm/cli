@@ -156,6 +156,29 @@ function confineGuardEvent(
 export async function runInner(parsed: RunInnerArgs): Promise<number> {
   const safeName = sanitizeForTerminal(parsed.serverName);
 
+  // Backlog #107: `mcpm guard run` calls process.exit() the moment runInner
+  // resolves (or immediately after a refusal below calls it directly), so
+  // every event that EXPLAINS an exit — a spawn-failure, a fail-closed
+  // teardown (#103), or one of the pre-relay refusals below — must be queued
+  // onto this chain BEFORE that exit runs, not fired-and-forgotten. Hoisted
+  // above the very first site that can log (the orig-hash check) so nothing
+  // that runs before the relay starts can outrun its own event write.
+  // `persist` is the ONLY way any site should call `appendEvent` (appendEvent
+  // itself never rejects — see event-log.ts — so this chain can't wedge).
+  let eventsPersisted: Promise<void> = Promise.resolve();
+  const persist = (event: GuardEvent): void => {
+    eventsPersisted = eventsPersisted.then(() => appendEvent(event, parsed.serverName));
+  };
+  const logEvent = (event: GuardEvent): void => {
+    if (event.action === "block" || event.action === "warn") {
+      process.stderr.write(
+        `[mcpm-guard] ${event.action.toUpperCase()} ${safeName} ` +
+          `${event.findings.map((f) => f.signature_id).join(",")}\n`,
+      );
+      persist(event);
+    }
+  };
+
   // Issue #29 — spawn-time wrap-marker integrity check. `--orig-hash` (a SHA-256
   // over the original command + args + declared-env KEY names, set at `mcpm guard
   // enable` time) was, until now, verified ONLY on the disable/unwrap path
@@ -180,43 +203,24 @@ export async function runInner(parsed: RunInnerArgs): Promise<number> {
       // Persist to the audit log so the mismatch is reviewable (mirrors the H9
       // spawn-failure synthetic-finding precedent in relay.ts — RELAY category,
       // valid InspectFinding shape, no GuardEvent type change).
-      void appendEvent(
-        {
-          ts: new Date().toISOString(),
-          direction: "parent->child",
-          action: "warn",
-          findings: [
-            {
-              signature_id: "orig-hash-mismatch",
-              category: "RELAY",
-              severity: "high",
-              target: "tool_response",
-              matched_text_excerpt: "wrap-marker integrity: recomputed hash != embedded --orig-hash",
-              remediation:
-                "Re-run `mcpm guard enable` to re-pin, or restore the original wrapped entry in the client config.",
-            },
-          ],
-        },
-        parsed.serverName,
-      );
+      persist({
+        ts: new Date().toISOString(),
+        direction: "parent->child",
+        action: "warn",
+        findings: [
+          {
+            signature_id: "orig-hash-mismatch",
+            category: "RELAY",
+            severity: "high",
+            target: "tool_response",
+            matched_text_excerpt: "wrap-marker integrity: recomputed hash != embedded --orig-hash",
+            remediation:
+              "Re-run `mcpm guard enable` to re-pin, or restore the original wrapped entry in the client config.",
+          },
+        ],
+      });
     }
   }
-
-  // `mcpm guard run` calls process.exit() the moment runInner resolves, so the
-  // returned exit waits on this chain (appendEvent never rejects). Without it
-  // the event that EXPLAINS the exit — a spawn-failure, or a fail-closed
-  // teardown the child exits on (backlog #103) — never reached the log.
-  let eventsPersisted: Promise<void> = Promise.resolve();
-  const logEvent = (event: GuardEvent): void => {
-    if (event.action === "block" || event.action === "warn") {
-      process.stderr.write(
-        `[mcpm-guard] ${event.action.toUpperCase()} ${safeName} ` +
-          `${event.findings.map((f) => f.signature_id).join(",")}\n`,
-      );
-      // Persist to ~/.mcpm/guard-events.jsonl best-effort (Step 10).
-      eventsPersisted = eventsPersisted.then(() => appendEvent(event, parsed.serverName));
-    }
-  };
 
   // Drift detection is async (reads + writes pins.json). The relay's inspect
   // callbacks are sync, so we keep a cached snapshot updated off-thread.
@@ -482,15 +486,15 @@ export async function runInner(parsed: RunInnerArgs): Promise<number> {
       `[mcpm-guard] CONFINE-BLOCK ${safeName}: malformed --confine-profile-hash in the wrap ` +
         `marker (the client config entry may be tampered or corrupt). Refusing to start.\n`,
     );
-    void appendEvent(
+    persist(
       confineGuardEvent(
         "confine-marker-malformed",
         "malformed confine profile hash",
         "block",
         "critical",
       ),
-      parsed.serverName,
     );
+    await eventsPersisted;
     process.exit(1);
   }
   let spawnCommand = parsed.command;
@@ -518,11 +522,9 @@ export async function runInner(parsed: RunInnerArgs): Promise<number> {
         `backend, and review ~/.mcpm/guard-events.jsonl.\n`,
     );
     if (confineDecision.event !== undefined) {
-      void appendEvent(
-        confineGuardEvent(confineDecision.event, confineDecision.reason, "block", "critical"),
-        parsed.serverName,
-      );
+      persist(confineGuardEvent(confineDecision.event, confineDecision.reason, "block", "critical"));
     }
+    await eventsPersisted;
     process.exit(1);
   }
   if (confineDecision.action === "confine" && confineProfile !== null) {
@@ -530,14 +532,13 @@ export async function runInner(parsed: RunInnerArgs): Promise<number> {
     if (wrapped !== null) {
       spawnCommand = wrapped.command;
       spawnArgs = wrapped.args;
-      void appendEvent(
+      persist(
         confineGuardEvent(
           confineDecision.event ?? "confine-applied",
           confineDecision.reason,
           "pass",
           "low",
         ),
-        parsed.serverName,
       );
     } else {
       // The backend was available when decideConfine ran but wrapForConfinement
@@ -550,35 +551,29 @@ export async function runInner(parsed: RunInnerArgs): Promise<number> {
           `[mcpm-guard] CONFINE-BLOCK ${safeName}: sandbox backend became unavailable at spawn ` +
             `(require-confine). Refusing to start.\n`,
         );
-        void appendEvent(
+        persist(
           confineGuardEvent(
             "confine-backend-missing",
             "backend unavailable at wrap",
             "block",
             "critical",
           ),
-          parsed.serverName,
         );
+        await eventsPersisted;
         process.exit(1);
       }
       process.stderr.write(
         `[mcpm-guard] CONFINE-UNCONFINED ${safeName}: sandbox backend unavailable at wrap — ` +
           `running unconfined.\n`,
       );
-      void appendEvent(
-        confineGuardEvent("confine-backend-missing", "backend unavailable at wrap", "warn", "high"),
-        parsed.serverName,
-      );
+      persist(confineGuardEvent("confine-backend-missing", "backend unavailable at wrap", "warn", "high"));
     }
   } else if (confineDecision.event !== undefined) {
     // Unconfined but noteworthy (stripped marker / missing profile / no backend).
     process.stderr.write(
       `[mcpm-guard] CONFINE-UNCONFINED ${safeName}: ${confineDecision.reason} — running unconfined.\n`,
     );
-    void appendEvent(
-      confineGuardEvent(confineDecision.event, confineDecision.reason, "warn", "high"),
-      parsed.serverName,
-    );
+    persist(confineGuardEvent(confineDecision.event, confineDecision.reason, "warn", "high"));
   }
 
   const handle = startRelay({
