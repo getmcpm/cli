@@ -5,9 +5,9 @@
  *
  * Until this fix the walk was a RECURSIVE generator (`yield*`) that unwrapped
  * arrays TRANSPARENTLY with no depth check gating the unwrap — so a
- * `tools/call` argument wrapped in enough nested arrays (measured: ~2,500 on
- * this machine under Node 24.20.0, well below the ~6,000 that overflows
- * `JSON.stringify` for the same shape) overflowed the call stack with
+ * `tools/call` argument wrapped in enough nested arrays (measured through the
+ * built `guard inspect` under Node 24.20.0: 2,610 levels, well below the
+ * ~6,170 that overflows `JSON.stringify` for the same shape) overflowed the call stack with
  * `RangeError: Maximum call stack size exceeded`. This suite pins two things:
  * the walk no longer recurses (100k/500k-deep inputs complete without
  * throwing), and its OUTPUT is byte-for-byte identical to the old recursive
@@ -21,6 +21,7 @@
  * re-derivation of the semantics.
  */
 
+import fc from "fast-check";
 import { describe, expect, test } from "vitest";
 import { stringArgLeaves } from "../tool-call-args-walk.js";
 
@@ -137,5 +138,85 @@ describe("stringArgLeaves — no longer recurses (#104)", () => {
     const start = Date.now();
     leaves(args);
     expect(Date.now() - start).toBeLessThan(5_000);
+  });
+});
+
+/**
+ * Differential oracle: the pre-#104 recursive walk, verbatim from v0.42.2. The
+ * golden table above pins chosen shapes; this pins every shape fast-check can
+ * build (JSON text through JSON.parse, so own `__proto__` keys and duplicate
+ * keys behave as on the wire). Depth stays shallow enough for the oracle's own
+ * recursion.
+ */
+function* recursiveOracle(node: unknown, depth = 0): Iterable<{ key: string; value: string }> {
+  if (node === null || typeof node !== "object") return;
+  if (Array.isArray(node)) {
+    for (const item of node) yield* recursiveOracle(item, depth);
+    return;
+  }
+  if (depth > 1) return;
+  for (const key of Object.keys(node)) {
+    if (!Object.hasOwn(node, key)) continue;
+    const value = (node as Record<string, unknown>)[key];
+    if (typeof value === "string") yield { key, value };
+    else if (value !== null && typeof value === "object") yield* recursiveOracle(value, depth + 1);
+  }
+}
+
+describe("stringArgLeaves — same output as the recursive walk it replaced (#104)", () => {
+  const key = fc.oneof(fc.constantFrom("__proto__", "id", "path", "0", ""), fc.string({ maxLength: 3 }));
+  const { json } = fc.letrec((tie) => ({
+    json: fc.oneof(
+      { depthSize: "small", maxDepth: 6 },
+      fc.constantFrom("null", "true", "1", '"s"'),
+      fc.array(tie("json") as fc.Arbitrary<string>, { maxLength: 5 }).map((xs) => `[${xs.join(",")}]`),
+      fc
+        .array(fc.tuple(key, tie("json") as fc.Arbitrary<string>), { maxLength: 5 })
+        .map((kvs) => `{${kvs.map(([k, v]) => `${JSON.stringify(k)}:${v}`).join(",")}}`),
+    ),
+  }));
+
+  test("every JSON value", () => {
+    fc.assert(
+      fc.property(json, (text) => {
+        const v: unknown = JSON.parse(text);
+        expect(leaves(v)).toEqual([...recursiveOracle(v)]);
+      }),
+      { numRuns: 1_000 },
+    );
+  });
+
+  test("a value is read when its key is reached, not when its object is entered", () => {
+    const trace = (walk: (n: unknown) => Iterable<{ key: string; value: string }>): string[] => {
+      const log: string[] = [];
+      const obj = {
+        get a() { log.push("read a"); return "1"; },
+        get b() { log.push("read b"); throw new Error("boom"); },
+      };
+      try {
+        for (const l of walk({ items: [obj] })) log.push(`yield ${l.key}`);
+      } catch {
+        log.push("threw");
+      }
+      return log;
+    };
+    expect(trace(stringArgLeaves)).toEqual(["read a", "yield a", "read b", "threw"]);
+    expect(trace(stringArgLeaves)).toEqual(trace(recursiveOracle));
+  });
+
+  test("a wide flat argument is walked without buffering its elements", () => {
+    // The first iterative version pushed every array element onto the stack up
+    // front: ~300-500 MB extra peak RSS on a ~10 MiB flat-array frame. A
+    // cursor-per-container walk touches element i only when it gets there.
+    let touched = 0;
+    const wide = new Proxy([{ id: "first" }, ...new Array<string>(1_000).fill("x")], {
+      get(target, prop, receiver) {
+        if (typeof prop === "string" && /^\d+$/.test(prop)) touched++;
+        return Reflect.get(target, prop, receiver);
+      },
+    });
+    const it = stringArgLeaves({ items: wide })[Symbol.iterator]();
+    expect(it.next().value).toEqual({ key: "id", value: "first" });
+    expect(touched).toBe(1);
   });
 });
