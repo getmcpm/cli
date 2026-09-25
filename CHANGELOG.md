@@ -21,7 +21,7 @@ published section (it happened to #170).
   joins the queue #228 added for the relay's own. The `PINS-READ-ERROR` exit waits
   too: it logs nothing itself, but it could exit ahead of an `orig-hash-mismatch` warn
   queued just before it (lost in 1 of 20 runs on 0.42.2). `SECRET-MISSING` has the
-  same shape and gets the same wait. (#107)
+  same shape and gets the same wait. (#229)
 
 ## [0.42.2] - 2026-09-25
 
