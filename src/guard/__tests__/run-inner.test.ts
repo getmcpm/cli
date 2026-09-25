@@ -1493,6 +1493,8 @@ describe("runInner — pre-relay refusals wait for their event append (backlog #
   let mockProfile: ConfineProfile | null;
   let mockBackendAvailable: boolean;
   let mockWrapNull: boolean;
+  let mockPinsError: Error | null;
+  let mockSecretError: Error | null;
 
   const P: ConfineProfile = {
     tier: "standard",
@@ -1510,6 +1512,8 @@ describe("runInner — pre-relay refusals wait for their event append (backlog #
     mockProfile = null;
     mockBackendAvailable = true;
     mockWrapNull = false;
+    mockPinsError = null;
+    mockSecretError = null;
     const appendGate = new Promise<void>((resolve) => {
       releaseAppend = resolve;
     });
@@ -1532,7 +1536,24 @@ describe("runInner — pre-relay refusals wait for their event append (backlog #
     });
     vi.doMock("../pins.js", async () => {
       const actual = await vi.importActual<typeof import("../pins.js")>("../pins.js");
-      return { ...actual, readPins: async (): Promise<PinsFile> => actual.emptyPinsFile() };
+      return {
+        ...actual,
+        readPins: async (): Promise<PinsFile> => {
+          if (mockPinsError !== null) throw mockPinsError;
+          return actual.emptyPinsFile();
+        },
+      };
+    });
+    vi.doMock("../../store/keychain.js", async () => {
+      const actual =
+        await vi.importActual<typeof import("../../store/keychain.js")>("../../store/keychain.js");
+      return {
+        ...actual,
+        resolveEnvPlaceholders: async (env: NodeJS.ProcessEnv) => {
+          if (mockSecretError !== null) throw mockSecretError;
+          return actual.resolveEnvPlaceholders(env);
+        },
+      };
     });
     vi.doMock("../policy.js", async () => {
       const actual = await vi.importActual<typeof import("../policy.js")>("../policy.js");
@@ -1565,6 +1586,7 @@ describe("runInner — pre-relay refusals wait for their event append (backlog #
     vi.resetModules();
     vi.doUnmock("../event-log.js");
     vi.doUnmock("../pins.js");
+    vi.doUnmock("../../store/keychain.js");
     vi.doUnmock("../policy.js");
     vi.doUnmock("../relay.js");
     vi.doUnmock("../confine/store.js");
@@ -1670,5 +1692,84 @@ describe("runInner — pre-relay refusals wait for their event append (backlog #
     releaseAppend();
     expect(await done).toBe(0);
     expect(resolved).toBe(true);
+  });
+
+  // The three confine sites that neither exit nor refuse: routed through the
+  // chain like the rest, so runInner's final await covers them too.
+  test.each([
+    {
+      sig: "confine-applied",
+      setup: () => {
+        mockProfile = P;
+        return { confineProfileHash: hashConfineProfile(P) };
+      },
+    },
+    {
+      sig: "confine-backend-missing",
+      setup: () => {
+        mockProfile = P;
+        mockWrapNull = true; // not required → warn + run unconfined
+        return { confineProfileHash: hashConfineProfile(P) };
+      },
+    },
+    {
+      sig: "confine-profile-missing",
+      setup: () => ({ confineProfileHash: "c".repeat(64) }), // dangling marker → warn
+    },
+  ])("non-exit confine site ($sig): runInner does not resolve before the append settles", async ({ sig, setup }) => {
+    const over = setup();
+    const { runInner } = await import("../run-inner.js");
+    let resolved = false;
+    const done = runInner(argsFor(over)).then((code) => {
+      resolved = true;
+      return code;
+    });
+
+    await new Promise((r) => setTimeout(r, 20));
+    expect(resolved).toBe(false);
+    expect(appendCalls.map((c) => c.event.findings[0]!.signature_id)).toEqual([sig]);
+
+    releaseAppend();
+    expect(await done).toBe(0);
+  });
+
+  // The two other early exits in runInner. Neither logs an event of its own, but
+  // an orig-hash-mismatch warn queued just before either one was still in flight
+  // (measured on the built binary: lost 3/60 runs ahead of PINS-READ-ERROR).
+  test("PINS-READ-ERROR exit(1) waits for an earlier orig-hash-mismatch append", async () => {
+    mockPinsError = new Error("pins.json is not valid JSON");
+    const { runInner } = await import("../run-inner.js");
+    let settled = false;
+    const done = runInner(argsFor({ origHash: "a".repeat(64) }))
+      .catch((e: unknown) => e)
+      .finally(() => {
+        settled = true;
+      });
+
+    await new Promise((r) => setTimeout(r, 20));
+    expect(settled).toBe(false);
+    expect(exitSpy).not.toHaveBeenCalled();
+    expect(appendCalls.map((c) => c.event.findings[0]!.signature_id)).toEqual(["orig-hash-mismatch"]);
+
+    releaseAppend();
+    await done;
+    expect(exitSpy).toHaveBeenCalledWith(1);
+  });
+
+  test("SECRET-MISSING return 1 waits for an earlier orig-hash-mismatch append", async () => {
+    mockSecretError = new Error('Secret "victim/KEY" not found.');
+    const { runInner } = await import("../run-inner.js");
+    let resolved = false;
+    const done = runInner(argsFor({ origHash: "a".repeat(64) })).then((code) => {
+      resolved = true;
+      return code;
+    });
+
+    await new Promise((r) => setTimeout(r, 20));
+    expect(resolved).toBe(false);
+    expect(appendCalls.map((c) => c.event.findings[0]!.signature_id)).toEqual(["orig-hash-mismatch"]);
+
+    releaseAppend();
+    expect(await done).toBe(1);
   });
 });

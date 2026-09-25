@@ -243,6 +243,7 @@ export async function runInner(parsed: RunInnerArgs): Promise<number> {
         `~/.mcpm/guard-events.jsonl for unauthorized activity. If you intentionally ` +
         `changed pins.json, run \`mcpm guard reset-integrity\`.\n`,
     );
+    await eventsPersisted; // an orig-hash-mismatch warn above may still be writing
     process.exit(1);
   }
 
@@ -464,6 +465,7 @@ export async function runInner(parsed: RunInnerArgs): Promise<number> {
     process.stderr.write(
       `[mcpm-guard] SECRET-MISSING ${safeName} ${(err as Error).message}\n`,
     );
+    await eventsPersisted;
     return 1;
   }
 
