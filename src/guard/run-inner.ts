@@ -164,7 +164,8 @@ export async function runInner(parsed: RunInnerArgs): Promise<number> {
   // above the very first site that can log (the orig-hash check) so nothing
   // that runs before the relay starts can outrun its own event write.
   // `persist` is the ONLY way any site should call `appendEvent` (appendEvent
-  // itself never rejects — see event-log.ts — so this chain can't wedge).
+  // itself never rejects — see event-log.ts — so a failed write can't break the
+  // chain; a write that never completes, e.g. to a FIFO, still stalls it).
   let eventsPersisted: Promise<void> = Promise.resolve();
   const persist = (event: GuardEvent): void => {
     eventsPersisted = eventsPersisted.then(() => appendEvent(event, parsed.serverName));

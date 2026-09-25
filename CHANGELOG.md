@@ -10,29 +10,18 @@ published section (it happened to #170).
 
 ### Fixed
 
-- **The three confine spawn refusals told the user to review `guard-events.jsonl`
-  and then exited before writing to it; the orig-hash-mismatch warn could lose its
-  event the same way.** `run-inner.ts` had 7 `void appendEvent(...)` sites that ran
-  BEFORE the relay starts — outside #228's `eventsPersisted` chain (#103), which was
-  wired only into the relay's own `onEvent` callback further down the function.
-  Three of the seven are followed immediately by `process.exit(1)`:
-  `confine-marker-malformed`, the generic confine fail-closed block (e.g.
-  `confine-hash-mismatch`), and `confine-backend-missing` (require-confine, wrap
-  returned null). The stderr line ran (`Refusing to start... review
-  ~/.mcpm/guard-events.jsonl`), but the async `appendFile` promise was simply
-  abandoned by the synchronous exit right after — reproduced on the built binary
-  for the first two: `guard-events.jsonl` was absent after each refusal. The other
-  four sites (the `orig-hash-mismatch` warn, `confine-applied`, and the two
-  `confine-unconfined` warns) could also lose their event, because `runInner`
-  awaited `eventsPersisted` only once, right before returning, and `mcpm guard run`
-  calls `process.exit(code)` immediately after that return. All 7 sites have been
-  losable this way since `--confine` and its `--orig-hash` spawn-verify shipped in
-  v0.16.0 (#108, #110) — every tag since, including the v0.42.2 release that added
-  the `eventsPersisted` chain these sites were never wired into. Fixed by hoisting
-  the chain above the very first site that can log (the orig-hash check) and
-  routing every `appendEvent` call through one `persist()` helper; the 3 refusals
-  now `await eventsPersisted` before `process.exit(1)`. `appendEvent` itself still
-  never rejects (event-log.ts), so the chain cannot wedge a session. (#107)
+- **A confine refusal exited before its event reached `guard-events.jsonl`.** A
+  malformed `--confine-profile-hash`, a confine profile hash mismatch, and a
+  require-confine server that could not be confined each printed `CONFINE-BLOCK`
+  and called `process.exit(1)` with the append still in flight, so the log stayed
+  empty, although the last two tell the user to review it. Reproduced on 0.42.2 under
+  Node 24.20.0 for the malformed marker, the hash mismatch and a required server with
+  no stored profile; the refusals have had this shape since `--confine` shipped in
+  v0.16.0. They now wait for the write, and every event logged before the relay starts
+  joins the queue #228 added for the relay's own. The `PINS-READ-ERROR` exit waits
+  too: it logs nothing itself, but it could exit ahead of an `orig-hash-mismatch` warn
+  queued just before it (lost in 1 of 20 runs on 0.42.2). `SECRET-MISSING` has the
+  same shape and gets the same wait. (#107)
 
 ## [0.42.2] - 2026-09-25
 
