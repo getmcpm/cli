@@ -213,7 +213,7 @@ describe("deep nesting: no throw, byte-identical to a structurally-built expecta
     // The actual reported shape (#109): a nested array sitting inside a
     // schema property, not the whole schema. Confirms the fix through the
     // real production entry point, at a depth well past the measured
-    // pre-fix threshold (2,589) and short of the relay's own
+    // pre-fix threshold (~2,590) and short of the relay's own
     // forward-serialize ceiling.
     let deep: unknown = 0;
     for (let i = 0; i < 5_000; i++) deep = [deep];
