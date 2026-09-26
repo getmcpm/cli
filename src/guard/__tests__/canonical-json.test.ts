@@ -265,6 +265,17 @@ describe("individual traps", () => {
     expect(canonicalStringify(value, oracleNFC)).toBe('{"a":1,"e":2}');
   });
 
+  test("an omitted FIRST object member leaves no leading comma", () => {
+    const value = { a: undefined, b: 1 };
+    expect(canonicalStringify(value, oracleNFC)).toBe(JSON.stringify(value, oracleNFC));
+    expect(canonicalStringify(value, oracleNFC)).toBe('{"b":1}');
+  });
+
+  test("a root with no JSON representation throws instead of hashing 'undefined'", () => {
+    expect(JSON.stringify(undefined, oracleNFC)).toBeUndefined();
+    expect(() => canonicalStringify(undefined, oracleNFC)).toThrow(TypeError);
+  });
+
   test("undefined/function/symbol ARRAY elements become null, not omitted", () => {
     const value = [1, undefined, () => 1, Symbol("x"), 2];
     expect(canonicalStringify(value, oracleNFC)).toBe(JSON.stringify(value, oracleNFC));
