@@ -8,6 +8,8 @@ _Add entries here, never under a stamped version_ — a release commit renames t
 heading, and a branch that wrote beneath it merges without conflict straight into a
 published section (it happened to #170).
 
+## [0.42.3] - 2026-09-26
+
 ### Fixed
 
 - **A confine refusal exited before its event reached `guard-events.jsonl`.** A
