@@ -1474,3 +1474,302 @@ describe("runInner — relay exit waits for pending event-log writes (backlog #1
     expect(await done).toBe(0);
   });
 });
+
+// ─────── backlog #107: pre-relay refusals wait for their own event append ───────
+//
+// 7 `void appendEvent(...)` sites in run-inner.ts ran BEFORE the relay starts —
+// outside the #103 `eventsPersisted` chain above, which was wired only into
+// `logEvent` (the relay's onEvent callback). 3 of those sites are immediately
+// followed by `process.exit(1)` (the CONFINE-BLOCK refusals): the stderr line
+// telling the user to "review ~/.mcpm/guard-events.jsonl" ran, but the async
+// appendFile promise was abandoned mid-flight by the synchronous exit. The fix
+// hoists a shared `eventsPersisted` chain (fed by a `persist()` helper) above
+// the very first site that can log, and each refusal now awaits it first.
+describe("runInner — pre-relay refusals wait for their event append (backlog #107)", () => {
+  let exitSpy: ReturnType<typeof vi.spyOn>;
+  let stderrSpy: ReturnType<typeof vi.spyOn>;
+  let appendCalls: Array<{ event: GuardEvent; serverName: string }>;
+  let releaseAppend!: () => void;
+  let mockProfile: ConfineProfile | null;
+  let mockBackendAvailable: boolean;
+  let mockWrapNull: boolean;
+  let mockPinsError: Error | null;
+  let mockSecretError: Error | null;
+
+  const P: ConfineProfile = {
+    tier: "standard",
+    require_confine: false,
+    read_deny: ["/home/u/.ssh"],
+    write_allow: ["/tmp"],
+    net: "none",
+    scratch_dir: "/home/u/.mcpm/sandbox/srv",
+    captured_at: "2026-01-01T00:00:00Z",
+  };
+
+  beforeEach(() => {
+    vi.resetModules();
+    appendCalls = [];
+    mockProfile = null;
+    mockBackendAvailable = true;
+    mockWrapNull = false;
+    mockPinsError = null;
+    mockSecretError = null;
+    const appendGate = new Promise<void>((resolve) => {
+      releaseAppend = resolve;
+    });
+    exitSpy = vi.spyOn(process, "exit").mockImplementation(((_c?: number) => {
+      throw new Error("__EXIT__");
+    }) as never);
+    stderrSpy = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+    // Gate appendEvent (never rejects in real life — see event-log.ts — so the
+    // gate models "still writing", never "failed") and record every call so a
+    // test can assert exactly which signature_id was persisted.
+    vi.doMock("../event-log.js", async () => {
+      const actual = await vi.importActual<typeof import("../event-log.js")>("../event-log.js");
+      return {
+        ...actual,
+        appendEvent: async (event: GuardEvent, serverName: string) => {
+          appendCalls.push({ event, serverName });
+          await appendGate;
+        },
+      };
+    });
+    vi.doMock("../pins.js", async () => {
+      const actual = await vi.importActual<typeof import("../pins.js")>("../pins.js");
+      return {
+        ...actual,
+        readPins: async (): Promise<PinsFile> => {
+          if (mockPinsError !== null) throw mockPinsError;
+          return actual.emptyPinsFile();
+        },
+      };
+    });
+    vi.doMock("../../store/keychain.js", async () => {
+      const actual =
+        await vi.importActual<typeof import("../../store/keychain.js")>("../../store/keychain.js");
+      return {
+        ...actual,
+        resolveEnvPlaceholders: async (env: NodeJS.ProcessEnv) => {
+          if (mockSecretError !== null) throw mockSecretError;
+          return actual.resolveEnvPlaceholders(env);
+        },
+      };
+    });
+    vi.doMock("../policy.js", async () => {
+      const actual = await vi.importActual<typeof import("../policy.js")>("../policy.js");
+      return { ...actual, readPolicy: async () => ({}) };
+    });
+    vi.doMock("../relay.js", async () => {
+      const actual = await vi.importActual<typeof import("../relay.js")>("../relay.js");
+      return { ...actual, startRelay: () => ({ child: {} as never, exit: Promise.resolve(0) }) };
+    });
+    vi.doMock("../confine/store.js", async () => {
+      const actual = await vi.importActual<typeof import("../confine/store.js")>("../confine/store.js");
+      return { ...actual, loadProfile: async () => mockProfile };
+    });
+    vi.doMock("../confine/apply.js", async () => {
+      const actual = await vi.importActual<typeof import("../confine/apply.js")>("../confine/apply.js");
+      return {
+        ...actual,
+        isConfineBackendAvailable: () => mockBackendAvailable,
+        wrapForConfinement: (_p: ConfineProfile, command: string, args: readonly string[]) =>
+          mockWrapNull || !mockBackendAvailable
+            ? null
+            : { command: "/usr/bin/sandbox-exec", args: ["-p", "<sbpl>", command, ...args] },
+      };
+    });
+  });
+
+  afterEach(() => {
+    exitSpy.mockRestore();
+    stderrSpy.mockRestore();
+    vi.resetModules();
+    vi.doUnmock("../event-log.js");
+    vi.doUnmock("../pins.js");
+    vi.doUnmock("../../store/keychain.js");
+    vi.doUnmock("../policy.js");
+    vi.doUnmock("../relay.js");
+    vi.doUnmock("../confine/store.js");
+    vi.doUnmock("../confine/apply.js");
+  });
+
+  const argsFor = (over: Record<string, unknown> = {}) => ({
+    serverName: "victim",
+    command: "node",
+    args: ["server.js"],
+    declaredEnvKeys: [] as string[],
+    ...over,
+  });
+
+  test("confine-marker-malformed: exit(1) waits for the append to settle", async () => {
+    const { runInner } = await import("../run-inner.js");
+    let settled = false;
+    const done = runInner(argsFor({ confineProfileHash: "NOT-64-HEX" }))
+      .catch((e: unknown) => e)
+      .finally(() => {
+        settled = true;
+      });
+
+    await new Promise((r) => setTimeout(r, 20));
+    expect(settled).toBe(false);
+    expect(exitSpy).not.toHaveBeenCalled();
+    expect(appendCalls).toHaveLength(1);
+    expect(appendCalls[0]!.event.findings[0]!.signature_id).toBe("confine-marker-malformed");
+
+    releaseAppend();
+    await done;
+    expect(settled).toBe(true);
+    expect(exitSpy).toHaveBeenCalledWith(1);
+  });
+
+  test("confine fail-closed (hash mismatch): exit(1) waits for the append to settle", async () => {
+    mockProfile = P;
+    const { runInner } = await import("../run-inner.js");
+    let settled = false;
+    const done = runInner(argsFor({ confineProfileHash: "b".repeat(64) }))
+      .catch((e: unknown) => e)
+      .finally(() => {
+        settled = true;
+      });
+
+    await new Promise((r) => setTimeout(r, 20));
+    expect(settled).toBe(false);
+    expect(exitSpy).not.toHaveBeenCalled();
+    expect(appendCalls).toHaveLength(1);
+    expect(appendCalls[0]!.event.findings[0]!.signature_id).toBe("confine-hash-mismatch");
+
+    releaseAppend();
+    await done;
+    expect(settled).toBe(true);
+    expect(exitSpy).toHaveBeenCalledWith(1);
+  });
+
+  test("confine-backend-missing (required, wrap→null): exit(1) waits for the append to settle", async () => {
+    const req: ConfineProfile = { ...P, require_confine: true };
+    mockProfile = req;
+    mockBackendAvailable = true; // decision says confine...
+    mockWrapNull = true; // ...but the wrap returns null (backend flipped between checks)
+    const { runInner } = await import("../run-inner.js");
+    let settled = false;
+    const done = runInner(
+      argsFor({ confineProfileHash: hashConfineProfile(req), confineRequired: true }),
+    )
+      .catch((e: unknown) => e)
+      .finally(() => {
+        settled = true;
+      });
+
+    await new Promise((r) => setTimeout(r, 20));
+    expect(settled).toBe(false);
+    expect(exitSpy).not.toHaveBeenCalled();
+    expect(appendCalls).toHaveLength(1);
+    expect(appendCalls[0]!.event.findings[0]!.signature_id).toBe("confine-backend-missing");
+
+    releaseAppend();
+    await done;
+    expect(settled).toBe(true);
+    expect(exitSpy).toHaveBeenCalledWith(1);
+  });
+
+  // Non-exit site (backlog #107 also covers this): the orig-hash-mismatch warn
+  // does not process.exit, but its append must still be durable before runInner
+  // itself resolves — otherwise `mcpm guard run`'s immediate process.exit(code)
+  // can still outrun it.
+  test("non-exit site (orig-hash-mismatch): runInner does not resolve before the append settles", async () => {
+    const wrongHash = "a".repeat(64);
+    const { runInner } = await import("../run-inner.js");
+    let resolved = false;
+    const done = runInner(argsFor({ origHash: wrongHash })).then((code) => {
+      resolved = true;
+      return code;
+    });
+
+    await new Promise((r) => setTimeout(r, 20));
+    expect(resolved).toBe(false);
+    expect(appendCalls).toHaveLength(1);
+    expect(appendCalls[0]!.event.findings[0]!.signature_id).toBe("orig-hash-mismatch");
+
+    releaseAppend();
+    expect(await done).toBe(0);
+    expect(resolved).toBe(true);
+  });
+
+  // The three confine sites that neither exit nor refuse: routed through the
+  // chain like the rest, so runInner's final await covers them too.
+  test.each([
+    {
+      sig: "confine-applied",
+      setup: () => {
+        mockProfile = P;
+        return { confineProfileHash: hashConfineProfile(P) };
+      },
+    },
+    {
+      sig: "confine-backend-missing",
+      setup: () => {
+        mockProfile = P;
+        mockWrapNull = true; // not required → warn + run unconfined
+        return { confineProfileHash: hashConfineProfile(P) };
+      },
+    },
+    {
+      sig: "confine-profile-missing",
+      setup: () => ({ confineProfileHash: "c".repeat(64) }), // dangling marker → warn
+    },
+  ])("non-exit confine site ($sig): runInner does not resolve before the append settles", async ({ sig, setup }) => {
+    const over = setup();
+    const { runInner } = await import("../run-inner.js");
+    let resolved = false;
+    const done = runInner(argsFor(over)).then((code) => {
+      resolved = true;
+      return code;
+    });
+
+    await new Promise((r) => setTimeout(r, 20));
+    expect(resolved).toBe(false);
+    expect(appendCalls.map((c) => c.event.findings[0]!.signature_id)).toEqual([sig]);
+
+    releaseAppend();
+    expect(await done).toBe(0);
+  });
+
+  // The two other early exits in runInner. Neither logs an event of its own, but
+  // an orig-hash-mismatch warn queued just before either one was still in flight
+  // (measured on the built binary: lost 3/60 runs ahead of PINS-READ-ERROR).
+  test("PINS-READ-ERROR exit(1) waits for an earlier orig-hash-mismatch append", async () => {
+    mockPinsError = new Error("pins.json is not valid JSON");
+    const { runInner } = await import("../run-inner.js");
+    let settled = false;
+    const done = runInner(argsFor({ origHash: "a".repeat(64) }))
+      .catch((e: unknown) => e)
+      .finally(() => {
+        settled = true;
+      });
+
+    await new Promise((r) => setTimeout(r, 20));
+    expect(settled).toBe(false);
+    expect(exitSpy).not.toHaveBeenCalled();
+    expect(appendCalls.map((c) => c.event.findings[0]!.signature_id)).toEqual(["orig-hash-mismatch"]);
+
+    releaseAppend();
+    await done;
+    expect(exitSpy).toHaveBeenCalledWith(1);
+  });
+
+  test("SECRET-MISSING return 1 waits for an earlier orig-hash-mismatch append", async () => {
+    mockSecretError = new Error('Secret "victim/KEY" not found.');
+    const { runInner } = await import("../run-inner.js");
+    let resolved = false;
+    const done = runInner(argsFor({ origHash: "a".repeat(64) })).then((code) => {
+      resolved = true;
+      return code;
+    });
+
+    await new Promise((r) => setTimeout(r, 20));
+    expect(resolved).toBe(false);
+    expect(appendCalls.map((c) => c.event.findings[0]!.signature_id)).toEqual(["orig-hash-mismatch"]);
+
+    releaseAppend();
+    expect(await done).toBe(1);
+  });
+});
