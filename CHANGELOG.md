@@ -10,6 +10,19 @@ published section (it happened to #170).
 
 ### Fixed
 
+- **A confine refusal exited before its event reached `guard-events.jsonl`.** A
+  malformed `--confine-profile-hash`, a confine profile hash mismatch, and a
+  require-confine server that could not be confined each printed `CONFINE-BLOCK`
+  and called `process.exit(1)` with the append still in flight, so the log stayed
+  empty, although the last two tell the user to review it. Reproduced on 0.42.2 under
+  Node 24.20.0 for the malformed marker, the hash mismatch and a required server with
+  no stored profile; the refusals have had this shape since `--confine` shipped in
+  v0.16.0. They now wait for the write, and every event logged before the relay starts
+  joins the queue #228 added for the relay's own. The `PINS-READ-ERROR` exit waits
+  too: it logs nothing itself, but it could exit ahead of an `orig-hash-mismatch` warn
+  queued just before it (lost in 1 of 20 runs on 0.42.2). `SECRET-MISSING` has the
+  same shape and gets the same wait. (#229)
+
 - **A `tools/call` whose argument was nested deep in arrays stopped
   `mcpm guard inspect` mid-run, and the relay crashed or blocked on it.**
   `stringArgLeaves` (`tool-call-args-walk.ts`), the argument walk behind the
