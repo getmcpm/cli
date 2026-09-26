@@ -319,12 +319,10 @@ export function fieldHashesOf(input: ToolDefinitionFields): FieldHashes {
   };
 }
 
-// #109: canonicalStringify, not JSON.stringify(value, replacer) — V8 recurses
-// one native stack frame per container level whenever a replacer function is
-// present, and a tools/list schema (or initialize capabilities) nested a few
-// thousand levels deep threw RangeError here, which the relay's try/catch
-// turned into a false BLOCK of the server's tools/list (or a broken
-// initialize handshake). See canonical-json.ts for the byte-identity argument.
+// #109: canonicalStringify, not JSON.stringify(value, replacer), which recurses
+// once per nesting level and overflowed ~2,600 levels down — a throw here blocks
+// the whole frame as inspect-rejected. canonical-json.ts has the measurements
+// and the byte-identity argument.
 function hashLeaf(value: unknown, replacer = sortedReplacer): string {
   const canonical = canonicalStringify(value, replacer);
   return `sha256:${createHash("sha256").update(canonical, "utf8").digest("hex")}`;

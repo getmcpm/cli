@@ -10,36 +10,22 @@ published section (it happened to #170).
 
 ### Fixed
 
-- **A `tools/list` inputSchema (or an `initialize` capabilities object) nested a few
-  thousand levels deep in arrays or objects stopped the schema-drift hash instead of
-  the relay.** `hashLeaf` (`pins.ts`) called `JSON.stringify(value, replacer)`, and V8
-  recurses one native stack frame per container level whenever a replacer FUNCTION is
-  present — the plain-object/array fast path it otherwise takes is skipped. Measured
-  on Node 24.20.0 against the real built binary: array nesting in a `tools/list`
-  schema blocked at depth 2,589 (last good 2,588), object nesting at 2,706 (2,705),
-  and a deep `initialize.capabilities` at 2,592 — all via the relay's existing
-  fail-closed `inspect()`-threw handler, which turned the RangeError into a synthetic
-  `inspect-rejected` BLOCK of the frame (a schema-side block disables the server's
-  entire `tools/list`; blocking `initialize` ends the session outright).
-  `hashLeaf` now canonicalizes through a new iterative walker
-  (`canonical-json.ts`, one stack frame per OPEN container, cursor-based like
-  `stringArgLeaves` — never all children pushed up front) instead of recursing, so
-  depth no longer costs call-stack frames. Both shapes now pass cleanly through to the
-  relay's own pre-existing forward-serialize ceiling (unchanged by this fix — measured
-  at 5,968 on this build, matching `forward-serialize-failed`'s known ~5,967-level
-  bound) instead of hitting the earlier, avoidable ceiling in the drift hash. The new
-  walker is differentially fuzzed (`fast-check`, 3,000 cases) against real
-  `JSON.stringify` for all three of `pins.ts`'s replacer forms and is byte-identical
-  on every case, including golden vectors captured from the shipped v0.42.3 hash —
-  **every existing `pins.json` entry keeps matching**, so this changes no catalog
-  verdict on any frame that was inspectable before. On a ~10 MiB flat input the new
-  walker costs roughly 1.3–2x the time and up to 1.5x the peak RSS of the old
-  recursive call (measured: 96ms/175MB → 183ms/259MB on a flat number array; on a
-  typical single-tool schema the difference is single-digit microseconds), accepted
-  as the always-iterative default since neither a real `tools/list` frame nor the
-  relay's documented perf budget is anywhere near that shape. PATCH: no new catalog
-  entry, no CLI/`--json` shape change, only a false BLOCK becoming a PASS on an
-  already-block-capable path. (#231)
+- **A `tools/list` schema or `initialize` capabilities nested a few thousand levels
+  deep was blocked by the schema-drift hash, not by anything in the frame.**
+  `hashLeaf` (`pins.ts`) canonicalized with `JSON.stringify(value, replacer)`, which
+  recurses once per level; under Node 24.20.0 it overflowed past ~2,590 nested arrays
+  or ~2,710 nested objects (counted from the JSON-RPC message), well short of the
+  ~5,970 the relay's own re-serialize holds. v0.42.1–v0.42.3 blocked such a frame as
+  `inspect-rejected` (the whole `tools/list`, or the `initialize` result), and v0.42.0
+  crashed the guard on it (reproduced at 3,000 levels: exit 1, no response). The hash
+  now canonicalizes iteratively (`canonical-json.ts`), so these frames are pinned on
+  the first launch, read as unchanged on the next, and are blocked for depth only past
+  the re-serialize limit, as `forward-serialize-failed`. The hashed bytes are
+  unchanged — 0 differences from v0.42.3's hash across 449,000 generated values under
+  all three replacer forms and ~42,900 JSON nodes from the fixture, benchmark and
+  registry-sweep corpora — so every existing `pins.json` entry keeps matching. Cost on
+  Node 24.20.0: 0.26 ms against 0.21 ms to hash a 40-property tool schema, and at most
+  1.6x the time and 1.5x the peak memory of v0.42.3 on 10 MiB schemas. (#231)
 
 ## [0.42.3] - 2026-09-26
 

@@ -4,7 +4,7 @@
  *
  * `JSON.stringify` recurses once per nesting level. With `hashLeaf`'s
  * replacer it overflowed the stack at ~2,590 nested arrays / ~2,710 nested
- * objects (absolute frame depth, Node 24.20.0), below the ~5,968 levels the
+ * objects (absolute frame depth, Node 24.20.0), below the ~5,970 levels the
  * relay's own forward re-serialize tolerates — so a deep `tools/list` schema
  * or `initialize.capabilities` was blocked as `inspect-rejected` by the drift
  * hash rather than by anything about the frame.
@@ -19,8 +19,8 @@
  * appended once to a flat buffer — never re-joined per level — so time and
  * memory are linear in the output, not depth × size.
  *
- * Not implemented: `toJSON`. `hashLeaf` only ever sees `JSON.parse` output
- * and pins.ts's own literals of strings, neither of which can carry a callable
+ * Not implemented: `toJSON`. `hashLeaf` only ever sees values parsed from JSON
+ * and pins.ts's own literals of strings, none of which can carry a callable
  * `toJSON`; such a value would be serialized by its keys instead.
  */
 
@@ -30,7 +30,7 @@ export type JsonReplacer = (this: unknown, key: string, value: unknown) => unkno
 // ponytail: a flat depth cap instead of a cycle-tracking set — it bounds the
 // explicit stack's memory on a 10 MiB frame (one entry per level) and turns a
 // cycle (unreachable: JSON.parse output is a tree) into a throw. Far deeper
-// than the relay forwards on Node 24 (~5,968) or stringLeaves' 100,000-node
+// than the relay forwards on Node 24 (~5,970) or stringLeaves' 100,000-node
 // budget lets through on tools/list; raise it if a runtime ever forwards
 // deeper initialize capabilities than this.
 export const MAX_DEPTH = 100_000;
