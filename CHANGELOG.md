@@ -23,6 +23,29 @@ published section (it happened to #170).
   queued just before it (lost in 1 of 20 runs on 0.42.2). `SECRET-MISSING` has the
   same shape and gets the same wait. (#229)
 
+- **A `tools/call` whose argument was nested deep in arrays stopped
+  `mcpm guard inspect` mid-run, and the relay crashed or blocked on it.**
+  `stringArgLeaves` (`tool-call-args-walk.ts`), the argument walk behind the
+  shell-metacharacter and query-control detectors (v0.31.0) and the CLI-flag
+  detector (v0.32.0), recursed once per array level with no bound: its depth cap
+  counts objects only, so that batch-style arguments stay covered (TODOS #50).
+  Under Node 24.20.0 it overflowed at 2,610 array levels, where `JSON.stringify`
+  holds to ~6,200. `guard inspect --json` printed the verdicts before that frame,
+  then `Maximum call stack size exceeded`, exit 1, and nothing after it; human
+  output printed no verdicts at all. On the relay it is the MCP client's own
+  request: v0.31.0 through v0.42.0 crashed the guard (reproduced on 0.42.0 at
+  4,000 levels: exit 1, no responses), and v0.42.1–v0.42.2 blocked it as
+  `inspect-rejected` through #226's try/catch in `relay.ts`, refusing calls that
+  would forward fine. The walk is now iterative, one cursor per container, and
+  yields what the recursive walk did (a property test runs the old walk as the
+  oracle); 4,000 levels now forwards, and past ~6,200 the relay blocks it as
+  `forward-serialize-failed`, as in v0.42.2. `guard inspect` also now reports a
+  frame whose inspection throws as `{"action":"error"}`, counted like a parse
+  error, and carries on. Not fixed here: the relay's drift hash (`hashLeaf` in
+  `pins.ts`) recurses too, so a `tools/list` input schema or `initialize`
+  capabilities nested past ~2,600 array levels (~2,750 object levels) is blocked
+  as `inspect-rejected`, and a blocked `initialize` ends the session. (#230)
+
 ## [0.42.2] - 2026-09-25
 
 ### Fixed

@@ -281,7 +281,7 @@ export function registerGuardCommand(program: Command): void {
       });
       // Exit status, so this is usable as a CI gate over captured traffic:
       //   2 = something would be blocked
-      //   1 = something would warn, or a frame could not be parsed
+      //   1 = something would warn, or a frame could not be parsed or inspected
       //   0 = every frame passed
       // Set exitCode rather than calling process.exit(): stdout is a pipe for
       // any harness consuming --json, and process.exit() would truncate
