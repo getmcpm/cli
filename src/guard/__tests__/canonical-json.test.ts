@@ -26,7 +26,7 @@
 import { createHash } from "node:crypto";
 import fc from "fast-check";
 import { describe, expect, test } from "vitest";
-import { canonicalStringify, type JsonReplacer } from "../canonical-json.js";
+import { MAX_DEPTH, canonicalStringify, type JsonReplacer } from "../canonical-json.js";
 import { hashToolDefinition } from "../pins.js";
 
 // ---------------------------------------------------------------------------
@@ -278,17 +278,20 @@ describe("individual traps", () => {
     expect(canonicalStringify(value, oracleNFC)).toBe("[1,null,null,4]");
   });
 
-  test("a self-referential OBJECT throws instead of looping forever", () => {
-    const a: Record<string, unknown> = {};
-    a.self = a;
-    expect(() => canonicalStringify(a, oracleNFC)).toThrow(TypeError);
+  test("nesting is capped at MAX_DEPTH: exactly MAX_DEPTH levels serialize, one more throws RangeError", () => {
+    let value: unknown = 0;
+    for (let i = 0; i < MAX_DEPTH; i++) value = [value];
+    expect(canonicalStringify(value, oracleNFC)).toBe("[".repeat(MAX_DEPTH) + "0" + "]".repeat(MAX_DEPTH));
+    expect(() => canonicalStringify([value], oracleNFC)).toThrow(RangeError);
   });
 
-  test("a self-referential ARRAY throws (matches native's own TypeError)", () => {
+  test("a self-referential OBJECT or ARRAY throws (via the depth cap) instead of looping forever", () => {
+    const o: Record<string, unknown> = {};
+    o.self = o;
     const a: unknown[] = [];
     a.push(a);
-    expect(() => JSON.stringify(a, oracleNFC)).toThrow(TypeError);
-    expect(() => canonicalStringify(a, oracleNFC)).toThrow(TypeError);
+    expect(() => canonicalStringify(o, oracleNFC)).toThrow(RangeError);
+    expect(() => canonicalStringify(a, oracleNFC)).toThrow(RangeError);
   });
 
   test("a DAG (same object referenced twice, non-cyclic) does NOT throw", () => {
