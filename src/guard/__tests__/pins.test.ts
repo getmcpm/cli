@@ -1038,6 +1038,28 @@ describe("inspectForDrift against the real pin store (#232)", () => {
       hashToolDefinition({ description: winner, schema: { type: "object" }, annotations: undefined }),
     );
   });
+
+  test("same server, two concurrent first handshakes with different capabilities: one pin, one drift", async () => {
+    const { inspectHandshakeForDrift } = await import("../drift.js");
+    const capsA = { tools: {} };
+    const capsB = { tools: {}, sampling: {} };
+    const init = (capabilities: object) =>
+      ({ jsonrpc: "2.0", id: 1, result: { protocolVersion: "2025-06-18", capabilities, serverInfo: { name: "srv", version: "1" } } }) as Parameters<
+        typeof inspectHandshakeForDrift
+      >[0];
+    const deps = { update: updatePins, signatureListVersion: "v0.5.0" };
+    const [a, b] = await Promise.all([
+      inspectHandshakeForDrift(init(capsA), "srv", deps),
+      inspectHandshakeForDrift(init(capsB), "srv", deps),
+    ]);
+
+    expect([a.action, b.action].filter((x) => x === "pass")).toHaveLength(1);
+    const winner = a.action === "pass" ? capsA : capsB;
+    const onDisk = await readPins();
+    expect(onDisk.handshakes?.srv?.current_hash).toBe(
+      hashHandshake(handshakeFieldHashesOf({ capabilities: winner, serverInfo: { name: "srv" } })),
+    );
+  });
 });
 
 // Issue #19: the unkeyed SHA-256 sidecars must be documented as integrity

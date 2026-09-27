@@ -2,29 +2,15 @@
  * Real multi-process regression test for #232 (backlog #111): pins.json
  * read-modify-write races under concurrent guard sessions.
  *
- * Every other pins/drift test uses an in-memory fake for `updatePins`'s
- * dependencies or drives a single in-process `readPins`/`writePins` pair —
- * neither exercises `proper-lockfile`'s actual CROSS-PROCESS locking, which is
- * exactly where the bug lived (two separate `mcpm guard run --inner`
- * processes, each composing an unlocked read with a later write). This test
- * spawns N REAL, separate `node` processes (the built `dist/index.js`, via
- * `mcpm guard run --inner`) against ONE throwaway HOME, each driven by a
- * conformant MCP client (initialize -> wait -> notifications/initialized +
- * tools/list -> wait -> close stdin) — the same shape an IDE launching a whole
- * server stack produces, and the same harness used for the CHANGELOG's
- * measured loss numbers (see scripts referenced there / storm.mjs in the PR
- * description).
+ * The unit tests fake `updatePins` or run in one process; only separate
+ * `mcpm guard run --inner` processes exercise proper-lockfile's cross-process
+ * lock, which is where the bug lived. This spawns N of them (the built
+ * `dist/index.js`) against ONE throwaway HOME, each driven by a client that
+ * sends initialize, then initialized + tools/list the moment the initialize
+ * response arrives, then closes stdin the moment tools/list's response arrives.
  *
- * Requires a build (`pnpm build`) — SKIPPED otherwise, so a plain `pnpm test`
- * on a fresh checkout doesn't fail on a missing `dist/index.js`. CI runs
- * `pnpm build` before `pnpm test` (see package.json / CI workflow) so this
- * runs there; run `pnpm build` locally first to exercise it.
- *
- * Mutation check (done manually, not encoded here — see PR description): with
- * `run-inner.ts`'s tools-capture routed back through the pre-#232 shape
- * (`read: () => readPins().catch(() => pinsSnapshot), write: writePins`) this
- * test fails reliably (observed ~20-90% pin loss depending on N); with
- * `deps.update: updatePins` (this codebase) it passes.
+ * Tests whatever `dist/` holds: SKIPPED when it is missing, and a stale
+ * `dist/` certifies old code (the smoke tests' caveat). CI builds first.
  */
 
 import { describe, test, expect } from "vitest";

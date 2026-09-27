@@ -1415,6 +1415,38 @@ describe("runInner — inspectChildResponse pin-commit wait (issue #27)", () => 
     const real = capturedInspectChildResponse!(toolsList("read", "v1"));
     expect(real).toBeInstanceOf(Promise);
   });
+
+  // #232: holding the frame does not hold the process. A client that hangs up
+  // right after sending tools/list ends the child while the pin write is still
+  // pending; the exit must wait for it or the first-session pin is lost.
+  test("the guard's exit waits for the held first tools/list's pin write", async () => {
+    let endChild!: (code: number) => void;
+    vi.doMock("../relay.js", async () => {
+      const actual = await vi.importActual<typeof import("../relay.js")>("../relay.js");
+      return {
+        ...actual,
+        startRelay: (opts: {
+          inspectChildResponse?: (msg: JSONRPCMessage) => InspectResult | Promise<InspectResult>;
+        }) => {
+          capturedInspectChildResponse = opts.inspectChildResponse;
+          return { child: {} as never, exit: new Promise<number>((resolve) => (endChild = resolve)) };
+        },
+      };
+    });
+    const { runInner } = await import("../run-inner.js");
+    let exited = false;
+    const done = runInner(runInnerArgs).then(() => (exited = true));
+    await vi.waitFor(() => expect(capturedInspectChildResponse).toBeDefined());
+
+    void capturedInspectChildResponse!(toolsList("read", "v1"));
+    endChild(0);
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(exited).toBe(false);
+
+    releaseWrite!();
+    await done;
+    expect(writePinsCalls).toHaveLength(1);
+  });
 });
 
 // ─────────── backlog #103: the exit waits for the event that explains it ───────────
