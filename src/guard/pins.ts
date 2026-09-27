@@ -29,6 +29,12 @@
  * so a reader landing in that window doesn't fail closed on an in-flight
  * write; a real tamper or a crash mid-write still reproduces every attempt.
  *
+ * #232: writePins/readPins are the low-level primitives; every caller that
+ * needs to read-then-write (derive a new state from the current one) MUST go
+ * through {@link updatePins} instead of composing the two directly — see its
+ * doc comment for why an unlocked read followed by a later write silently lost
+ * pins under concurrent guard sessions.
+ *
  * Two-target scope: install-time capture writes captured_via:"install".
  * If install-time spawn fails (OAuth, network), a placeholder entry with
  * current_hash:null + captured_via:"first-session" is written; the next
@@ -36,8 +42,8 @@
  */
 
 import { createHash } from "node:crypto";
-import { readFile, writeFile, unlink } from "node:fs/promises";
-import { fileSha, writeFileAtomic } from "./store-integrity.js";
+import { readFile, unlink } from "node:fs/promises";
+import { fileSha, touchIfAbsent, writeFileAtomic } from "./store-integrity.js";
 import { canonicalStringify } from "./canonical-json.js";
 import path from "node:path";
 import lockfile from "proper-lockfile";
@@ -589,11 +595,10 @@ export async function writePins(pins: PinsFile): Promise<void> {
   // PINS-READ-ERROR and fails the guard closed / bricks the next launch.
   // readPins treats an absent sidecar as first-run, so this sidecar-less
   // intermediate parses cleanly; the lock+atomic writes below finalize it.
-  try {
-    await writeFile(filePath, serialized, { flag: "wx", mode: 0o600 });
-  } catch (err) {
-    if ((err as NodeJS.ErrnoException).code !== "EEXIST") throw err;
-  }
+  // #232: touchIfAbsent (not a raw wx writeFile) — see its own doc comment for
+  // why a plain wx write is itself two syscalls a concurrent unlocked reader
+  // can land between, observing a torn 0-byte file under real contention.
+  await touchIfAbsent(filePath, serialized);
 
   const release = await lockfile.lock(filePath, {
     retries: { retries: 5, minTimeout: 10, maxTimeout: 200 },
@@ -602,6 +607,82 @@ export async function writePins(pins: PinsFile): Promise<void> {
   try {
     await writeFileAtomic(filePath, serialized, "pins");
     await writeFileAtomic(sidecarPath, fileSha(serialized), "pins");
+  } finally {
+    await release();
+  }
+}
+
+/**
+ * #232: the single locked read-modify-write seam for pins.json. Every caller
+ * that needs to read the CURRENT pin state and derive a new one from it — the
+ * relay's first-session tool/handshake capture, `accept-drift`, orphan-pin
+ * `cleanup` — MUST go through this instead of composing an unlocked readPins()
+ * with a later writePins(): doing those as two separate calls (the pre-#232
+ * shape) let a second writer's commit land in between, so the first writer's
+ * eventual write silently overwrote it with a state derived from stale data.
+ * Measured with 8 guard sessions racing at once (an IDE launching a whole
+ * stack): up to ~87% of first-session pins lost — see storm.mjs / CHANGELOG.
+ *
+ * Acquires the SAME lock {@link writePins} holds BEFORE reading, so `fn`
+ * always sees the freshest on-disk state and no concurrent updatePins /
+ * writePins call can land a write between THIS call's own read and write.
+ * `fn` must be pure and fast (no I/O, no awaits) — it runs holding the lock,
+ * so anything slow here directly widens every other writer's contention
+ * window. If `fn` returns the SAME reference it was given, the write is
+ * skipped entirely (the `next !== pins` convention already used elsewhere in
+ * this codebase to decide whether a write is needed). Returns whatever is now
+ * durably on disk: the input unchanged, or the new value once both atomic
+ * renames (content, then sidecar) have completed.
+ *
+ * Propagates whatever readPins() / the atomic writes can throw — a
+ * PinsIntegrityError (tamper), a structural-validation error (corrupt file),
+ * or an fs error (EACCES, or ELOCKED if the retry budget below is exhausted).
+ * Nothing here swallows an error the way the old best-effort writes did;
+ * callers decide how to react.
+ */
+export async function updatePins(fn: (current: PinsFile) => PinsFile): Promise<PinsFile> {
+  const filePath = await pinsPath();
+  const sidecarPath = await integrityPath();
+
+  // Touch first, exactly like writePins — proper-lockfile requires the target
+  // to exist, and a crash between this touch and the finalize write below must
+  // never leave a 0-byte pins.json. Unlike writePins we don't yet know the new
+  // content (that's what `fn` is for, and it needs the CURRENT state as its
+  // input) — emptyPinsFile() is the honest placeholder for "no pins yet",
+  // exactly what readPins() would already report for a genuinely absent file.
+  // touchIfAbsent, not a raw wx writeFile — see its doc comment.
+  await touchIfAbsent(filePath, `${JSON.stringify(emptyPinsFile(), null, 2)}\n`);
+
+  // #232: wider than writePins's budget (5 retries, 10-200ms) — updatePins is
+  // now the hot path EVERY guarded server's first-session tool AND handshake
+  // capture goes through, so at IDE-launch every wrapped server contends for
+  // this one lock at once. Measured with the storm.mjs harness: 5 retries
+  // (~310ms worst case) let 8-16 concurrent sessions exhaust the budget and
+  // throw ELOCKED often enough to matter (a caller's own catch then treats it
+  // as a transient failure and fails open on THIS message — see
+  // inspectForDrift/inspectHandshakeForDrift). 20 retries at 10-100ms
+  // (~1.4s worst-case queue depth, `retry`'s default factor-2 backoff) cleared
+  // every observed ELOCKED at 16 concurrent sessions across 20+ rounds; the
+  // #27 hold means a NEVER-pinned server's first tools/list waits on this, so
+  // this is a cap on added IDE-startup latency, not just a knob to be widened
+  // freely — see storm.mjs / CHANGELOG for the actual measured latency.
+  const release = await lockfile.lock(filePath, {
+    retries: { retries: 20, minTimeout: 10, maxTimeout: 100 },
+    stale: 5_000,
+  });
+  try {
+    // readPins() while HOLDING the lock: no other lock-respecting writer can be
+    // mid-rename right now (both writePins and updatePins take this same lock
+    // before touching either file), so readPins()'s own integrity-mismatch
+    // retry loop is normally a no-op here — a mismatch it still finds under
+    // the lock is a genuine tamper, not an in-flight-write race.
+    const current = await readPins();
+    const next = fn(current);
+    if (next === current) return current;
+    const serialized = `${JSON.stringify(next, null, 2)}\n`;
+    await writeFileAtomic(filePath, serialized, "pins");
+    await writeFileAtomic(sidecarPath, fileSha(serialized), "pins");
+    return next;
   } finally {
     await release();
   }

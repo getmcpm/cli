@@ -330,8 +330,7 @@ describe("#26 NFC normalization before hashing", () => {
       field_hashes: rawLegacyFieldHashes(pinned),
     });
     const r = await inspectForDrift(listMsg({ description: "New wording.", schema }), "srv", {
-      read: async () => legacy,
-      write: async () => undefined,
+      update: async (fn) => fn(legacy),
       signatureListVersion: "v0.5.0",
     });
     expect(r.findings.map((f) => f.signature_id)).toContain("schema-drift-cosmetic");
@@ -366,12 +365,14 @@ describe("#26 NFC normalization before hashing", () => {
       { jsonrpc: "2.0", id: 1, result: { ...result, protocolVersion: "2025-06-18" } } as JSONRPCMessage,
       "srv",
       {
-      read: async () => legacy,
-      write: async () => {
-        wrote = true;
+        update: async (fn) => {
+          const next = fn(legacy);
+          if (next !== legacy) wrote = true;
+          return next;
+        },
+        signatureListVersion: "v0.5.0",
       },
-      signatureListVersion: "v0.5.0",
-    });
+    );
     expect(r.findings).toEqual([]);
     expect(r.action).toBe("pass");
     // A spurious warn would also append a previous_hashes entry to the user's store.
@@ -418,7 +419,7 @@ describe("#26 NFC normalization before hashing", () => {
         },
       } as JSONRPCMessage,
       "srv",
-      { read: async () => legacy, write: async () => undefined, signatureListVersion: "v0.5.0" },
+      { update: async (fn) => fn(legacy), signatureListVersion: "v0.5.0" },
     );
     expect(r.findings.map((f) => f.signature_id)).toContain("handshake-drift-capability");
     expect(r.findings.map((f) => f.signature_id)).not.toContain("handshake-drift-identity");
@@ -466,7 +467,7 @@ describe("#26 NFC normalization before hashing", () => {
     const r = await inspectForDrift(
       listMsg({ schema: { type: "object", properties: { dir: { enum: [NFC] } } } }),
       "srv",
-      { read: async () => pins, write: async () => undefined, signatureListVersion: "v0.5.0" },
+      { update: async (fn) => fn(pins), signatureListVersion: "v0.5.0" },
     );
     expect(r.findings).toEqual([]);
     expect(r.action).toBe("pass");
@@ -486,8 +487,7 @@ describe("#26 NFC normalization before hashing", () => {
       field_hashes: rawLegacyFieldHashes(nfdFields),
     });
     const r = await inspectForDrift(listMsg(nfdFields), "srv", {
-      read: async () => legacy,
-      write: async () => undefined,
+      update: async (fn) => fn(legacy),
       signatureListVersion: "v0.5.0",
     });
     expect(r.findings).toEqual([]);

@@ -1263,9 +1263,16 @@ describe("runInner — inspectChildResponse pin-commit wait (issue #27)", () => 
       return {
         ...actual,
         readPins: async (): Promise<PinsFile> => actual.emptyPinsFile(),
-        writePins: async (pins: PinsFile): Promise<void> => {
-          writePinsCalls.push(pins);
+        // #232: run-inner now routes the pin-commit write through updatePins
+        // (a locked read-modify-write), not a bare writePins() call — mock
+        // THAT seam instead, applying `fn` against the same never-pinned
+        // baseline `readPins` reports, and keep the same writeGate so the
+        // test can still hold the write open to prove the #27 wait.
+        updatePins: async (fn: (current: PinsFile) => PinsFile): Promise<PinsFile> => {
+          const next = fn(actual.emptyPinsFile());
+          writePinsCalls.push(next);
           await writeGate;
+          return next;
         },
       };
     });
@@ -1356,8 +1363,10 @@ describe("runInner — inspectChildResponse pin-commit wait (issue #27)", () => 
       return {
         ...actual,
         readPins: async (): Promise<PinsFile> => pins,
-        writePins: async (p: PinsFile): Promise<void> => {
-          writePinsCalls.push(p);
+        updatePins: async (fn: (current: PinsFile) => PinsFile): Promise<PinsFile> => {
+          const next = fn(pins);
+          if (next !== pins) writePinsCalls.push(next);
+          return next;
         },
       };
     });

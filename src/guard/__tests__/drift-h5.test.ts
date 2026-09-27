@@ -68,10 +68,13 @@ function makeDeps(initialPins: PinsFile): { deps: HandshakeDriftDeps; writes: Pi
   return {
     writes,
     deps: {
-      read: async () => snapshot,
-      write: async (p) => {
-        writes.push(p);
-        snapshot = p;
+      update: async (fn) => {
+        const next = fn(snapshot);
+        if (next !== snapshot) {
+          writes.push(next);
+          snapshot = next;
+        }
+        return snapshot;
       },
       signatureListVersion: SIGV,
     },
@@ -308,10 +311,9 @@ describe("inspectHandshakeForDrift (H5 async capture)", () => {
 
   test("PinsIntegrityError → fail-closed block (parity with tools/list arm)", async () => {
     const deps: HandshakeDriftDeps = {
-      read: async () => {
+      update: async () => {
         throw new PinsIntegrityErrorStub();
       },
-      write: async () => undefined,
       signatureListVersion: SIGV,
     };
     const result = await inspectHandshakeForDrift(

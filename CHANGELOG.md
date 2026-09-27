@@ -27,6 +27,39 @@ published section (it happened to #170).
   Node 24.20.0: 0.26 ms against 0.21 ms to hash a 40-property tool schema, and at most
   1.6x the time and 1.5x the peak memory of v0.42.3 on 10 MiB schemas. (#231)
 
+- **Concurrent guard sessions racing at IDE startup lost pins.json entries — up to
+  87% of them.** Every writer (the relay's first-session tool/handshake capture,
+  `accept-drift`, `guard cleanup`) read pins.json, computed a new value, and wrote it
+  back, but only the WRITE was under the proper-lockfile lock — so a second writer's
+  commit landing between a first writer's read and write was silently overwritten.
+  Measured on origin/main, Node 24.20.0, with real `mcpm guard run --inner` processes
+  against one throwaway HOME (initialize -> notifications/initialized + tools/list ->
+  close stdin, 20 rounds each): 50.0% of tool AND handshake pins lost with 2 servers
+  starting at once, 86.9% / 85.0% with 8. The relay's own read additionally fell back
+  to the session-start snapshot on ANY read failure (`.catch(() => pinsSnapshot)`), so
+  a genuine tampered-sidecar `PinsIntegrityError` could never reach drift.ts's
+  fail-closed branch from a running relay. Fixed with one locked read-modify-write
+  seam (`updatePins`, `pins.ts`) that every writer now goes through — classification
+  runs inside the same critical section that commits it, so two sessions of the SAME
+  server racing on their own pin no longer last-writer-win a stale comparison. Two
+  more bugs surfaced only once the RMW race was closed and had to be fixed to reach
+  zero loss: the touch-then-create step used to seed a never-yet-written pins.json
+  was two syscalls (create, then fill in the content), so a concurrent unlocked
+  reader could observe a torn, 0-byte file under real contention and fail closed with
+  a spurious "not valid JSON" — now a single atomic create-with-content
+  (`touchIfAbsent`); and the handshake pin write, always fire-and-forget, was not
+  guaranteed to finish before the guard process exited once the RMW race stopped
+  masking it — up to 1 in 3 handshake pins were lost to this alone even with locking
+  fixed, closed by waiting for it (alongside the existing event-log drain) before
+  exit. The lock's retry budget was also widened (5 -> 20 retries, 200ms -> 100ms max
+  backoff) after measuring that the original budget let 8+ concurrent sessions
+  exhaust it and silently fail the message open. Re-measured on the fixed build: 0%
+  tool and handshake pin loss across 2, 8, and 16 concurrent sessions, 20-50 rounds
+  each; median/max added latency on the held first-session write went from
+  292/343 ms (2 sessions) and 406/703 ms (8 sessions) on origin/main to 289/350 ms and
+  461/1224 ms respectively, plus a measured 847/1639 ms at 16 sessions (not run on
+  origin/main). (#232)
+
 ## [0.42.3] - 2026-09-26
 
 ### Fixed

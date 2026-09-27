@@ -11,6 +11,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { _resetCachedStorePath } from "../../store/index.js";
+import { emptyPinsFile, readPins, upsertToolPin, writePins } from "../pins.js";
 
 let tmpHome: string;
 let originalHome: string | undefined;
@@ -53,5 +54,74 @@ describe("runCleanupCommand on a tampered pins file", () => {
     expect(text).toContain("Refusing to prune");
     // The old buggy behavior printed this on a tampered file — it must NOT now.
     expect(text).not.toContain("nothing to prune");
+  });
+});
+
+// #232: the actual prune now goes through updatePins (a locked
+// read-modify-write) instead of a bare readPins()-then-writePins() pair, so it
+// re-derives the orphan set fresh at commit time rather than reusing the
+// (possibly stale) set the dry-run report above was built from.
+describe("runCleanupCommand --yes (apply)", () => {
+  test("prunes every orphan pin against a real filesystem, no client configs installed", async () => {
+    let pins = emptyPinsFile();
+    pins = upsertToolPin(pins, "orphan-a", "tool", {
+      current_hash: "sha256:" + "a".repeat(64),
+      previous_hashes: [],
+      captured_at: "x",
+      captured_via: "install",
+      signature_list_version: "v0.5.0",
+    });
+    pins = upsertToolPin(pins, "orphan-b", "tool", {
+      current_hash: "sha256:" + "b".repeat(64),
+      previous_hashes: [],
+      captured_at: "x",
+      captured_via: "install",
+      signature_list_version: "v0.5.0",
+    });
+    await writePins(pins);
+
+    const { runCleanupCommand } = await import("../cli.js");
+    const out: string[] = [];
+    await runCleanupCommand({ apply: true, write: (s) => out.push(s) });
+
+    const text = out.join("");
+    expect(text).toContain("Pruned 2 orphan pin entries");
+    const after = await readPins();
+    expect(after.servers).toEqual({});
+  });
+
+  test("a tamper detected only at commit time (not at the earlier report read) aborts without pruning", async () => {
+    let pins = emptyPinsFile();
+    pins = upsertToolPin(pins, "orphan-a", "tool", {
+      current_hash: "sha256:" + "a".repeat(64),
+      previous_hashes: [],
+      captured_at: "x",
+      captured_via: "install",
+      signature_list_version: "v0.5.0",
+    });
+    await writePins(pins);
+
+    vi.resetModules();
+    vi.doMock("../pins.js", async () => {
+      const actual = await vi.importActual<typeof import("../pins.js")>("../pins.js");
+      return {
+        ...actual,
+        // The dry-run-style report read still succeeds (mirrors a real
+        // integrity mismatch that only appears once the file changes again
+        // between the report and the commit).
+        updatePins: async (): Promise<never> => {
+          throw new actual.PinsIntegrityError("pins.json integrity check failed");
+        },
+      };
+    });
+
+    const { runCleanupCommand } = await import("../cli.js");
+    const out: string[] = [];
+    await runCleanupCommand({ apply: true, write: (s) => out.push(s) });
+
+    const text = out.join("");
+    expect(text).toContain("cannot prune");
+    expect(text).toContain("integrity check failed");
+    expect(text).not.toContain("Pruned");
   });
 });

@@ -30,6 +30,11 @@ function makeToolsListResponse(
   return { jsonrpc: "2.0", id: 1, result: { tools } } as JSONRPCMessage;
 }
 
+/**
+ * Fake `updatePins`: applies `fn` to an in-memory snapshot, exactly like the
+ * real one skipping the write (and the `writes` push) when `fn` returns the
+ * SAME reference it was given.
+ */
 function makeDeps(initialPins: PinsFile): {
   deps: DriftCheckDeps;
   writes: PinsFile[];
@@ -39,10 +44,13 @@ function makeDeps(initialPins: PinsFile): {
   return {
     writes,
     deps: {
-      read: async () => snapshot,
-      write: async (p) => {
-        writes.push(p);
-        snapshot = p;
+      update: async (fn) => {
+        const next = fn(snapshot);
+        if (next !== snapshot) {
+          writes.push(next);
+          snapshot = next;
+        }
+        return snapshot;
       },
       signatureListVersion: SIGV,
     },
@@ -289,8 +297,7 @@ describe("inspectForDrift — drift detection", () => {
 
   test("fails CLOSED on PinsIntegrityError (security F1)", async () => {
     const deps: DriftCheckDeps = {
-      read: async () => { throw new PinsIntegrityError("tampered"); },
-      write: async () => undefined,
+      update: async () => { throw new PinsIntegrityError("tampered"); },
       signatureListVersion: SIGV,
     };
     const msg = makeToolsListResponse([{ name: "read_file", description: "any" }]);
@@ -301,8 +308,7 @@ describe("inspectForDrift — drift detection", () => {
 
   test("transient I/O read failure fails OPEN (recoverable)", async () => {
     const deps: DriftCheckDeps = {
-      read: async () => { throw new Error("EIO disk error"); },
-      write: async () => undefined,
+      update: async () => { throw new Error("EIO disk error"); },
       signatureListVersion: SIGV,
     };
     const msg = makeToolsListResponse([{ name: "read_file", description: "any" }]);

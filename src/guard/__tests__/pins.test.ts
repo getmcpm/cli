@@ -12,6 +12,7 @@ import {
   readFileSync,
   existsSync,
   symlinkSync,
+  statSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -25,6 +26,7 @@ import {
   acceptDrift,
   readPins,
   writePins,
+  updatePins,
   resetIntegrity,
   PinsIntegrityError,
   PINS_FORMAT_VERSION,
@@ -801,6 +803,183 @@ describe("readPins / writePins", () => {
     );
     await expect(readPins()).rejects.toThrow(/invalid structure/);
     await expect(readPins()).rejects.not.toBeInstanceOf(PinsIntegrityError);
+  });
+});
+
+// #232: updatePins is the ONE locked read-modify-write seam — every caller
+// that used to compose an unlocked readPins() with a later writePins() must
+// route through this instead. See pins.ts's doc comment for the measured
+// pin-loss numbers a bare read+write pair produced under concurrent guard
+// sessions, and src/guard/__tests__/pins-concurrency.test.ts for the real
+// multi-process reproduction/regression test.
+describe("updatePins (#232)", () => {
+  test("an unchanged fn (returns the same reference) performs no write", async () => {
+    await writePins(emptyPinsFile());
+    const filePath = path.join(tmpHome, ".mcpm", "pins.json");
+    const before = readFileSync(filePath, "utf-8");
+    const before_mtime = statSync(filePath).mtimeNs;
+
+    const result = await updatePins((current) => current);
+
+    expect(result).toEqual(emptyPinsFile());
+    expect(readFileSync(filePath, "utf-8")).toBe(before);
+    // A skipped write never touches writeFileAtomic's rename — the file's
+    // inode-level mtime must be untouched, not just byte-identical content.
+    expect(statSync(filePath).mtimeNs).toBe(before_mtime);
+  });
+
+  test("a changed fn (returns a new object) writes content + refreshes the sidecar", async () => {
+    await writePins(emptyPinsFile());
+    const next = upsertToolPin(emptyPinsFile(), "fs", "read", {
+      current_hash: "sha256:" + "a".repeat(64),
+      previous_hashes: [],
+      captured_at: "2026-05-17T00:00:00Z",
+      captured_via: "first-session",
+      signature_list_version: "v0.5.0",
+    });
+    const result = await updatePins(() => next);
+    expect(result).toEqual(next);
+    const back = await readPins();
+    expect(back.servers.fs?.read?.current_hash).toBe("sha256:" + "a".repeat(64));
+    const sidecar = path.join(tmpHome, ".mcpm", "pins.json.integrity");
+    expect(readFileSync(sidecar, "utf-8")).toMatch(/^sha256:[0-9a-f]{64}$/);
+  });
+
+  test("fn sees the FRESH on-disk state, not a value fixed before the call", async () => {
+    // Simulates what a concurrent writer would have already committed: content
+    // written directly (bypassing updatePins) between test setup and the call.
+    await writePins(emptyPinsFile());
+    const concurrentlyWritten = upsertToolPin(emptyPinsFile(), "other", "tool", {
+      current_hash: "sha256:" + "b".repeat(64),
+      previous_hashes: [],
+      captured_at: "x",
+      captured_via: "install",
+      signature_list_version: "v0.5.0",
+    });
+    await writePins(concurrentlyWritten);
+
+    let seenByFn: PinsFile | undefined;
+    await updatePins((current) => {
+      seenByFn = current;
+      return current;
+    });
+    expect(seenByFn?.servers.other?.tool?.current_hash).toBe("sha256:" + "b".repeat(64));
+  });
+
+  test("no entry is lost when two updatePins calls race on DIFFERENT keys (in-process)", async () => {
+    await writePins(emptyPinsFile());
+    await Promise.all([
+      updatePins((pins) =>
+        upsertToolPin(pins, "a", "tool", {
+          current_hash: "sha256:" + "1".repeat(64),
+          previous_hashes: [],
+          captured_at: "x",
+          captured_via: "first-session",
+          signature_list_version: "v0.5.0",
+        }),
+      ),
+      updatePins((pins) =>
+        upsertToolPin(pins, "b", "tool", {
+          current_hash: "sha256:" + "2".repeat(64),
+          previous_hashes: [],
+          captured_at: "x",
+          captured_via: "first-session",
+          signature_list_version: "v0.5.0",
+        }),
+      ),
+    ]);
+    const back = await readPins();
+    expect(back.servers.a?.tool?.current_hash).toBe("sha256:" + "1".repeat(64));
+    expect(back.servers.b?.tool?.current_hash).toBe("sha256:" + "2".repeat(64));
+  });
+
+  test("the lock is released even when fn throws synchronously", async () => {
+    await writePins(emptyPinsFile());
+    await expect(
+      updatePins(() => {
+        throw new Error("fn blew up");
+      }),
+    ).rejects.toThrow(/fn blew up/);
+
+    // If the lock were still held, this would hang/reject on ELOCKED instead
+    // of completing — bound the wait so a real regression fails fast, not by
+    // timing out the whole suite.
+    const result = await Promise.race([
+      updatePins((pins) => pins),
+      new Promise<"TIMEOUT">((resolve) => setTimeout(() => resolve("TIMEOUT"), 2_000)),
+    ]);
+    expect(result).not.toBe("TIMEOUT");
+  });
+
+  test("propagates PinsIntegrityError from the locked read (tamper is not swallowed)", async () => {
+    await writePins(emptyPinsFile());
+    const filePath = path.join(tmpHome, ".mcpm", "pins.json");
+    writeFileSync(filePath, '{"format_version": 1, "servers": {"evil": {}}}\n');
+    let fnCalled = false;
+    await expect(
+      updatePins((pins) => {
+        fnCalled = true;
+        return pins;
+      }),
+    ).rejects.toBeInstanceOf(PinsIntegrityError);
+    // The tamper is caught on the locked read, before fn ever runs.
+    expect(fnCalled).toBe(false);
+  });
+
+  test("first-ever call (no pins.json yet) touches an empty placeholder, not the caller's content", async () => {
+    // Nothing has called writePins yet in this test — pins.json doesn't exist.
+    let seenByFn: PinsFile | undefined;
+    const next = await updatePins((current) => {
+      seenByFn = current;
+      return upsertToolPin(current, "fs", "read", {
+        current_hash: "sha256:" + "c".repeat(64),
+        previous_hashes: [],
+        captured_at: "x",
+        captured_via: "first-session",
+        signature_list_version: "v0.5.0",
+      });
+    });
+    expect(seenByFn).toEqual(emptyPinsFile());
+    expect(next.servers.fs?.read?.current_hash).toBe("sha256:" + "c".repeat(64));
+  });
+});
+
+// #232: acceptDriftCommand (drift.ts) now routes its read-modify-write through
+// updatePins instead of a bare readPins()-then-writePins() pair — no prior
+// test exercised it against a real filesystem (applyAcceptDrift, the pure
+// function it wraps, is covered in drift.test.ts).
+describe("acceptDriftCommand (drift.ts, #232)", () => {
+  test("--new-hash re-pins against a real pins.json and reports changed", async () => {
+    let pins = emptyPinsFile();
+    pins = upsertToolPin(pins, "fs", "read", {
+      current_hash: "sha256:" + "a".repeat(64),
+      previous_hashes: [],
+      captured_at: "x",
+      captured_via: "install",
+      signature_list_version: "v0.5.0",
+    });
+    await writePins(pins);
+
+    const { acceptDriftCommand } = await import("../drift.js");
+    const newHash = "sha256:" + "b".repeat(64);
+    const changed = await acceptDriftCommand("fs", { toolName: "read", newHash });
+
+    expect(changed).toBe(true);
+    const after = await readPins();
+    expect(after.servers.fs?.read?.current_hash).toBe(newHash);
+    expect(after.servers.fs?.read?.previous_hashes).toContain("sha256:" + "a".repeat(64));
+  });
+
+  test("a non-existent server is a no-op and reports unchanged (no write)", async () => {
+    await writePins(emptyPinsFile());
+    const filePath = path.join(tmpHome, ".mcpm", "pins.json");
+    const mtimeBefore = statSync(filePath).mtimeNs;
+
+    const { acceptDriftCommand } = await import("../drift.js");
+    const changed = await acceptDriftCommand("nope", { remove: true });
+
+    expect(changed).toBe(false);
+    expect(statSync(filePath).mtimeNs).toBe(mtimeBefore);
   });
 });
 
