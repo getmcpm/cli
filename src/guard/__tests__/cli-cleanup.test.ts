@@ -11,7 +11,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { _resetCachedStorePath } from "../../store/index.js";
-import { emptyPinsFile, readPins, upsertToolPin, writePins } from "../pins.js";
+import { emptyPinsFile, readPins, updatePins, upsertToolPin } from "../pins.js";
 
 let tmpHome: string;
 let originalHome: string | undefined;
@@ -78,7 +78,7 @@ describe("runCleanupCommand --yes (apply)", () => {
       captured_via: "install",
       signature_list_version: "v0.5.0",
     });
-    await writePins(pins);
+    await updatePins(() => pins);
 
     const { runCleanupCommand } = await import("../cli.js");
     const out: string[] = [];
@@ -99,7 +99,7 @@ describe("runCleanupCommand --yes (apply)", () => {
       captured_via: "install",
       signature_list_version: "v0.5.0",
     });
-    await writePins(pins);
+    await updatePins(() => pins);
 
     vi.resetModules();
     vi.doMock("../pins.js", async () => {
