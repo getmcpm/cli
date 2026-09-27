@@ -172,14 +172,10 @@ export async function runInner(parsed: RunInnerArgs): Promise<number> {
   };
 
   // #232: the SAME "don't fire-and-forget past process exit" problem as
-  // `eventsPersisted`, for pins.json writes. A handshake capture (always
-  // fire-and-forget — H5 never holds the `initialize` response for it) and
-  // every tools/list capture PAST the first (#27 only holds the very first)
-  // are not awaited by the relay's own dispatch logic, so nothing previously
-  // stopped the process from exiting mid-write once the client closed its
-  // side of the pipe — measured: an IDE-realistic client that disconnects
-  // right after its first tools/list lost ~1 in 3 handshake pins to exactly
-  // this, even with updatePins's locking race already closed. Chained (not a
+  // `eventsPersisted`, for pins.json writes. Every capture is tracked: the
+  // handshake (H5 never holds `initialize` for it), every tools/list past the
+  // first, and the #27-held first one too — holding a frame does not keep the
+  // process alive once the client closes its side of the pipe. Chained (not a
   // bare Promise.all) for the same reason as eventsPersisted: each write
   // never rejects (inspectForDrift/inspectHandshakeForDrift always resolve —
   // see their own catch blocks), so chaining just sequences them onto one
@@ -442,7 +438,11 @@ export async function runInner(parsed: RunInnerArgs): Promise<number> {
     // the one-shot opportunity (review finding).
     if (neverPinnedThisServer && !firstToolsListPinAwaited && canProducePin) {
       firstToolsListPinAwaited = true;
-      return commitPin().then(() => result);
+      // Holding the frame does not hold the process: a client that closes stdin
+      // before this resolves ends the child, and exit must still wait for it.
+      const held = commitPin();
+      trackPinWrite(held);
+      return held.then(() => result);
     }
     trackPinWrite(commitPin());
     return result;
