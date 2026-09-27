@@ -8,6 +8,25 @@ _Add entries here, never under a stamped version_ — a release commit renames t
 heading, and a branch that wrote beneath it merges without conflict straight into a
 published section (it happened to #170).
 
+### Fixed
+
+- **A `tools/list` schema or `initialize` capabilities nested a few thousand levels
+  deep was blocked by the schema-drift hash, not by anything in the frame.**
+  `hashLeaf` (`pins.ts`) canonicalized with `JSON.stringify(value, replacer)`, which
+  recurses once per level; under Node 24.20.0 it overflowed past ~2,590 nested arrays
+  or ~2,710 nested objects (counted from the JSON-RPC message), well short of the
+  ~5,970 the relay's own re-serialize holds. v0.42.1–v0.42.3 blocked such a frame as
+  `inspect-rejected` (the whole `tools/list`, or the `initialize` result), and v0.42.0
+  crashed the guard on it (reproduced at 3,000 levels: exit 1, no response). The hash
+  now canonicalizes iteratively (`canonical-json.ts`), so these frames are pinned on
+  the first launch, read as unchanged on the next, and are blocked for depth only past
+  the re-serialize limit, as `forward-serialize-failed`. The hashed bytes are
+  unchanged — 0 differences from v0.42.3's hash across 449,000 generated values under
+  all three replacer forms and ~42,900 JSON nodes from the fixture, benchmark and
+  registry-sweep corpora — so every existing `pins.json` entry keeps matching. Cost on
+  Node 24.20.0: 0.26 ms against 0.21 ms to hash a 40-property tool schema, and at most
+  1.6x the time and 1.5x the peak memory of v0.42.3 on 10 MiB schemas. (#231)
+
 ## [0.42.3] - 2026-09-26
 
 ### Fixed

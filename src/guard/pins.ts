@@ -38,6 +38,7 @@
 import { createHash } from "node:crypto";
 import { readFile, writeFile, unlink } from "node:fs/promises";
 import { fileSha, writeFileAtomic } from "./store-integrity.js";
+import { canonicalStringify } from "./canonical-json.js";
 import path from "node:path";
 import lockfile from "proper-lockfile";
 import { z } from "zod";
@@ -318,8 +319,12 @@ export function fieldHashesOf(input: ToolDefinitionFields): FieldHashes {
   };
 }
 
+// #109: canonicalStringify, not JSON.stringify(value, replacer), which recurses
+// once per nesting level and overflowed ~2,600 levels down — a throw here blocks
+// the whole frame as inspect-rejected. canonical-json.ts has the measurements
+// and the byte-identity argument.
 function hashLeaf(value: unknown, replacer = sortedReplacer): string {
-  const canonical = JSON.stringify(value, replacer);
+  const canonical = canonicalStringify(value, replacer);
   return `sha256:${createHash("sha256").update(canonical, "utf8").digest("hex")}`;
 }
 
