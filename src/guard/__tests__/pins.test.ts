@@ -3,7 +3,7 @@
  * (v0.5.0 Next Step 6).
  */
 
-import { describe, expect, test, beforeEach, afterEach } from "vitest";
+import { describe, expect, test, beforeEach, afterEach, vi } from "vitest";
 import {
   mkdirSync,
   mkdtempSync,
@@ -1059,6 +1059,59 @@ describe("inspectForDrift against the real pin store (#232)", () => {
     expect(onDisk.handshakes?.srv?.current_hash).toBe(
       hashHandshake(handshakeFieldHashesOf({ capabilities: winner, serverInfo: { name: "srv" } })),
     );
+  });
+
+  // The two races above only catch a pre-read that both sessions take before
+  // either writes. A pre-read in its OWN locked update leaves a window a
+  // concurrent commit can land in; one update per inspection closes it.
+  test("each inspection classifies and writes inside ONE update — no separate pre-read", async () => {
+    const { inspectForDrift, inspectHandshakeForDrift } = await import("../drift.js");
+    let calls = 0;
+    const deps = {
+      update: (fn: (current: PinsFile) => PinsFile) => {
+        calls++;
+        return updatePins(fn);
+      },
+      signatureListVersion: "v0.5.0",
+    };
+    const tools = { jsonrpc: "2.0", id: 1, result: { tools: [{ name: "alpha", description: "d" }] } };
+    await inspectForDrift(tools as Parameters<typeof inspectForDrift>[0], "srv", deps);
+    expect(calls).toBe(1);
+    const init = { jsonrpc: "2.0", id: 1, result: { protocolVersion: "2025-06-18", capabilities: { tools: {} }, serverInfo: { name: "srv" } } };
+    await inspectHandshakeForDrift(init as Parameters<typeof inspectHandshakeForDrift>[0], "srv", deps);
+    expect(calls).toBe(2);
+  });
+
+  test("accept-drift reads and writes inside ONE updatePins call", async () => {
+    await updatePins(() =>
+      upsertToolPin(emptyPinsFile(), "fs", "read", {
+        current_hash: "sha256:" + "a".repeat(64),
+        previous_hashes: [],
+        captured_at: "x",
+        captured_via: "install",
+        signature_list_version: "v0.5.0",
+      }),
+    );
+    let calls = 0;
+    vi.resetModules();
+    vi.doMock("../pins.js", async () => {
+      const actual = await vi.importActual<typeof import("../pins.js")>("../pins.js");
+      return {
+        ...actual,
+        updatePins: (fn: (current: PinsFile) => PinsFile) => {
+          calls++;
+          return actual.updatePins(fn);
+        },
+      };
+    });
+    try {
+      const { acceptDriftCommand } = await import("../drift.js");
+      expect(await acceptDriftCommand("fs", { toolName: "read", newHash: "sha256:" + "b".repeat(64) })).toBe(true);
+      expect(calls).toBe(1);
+    } finally {
+      vi.doUnmock("../pins.js");
+      vi.resetModules();
+    }
   });
 });
 

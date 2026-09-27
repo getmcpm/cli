@@ -7,11 +7,12 @@
  */
 
 import { describe, expect, test, vi, beforeEach, afterEach } from "vitest";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { _resetCachedStorePath } from "../../store/index.js";
 import { emptyPinsFile, readPins, updatePins, upsertToolPin } from "../pins.js";
+import { fileSha } from "../store-integrity.js";
 
 let tmpHome: string;
 let originalHome: string | undefined;
@@ -88,6 +89,39 @@ describe("runCleanupCommand --yes (apply)", () => {
     expect(text).toContain("Pruned 2 orphan pin entries");
     const after = await readPins();
     expect(after.servers).toEqual({});
+  });
+
+  test("the prune applies to pins.json as it is at commit time, not to the earlier report read", async () => {
+    // `live` is installed (Claude Code's user config), so its pins must survive.
+    writeFileSync(path.join(tmpHome, ".claude.json"), JSON.stringify({ mcpServers: { live: { command: "node", args: ["s.js"] } } }));
+    const entry = (c: string) => ({
+      current_hash: "sha256:" + c.repeat(64),
+      previous_hashes: [],
+      captured_at: "x",
+      captured_via: "first-session" as const,
+      signature_list_version: "v0.5.0",
+    });
+    await updatePins(() => upsertToolPin(emptyPinsFile(), "orphan-a", "tool", entry("a")));
+
+    const { runCleanupCommand } = await import("../cli.js");
+    let raced = false;
+    await runCleanupCommand({
+      apply: true,
+      write: (s) => {
+        // A guard session for `live` commits its first pin between the report
+        // and the prune (synchronously, so it has fully landed first).
+        if (raced || !s.includes("orphan pin entr")) return;
+        raced = true;
+        const file = path.join(tmpHome, ".mcpm", "pins.json");
+        const content = `${JSON.stringify(upsertToolPin(JSON.parse(readFileSync(file, "utf-8")), "live", "tool", entry("b")), null, 2)}\n`;
+        writeFileSync(file, content);
+        writeFileSync(`${file}.integrity`, fileSha(content));
+      },
+    });
+
+    expect(raced).toBe(true);
+    const after = await readPins();
+    expect(Object.keys(after.servers)).toEqual(["live"]);
   });
 
   test("a tamper detected only at commit time (not at the earlier report read) aborts without pruning", async () => {

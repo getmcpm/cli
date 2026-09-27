@@ -102,6 +102,31 @@ describe("store-integrity", () => {
       expect(existsSync(outside)).toBe(false);
     });
 
+    // An exclusive create of the real name is open() then write(): an unlocked
+    // reader between the two saw a 0-byte pins.json and refused to start.
+    test("never opens the real name for writing where hard links work", async () => {
+      const f = path.join(dir, "pins.json");
+      vi.resetModules();
+      vi.doMock("node:fs/promises", async (importOriginal) => {
+        const actual = await importOriginal<typeof import("node:fs/promises")>();
+        return {
+          ...actual,
+          writeFile: (async (target: unknown, ...rest: unknown[]) => {
+            if (target === f) throw new Error("real name opened before its content was complete");
+            return (actual.writeFile as (...a: unknown[]) => Promise<void>)(target, ...rest);
+          }) as typeof actual.writeFile,
+        };
+      });
+      try {
+        const { touchIfAbsent: touch } = await import("../store-integrity.js");
+        await touch(f, "{}\n");
+        expect(readFileSync(f, "utf-8")).toBe("{}\n");
+      } finally {
+        vi.doUnmock("node:fs/promises");
+        vi.resetModules();
+      }
+    });
+
     test("still creates the file on a volume without hard links (exFAT: link() is ENOTSUP)", async () => {
       vi.resetModules();
       vi.doMock("node:fs/promises", async (importOriginal) => ({
