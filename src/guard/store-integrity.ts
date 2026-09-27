@@ -88,12 +88,23 @@ export async function writeFileAtomic(target: string, data: string, label: strin
  * committed there. Deliberately NOT `writeFileAtomic`: that always REPLACES
  * `target`, which is correct for an intentional overwrite but wrong for a
  * touch, whose entire point is "only if nothing is there yet".
+ *
+ * A volume without hard links (exFAT/FAT, some SMB mounts) fails the `link()`
+ * with ENOTSUP/EPERM even though nothing is there — measured on exFAT, where
+ * every call threw and no pin was ever persisted. There we fall back to the
+ * plain exclusive create: correct, just without the torn-read protection.
  */
 export async function touchIfAbsent(target: string, placeholderContent: string): Promise<void> {
   const tmp = `${target}.touch-${process.pid}-${randomUUID()}`;
+  const create = { encoding: "utf-8", mode: 0o600, flag: "wx" } as const;
   try {
-    await writeFile(tmp, placeholderContent, { encoding: "utf-8", mode: 0o600, flag: "wx" });
-    await link(tmp, target);
+    await writeFile(tmp, placeholderContent, create);
+    try {
+      await link(tmp, target);
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === "EEXIST") return;
+      await writeFile(target, placeholderContent, create);
+    }
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code !== "EEXIST") throw err;
   } finally {
