@@ -355,7 +355,7 @@ export async function runInner(parsed: RunInnerArgs): Promise<number> {
     // `method` not `result`, so neither drift branch below applies to it.
     const statelessResult = inspectFrame(msg);
     let driftResult: InspectResult = { action: "pass", findings: [] };
-    // Issue #27: set only for a tools/list frame — the off-thread refresh +
+    // Issue #27: set only for a tools/list frame — the off-thread
     // first-session pin capture, factored out so the branch below can either
     // fire it (existing behavior) or await it once before returning.
     let commitPin: (() => Promise<void>) | null = null;

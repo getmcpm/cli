@@ -83,7 +83,7 @@ alt Schema mismatch or in-session drift
 Relay->>EventLog: append finding<br/>(signature: schema-drift)
 Relay->>IDE: JSON-RPC error<br/>(block)
 else Schema matches
-Relay->>Relay: Pin write + snapshot refresh<br/>(AWAITED for a never-pinned server's<br/>FIRST tools/list — v0.34.1, so a crash<br/>cannot leave the session baseline-less;<br/>off-thread for every later one)
+Relay->>Relay: Locked pin read-modify-write (#232)<br/>(AWAITED for a never-pinned server's<br/>FIRST tools/list — v0.34.1, so a crash<br/>cannot leave the session baseline-less;<br/>off-thread for every later one;<br/>all awaited before the guard exits)
 end
 end
 end

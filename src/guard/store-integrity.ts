@@ -76,8 +76,8 @@ export async function writeFileAtomic(target: string, data: string, label: strin
  * JSON input". Harmless with one writer (the gap is vanishingly unlikely to be
  * hit); measured to fire under real contention once `updatePins` gave EVERY
  * guard session's first pins.json touch a peer to race against (an IDE
- * launching N servers at once, each pinning tools AND a handshake) — see
- * storm.mjs / CHANGELOG.
+ * launching N servers at once, each pinning tools AND a handshake) — see the
+ * #232 CHANGELOG entry.
  *
  * Fix: write the FULL content to a private temp file first (so it is complete
  * before anything can observe it under the real name), then `link()` it into

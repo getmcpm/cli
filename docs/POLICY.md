@@ -89,4 +89,4 @@ This protects against a same-machine attacker (npm postinstall script, malware) 
 
 ## Concurrency
 
-Both `pins.json` and `guard-policy.yaml` use `proper-lockfile` around writes. Two simultaneous `mcpm guard mute` invocations serialize cleanly; the second waits for the first to release.
+`pins.json` takes one `proper-lockfile` lock around each read-modify-write, so concurrent guard sessions, `accept-drift` and `cleanup` never lose each other's pins. `guard-policy.yaml` locks only around its write, so two simultaneous `mcpm guard mute` invocations can still lose one update (known gap).

@@ -17,10 +17,12 @@ published section (it happened to #170).
   or ~2,710 nested objects (counted from the JSON-RPC message), well short of the
   ~5,970 the relay's own re-serialize holds. v0.42.1–v0.42.3 blocked such a frame as
   `inspect-rejected` (the whole `tools/list`, or the `initialize` result), and v0.42.0
-  crashed the guard on it (reproduced at 3,000 levels: exit 1, no response). The hash
-  now canonicalizes iteratively (`canonical-json.ts`), so these frames are pinned on
-  the first launch, read as unchanged on the next, and are blocked for depth only past
-  the re-serialize limit, as `forward-serialize-failed`. The hashed bytes are
+  and earlier crashed the guard on it (reproduced on v0.42.0 and v0.20.0 at 3,000
+  levels: exit 1, no response). The hash now canonicalizes iteratively
+  (`canonical-json.ts`), so these frames are pinned on the first launch, read as
+  unchanged on the next, and are blocked for depth only past the re-serialize limit,
+  as `forward-serialize-failed` (or `inspect-rejected` past the new walk's
+  100,000-level cap). The hashed bytes are
   unchanged — 0 differences from v0.42.3's hash across 449,000 generated values under
   all three replacer forms and ~42,900 JSON nodes from the fixture, benchmark and
   registry-sweep corpora — so every existing `pins.json` entry keeps matching. Cost on
@@ -35,13 +37,14 @@ published section (it happened to #170).
   with 2 servers starting at once, 88% with 16, 92% with 32. The relay's captures,
   `accept-drift` and `guard cleanup` now read and write under one lock: 0 of 2,640
   tool and 1,320 handshake pins lost at 2 to 32 servers, and no guard refused to
-  start (previously 3 of 640 did at 32, on a half-written pins.json). What changes:
-  a never-pinned server's first `tools/list` can wait for the lock at startup
-  (median/max 32/489 ms with 16 starting, 154/1,320 ms with 32, against 21/391 and
+  start (previously 3 of 640 did at 32, reading pins.json between a writer's content
+  and sidecar renames). What changes: a never-pinned server's first `tools/list` can
+  wait for the lock at startup (median/max 154/1,320 ms with 32 starting, against
   71/656 ms before, and about 1.8 s behind a lock left by a killed guard); the guard
-  exits only after its pin writes land; and a pins.json tampered with while a guard
-  runs is no longer overwritten by that guard's next write, so the next launch
-  refuses to start until `mcpm guard reset-integrity`. (#232)
+  exits only after its pin writes land (p95 about 0.3 s after the client closes, with
+  32 starting, against about 20 ms); and a pins.json tampered with while a guard runs
+  is no longer overwritten by that guard's next write, so the next launch refuses to
+  start until `mcpm guard reset-integrity`. (#232)
 
 ## [0.42.3] - 2026-09-26
 
