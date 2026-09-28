@@ -1263,9 +1263,16 @@ describe("runInner — inspectChildResponse pin-commit wait (issue #27)", () => 
       return {
         ...actual,
         readPins: async (): Promise<PinsFile> => actual.emptyPinsFile(),
-        writePins: async (pins: PinsFile): Promise<void> => {
-          writePinsCalls.push(pins);
+        // #232: run-inner now routes the pin-commit write through updatePins
+        // (a locked read-modify-write), not a bare writePins() call — mock
+        // THAT seam instead, applying `fn` against the same never-pinned
+        // baseline `readPins` reports, and keep the same writeGate so the
+        // test can still hold the write open to prove the #27 wait.
+        updatePins: async (fn: (current: PinsFile) => PinsFile): Promise<PinsFile> => {
+          const next = fn(actual.emptyPinsFile());
+          writePinsCalls.push(next);
           await writeGate;
+          return next;
         },
       };
     });
@@ -1356,8 +1363,10 @@ describe("runInner — inspectChildResponse pin-commit wait (issue #27)", () => 
       return {
         ...actual,
         readPins: async (): Promise<PinsFile> => pins,
-        writePins: async (p: PinsFile): Promise<void> => {
-          writePinsCalls.push(p);
+        updatePins: async (fn: (current: PinsFile) => PinsFile): Promise<PinsFile> => {
+          const next = fn(pins);
+          if (next !== pins) writePinsCalls.push(next);
+          return next;
         },
       };
     });
@@ -1405,6 +1414,38 @@ describe("runInner — inspectChildResponse pin-commit wait (issue #27)", () => 
 
     const real = capturedInspectChildResponse!(toolsList("read", "v1"));
     expect(real).toBeInstanceOf(Promise);
+  });
+
+  // #232: holding the frame does not hold the process. A client that hangs up
+  // right after sending tools/list ends the child while the pin write is still
+  // pending; the exit must wait for it or the first-session pin is lost.
+  test("the guard's exit waits for the held first tools/list's pin write", async () => {
+    let endChild!: (code: number) => void;
+    vi.doMock("../relay.js", async () => {
+      const actual = await vi.importActual<typeof import("../relay.js")>("../relay.js");
+      return {
+        ...actual,
+        startRelay: (opts: {
+          inspectChildResponse?: (msg: JSONRPCMessage) => InspectResult | Promise<InspectResult>;
+        }) => {
+          capturedInspectChildResponse = opts.inspectChildResponse;
+          return { child: {} as never, exit: new Promise<number>((resolve) => (endChild = resolve)) };
+        },
+      };
+    });
+    const { runInner } = await import("../run-inner.js");
+    let exited = false;
+    const done = runInner(runInnerArgs).then(() => (exited = true));
+    await vi.waitFor(() => expect(capturedInspectChildResponse).toBeDefined());
+
+    void capturedInspectChildResponse!(toolsList("read", "v1"));
+    endChild(0);
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(exited).toBe(false);
+
+    releaseWrite!();
+    await done;
+    expect(writePinsCalls).toHaveLength(1);
   });
 });
 

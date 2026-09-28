@@ -34,9 +34,8 @@ import {
   hashHandshake,
   lookupHandshake,
   upsertHandshakePin,
-  readPins,
+  updatePins,
   upsertToolPin,
-  writePins,
   type FieldHashes,
   type HandshakeFieldHashes,
   type HandshakePinEntry,
@@ -438,9 +437,15 @@ function extractTools(msg: JSONRPCMessage): readonly ToolDefinition[] | null {
   return tools.filter(isToolDefinition);
 }
 
+/**
+ * #232: `update` is the ONE locked read-modify-write seam (see
+ * {@link updatePins}) — deliberately not a `read`/`write` pair. The pre-#232
+ * shape let a caller compose its own unlocked read with a later write, which
+ * is exactly how two concurrent guard sessions could each read the same
+ * stale state and one write clobber the other's first-session pin.
+ */
 export interface DriftCheckDeps {
-  readonly read: () => Promise<PinsFile>;
-  readonly write: (pins: PinsFile) => Promise<void>;
+  readonly update: (fn: (current: PinsFile) => PinsFile) => Promise<PinsFile>;
   readonly signatureListVersion: string;
 }
 
@@ -459,86 +464,98 @@ export async function inspectForDrift(
     return { action: "pass", findings: [] };
   }
 
-  let pins: PinsFile;
-  try {
-    pins = await deps.read();
-  } catch (err) {
-    // SECURITY F1: fail CLOSED on a known integrity violation. Failing open
-    // would let a tampered pins.json (matched-back sidecar from a same-user
-    // attacker) silently disable drift detection. Transient I/O errors fail
-    // open since they're recoverable.
-    if (err instanceof PinsIntegrityError) return pinsIntegrityBlock();
-    return { action: "pass", findings: [] };
-  }
-
+  // #232: classification runs INSIDE the same locked critical section as the
+  // read+write, via the closure below — so the verdict is always computed
+  // against the exact state that gets (or already is) durably on disk, never
+  // against a snapshot a concurrent writer could invalidate before the write
+  // lands. `driftedTools`/`classified` are populated by that closure; `deps
+  // .update` calls it exactly once (it runs synchronously inside the lock, no
+  // internal retry), so capturing the result this way is safe.
   const driftedTools: {
     toolName: string;
     expected: string;
     actual: string;
     cls: DriftClass;
   }[] = [];
-  let pinsAfter = pins;
+  let classified = false;
 
-  for (const tool of tools) {
-    const toolName = typeof tool.name === "string" ? tool.name : null;
-    if (toolName === null) continue;
+  try {
+    await deps.update((current) => {
+      classified = true;
+      let pinsAfter = current;
 
-    const fields = {
-      description: typeof tool.description === "string" ? tool.description : null,
-      schema: tool.inputSchema ?? tool.schema,
-      annotations: tool.annotations,
-    };
-    const liveHash = hashToolDefinition(fields);
-    const liveFields = fieldHashesOf(fields);
+      for (const tool of tools) {
+        const toolName = typeof tool.name === "string" ? tool.name : null;
+        if (toolName === null) continue;
 
-    const existing = lookupPin(pins, serverName, toolName);
+        const fields = {
+          description: typeof tool.description === "string" ? tool.description : null,
+          schema: tool.inputSchema ?? tool.schema,
+          annotations: tool.annotations,
+        };
+        const liveHash = hashToolDefinition(fields);
+        const liveFields = fieldHashesOf(fields);
 
-    if (!existing) {
-      // First-session capture. Write the pin (with H4 field hashes) and let
-      // traffic through.
-      const entry: PinEntry = {
-        current_hash: liveHash,
-        previous_hashes: [],
-        captured_at: new Date().toISOString(),
-        captured_via: "first-session",
-        signature_list_version: deps.signatureListVersion,
-        field_hashes: liveFields,
-      };
-      pinsAfter = upsertToolPin(pinsAfter, serverName, toolName, entry);
-      continue;
-    }
+        const existing = lookupPin(current, serverName, toolName);
 
-    if (existing.current_hash === null) {
-      // Placeholder entry from a failed install-time capture. Fill it in now,
-      // including H4 field hashes.
-      const entry: PinEntry = {
-        ...existing,
-        current_hash: liveHash,
-        captured_at: new Date().toISOString(),
-        captured_via: "first-session",
-        signature_list_version: deps.signatureListVersion,
-        field_hashes: liveFields,
-      };
-      pinsAfter = upsertToolPin(pinsAfter, serverName, toolName, entry);
-      continue;
-    }
+        if (!existing) {
+          // First-session capture. Write the pin (with H4 field hashes) and
+          // let traffic through.
+          const entry: PinEntry = {
+            current_hash: liveHash,
+            previous_hashes: [],
+            captured_at: new Date().toISOString(),
+            captured_via: "first-session",
+            signature_list_version: deps.signatureListVersion,
+            field_hashes: liveFields,
+          };
+          pinsAfter = upsertToolPin(pinsAfter, serverName, toolName, entry);
+          continue;
+        }
 
-    if (!pinStillMatches(existing.current_hash, liveHash, fields)) {
-      // Drift. Classify by field (cosmetic vs security). Do NOT auto-re-pin —
-      // the durable baseline only moves via an explicit `accept-drift`.
-      driftedTools.push({
-        toolName,
-        expected: existing.current_hash,
-        actual: liveHash,
-        cls: classifyDrift(existing, liveFields, legacyFieldHashCandidates(fields)),
-      });
-    }
-  }
+        if (existing.current_hash === null) {
+          // Placeholder entry from a failed install-time capture. Fill it in
+          // now, including H4 field hashes.
+          const entry: PinEntry = {
+            ...existing,
+            current_hash: liveHash,
+            captured_at: new Date().toISOString(),
+            captured_via: "first-session",
+            signature_list_version: deps.signatureListVersion,
+            field_hashes: liveFields,
+          };
+          pinsAfter = upsertToolPin(pinsAfter, serverName, toolName, entry);
+          continue;
+        }
 
-  // Best-effort persist any new / first-session-pin entries. Don't block on
-  // write failures — drift detection is already as strict as it can be.
-  if (pinsAfter !== pins) {
-    await deps.write(pinsAfter).catch(() => undefined);
+        if (!pinStillMatches(existing.current_hash, liveHash, fields)) {
+          // Drift. Classify by field (cosmetic vs security). Do NOT auto-re-pin
+          // — the durable baseline only moves via an explicit `accept-drift`.
+          driftedTools.push({
+            toolName,
+            expected: existing.current_hash,
+            actual: liveHash,
+            cls: classifyDrift(existing, liveFields, legacyFieldHashCandidates(fields)),
+          });
+        }
+      }
+
+      return pinsAfter;
+    });
+  } catch (err) {
+    // SECURITY F1: fail CLOSED on a known integrity violation. Failing open
+    // would let a tampered pins.json (matched-back sidecar from a same-user
+    // attacker) silently disable drift detection.
+    if (err instanceof PinsIntegrityError) return pinsIntegrityBlock();
+    // A read/lock failure BEFORE `current` was ever produced (transient I/O,
+    // ELOCKED, …) — fail open, same as before #232.
+    if (!classified) return { action: "pass", findings: [] };
+    // Classification succeeded (driftedTools reflects a real, freshly-read
+    // comparison) but the SUBSEQUENT write threw (e.g. disk full). The verdict
+    // still stands — a failed persist doesn't un-happen a real drift — and
+    // `run-inner.ts`'s own confirmation (issue #27) is what surfaces an
+    // unpersisted first-session capture, not this function silently
+    // discarding an already-correct answer.
   }
 
   if (driftedTools.length === 0) {
@@ -618,59 +635,66 @@ export async function inspectHandshakeForDrift(
   const result = extractInitializeResult(msg);
   if (result === null) return { action: "pass", findings: [] };
 
-  let pins: PinsFile;
-  try {
-    pins = await deps.read();
-  } catch (err) {
-    if (err instanceof PinsIntegrityError) return pinsIntegrityBlock();
-    return { action: "pass", findings: [] };
-  }
-
   const liveFields = handshakeFieldHashesOf(result);
   const liveCapKeys = handshakeCapabilityKeys(result);
   const liveWhole = hashHandshake(liveFields);
 
-  const pinned = lookupHandshake(pins, serverName);
+  // #232: same locked-critical-section shape as inspectForDrift — the verdict
+  // (in `outcome`) is computed INSIDE the closure `deps.update` runs under the
+  // lock, against the freshest on-disk state, not a snapshot a concurrent
+  // writer could invalidate before the write lands.
+  let outcome: InspectResult = { action: "pass", findings: [] };
+  let classified = false;
 
-  // First-session capture (TOFU). Write the pin + pass.
-  if (pinned === undefined) {
-    const entry: HandshakePinEntry = {
-      current_hash: liveWhole,
-      previous_hashes: [],
-      captured_at: new Date().toISOString(),
-      captured_via: "first-session",
-      signature_list_version: deps.signatureListVersion,
-      field_hashes: liveFields,
-      capability_keys: liveCapKeys,
-    };
-    await deps.write(upsertHandshakePin(pins, serverName, entry)).catch(() => undefined);
-    return { action: "pass", findings: [] };
+  try {
+    await deps.update((pins) => {
+      classified = true;
+      const pinned = lookupHandshake(pins, serverName);
+
+      // First-session capture (TOFU). Write the pin + pass.
+      if (pinned === undefined) {
+        const entry: HandshakePinEntry = {
+          current_hash: liveWhole,
+          previous_hashes: [],
+          captured_at: new Date().toISOString(),
+          captured_via: "first-session",
+          signature_list_version: deps.signatureListVersion,
+          field_hashes: liveFields,
+          capability_keys: liveCapKeys,
+        };
+        return upsertHandshakePin(pins, serverName, entry);
+      }
+
+      // Matches the durable baseline, or already surfaced once → no warn, no write.
+      if (
+        handshakeStillMatches(pinned.current_hash, liveWhole, result) ||
+        pinned.previous_hashes.some((h) => handshakeStillMatches(h, liveWhole, result))
+      ) {
+        return pins;
+      }
+
+      // New drift. Append the live whole-hash to previous_hashes (warn-once
+      // durable dedup) WITHOUT moving current_hash — the baseline only moves
+      // via an explicit re-pin (deferred to H3).
+      const updated: HandshakePinEntry = {
+        ...pinned,
+        previous_hashes: [...pinned.previous_hashes, liveWhole],
+      };
+      const cls = classifyHandshakeDrift(pinned, liveFields, liveCapKeys, legacyHandshakeFieldCandidates(result));
+      const findings = buildHandshakeDriftFinding({ cls, safeServer: sanitizeLabel(serverName) });
+      outcome = { action: worstAction(findings), findings };
+      return upsertHandshakePin(pins, serverName, updated);
+    });
+  } catch (err) {
+    if (err instanceof PinsIntegrityError) return pinsIntegrityBlock();
+    // A read/lock failure before `pins` was ever produced: fail open, same as
+    // before #232. If classification DID run, `outcome` already reflects it —
+    // a subsequent write failure doesn't un-happen a real drift (mirrors
+    // inspectForDrift; the durable dedup just didn't persist this round).
+    if (!classified) return { action: "pass", findings: [] };
   }
 
-  // Matches the durable baseline, or already surfaced once → no warn.
-  if (
-    handshakeStillMatches(pinned.current_hash, liveWhole, result) ||
-    pinned.previous_hashes.some((h) => handshakeStillMatches(h, liveWhole, result))
-  ) {
-    return { action: "pass", findings: [] };
-  }
-
-  // New drift. Append the live whole-hash to previous_hashes (warn-once durable
-  // dedup) WITHOUT moving current_hash — the baseline only moves via an explicit
-  // re-pin (deferred to H3). Best-effort persist.
-  const updated: HandshakePinEntry = {
-    ...pinned,
-    previous_hashes: [...pinned.previous_hashes, liveWhole],
-  };
-  await deps.write(upsertHandshakePin(pins, serverName, updated)).catch(() => undefined);
-
-  const cls = classifyHandshakeDrift(pinned, liveFields, liveCapKeys, legacyHandshakeFieldCandidates(result));
-  const findings = buildHandshakeDriftFinding({
-    cls,
-    safeServer: sanitizeLabel(serverName),
-  });
-  const action = worstAction(findings);
-  return { action, findings };
+  return outcome;
 }
 
 /**
@@ -747,9 +771,15 @@ export async function acceptDriftCommand(
   serverName: string,
   options: { toolName?: string; remove?: boolean; newHash?: string } = {},
 ): Promise<boolean> {
-  const pins = await readPins();
-  const next = applyAcceptDrift(pins, serverName, options);
-  const changed = next !== pins;
-  if (changed) await writePins(next);
+  // #232: route through updatePins so applyAcceptDrift is applied against a
+  // FRESH, locked read — a relay session could be mid-first-session-capture
+  // for this same server concurrently, and reading+writing separately here
+  // (the pre-#232 shape) could clobber it (or vice versa).
+  let changed = false;
+  await updatePins((pins) => {
+    const next = applyAcceptDrift(pins, serverName, options);
+    changed = next !== pins;
+    return next;
+  });
   return changed;
 }

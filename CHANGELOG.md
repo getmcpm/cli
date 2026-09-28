@@ -27,6 +27,22 @@ published section (it happened to #170).
   Node 24.20.0: 0.26 ms against 0.21 ms to hash a 40-property tool schema, and at most
   1.6x the time and 1.5x the peak memory of v0.42.3 on 10 MiB schemas. (#231)
 
+- **Guard sessions that started together overwrote each other's pins.** Every
+  pins.json writer read the file outside the lock and wrote it back under it, so a
+  commit landing in between was lost, and a server whose pin is lost is trusted
+  afresh on its next launch. Measured with real `mcpm guard run --inner` sessions
+  sharing one throwaway HOME (Node 24.20.0): 48% of first-session tool pins lost
+  with 2 servers starting at once, 88% with 16, 92% with 32. The relay's captures,
+  `accept-drift` and `guard cleanup` now read and write under one lock: 0 of 2,640
+  tool and 1,320 handshake pins lost at 2 to 32 servers, and no guard refused to
+  start (previously 3 of 640 did at 32, on a half-written pins.json). What changes:
+  a never-pinned server's first `tools/list` can wait for the lock at startup
+  (median/max 32/489 ms with 16 starting, 154/1,320 ms with 32, against 21/391 and
+  71/656 ms before, and about 1.8 s behind a lock left by a killed guard); the guard
+  exits only after its pin writes land; and a pins.json tampered with while a guard
+  runs is no longer overwritten by that guard's next write, so the next launch
+  refuses to start until `mcpm guard reset-integrity`. (#232)
+
 ## [0.42.3] - 2026-09-26
 
 ### Fixed

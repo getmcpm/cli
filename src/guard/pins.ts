@@ -24,10 +24,11 @@
  * #19. Any mismatch on read refuses to use the pin file until the user runs
  * `mcpm guard reset-integrity`.
  *
- * writePins finalizes via two sequential renames (content, then sidecar) —
- * see its own doc comment. readPins retries a mismatch briefly (TODOS #24)
- * so a reader landing in that window doesn't fail closed on an in-flight
- * write; a real tamper or a crash mid-write still reproduces every attempt.
+ * updatePins — the only writer (#232) — finalizes via two sequential renames
+ * (content, then sidecar). readPins retries a mismatch briefly (TODOS #24),
+ * then confirms it under the writers' lock, so a reader landing in that window
+ * doesn't fail closed on an in-flight write; a real tamper or a crash
+ * mid-write still reproduces every attempt.
  *
  * Two-target scope: install-time capture writes captured_via:"install".
  * If install-time spawn fails (OAuth, network), a placeholder entry with
@@ -36,8 +37,8 @@
  */
 
 import { createHash } from "node:crypto";
-import { readFile, writeFile, unlink } from "node:fs/promises";
-import { fileSha, writeFileAtomic } from "./store-integrity.js";
+import { readFile, unlink } from "node:fs/promises";
+import { fileSha, touchIfAbsent, writeFileAtomic } from "./store-integrity.js";
 import { canonicalStringify } from "./canonical-json.js";
 import path from "node:path";
 import lockfile from "proper-lockfile";
@@ -464,8 +465,8 @@ async function integrityPath(): Promise<string> {
   return path.join(await getStorePath(), INTEGRITY_FILENAME);
 }
 
-// writePins renames pins.json, THEN renames the sidecar (two separate atomic
-// writes under one lock — see writePins). A reader landing in that gap sees
+// updatePins renames pins.json, THEN renames the sidecar (two separate atomic
+// writes under one lock). A reader landing in that gap sees
 // new content next to the still-old sidecar and would otherwise fail closed
 // on an in-flight write, not tamper (TODOS #24). Retry briefly before raising:
 // the gap spans the second writeFileAtomic call's own several awaited fs ops
@@ -476,13 +477,42 @@ async function integrityPath(): Promise<string> {
 const INTEGRITY_RETRY_ATTEMPTS = 4;
 const INTEGRITY_RETRY_DELAY_MS = 20;
 
+/** The one lock every pins.json writer (and readPins's confirmation) takes. */
+const PINS_LOCK = { retries: { retries: 20, minTimeout: 10, maxTimeout: 100 }, stale: 5_000 };
+
 /**
  * Read the pin file + verify its integrity sidecar. Returns an empty pins
  * file if pins.json does not exist (first-run). Throws PinsIntegrityError
  * if the sidecar exists but does not match the file content — the user must
  * run `mcpm guard reset-integrity` before pins are usable again.
+ *
+ * #232: an unlocked reader that keeps landing in a writer's content→sidecar
+ * rename gap is not a tamper. Under an IDE-launch storm (CPU oversubscribed, a
+ * writer descheduled between its renames) that outlasted the retries above —
+ * measured: 1 of 320 guards refused to start with 32 launching at once. So a
+ * mismatch is confirmed once more under the writers' lock, where no writer can
+ * be mid-rename; only a mismatch that survives it is reported.
  */
 export async function readPins(): Promise<PinsFile> {
+  try {
+    return await readPinsUnlocked();
+  } catch (err) {
+    if (!(err instanceof PinsIntegrityError)) throw err;
+    let release: () => Promise<void>;
+    try {
+      release = await lockfile.lock(await pinsPath(), PINS_LOCK);
+    } catch {
+      throw err;
+    }
+    try {
+      return await readPinsUnlocked();
+    } finally {
+      await release();
+    }
+  }
+}
+
+async function readPinsUnlocked(): Promise<PinsFile> {
   const filePath = await pinsPath();
   const sidecarPath = await integrityPath();
 
@@ -506,7 +536,7 @@ export async function readPins(): Promise<PinsFile> {
     }
 
     // If the sidecar exists, it must match. If the sidecar is missing, treat as
-    // first-run — write a fresh sidecar on the next writePins.
+    // first-run — write a fresh sidecar on the next updatePins.
     let sidecar: string | null = null;
     try {
       sidecar = (await readFile(sidecarPath, "utf-8")).trim();
@@ -570,38 +600,37 @@ export async function readPins(): Promise<PinsFile> {
 }
 
 /**
- * Write pins.json + refresh the integrity sidecar. Atomic via .tmp + rename.
+ * #232: the ONLY way to write pins.json — a locked read-modify-write. The lock
+ * is taken BEFORE the read, so `fn` always derives the new state from what is
+ * on disk now and no other writer can commit between this read and this write.
+ * The pre-#232 shape (an unlocked read, then a locked write) lost a concurrent
+ * writer's commit whenever one landed in between: 50% of first-session pins at
+ * 2 guards launching at once, ~88% at 16.
  *
- * Uses proper-lockfile (security review F2) to serialize concurrent writes
- * from multiple IDE sessions hitting the same wrapped server. Without the
- * lock, two relays writing first-session pins can race and corrupt the
- * sidecar relative to pins.json.
+ * `fn` must be pure and fast (it runs holding the lock). Returning the SAME
+ * reference skips the write. Resolves to what is now on disk. Propagates a
+ * PinsIntegrityError (tamper), a corrupt-file error, or an fs error — ELOCKED
+ * once PINS_LOCK's retries (~1.75 s of backoff) are exhausted.
+ *
+ * Finalizes via two renames (content, then sidecar) — the gap readPins retries
+ * through. The lock needs the file to exist, so a missing pins.json is first
+ * seeded with an empty, valid placeholder (never 0 bytes — see touchIfAbsent).
  */
-export async function writePins(pins: PinsFile): Promise<void> {
+export async function updatePins(fn: (current: PinsFile) => PinsFile): Promise<PinsFile> {
   const filePath = await pinsPath();
   const sidecarPath = await integrityPath();
-  const serialized = `${JSON.stringify(pins, null, 2)}\n`;
+  await touchIfAbsent(filePath, `${JSON.stringify(emptyPinsFile(), null, 2)}\n`);
 
-  // Touch the file first if it doesn't exist — proper-lockfile requires the
-  // target to exist before locking. Write VALID pins content, NOT "": a crash
-  // (or a concurrent, unlocked readPins) between this touch and the atomic
-  // write below must never observe a 0-byte pins.json — that throws
-  // PINS-READ-ERROR and fails the guard closed / bricks the next launch.
-  // readPins treats an absent sidecar as first-run, so this sidecar-less
-  // intermediate parses cleanly; the lock+atomic writes below finalize it.
+  const release = await lockfile.lock(filePath, PINS_LOCK);
   try {
-    await writeFile(filePath, serialized, { flag: "wx", mode: 0o600 });
-  } catch (err) {
-    if ((err as NodeJS.ErrnoException).code !== "EEXIST") throw err;
-  }
-
-  const release = await lockfile.lock(filePath, {
-    retries: { retries: 5, minTimeout: 10, maxTimeout: 200 },
-    stale: 5_000,
-  });
-  try {
+    // Under the lock no writer is mid-rename, so a mismatch here is genuine.
+    const current = await readPinsUnlocked();
+    const next = fn(current);
+    if (next === current) return current;
+    const serialized = `${JSON.stringify(next, null, 2)}\n`;
     await writeFileAtomic(filePath, serialized, "pins");
     await writeFileAtomic(sidecarPath, fileSha(serialized), "pins");
+    return next;
   } finally {
     await release();
   }
@@ -627,21 +656,18 @@ export async function resetIntegrity(): Promise<boolean> {
     throw err;
   }
 
-  // TODOS #24 (review finding): take the SAME lock writePins holds. Without
-  // it, a concurrent writePins can rename pins.json to content B and its
+  // TODOS #24 (review finding): take the SAME lock updatePins holds. Without
+  // it, a concurrent updatePins can rename pins.json to content B and its
   // sidecar to sha(B) while this function is between its own read and sidecar
   // write — leaving pins.json at B but the sidecar at sha(A), a permanent
   // mismatch readPins's retries can never clear (both files are individually
   // legitimate, just from two different writers). Re-read AFTER acquiring the
   // lock so the hash always matches whatever is on disk at write time.
-  const release = await lockfile.lock(filePath, {
-    retries: { retries: 5, minTimeout: 10, maxTimeout: 200 },
-    stale: 5_000,
-  });
+  const release = await lockfile.lock(filePath, PINS_LOCK);
   try {
     const content = await readFile(filePath, "utf-8");
     // Route the sidecar write through the same hardened atomic writer used by
-    // writePins (assertNotSymlink + stale-.tmp unlink + {flag:"wx"}). A bare
+    // updatePins (assertNotSymlink + stale-.tmp unlink + {flag:"wx"}). A bare
     // writeFile(`${sidecarPath}.tmp`) + rename would follow a pre-placed symlink
     // at the sidecar (or its .tmp), redirecting the write onto an attacker-chosen
     // path — the exact gap the PR closed for the main pins/policy writes.

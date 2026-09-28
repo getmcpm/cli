@@ -5,11 +5,11 @@
  * the new `label` that names the store in the symlink-refusal message.
  */
 
-import { describe, expect, test, beforeEach, afterEach } from "vitest";
-import { mkdtempSync, rmSync, writeFileSync, symlinkSync, readFileSync, existsSync } from "node:fs";
+import { describe, expect, test, beforeEach, afterEach, vi } from "vitest";
+import { mkdtempSync, rmSync, writeFileSync, symlinkSync, readFileSync, existsSync, readdirSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { fileSha, assertNotSymlink, writeFileAtomic } from "../store-integrity.js";
+import { fileSha, assertNotSymlink, writeFileAtomic, touchIfAbsent } from "../store-integrity.js";
 
 describe("store-integrity", () => {
   let dir: string;
@@ -78,6 +78,75 @@ describe("store-integrity", () => {
       expect(readFileSync(f, "utf-8")).toBe("fresh");
       // The pre-placed symlink's target must be untouched (unlink removed the link).
       expect(readFileSync(outside, "utf-8")).toBe("do-not-touch");
+    });
+  });
+
+  // #232: the create-if-absent seed for pins.json.
+  describe("touchIfAbsent", () => {
+    test("creates the file with its full content at 0600 and leaves no temp file", async () => {
+      const f = path.join(dir, "pins.json");
+      await touchIfAbsent(f, "{}\n");
+      expect(readFileSync(f, "utf-8")).toBe("{}\n");
+      expect(statSync(f).mode & 0o777).toBe(0o600);
+      expect(readdirSync(dir)).toEqual(["pins.json"]);
+    });
+
+    test("never replaces an existing file (or follows a symlink there)", async () => {
+      const f = path.join(dir, "pins.json");
+      writeFileSync(f, "committed");
+      await touchIfAbsent(f, "placeholder");
+      expect(readFileSync(f, "utf-8")).toBe("committed");
+      const outside = path.join(dir, "outside");
+      symlinkSync(outside, path.join(dir, "dangling"));
+      await touchIfAbsent(path.join(dir, "dangling"), "placeholder");
+      expect(existsSync(outside)).toBe(false);
+    });
+
+    // An exclusive create of the real name is open() then write(): an unlocked
+    // reader between the two saw a 0-byte pins.json and refused to start.
+    test("never opens the real name for writing where hard links work", async () => {
+      const f = path.join(dir, "pins.json");
+      vi.resetModules();
+      vi.doMock("node:fs/promises", async (importOriginal) => {
+        const actual = await importOriginal<typeof import("node:fs/promises")>();
+        return {
+          ...actual,
+          writeFile: (async (target: unknown, ...rest: unknown[]) => {
+            if (target === f) throw new Error("real name opened before its content was complete");
+            return (actual.writeFile as (...a: unknown[]) => Promise<void>)(target, ...rest);
+          }) as typeof actual.writeFile,
+        };
+      });
+      try {
+        const { touchIfAbsent: touch } = await import("../store-integrity.js");
+        await touch(f, "{}\n");
+        expect(readFileSync(f, "utf-8")).toBe("{}\n");
+      } finally {
+        vi.doUnmock("node:fs/promises");
+        vi.resetModules();
+      }
+    });
+
+    test("still creates the file on a volume without hard links (exFAT: link() is ENOTSUP)", async () => {
+      vi.resetModules();
+      vi.doMock("node:fs/promises", async (importOriginal) => ({
+        ...(await importOriginal<typeof import("node:fs/promises")>()),
+        link: async () => {
+          throw Object.assign(new Error("operation not supported"), { code: "ENOTSUP" });
+        },
+      }));
+      try {
+        const { touchIfAbsent: touchNoLinks } = await import("../store-integrity.js");
+        const f = path.join(dir, "pins.json");
+        await touchNoLinks(f, "{}\n");
+        expect(readFileSync(f, "utf-8")).toBe("{}\n");
+        await touchNoLinks(f, "second");
+        expect(readFileSync(f, "utf-8")).toBe("{}\n");
+        expect(readdirSync(dir)).toEqual(["pins.json"]);
+      } finally {
+        vi.doUnmock("node:fs/promises");
+        vi.resetModules();
+      }
     });
   });
 });

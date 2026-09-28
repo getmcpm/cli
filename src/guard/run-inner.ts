@@ -29,7 +29,7 @@ import {
   buildDriftFinding,
   lookupToolPin,
 } from "./drift.js";
-import { readPins, writePins } from "./pins.js";
+import { readPins, updatePins } from "./pins.js";
 import { readPolicy, expireStale, PolicyIntegrityError, type GuardPolicyFile } from "./policy.js";
 import { appendEvent } from "./event-log.js";
 import { hashOriginalEntry } from "./wrap.js";
@@ -170,6 +170,20 @@ export async function runInner(parsed: RunInnerArgs): Promise<number> {
   const persist = (event: GuardEvent): void => {
     eventsPersisted = eventsPersisted.then(() => appendEvent(event, parsed.serverName));
   };
+
+  // #232: the SAME "don't fire-and-forget past process exit" problem as
+  // `eventsPersisted`, for pins.json writes. Every capture is tracked: the
+  // handshake (H5 never holds `initialize` for it), every tools/list past the
+  // first, and the #27-held first one too — holding a frame does not keep the
+  // process alive once the client closes its side of the pipe. Chained (not a
+  // bare Promise.all) for the same reason as eventsPersisted: each write
+  // never rejects (inspectForDrift/inspectHandshakeForDrift always resolve —
+  // see their own catch blocks), so chaining just sequences them onto one
+  // awaitable without needing per-call error handling.
+  let pinsPersisted: Promise<void> = Promise.resolve();
+  const trackPinWrite = (write: Promise<unknown>): void => {
+    pinsPersisted = pinsPersisted.then(() => write).then(() => undefined);
+  };
   const logEvent = (event: GuardEvent): void => {
     if (event.action === "block" || event.action === "warn") {
       process.stderr.write(
@@ -224,7 +238,11 @@ export async function runInner(parsed: RunInnerArgs): Promise<number> {
   }
 
   // Drift detection is async (reads + writes pins.json). The relay's inspect
-  // callbacks are sync, so we keep a cached snapshot updated off-thread.
+  // callbacks are sync, so the SYNC per-message verdict compares against a
+  // frozen session-start snapshot (baselineForDrift below); persistence of new
+  // pins happens off-thread through the locked updatePins seam (#232) and no
+  // longer needs — or silently falls back to — a mutable cached snapshot: each
+  // persist call re-reads the CURRENT on-disk state itself, under the lock.
   //
   // FAIL CLOSED on a pins-read error. First-run ENOENT is handled INSIDE
   // readPins (returns an empty pins file, no throw), so the only errors that
@@ -290,10 +308,11 @@ export async function runInner(parsed: RunInnerArgs): Promise<number> {
     firstFieldHashes: new Map(),
   };
 
-  // FROZEN session-start baseline. The off-thread refresh may keep reassigning
-  // pinsSnapshot for its own fallback, but the sync classifier must compare
-  // against the immutable session-start pins so a mid-session pin rewrite can't
-  // retroactively launder a drift.
+  // FROZEN session-start baseline. `pinsSnapshot` itself is never reassigned
+  // (#232 removed the off-thread refresh that used to keep it "reasonably
+  // current" as a fallback) — this alias just names the value's role: the sync
+  // classifier must compare against the immutable session-start pins so a
+  // mid-session pin rewrite can't retroactively launder a drift.
   const baselineForDrift = pinsSnapshot;
 
   // Issue #27: this server has no pin on disk AT ALL as of session start — the
@@ -352,22 +371,33 @@ export async function runInner(parsed: RunInnerArgs): Promise<number> {
       driftResult = inspectForDriftSync(msg, parsed.serverName, baselineForDrift, sessionState);
       canProducePin = hasNameableTool(msg);
 
-      // Off-thread: refresh snapshot + apply first-session pin capture.
+      // #232: `committed` captures whatever updatePins actually wrote (or
+      // determined was already correct) — a truthful confirmation, not a
+      // separate unlocked re-read that a concurrent writer could race past.
+      // It stays undefined if inspectForDrift's own locked read/write never
+      // completed (e.g. a PinsIntegrityError), which the check below treats
+      // the same as "could not confirm".
+      let committed: PinsFile | undefined;
       commitPin = async () => {
         await inspectForDrift(msg, parsed.serverName, {
-          read: () => readPins().catch(() => pinsSnapshot),
-          write: writePins,
+          update: async (fn) => {
+            committed = await updatePins(fn);
+            return committed;
+          },
           signatureListVersion: SIGNATURE_LIST_VERSION,
         });
-        pinsSnapshot = await readPins().catch(() => pinsSnapshot);
-        // Issue #27 (review finding): inspectForDrift's own write is
-        // best-effort — it swallows a write failure (drift.ts) so drift
-        // detection degrades gracefully rather than blocking the session.
-        // That is the right default everywhere else it's used, but it means
-        // this specific write — the one the hold below exists to make
-        // durable — can silently fail with nothing to show for the wait.
-        // Confirm it actually landed and warn (don't block) if it didn't.
-        if (canProducePin && !allNameableToolsPinned(msg, parsed.serverName, pinsSnapshot)) {
+        // Issue #27 (review finding): confirm the write actually landed before
+        // letting a NEVER-pinned server's first tools/list through unheld.
+        // updatePins() no longer swallows a write failure the way the old
+        // best-effort `deps.write(...).catch(() => undefined)` did — but
+        // inspectForDrift's OWN catch still tolerates one (see its comment),
+        // so `committed` can legitimately stay unset. Re-check against it,
+        // not a fresh unlocked read (#232 — that would just reintroduce the
+        // same stale-snapshot race this fix closes).
+        if (
+          canProducePin &&
+          (committed === undefined || !allNameableToolsPinned(msg, parsed.serverName, committed))
+        ) {
           process.stderr.write(
             `[mcpm-guard] PIN-COMMIT-UNCONFIRMED ${safeName}: could not confirm the ` +
               `first-session tools/list pin was persisted to ~/.mcpm/pins.json. A crash ` +
@@ -383,14 +413,12 @@ export async function runInner(parsed: RunInnerArgs): Promise<number> {
       // first-session capture + the cross-session warn-once previous_hashes append.
       driftResult = inspectHandshakeDriftSync(msg, parsed.serverName, baselineForDrift, sessionState);
 
-      void (async () => {
-        await inspectHandshakeForDrift(msg, parsed.serverName, {
-          read: () => readPins().catch(() => pinsSnapshot),
-          write: writePins,
+      trackPinWrite(
+        inspectHandshakeForDrift(msg, parsed.serverName, {
+          update: updatePins,
           signatureListVersion: SIGNATURE_LIST_VERSION,
-        });
-        pinsSnapshot = await readPins().catch(() => pinsSnapshot);
-      })();
+        }),
+      );
     }
 
     const result = applyPolicy(mergeInspect(statelessResult, driftResult), policy);
@@ -410,9 +438,13 @@ export async function runInner(parsed: RunInnerArgs): Promise<number> {
     // the one-shot opportunity (review finding).
     if (neverPinnedThisServer && !firstToolsListPinAwaited && canProducePin) {
       firstToolsListPinAwaited = true;
-      return commitPin().then(() => result);
+      // Holding the frame does not hold the process: a client that closes stdin
+      // before this resolves ends the child, and exit must still wait for it.
+      const held = commitPin();
+      trackPinWrite(held);
+      return held.then(() => result);
     }
-    void commitPin();
+    trackPinWrite(commitPin());
     return result;
   };
 
@@ -591,6 +623,12 @@ export async function runInner(parsed: RunInnerArgs): Promise<number> {
   });
 
   const code = await handle.exit;
+  // #232: wait for any still-in-flight pins.json write (handshake capture,
+  // or a tools/list capture past the first) the same way eventsPersisted is
+  // already awaited — otherwise a client that disconnects immediately after
+  // its response arrives (the ordinary case: nothing about MCP requires it to
+  // keep the pipe open) races the process exit against the write landing.
+  await pinsPersisted;
   await eventsPersisted;
   return code;
 }

@@ -677,12 +677,18 @@ export async function runCleanupCommand(opts: CleanupOpts): Promise<void> {
     for (const s of c.servers) installedServerNames.add(s.name);
   }
 
-  const { readPins, writePins, clearServerPins, PinsIntegrityError } = await import("./pins.js");
+  const { readPins, updatePins, clearServerPins, PinsIntegrityError } = await import("./pins.js");
   // readPins returns an empty pins file (not a throw) when pins.json is absent,
   // so a thrown error here is never "no pins yet" — it is a PinsIntegrityError
   // (tampered/corrupted sidecar) or an I/O error. Swallowing it to `null` would
   // make `cleanup` print "nothing to prune" on a TAMPERED pins file, hiding the
   // exact tamper signal the user needs. Surface it loudly and abort instead.
+  //
+  // This read is UNLOCKED and only feeds the report below (dry-run preview or
+  // the pre-prune listing) — it never feeds a write. #232: the actual prune
+  // re-derives the orphan set fresh under updatePins's lock, so a pin added or
+  // removed by a concurrent guard session between this report and the prune
+  // below can't be clobbered by a decision made from this stale snapshot.
   let pins: Awaited<ReturnType<typeof readPins>>;
   try {
     pins = await readPins();
@@ -725,8 +731,27 @@ export async function runCleanupCommand(opts: CleanupOpts): Promise<void> {
     return;
   }
 
-  let next = pins;
-  for (const serverName of orphanPinned) next = clearServerPins(next, serverName);
-  await writePins(next);
-  opts.write(`\nPruned ${orphanPinned.length} orphan pin entr${orphanPinned.length === 1 ? "y" : "ies"} from ~/.mcpm/pins.json.\n`);
+  let prunedCount = 0;
+  try {
+    await updatePins((fresh) => {
+      let next = fresh;
+      for (const serverName of Object.keys(fresh.servers)) {
+        if (!installedServerNames.has(serverName)) {
+          next = clearServerPins(next, serverName);
+          prunedCount++;
+        }
+      }
+      return next;
+    });
+  } catch (err) {
+    if (err instanceof PinsIntegrityError) {
+      opts.write(
+        `mcpm guard cleanup: cannot prune — ~/.mcpm/pins.json integrity check failed.\n` +
+          `${err.message}\n`,
+      );
+      return;
+    }
+    throw err;
+  }
+  opts.write(`\nPruned ${prunedCount} orphan pin entr${prunedCount === 1 ? "y" : "ies"} from ~/.mcpm/pins.json.\n`);
 }
