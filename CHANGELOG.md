@@ -8,7 +8,43 @@ _Add entries here, never under a stamped version_ — a release commit renames t
 heading, and a branch that wrote beneath it merges without conflict straight into a
 published section (it happened to #170).
 
-## [0.42.4] - 2026-09-28
+### Fixed
+
+- **Two guard catalog regexes backtracked super-linearly on server-controlled
+  `tool_response` text, stalling the relay.** `generic-bearer-token-disclosure`
+  (added v0.42.0, #223): a token run with no digit near a truncation-marker
+  boundary forced the engine to re-search the digit position across O(n) candidate
+  lengths, each an O(n) rescan — measured at 4.40s for a 32,700-char token with no
+  digit, no closing bound. `renderer-code-execution-in-response` (added v0.32.0,
+  #188), attribute shape: an unbounded tag-open/close scan retried a full
+  scan-to-end-of-string at every `on[a-z]+=` occurrence — `"<a" + "
+  onx=electron.mcp.activate(".repeat(1200)` (no closing `>`) took 812ms at 32KB
+  and 3.64s at 70KB. Same signature, `<script>` shape: the tag-open scanner's
+  unbounded alternation was retried at every later `<script` occurrence —
+  `"<script ".repeat(8000)` (64KB, no `>`) took ~1.0s. The third shape sharing this
+  signature (the mermaid/echarts fence) was measured and found NOT to have this
+  problem; its comment claiming "no backtracking blowup (sub-millisecond)" was
+  true only for that shape and has been corrected. Fixed: the Bearer pattern now
+  captures its maximal token run once via a lookahead+backreference instead of
+  re-deriving it per candidate length; the attribute pattern's four unbounded
+  quantifiers are capped at `{0,2000}`, matching the sibling body-scan bound
+  already used elsewhere in this signature; the `<script>` tag-open scanner's
+  alternation is capped at 500 iterations (not characters — a single quoted
+  attribute value can still be arbitrarily long, so the existing regression test
+  for a 2010-char quoted filler is untouched). An earlier draft excluded `<` from
+  the `<script>` scanner's bare alternative instead of capping iterations; that
+  was reverted because it changes real matching behaviour — the WHATWG tokenizer
+  (and this regex) both treat a stray `<` inside a tag's attribute region as a
+  bogus attribute name and keep scanning for the real `>`, so excluding it would
+  have introduced a false negative on that browser-accurate shape (caught by a
+  fast-check property test, not by hand). All three fixed patterns are now under
+  ~20ms at the guard's actual 64KB leaf-inspection ceiling (down from seconds),
+  verified by a property test that keeps each old (slow) regex as a test-only
+  oracle and checks exact `RegExp#exec` equivalence against the new one over
+  thousands of random inputs (3000 runs each, 3 repeated runs with no flakes),
+  plus wall-clock regression tests on the original pathological shapes. Verdicts
+  are unchanged on every existing guard fixture (79 files): a diff of `guard
+  inspect --json` output over all of them, before and after, is empty. (#TBD)
 
 ### Fixed
 
