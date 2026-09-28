@@ -8,6 +8,32 @@ _Add entries here, never under a stamped version_ — a release commit renames t
 heading, and a branch that wrote beneath it merges without conflict straight into a
 published section (it happened to #170).
 
+### Fixed
+
+- **Two guard catalog regexes backtracked super-linearly on server-controlled
+  `tool_response` text, stalling the relay for seconds per leaf.**
+  `generic-bearer-token-disclosure` (v0.42.0, #223) retried every digit position
+  against every shorter end once its `...` lookbehind rejected a token:
+  `"Bearer " + "1".repeat(32700) + "..."` cost ~2.9 s through `guard inspect`, and
+  ~16 s with 32,000 × U+249B (`⒛`), which NFKC expands to 96,000 characters after
+  the 64 KB window is cut.
+  `renderer-code-execution-in-response` (v0.32.0, #188) re-ran its tag scans once per
+  event-handler attribute (`"<a" + " onx=electron.mcp.activate(".repeat(2400)`, a
+  64 KB leaf with no `>`: ~2.3 s), once per hyphen in a tag name
+  (`"<a" + "-a".repeat(32000)`: ~1.1 s) and once per `<script` nested in one tag
+  (`"<script ".repeat(8000)`: ~0.74 s). Each of these leaves now costs about what a
+  64 KB leaf of prose does (under 10 ms; Node 24.20.0, built binary, CLI start-up
+  subtracted). The patterns were rewritten rather than capped: a length cap bounds the
+  cost but drops every tag longer than the cap, and a capped draft let `<script`
+  followed by 501 spaces, or an event handler with a 2,100-character body, pass where
+  v0.42.4 warns. Which inputs match does not change: the Bearer and event-handler
+  patterns return the same match as before, index and text included; the `<script>`
+  pattern can report a later start when one tag holds a nested `<script`, which
+  changes only the length in the redacted excerpt. All three are pinned against the
+  old regexes by fast-check properties. Not changed: the `<script>` body window is
+  still re-scanned from every `<script…>`, so `"<script>".repeat(8192)` costs
+  ~40 ms per 64 KB leaf, as in v0.42.4. (#233)
+
 ## [0.42.4] - 2026-09-28
 
 ### Fixed
