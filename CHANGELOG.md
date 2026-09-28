@@ -32,7 +32,7 @@ published section (it happened to #170).
   changes only the length in the redacted excerpt. All three are pinned against the
   old regexes by fast-check properties. Not changed: the `<script>` body window is
   still re-scanned from every `<script…>`, so `"<script>".repeat(8192)` costs
-  ~40 ms per 64 KB leaf, as in v0.42.4. (#TBD)
+  ~40 ms per 64 KB leaf, as in v0.42.4. (#233)
 
 ## [0.42.4] - 2026-09-28
 
