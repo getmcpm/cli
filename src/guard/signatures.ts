@@ -94,6 +94,21 @@ const solicits = (noun: string): RegExp =>
 // it").
 const ELECTRON_MCP_BRIDGE_CALL = "electron\\s*\\.\\s*mcp\\s*\\.\\s*(?:activate|addServer)\\s*\\(";
 
+// An event-handler attribute (`\son[a-z]+=`) whose value contains the bridge
+// call, for renderer-code-execution-in-response shape 1. ANY accepts every
+// value; CROSSING accepts only a value that contains a `<` or `>` (an unquoted
+// value cannot contain `>`). Why there are two: see the #113 note on that
+// signature.
+const HANDLER_ATTR = "\\son[a-z]+\\s*=\\s*";
+const HANDLER_VALUE_ANY =
+  `(?:"(?=[^"]*(?:${ELECTRON_MCP_BRIDGE_CALL}))[^"]*"` +
+  `|'(?=[^']*(?:${ELECTRON_MCP_BRIDGE_CALL}))[^']*'` +
+  `|(?!["'])(?=[^\\s>]*(?:${ELECTRON_MCP_BRIDGE_CALL}))[^\\s>]*)`;
+const HANDLER_VALUE_CROSSING =
+  `(?:"(?=[^"]*(?:${ELECTRON_MCP_BRIDGE_CALL}))(?=[^"]*[<>])[^"]*"` +
+  `|'(?=[^']*(?:${ELECTRON_MCP_BRIDGE_CALL}))(?=[^']*[<>])[^']*'` +
+  `|(?!["'])(?=[^\\s>]*(?:${ELECTRON_MCP_BRIDGE_CALL}))(?=[^\\s>]*<)[^\\s>]*)`;
+
 // Shared by owasp-mcp-1-tool-description-injection and (TODOS #16)
 // owasp-mcp-1-tool-annotation-injection below — the same tool-poisoning attack
 // class on two adjacent tools/list surfaces (description text vs. the
@@ -463,33 +478,28 @@ export const OWASP_MCP_TOP_10: readonly Signature[] = [
       "A generic Bearer-prefixed credential (typically no distinctive vendor prefix) in a tool response",
     target: "tool_response",
     redact: true,
-    // The trailing two assertions are a TRUNCATION-MARKER suppression, added
-    // after a measured FP: API documentation writes `Authorization: Bearer
+    // Maximality plus the final lookbehind are a TRUNCATION-MARKER suppression,
+    // added after a measured FP: API documentation writes `Authorization: Bearer
     // eyJhbGciOiJIUzI1NiIs...` to show the header's shape, and `.` is inside the
     // token class, so the elided sample read as a live credential (found in a
     // public third-party skill file, 2026-09-19).
     //   (?=(C{20,}))\1            captures the MAXIMAL token run once (C = the
-    //     token class) and consumes exactly that capture. This REPLACED a
-    //     `C*[0-9]C*(?![C])` shape (#113) that backtracked super-linearly: a
-    //     32,700-char token (no closing "...") took 4.40s through
-    //     `guard inspect`, because the digit search retried across O(n)
-    //     candidate lengths, each rescanning O(n) more text. The
-    //     lookahead+backreference form captures the run once and measures
-    //     under 1ms at 64KB and well under 2ms at 256KB (redos-properties and
-    //     signature-perf tests) — V8 does not reopen the lookahead's `{20,}`
-    //     once a downstream check fails, in every input this was tested
-    //     against.
-    //   (?<=[0-9]C*)              "the run contains a digit somewhere": since
-    //     the run is entirely class C, a digit anywhere in it is trivially
-    //     followed only by C chars up to the run's end, so this is equivalent
-    //     to the old `C*[0-9]C*` consume-and-search without paying to consume
-    //     the text twice.
+    //     token class) and consumes exactly that capture. It must be maximal, or
+    //     the engine simply backtracks off the dots and matches the prefix,
+    //     which is why a bare lookbehind on its own does nothing here.
+    //     Lookarounds are atomic in JavaScript, so a later failure never
+    //     re-enters it. This REPLACED `C*[0-9]C*(?!C)` (#113), which
+    //     backtracked quadratically whenever the maximal run was then
+    //     rejected: once `(?<!\.\.\.)` failed on it, every digit position was
+    //     retried against every shorter end.
+    //     `"Bearer " + "1".repeat(32700) + "..."` cost ~2.9 s through
+    //     `guard inspect`; it now costs under 1 ms.
+    //   (?<=[0-9]C*)              "the run contains a digit somewhere". It
+    //     cannot reach outside the run: C excludes whitespace, and `\s+` sits
+    //     directly in front of the run.
     //   (?<!\.\.\.)              rejects a run ending in an ellipsis.
-    // Equivalence with the old (slow) pattern on non-pathological input is
-    // checked by a fast-check property test that keeps the old regex as a
-    // test-only oracle (redos-properties.test.ts, numRuns: 3000); no
-    // divergence was found across the alphabet it exercises (Bearer,
-    // whitespace, the token class, digits, literal ".", "...", and prose).
+    // Same matches as the old pattern, index and text included: pinned against
+    // it as an oracle in redos-properties.test.ts.
     // U+2026 needs NO clause of its own: `normalizeSegment` NFKC-normalizes every
     // leaf before matching, and NFKC folds U+2026 to the three ASCII periods the
     // lookbehind already rejects. A dedicated `(?!\u2026)` was written, measured
@@ -736,7 +746,7 @@ export const OWASP_MCP_TOP_10: readonly Signature[] = [
     //     separating whitespace (review-found regex-correctness bug).
     //  2. A <script>...</script> block whose body (bounded to 2000 chars,
     //     never crossing a closing </script>) contains the bridge call. The
-    //     tag-open matcher is quote-aware (`(?:"[^"]*"|'[^']*'|[^>"'])*`) so a
+    //     tag-open matcher is quote-aware (a quoted value is one step) so a
     //     literal `>` inside a quoted attribute value can't be mistaken for
     //     the tag's own close and misalign where the 2000-char body budget
     //     starts counting from (review-found: this could push a real call
@@ -757,52 +767,40 @@ export const OWASP_MCP_TOP_10: readonly Signature[] = [
     //     executes identically. Requiring only the bridge call is both safer
     //     (fixes the ECharts false-positive class) and strictly more complete.
     //
-    // All three regexes use bounded lazy quantifiers ({0,4000}?/{0,2000}?) with
-    // a `(?!` "does not cross a fence/tag-close boundary" guard for their BODY
-    // scan. That claim is measured and holds for shape 3 (the fence): against
-    // multi-hundred-KB adversarial padding, including non-matching
-    // `electron.mcp.`-prefixed near-misses and backtick spam, it stays under
-    // 2ms even past 250KB.
+    // Shape 3's body scan is bounded ({0,4000}?) and cannot cross a fence
+    // (`(?!```)`), so each fence start scans only up to the next one.
     //
-    // It did NOT hold for shapes 1 and 2's TAG/FENCE-OPEN scanners, found and
-    // fixed under #113 (both pre-existing since this signature's v0.32.0
-    // introduction; neither is a fence, so the sentence above never covered
-    // them and should not have implied it did):
-    //  - Shape 1's `[^<>]*?` / `[^<>]*` open/close scan had no bound at all.
-    //    `"<a" + " onx=electron.mcp.activate(".repeat(1200)` (no closing `>`)
-    //    took 812ms at 32KB and 3.64s at 70KB (measured on the bare regex) —
-    //    every one of the ~1200 attribute-lookalikes re-triggered a scan to the
-    //    end of the (`>`-free) remainder. Fixed by bounding all four unbounded
-    //    quantifiers in this pattern to `{0,2000}`/`{0,2000}?`, matching shape
-    //    2's own body-scan bound: worst case measured at ~12ms, CONSTANT in
-    //    overall input length (bounded by the cap, not by the frame), for
-    //    input up to 540KB.
-    //  - Shape 2's tag-open matcher `(?:"[^"]*"|'[^']*'|[^>"'])*` retried its
-    //    (unbounded) scan-for-a-real-`>` at EVERY later `<script` occurrence:
-    //    `"<script ".repeat(8000)` (64KB, no `>` anywhere) took 1.0s. An
-    //    earlier draft of this fix excluded `<` from the bare alternative, on
-    //    the premise that real HTML never has one there — that premise is
-    //    FALSE: the WHATWG tokenizer's "before attribute name" state treats an
-    //    unexpected `<` as the start of a bogus attribute NAME and keeps
-    //    scanning for the tag's real `>`, so a real browser (and the OLD
-    //    regex) both cross it, and excluding it would have created a false
-    //    negative on exactly that browser-accurate shape (caught by the
-    //    property test in redos-properties.test.ts, not by hand). Fixed
-    //    instead by bounding the alternation's ITERATION COUNT to `{0,500}`
-    //    rather than its character class or total length: a single quoted
-    //    branch match still counts as ONE iteration regardless of the quoted
-    //    value's length, so the existing "budget-miscount" regression test (a
-    //    2010-char quoted filler, one iteration) is untouched, while the
-    //    all-bare-chars attack above is now bounded to 500 iterations per
-    //    attempt. Measured at ~17ms at the real 64KB leaf-window ceiling
-    //    (MATCH_SEGMENT_CAP * 2 in patterns.ts) — this pattern is never
-    //    actually handed more than that. Accepted, documented gap: a real
-    //    `<script>` tag needing more than ~500 alternation iterations before
-    //    its bridge call (roughly 60+ short quoted attributes) is missed; no
-    //    legitimate or disclosed-CVE script tag comes close.
-    // Both fixes keep this signature's matched text and verdicts unchanged on
-    // non-pathological input (redos-properties.test.ts holds the property
-    // tests; signature-perf.test.ts holds the wall-clock regressions).
+    // Shapes 1 and 2 backtracked super-linearly on server-controlled text until
+    // #113 (both since v0.32.0). They were fixed by REWRITING the scan, not by
+    // capping it: a cap bounds the cost but silently drops every tag longer than
+    // the cap, which the old patterns caught — a padding evasion (`<script` then
+    // 501 spaces passed a first, capped draft). Both rewrites are pinned against
+    // the old regexes as oracles in redos-properties.test.ts.
+    //  - Shape 1 re-ran the closing `[^<>]*>` scan once per event-handler
+    //    attribute: `"<a" + " onx=electron.mcp.activate(".repeat(2400)` (64 KB,
+    //    no `>`) cost ~2.3 s through `guard inspect`. A value that stays inside
+    //    the tag's first `<>`-free run can only close at that run's end, so it
+    //    closes iff the run ends in `>`. The leading lookahead answers that once
+    //    per tag; when the run does not end in `>`, only a value containing a
+    //    `<` or `>` can reach a later `>`, so only those are tried. Same matches
+    //    as the old pattern, index and text included. `[\w-]*\b` after the first
+    //    letter was dropped: a `\b` always exists inside the name and no handler
+    //    can start there, but the engine retried the whole scan at every
+    //    boundary — `"<a" + "-a".repeat(32000)` cost ~1.1 s.
+    //  - Shape 2 re-ran its tag-open scan from every `<script` nested bare inside
+    //    one tag: `"<script ".repeat(8000)` (64 KB, no `>`) cost ~0.74 s. A bare
+    //    `<script\b` now ends the scan. That inner `<script` is itself a start,
+    //    and its scan continues exactly as the outer one would have, so any text
+    //    the old pattern matched still matches; only the reported match can
+    //    start later, and so end elsewhere (the excerpt is redacted to a length
+    //    anyway). Outside quotes, inside "…" and inside '…' are the only
+    //    scan states and a quote character permutes them, so at most three
+    //    starts are ever live at one position: linear. Any other stray `<`
+    //    still continues the scan, as the WHATWG tokenizer does (a bogus
+    //    attribute name).
+    // Not changed, same on main: the 2000-char `<script>` body window is
+    // re-scanned from every `<script…>` start, so `"<script>".repeat(8192)`
+    // costs ~40 ms per 64 KB leaf — linear in input, but a large constant.
     //
     // Severity is `high` (→ warn, forward + log, never block on its own): a
     // documentation/CVE-lookup tool can legitimately return prose QUOTING this
@@ -830,15 +828,14 @@ export const OWASP_MCP_TOP_10: readonly Signature[] = [
     target: "tool_response",
     patterns: [
       new RegExp(
-        "<[a-zA-Z][\\w-]*\\b[^<>]{0,2000}?\\son[a-z]+\\s*=\\s*" +
-          `(?:"(?=[^"]{0,2000}(?:${ELECTRON_MCP_BRIDGE_CALL}))[^"]{0,2000}"` +
-          `|'(?=[^']{0,2000}(?:${ELECTRON_MCP_BRIDGE_CALL}))[^']{0,2000}'` +
-          `|(?!["'])(?=[^\\s>]{0,2000}(?:${ELECTRON_MCP_BRIDGE_CALL}))[^\\s>]{0,2000})` +
-          "[^<>]{0,2000}>",
+        "<[a-zA-Z](?:" +
+          `(?=[^<>]*>)[^<>]*?${HANDLER_ATTR}${HANDLER_VALUE_ANY}` +
+          `|(?![^<>]*>)[^<>]*?${HANDLER_ATTR}${HANDLER_VALUE_CROSSING}` +
+          ")[^<>]*>",
         "i",
       ),
       new RegExp(
-        `<script\\b(?:"[^"]*"|'[^']*'|[^>"']){0,500}>(?:(?!</script>)[\\s\\S]){0,2000}?(?:${ELECTRON_MCP_BRIDGE_CALL})`,
+        `<script\\b(?:"[^"]*"|'[^']*'|[^>"'<]|<(?!script\\b))*>(?:(?!</script>)[\\s\\S]){0,2000}?(?:${ELECTRON_MCP_BRIDGE_CALL})`,
         "i",
       ),
       new RegExp(

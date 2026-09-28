@@ -11,40 +11,28 @@ published section (it happened to #170).
 ### Fixed
 
 - **Two guard catalog regexes backtracked super-linearly on server-controlled
-  `tool_response` text, stalling the relay.** `generic-bearer-token-disclosure`
-  (added v0.42.0, #223): a token run with no digit near a truncation-marker
-  boundary forced the engine to re-search the digit position across O(n) candidate
-  lengths, each an O(n) rescan — measured at 4.40s for a 32,700-char token with no
-  digit, no closing bound. `renderer-code-execution-in-response` (added v0.32.0,
-  #188), attribute shape: an unbounded tag-open/close scan retried a full
-  scan-to-end-of-string at every `on[a-z]+=` occurrence — `"<a" + "
-  onx=electron.mcp.activate(".repeat(1200)` (no closing `>`) took 812ms at 32KB
-  and 3.64s at 70KB. Same signature, `<script>` shape: the tag-open scanner's
-  unbounded alternation was retried at every later `<script` occurrence —
-  `"<script ".repeat(8000)` (64KB, no `>`) took ~1.0s. The third shape sharing this
-  signature (the mermaid/echarts fence) was measured and found NOT to have this
-  problem; its comment claiming "no backtracking blowup (sub-millisecond)" was
-  true only for that shape and has been corrected. Fixed: the Bearer pattern now
-  captures its maximal token run once via a lookahead+backreference instead of
-  re-deriving it per candidate length; the attribute pattern's four unbounded
-  quantifiers are capped at `{0,2000}`, matching the sibling body-scan bound
-  already used elsewhere in this signature; the `<script>` tag-open scanner's
-  alternation is capped at 500 iterations (not characters — a single quoted
-  attribute value can still be arbitrarily long, so the existing regression test
-  for a 2010-char quoted filler is untouched). An earlier draft excluded `<` from
-  the `<script>` scanner's bare alternative instead of capping iterations; that
-  was reverted because it changes real matching behaviour — the WHATWG tokenizer
-  (and this regex) both treat a stray `<` inside a tag's attribute region as a
-  bogus attribute name and keep scanning for the real `>`, so excluding it would
-  have introduced a false negative on that browser-accurate shape (caught by a
-  fast-check property test, not by hand). All three fixed patterns are now under
-  ~20ms at the guard's actual 64KB leaf-inspection ceiling (down from seconds),
-  verified by a property test that keeps each old (slow) regex as a test-only
-  oracle and checks exact `RegExp#exec` equivalence against the new one over
-  thousands of random inputs (3000 runs each, 3 repeated runs with no flakes),
-  plus wall-clock regression tests on the original pathological shapes. Verdicts
-  are unchanged on every existing guard fixture (79 files): a diff of `guard
-  inspect --json` output over all of them, before and after, is empty. (#TBD)
+  `tool_response` text, stalling the relay for up to seconds per leaf.**
+  `generic-bearer-token-disclosure` (v0.42.0, #223) retried every digit position
+  against every shorter end once its `...` lookbehind rejected a token:
+  `"Bearer " + "1".repeat(32700) + "..."` cost ~2.9 s through `guard inspect`.
+  `renderer-code-execution-in-response` (v0.32.0, #188) re-ran its tag scans once per
+  event-handler attribute (`"<a" + " onx=electron.mcp.activate(".repeat(2400)`, a
+  64 KB leaf with no `>`: ~2.3 s), once per hyphen in a tag name
+  (`"<a" + "-a".repeat(32000)`: ~1.1 s) and once per `<script` nested in one tag
+  (`"<script ".repeat(8000)`: ~0.74 s). Each of these leaves now costs about what a
+  64 KB leaf of prose does (~4 ms; Node 24.20.0, built binary, CLI start-up
+  subtracted). The patterns were rewritten rather than capped: a length cap bounds the
+  cost but drops every tag longer than the cap, and a capped draft let `<script`
+  followed by 501 spaces, or an event handler with a 2,100-character body, pass where
+  v0.42.4 warns. Which inputs match does not change: the Bearer and event-handler
+  patterns return the same match as before, index and text included; the `<script>`
+  pattern can report a later start when one tag holds a nested `<script`, which
+  changes only the length in the redacted excerpt. All three are pinned against the
+  old regexes by fast-check properties. Not changed: the `<script>` body window is
+  still re-scanned from every `<script…>`, so `"<script>".repeat(8192)` costs
+  ~40 ms per 64 KB leaf, as in v0.42.4. (#TBD)
+
+## [0.42.4] - 2026-09-28
 
 ### Fixed
 
