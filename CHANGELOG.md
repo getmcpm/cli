@@ -19,7 +19,7 @@ published section (it happened to #170).
   the 64 KB window is cut.
   `renderer-code-execution-in-response` (v0.32.0, #188) re-ran its tag scans once per
   event-handler attribute (`"<a" + " onx=electron.mcp.activate(".repeat(2400)`, a
-  64 KB leaf with no `>`: ~2.3 s), once per hyphen in a tag name
+  64 KB leaf with no `>`: ~2.2 s), once per hyphen in a tag name
   (`"<a" + "-a".repeat(32000)`: ~1.1 s) and once per `<script` nested in one tag
   (`"<script ".repeat(8000)`: ~0.74 s). Each of these leaves now costs about what a
   64 KB leaf of prose does (under 10 ms; Node 24.20.0, built binary, CLI start-up
@@ -29,10 +29,16 @@ published section (it happened to #170).
   v0.42.4 warns. Which inputs match does not change: the Bearer and event-handler
   patterns return the same match as before, index and text included; the `<script>`
   pattern can report a later start when one tag holds a nested `<script`, which
-  changes only the length in the redacted excerpt. All three are pinned against the
-  old regexes by fast-check properties. Not changed: the `<script>` body window is
-  still re-scanned from every `<script…>`, so `"<script>".repeat(8192)` costs
-  ~40 ms per 64 KB leaf, as in v0.42.4. (#233)
+  changes only the length in the redacted excerpt — except in the Unicode tag-decode
+  pass, where a tag whose outer `<script` is concealed can lose its
+  `‹decoded:unicode-tag›` renderer finding (the verdict stays warn through
+  `unicode-tag-concealment`). All three are pinned against the old regexes by
+  fast-check properties, and `guard inspect` verdicts are byte-identical to v0.42.4 on
+  all 100 fixture and corpus frames. Not changed, as in v0.42.4: the `<script>` body
+  window is still re-scanned from every `<script…>`, so `"<script>".repeat(8192)`
+  costs ~40 ms per 64 KB leaf; and an unquoted event-handler value that crosses a `<`
+  with no closing `>` (`"<a onx=electron.mcp.activate(<" + "a".repeat(64000)`) still
+  costs ~2.6 s per leaf. (#233)
 
 ## [0.42.4] - 2026-09-28
 

@@ -793,7 +793,10 @@ export const OWASP_MCP_TOP_10: readonly Signature[] = [
     //    and its scan continues exactly as the outer one would have, so any text
     //    the old pattern matched still matches; only the reported match can
     //    start later, and so end elsewhere (the excerpt is redacted to a length
-    //    anyway). Outside quotes, inside "…" and inside '…' are the only
+    //    anyway). One exception: the Unicode tag-decode pass counts matches per
+    //    start, so a tag whose OUTER `<script` is TAG-concealed can lose its
+    //    decoded renderer finding (the frame still warns via
+    //    unicode-tag-concealment). Outside quotes, inside "…" and inside '…' are the only
     //    scan states and a quote character permutes them, so at most three
     //    starts are ever live at one position: linear. Any other stray `<`
     //    still continues the scan, as the WHATWG tokenizer does (a bogus
@@ -801,6 +804,10 @@ export const OWASP_MCP_TOP_10: readonly Signature[] = [
     // Not changed, same on main: the 2000-char `<script>` body window is
     // re-scanned from every `<script…>` start, so `"<script>".repeat(8192)`
     // costs ~40 ms per 64 KB leaf — linear in input, but a large constant.
+    // Not changed either (v0.42.5 pre-tag audit): shape 1's crossing branch
+    // still backtracks quadratically on an UNQUOTED handler value that crosses
+    // a `<` with no closing `>` — `"<a onx=electron.mcp.activate(<" +
+    // "a".repeat(64000)` costs ~2.6 s per 64 KB leaf, the same as v0.42.4.
     //
     // Severity is `high` (→ warn, forward + log, never block on its own): a
     // documentation/CVE-lookup tool can legitimately return prose QUOTING this
