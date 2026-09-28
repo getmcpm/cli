@@ -96,17 +96,16 @@ const ELECTRON_MCP_BRIDGE_CALL = "electron\\s*\\.\\s*mcp\\s*\\.\\s*(?:activate|a
 
 // An event-handler attribute (`\son[a-z]+=`) whose value contains the bridge
 // call, for renderer-code-execution-in-response shape 1. ANY accepts every
-// value; CROSSING accepts only a value that contains a `<` or `>` (an unquoted
-// value cannot contain `>`). Why there are two: see the #113 note on that
-// signature.
+// value; CROSSING accepts only a value that contains a `<`. Why there are two:
+// see the #113 note on that signature.
 const HANDLER_ATTR = "\\son[a-z]+\\s*=\\s*";
 const HANDLER_VALUE_ANY =
   `(?:"(?=[^"]*(?:${ELECTRON_MCP_BRIDGE_CALL}))[^"]*"` +
   `|'(?=[^']*(?:${ELECTRON_MCP_BRIDGE_CALL}))[^']*'` +
   `|(?!["'])(?=[^\\s>]*(?:${ELECTRON_MCP_BRIDGE_CALL}))[^\\s>]*)`;
 const HANDLER_VALUE_CROSSING =
-  `(?:"(?=[^"]*(?:${ELECTRON_MCP_BRIDGE_CALL}))(?=[^"]*[<>])[^"]*"` +
-  `|'(?=[^']*(?:${ELECTRON_MCP_BRIDGE_CALL}))(?=[^']*[<>])[^']*'` +
+  `(?:"(?=[^"]*(?:${ELECTRON_MCP_BRIDGE_CALL}))(?=[^"]*<)[^"]*"` +
+  `|'(?=[^']*(?:${ELECTRON_MCP_BRIDGE_CALL}))(?=[^']*<)[^']*'` +
   `|(?!["'])(?=[^\\s>]*(?:${ELECTRON_MCP_BRIDGE_CALL}))(?=[^\\s>]*<)[^\\s>]*)`;
 
 // Shared by owasp-mcp-1-tool-description-injection and (TODOS #16)
@@ -781,12 +780,13 @@ export const OWASP_MCP_TOP_10: readonly Signature[] = [
     //    no `>`) cost ~2.3 s through `guard inspect`. A value that stays inside
     //    the tag's first `<>`-free run can only close at that run's end, so it
     //    closes iff the run ends in `>`. The leading lookahead answers that once
-    //    per tag; when the run does not end in `>`, only a value containing a
-    //    `<` or `>` can reach a later `>`, so only those are tried. Same matches
-    //    as the old pattern, index and text included. `[\w-]*\b` after the first
-    //    letter was dropped: a `\b` always exists inside the name and no handler
-    //    can start there, but the engine retried the whole scan at every
-    //    boundary — `"<a" + "-a".repeat(32000)` cost ~1.1 s.
+    //    per tag; when the run ends in `<` instead (or at the end of the input),
+    //    only a value containing that `<` can reach a later `>`, so only those
+    //    are tried. Same matches as the old pattern, index and text included.
+    //    `[\w-]*\b` after the first letter was dropped: a `\b` always exists
+    //    inside the name and no handler can start there, but the engine retried
+    //    the whole scan at every boundary — `"<a" + "-a".repeat(32000)` cost
+    //    ~1.1 s.
     //  - Shape 2 re-ran its tag-open scan from every `<script` nested bare inside
     //    one tag: `"<script ".repeat(8000)` (64 KB, no `>`) cost ~0.74 s. A bare
     //    `<script\b` now ends the scan. That inner `<script` is itself a start,
