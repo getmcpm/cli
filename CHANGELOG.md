@@ -8,6 +8,8 @@ _Add entries here, never under a stamped version_ — a release commit renames t
 heading, and a branch that wrote beneath it merges without conflict straight into a
 published section (it happened to #170).
 
+## [0.42.4] - 2026-09-28
+
 ### Fixed
 
 - **A `tools/list` schema or `initialize` capabilities nested a few thousand levels
