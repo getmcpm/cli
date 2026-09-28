@@ -31,6 +31,9 @@ describe("signature-perf (#113): pathological 32-64 KB leaves inspect in well un
     // Kept just under the 32 KB head/tail split in normalizeForMatch, so the
     // "Bearer" prefix and the trailing "..." reach the regex in one piece.
     ["generic-bearer: an all-digit token ending in '...' (was ~2.9 s)", "Bearer " + "1".repeat(32750) + "..."],
+    // NFKC runs AFTER the window is cut and folds U+249B to "20.", so the regex
+    // is handed a 96,000-char token here, not 32 KB.
+    ["generic-bearer: 32,000 x U+249B, tripled by NFKC (was ~16 s)", "Bearer " + "⒛".repeat(32000) + "…"],
     ["renderer shape 1: one tag, 2400 handlers, no '>' (was ~2.3 s)", "<a" + " onx=electron.mcp.activate(".repeat(2400)],
     ["renderer shape 1: a 64 KB hyphenated tag name (was ~1.1 s)", "<a" + "-a".repeat(32000)],
     ["renderer shape 2: '<script ' x 8000, no '>' (was ~0.74 s)", "<script ".repeat(8000)],
