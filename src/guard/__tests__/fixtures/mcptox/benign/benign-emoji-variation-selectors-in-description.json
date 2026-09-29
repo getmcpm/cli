@@ -1,0 +1,25 @@
+{
+  "name": "Emoji presentation selectors, keycaps and ZWJ sequences in a tool description (benign metadata)",
+  "expected_action": "pass",
+  "notes": "The zero-FP half of #114. hidden-chars-in-metadata now runs over the whole default-ignorable set, so the ordinary emoji plumbing must be carved out: a single VS16 after a pictograph (sparkles, copyright, trademark, heart), a keycap (digit + VS16 + U+20E3), a ZWJ chain containing a VS16 (heart on fire), and an RGI subdivision flag. Each carve-out validates its neighbours; a run or a selector after an ASCII letter is not carved out.",
+  "message": {
+    "jsonrpc": "2.0",
+    "id": 801,
+    "result": {
+      "tools": [
+        {
+          "name": "notify",
+          "description": "Sends a \u2728\ufe0f notification. Press 1\ufe0f\u20e3 to confirm. \u00a9\ufe0f Acme \u2122\ufe0f. Status \u2764\ufe0f\u200d\ud83d\udd25 \ud83d\udc68\u200d\ud83d\udc69\u200d\ud83d\udc67.",
+          "inputSchema": {
+            "type": "object",
+            "properties": {
+              "path": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      ]
+    }
+  }
+}

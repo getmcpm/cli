@@ -19,9 +19,9 @@
  *    `format_code`. The relay's stateful path deliberately EXCLUDES such pairs
  *    from drift comparison (a spec-legal `Read`/`read` pair must never
  *    hard-block a real server), so this warn is what keeps the shape visible.
- * 2. DECEPTIVE CHARACTERS — a name containing an invisible character
- *    (zero-width, bidi, soft hyphen, BOM, Unicode TAG) or MIXING Latin letters
- *    with another script. This is the complement to the fold, not a duplicate
+ * 2. DECEPTIVE CHARACTERS — a name containing an invisible or blank-width
+ *    character (any default-ignorable codepoint, or a blank filler) or MIXING
+ *    Latin letters with another script. This is the complement to the fold, not a duplicate
  *    of it: the confusable table is scoped (Cyrillic/Greek look-alikes), so
  *    out-of-table homoglyphs like `ԝrite_file` (Armenian U+051D) or `ɡet_user`
  *    (U+0261) survive canonicalization — but neither survives a mixed-script
@@ -48,19 +48,22 @@
 import type { JSONRPCMessage } from "@modelcontextprotocol/sdk/types.js";
 import { canonicalToolName } from "./key-canon.js";
 import { sanitizeForTerminal } from "./sanitize.js";
-import { worstAction } from "./patterns.js";
+import { BLANK_FILLER_CLASS, DEFAULT_IGNORABLE_CLASS, worstAction } from "./patterns.js";
 import type { InspectFinding, InspectResult } from "./types.js";
 
 export const CONFUSABLE_TOOL_NAME_SIGNATURE_ID = "tool-name-confusable-duplicate";
 export const DECEPTIVE_TOOL_NAME_SIGNATURE_ID = "tool-name-deceptive-characters";
 
 /**
- * Invisible / formatting characters: zero-width, bidi controls, soft hyphen,
- * BOM, and the Unicode TAG block. None of these render, so their only effect in
- * a NAME is to make two different names look identical.
+ * Anything that renders as nothing or as blank width: every default-ignorable
+ * codepoint (zero-width, bidi, soft hyphen, BOM, TAG, the combining grapheme
+ * joiner, the Arabic letter mark, variation selectors, the Hangul fillers, …)
+ * plus the blank Braille cell. None of it belongs in a SEP-986 name (ASCII), so
+ * unlike the description carrier there are NO carve-outs here — an emoji
+ * presentation selector in a tool name is as deceptive as any other. Both parts
+ * come from patterns.ts, the one place "invisible" is defined.
  */
-const INVISIBLE_CHARS =
-  /[\u00AD\u200B-\u200F\u202A-\u202E\u2060-\u2064\u206A-\u206F\uFEFF]|[\u{E0000}-\u{E007F}]/u;
+const INVISIBLE_CHARS = new RegExp(`[${DEFAULT_IGNORABLE_CLASS}${BLANK_FILLER_CLASS}]`, "u");
 
 /**
  * A name that mixes Latin letters with letters from another script is the
@@ -141,8 +144,9 @@ export function detectConfusableToolNames(msg: JSONRPCMessage): InspectResult {
       matched_text_excerpt: sanitizeForTerminal(name, 64),
       remediation: invisible
         ? `Tool name "${sanitizeForTerminal(name, 64)}" contains an invisible character ` +
-          `(zero-width, bidi control, or Unicode TAG). Such a character does not render, ` +
-          `so its only effect is to make this name look identical to another one. ` +
+          `(zero-width, bidi control, variation selector, filler, or Unicode TAG). Such a ` +
+          `character renders as nothing or as blank space, so its only effect is to make this ` +
+          `name look identical to another one. ` +
           `Report it to the server's publisher.`
         : `Tool name "${sanitizeForTerminal(name, 64)}" mixes Latin letters with letters ` +
           `from another script — the standard way to build a look-alike of a trusted tool ` +

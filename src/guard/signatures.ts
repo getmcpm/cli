@@ -689,12 +689,13 @@ export const OWASP_MCP_TOP_10: readonly Signature[] = [
     category: "OWASP-MCP-1",
     severity: "high",
     description:
-      "A tool name contains an invisible character, or mixes Latin with another script — the out-of-table homoglyph class the confusable table cannot fold",
+      "A tool name contains an invisible or blank-width character, or mixes Latin with another script — the out-of-table homoglyph class the confusable table cannot fold",
     target: "tool_description",
     patterns: [],
     remediation:
-      "A tool name contains an invisible character (zero-width, bidi, Unicode TAG), " +
-      "or mixes Latin letters with letters from another script. Both are ways to build " +
+      "A tool name contains an invisible or blank-width character (any default-ignorable " +
+      "codepoint — zero-width, bidi, variation selector, filler, Unicode TAG — or a blank " +
+      "Braille cell), or mixes Latin letters with letters from another script. Both are ways to build " +
       "a name that looks identical to a trusted tool's, and neither is folded by the " +
       "guard's scoped confusable table. A name written wholly in one non-Latin script " +
       "impersonates nothing and is NOT flagged. Report it to the server's publisher. " +
@@ -725,6 +726,38 @@ export const OWASP_MCP_TOP_10: readonly Signature[] = [
       "technique. Outside an emoji subdivision flag these do not occur in real text. " +
       "Inspect the server's output; if legitimate (rare), mute via " +
       "`mcpm guard mute unicode-tag-concealment`.",
+  },
+  {
+    // variation-selector-concealment — the variation-selector-RUN presence floor on
+    // the carriers H2 deliberately skips, exactly as unicode-tag-concealment is the
+    // tag-block floor there. Emitted inline by detectVariationSelectorConcealment
+    // from a codepoint scan, so like the entries above it carries NO patterns.
+    //
+    // Fires on TWO OR MORE variation selectors in a row and nothing else: a single
+    // emoji VS16 (or a keycap, or a CJK ideographic sequence) is what retrieved data
+    // is full of, and no standardized sequence contains two. On the metadata
+    // carriers the same runs are reported by hidden-chars-in-metadata instead, so
+    // one character is never reported under two ids.
+    //
+    // Known gaps, stated here rather than left to be rediscovered: one selector
+    // interleaved after each of many visible characters is not a run and passes;
+    // and there is NO decode-and-rescan pass (inspectTagEncoded can recover a tag
+    // payload because a tag codepoint IS an ASCII letter; a selector run encodes
+    // bytes under a convention the attacker chooses), so this reports that
+    // something was concealed, never what it says. `high` -> warn. (#114)
+    id: "variation-selector-concealment",
+    category: "OWASP-MCP-1",
+    severity: "high",
+    description:
+      "A run of two or more Unicode variation selectors — invisible on every renderer, readable byte-by-byte by a decoder ('emoji smuggling')",
+    target: "tool_response",
+    patterns: [],
+    remediation:
+      "Content contains a run of Unicode variation selectors. No standardized variation " +
+      "sequence has two in a row: they render as nothing and a decoder can read one byte " +
+      "from each — the documented 'emoji smuggling' concealment technique. Inspect the " +
+      "server's output; if legitimate (rare), mute via " +
+      "`mcpm guard mute variation-selector-concealment`.",
   },
   {
     // TODOS #54 — renderer-code-execution-in-response. See the

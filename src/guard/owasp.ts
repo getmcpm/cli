@@ -93,6 +93,7 @@ export const _SIGNATURE_OWASP_TABLE: Readonly<Record<string, PinState>> = Object
   "owasp-mcp-2-instruction-injection-in-response": "MCP03",
   "hidden-chars-in-metadata": "MCP03",
   "unicode-tag-concealment": "MCP03",
+  "variation-selector-concealment": "MCP03",
   "exfil-param-in-schema": "MCP03",
   "schema-drift": "MCP03",
   "schema-drift-cosmetic": "MCP03",

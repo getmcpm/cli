@@ -252,9 +252,11 @@ function redactSecret(s: string): string {
  * before pattern matching.
  *
  * NFKC folds compatibility characters (full-width Latin "ｉｇｎｏｒｅ" → "ignore")
- * but does NOT strip zero-width spaces, soft hyphens, or bidi controls, which
- * an attacker can insert between word characters to defeat a regex. PATTERN_BREAKERS
- * captures those classes after normalization.
+ * but does NOT strip zero-width spaces, soft hyphens, bidi controls or any other
+ * default-ignorable codepoint, which an attacker can insert between word
+ * characters to defeat a regex. PATTERN_BREAKERS strips that whole set after
+ * normalization, and the blank fillers (which render as width, not as nothing)
+ * are folded to a space first.
  *
  * NFKC also does NOT fold visually-confusable homoglyphs from other scripts —
  * e.g. Cyrillic "о" (U+043E) or Greek "ο" (U+03BF) for Latin "o". So
@@ -277,10 +279,48 @@ function redactSecret(s: string): string {
 // single match is bounded-cost even if a future signature is ReDoS-prone. (#27)
 const MATCH_SEGMENT_CAP = 32 * 1_024; // 32 KB
 
-// Zero-width chars, bidi overrides, ZWJ/ZWNJ, byte-order mark, Unicode tag block.
-// Stripping these post-NFKC closes a class of "invisible separator" evasions where
-// an attacker inserts U+200B between "ignore" and "previous" to break the regex.
-const PATTERN_BREAKERS = /[­​-‏‪-‮⁠-⁯﻿]|[\u{E0000}-\u{E007F}]/gu;
+/**
+ * THE definition of "renders as nothing", shared by every invisible-character
+ * check in the guard: Unicode's own `Default_Ignorable_Code_Point` property, i.e.
+ * the codepoints a renderer is told to draw as nothing when it has no glyph.
+ *
+ * Three hand-written lists used to stand in for it — PATTERN_BREAKERS (what the
+ * match pipeline strips), HIDDEN_CHAR_CLASS (what the metadata presence detector
+ * flags) and INVISIBLE_CHARS (tool names) — and all three named the same six
+ * families (soft hyphen, U+200B–200F, bidi, U+2060–206F, BOM, TAG) and missed
+ * most of the property: the combining grapheme joiner U+034F, the Arabic letter
+ * mark U+061C, the Hangul fillers, Khmer inherent vowels, the Mongolian
+ * selectors, every variation selector, U+FFF0–FFF8, and the tag block's other
+ * 3,000 codepoints. `ig͏nore previous instructions` (CGJ) scored ZERO findings on
+ * a block-capable carrier while the ZWSP spelling blocked — and it reopened #58
+ * (`format؜_code`, ALM, was filed as a brand-new tool). Deriving all three from
+ * the property means a newly assigned invisible codepoint is covered by a
+ * Unicode/Node upgrade instead of by someone remembering to extend three lists.
+ *
+ * Exported as a class BODY (no brackets) so each site composes its own regex.
+ */
+export const DEFAULT_IGNORABLE_CLASS = "\\p{Default_Ignorable_Code_Point}";
+
+/**
+ * Codepoints that render as blank WIDTH rather than as nothing: the Hangul
+ * choseong / jungseong fillers and the blank Braille cell U+2800. They read as a
+ * gap between words, so the match pipeline folds them to a SPACE — stripping them
+ * would fuse the words either side into one.
+ *
+ * U+115F, U+1160 and U+2800 only. NFKC already maps U+3164 and U+FFA0 (the
+ * compatibility fillers) onto U+1160, and normalizeSegment runs NFKC before this
+ * fold; a test pins that mapping, so a Unicode change that broke it fails by name
+ * instead of quietly reopening the gap. U+2800 is not default-ignorable; U+115F
+ * and U+1160 are, which is why the fold must run BEFORE the default-ignorable
+ * strip.
+ */
+export const BLANK_FILLER_CLASS = "\\u115F\\u1160\\u2800";
+
+// Stripped post-NFKC, closing the "invisible separator" evasion class where an
+// attacker inserts U+200B (or any other default-ignorable) between "ignore" and
+// "previous" to break the regex. Blank fillers are folded to a space first.
+const PATTERN_BREAKERS = new RegExp(`[${DEFAULT_IGNORABLE_CLASS}]`, "gu");
+const BLANK_FILLERS = new RegExp(`[${BLANK_FILLER_CLASS}]`, "gu");
 
 // Targeted confusable → ASCII-Latin fold (TR39 skeleton, Cyrillic + Greek scope).
 // Only single-codepoint look-alikes that map cleanly to an ASCII letter/digit and
@@ -323,7 +363,12 @@ function foldConfusables(s: string): string {
 }
 
 function normalizeSegment(segment: string): string {
-  return foldConfusables(segment.normalize("NFKC").replace(PATTERN_BREAKERS, ""));
+  // Order matters: NFKC first (it maps U+3164/U+FFA0 onto U+1160), then the blank
+  // fillers become a space, and only THEN the default-ignorable strip — U+115F and
+  // U+1160 are themselves default-ignorable, so stripping first would fuse words.
+  return foldConfusables(
+    segment.normalize("NFKC").replace(BLANK_FILLERS, " ").replace(PATTERN_BREAKERS, ""),
+  );
 }
 
 /**
@@ -612,20 +657,27 @@ const HIDDEN_CHAR_TARGETS: ReadonlySet<SignatureTarget> = new Set<SignatureTarge
 ]);
 
 /**
- * Dangerous invisible / control characters. Distinct from PATTERN_BREAKERS:
- * H2 must also catch C0/C1 controls and ANSI ESC, which PATTERN_BREAKERS omits.
+ * Dangerous invisible / control characters: every default-ignorable codepoint
+ * (see DEFAULT_IGNORABLE_CLASS — zero-width, bidi, soft hyphen, word joiners,
+ * fillers, variation selectors, the tag block, …) plus what that property does
+ * NOT cover and H2 must still catch: C0 controls EXCEPT tab/newline/CR, DEL, ANSI
+ * ESC and the C1 controls. The \t \n \r whitespace bytes (0x09/0x0A/0x0D) are
+ * intentionally excluded.
  *
- * Matches: zero-width (ZWSP/ZWNJ/ZWJ/word-joiner/BOM), bidi overrides &
- * embeddings (U+202A–U+202E, U+2066–U+2069), soft hyphen, C0 controls EXCEPT
- * tab/newline/CR plus DEL, C1 controls, and the Unicode tag block.
- *
- * Deliberately enumerated (no broad \p{Cf}) so legitimate non-Latin metadata —
- * e.g. an Arabic tool description carrying U+0600-class format chars — does not
- * false-positive. Broaden only if an attack fixture demonstrates a gap. The
- * \t \n \r whitespace bytes (0x09/0x0A/0x0D) are intentionally excluded.
+ * This used to be a hand-enumerated list, with a comment defending it — "no broad
+ * \p{Cf}, so legitimate non-Latin metadata does not false-positive". The
+ * property is not \p{Cf}: it leaves out the Arabic number signs (U+0600-class)
+ * that comment was worried about, and what it adds is exactly the set a renderer
+ * draws as nothing. What that costs on legitimate text is paid for by
+ * detectHiddenChars' carve-outs (composite emoji, subdivision flags, single
+ * emoji variation selectors, keycaps), each of which validates the neighbours.
+ * U+2800 (blank Braille) is deliberately NOT here: it is real Braille, and only
+ * the tool-name check and the match fold treat it as a filler.
  */
-const HIDDEN_CHAR_CLASS =
-  /[\u200b-\u200f\u2060-\u2064\ufeff\u00ad\u202a-\u202e\u2066-\u2069]|[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]|[\u0080-\u009f]|[\u{E0000}-\u{E007F}]/gu;
+const HIDDEN_CHAR_CLASS = new RegExp(
+  `[\\u0000-\\u0008\\u000b\\u000c\\u000e-\\u001f\\u007f\\u0080-\\u009f${DEFAULT_IGNORABLE_CLASS}]`,
+  "gu",
+);
 
 // Human-readable classification per matched codepoint. Never echoes the raw
 // (invisible) char into the excerpt — that would be unreadable in logs and
@@ -642,8 +694,13 @@ function classifyHiddenChar(ch: string): string {
   else if (cp === 0x200e || cp === 0x200f) kind = "bidi-control";
   else if ((cp >= 0x202a && cp <= 0x202e) || (cp >= 0x2066 && cp <= 0x2069)) kind = "bidi-control";
   else if (cp >= 0xe0000 && cp <= 0xe007f) kind = "unicode-tag";
+  else if (isVariationSelector(cp)) kind = "variation-selector";
+  else if (cp === 0x115f || cp === 0x1160 || cp === 0x3164 || cp === 0xffa0) kind = "hangul-filler";
+  else if (cp === 0x61c) kind = "bidi-control";
+  else if (cp === 0x34f) kind = "combining-grapheme-joiner";
   else if (cp >= 0x80 && cp <= 0x9f) kind = "C1-control";
-  else kind = "control";
+  else if (cp <= 0x1f || cp === 0x7f) kind = "control";
+  else kind = "invisible-format";
   return `${kind} (${hex})`;
 }
 
@@ -769,6 +826,51 @@ function isEmojiJoinComponent(cp: number | undefined): boolean {
   return /\p{Extended_Pictographic}/u.test(String.fromCodePoint(cp));
 }
 
+const VARIATION_SELECTOR = /\p{Variation_Selector}/u;
+const EXTENDED_PICTOGRAPHIC = /\p{Extended_Pictographic}/u;
+
+/** True for any variation selector: U+FE00–FE0F, U+E0100–E01EF and the Mongolian
+ *  free selectors. Property-derived, like the class that admits it. */
+function isVariationSelector(cp: number | undefined): boolean {
+  return cp !== undefined && VARIATION_SELECTOR.test(String.fromCodePoint(cp));
+}
+
+/**
+ * A variation selector is only an emoji-presentation request when its BASE is an
+ * emoji: `✨` + U+FE0F, `©` + U+FE0F, `👩‍❤️‍👨`, and the keycap `1` + U+FE0F +
+ * U+20E3. In real text that is by far the dominant use — over 457 MB of local
+ * documentation and dependency text, 15,398 of 15,510 single selectors sat on an
+ * Extended_Pictographic base or a keycap (see the CHANGELOG entry for the
+ * census). Everything else is either a legitimate-but-rare shape this carve-out
+ * deliberately does NOT admit (Han ideographic sequences — 0 occurrences measured
+ * — and math symbols, which appeared only in HTML-entity tables) or a payload.
+ *
+ * What is NEVER benign, whatever the base: two selectors in a row. No
+ * standardized variation sequence contains one, and a run of 256 distinct
+ * selectors is exactly the byte-per-codepoint channel the "emoji smuggling"
+ * technique writes a payload into. A selector after an ASCII letter (outside a
+ * keycap) is not benign either — there is no such sequence.
+ *
+ * Every check is O(1) in the leaf length (a codepoint either side), so a leaf
+ * packed with emoji selectors costs one lookup per selector — the per-hit LINEAR
+ * scan this replaced in the TAG carve-out is what once stalled the relay for 24 s.
+ *
+ * The residual, stated rather than hidden: ONE selector after each of many
+ * emoji-or-keycap bases passes here. That is a real (low-bandwidth, emoji-cover)
+ * covert channel and it is not closed by this check.
+ */
+function isBenignVariationSelector(s: string, index: number): boolean {
+  const cp = s.codePointAt(index) ?? 0;
+  const before = codePointBefore(s, index);
+  const after = s.codePointAt(index + (cp > 0xffff ? 2 : 1));
+  if (before === undefined || isVariationSelector(before) || isVariationSelector(after)) return false;
+  if (EXTENDED_PICTOGRAPHIC.test(String.fromCodePoint(before))) return true;
+  // keycap sequence: [0-9#*] U+FE0F U+20E3
+  const isKeycapBase =
+    (before >= 0x30 && before <= 0x39) || before === 0x23 || before === 0x2a;
+  return isKeycapBase && cp === 0xfe0f && after === 0x20e3;
+}
+
 /**
  * Scans a RAW leaf (pre-normalization) for a hidden/control character. Presence
  * is binary: returns at most one HIGH finding per leaf. Must be called BEFORE
@@ -794,7 +896,8 @@ export function detectHiddenChars(leaf: string, target: SignatureTarget): Inspec
     // U+200D (ZWJ) is the standard joiner for composite emoji. When it is flanked
     // on BOTH sides by emoji/pictograph (or modifier/VS16) codepoints it is a
     // benign sequence (family, profession, flag) — not a poisoning indicator.
-    if (m[0].codePointAt(0) === 0x200d) {
+    const cp = m[0].codePointAt(0) ?? 0;
+    if (cp === 0x200d) {
       const before = codePointBefore(scanned, m.index);
       // ZWJ (U+200D) is in the BMP → one UTF-16 code unit, so the next codepoint
       // starts at m.index + 1 (no surrogate-pair offset needed here).
@@ -806,11 +909,13 @@ export function detectHiddenChars(leaf: string, target: SignatureTarget): Inspec
     // poisoning warning on every tools/list — a live false positive in a
     // zero-FP detector. Unlike the ZWJ carve-out above this validates the WHOLE
     // sequence, because a per-character flank test is a bypass lever. (TODOS #31)
-    const cp = m[0].codePointAt(0) ?? 0;
     if (cp >= 0xe0000 && cp <= 0xe007f) {
       if (tagSkip === undefined) tagSkip = rgiTagSequenceMask(scanned);
       if (isSkipped(tagSkip, m.index)) continue;
     }
+    // A single emoji-presentation / keycap selector is the ordinary way emoji are
+    // written; a run of them, or one after a non-emoji base, is not. (#114)
+    if (isVariationSelector(cp) && isBenignVariationSelector(scanned, m.index)) continue;
     return [
       {
         signature_id: "hidden-chars-in-metadata",
@@ -883,6 +988,62 @@ export function detectTagConcealment(leaf: string, target: SignatureTarget): Ins
     ];
   }
   return [];
+}
+
+/** Two or more variation selectors in a row. Greedy, so a run is measured once. */
+const VARIATION_SELECTOR_RUN = /\p{Variation_Selector}{2,}/u;
+
+/**
+ * PRESENCE floor for variation-selector RUNS on the carriers H2 skips (the same
+ * carriers detectTagConcealment covers). There are 260 variation selectors, and
+ * one base character followed by a run of them is invisible on every renderer
+ * while a decoder reads one byte per selector — "emoji smuggling". Before this,
+ * the payload scored zero findings anywhere: unlike the tag block the selectors
+ * were not even stripped, and nothing looked at them off the metadata carriers.
+ *
+ * A run of two or more is the trigger because no standardized variation sequence
+ * contains two selectors, so a real emoji, keycap or ideographic sequence never
+ * trips it — and the SAME leaf's single emoji VS16 is exactly what retrieved data
+ * is full of, which is why a lone selector must stay silent here.
+ *
+ * Known gaps, on purpose:
+ *   - ONE selector interleaved after each of many visible characters is not a
+ *     run and is not caught (a lower-bandwidth channel that needs cover text).
+ *   - There is NO decode-and-rescan pass. inspectTagEncoded recovers a tag-block
+ *     payload because a tag codepoint IS an ASCII letter; a selector run encodes
+ *     bytes under a convention the attacker picks, so nothing here can say what
+ *     the payload SAYS. This is the floor, not the verdict, and it is warn-tier.
+ *
+ * The scan uses the seam-marked window, not scanWindow: this detector's whole
+ * trigger is ADJACENCY, and joining a head and a tail can fabricate it.
+ * Exported for direct unit testing.
+ */
+export function detectVariationSelectorConcealment(
+  leaf: string,
+  target: SignatureTarget,
+): InspectFinding[] {
+  const m = VARIATION_SELECTOR_RUN.exec(matchWindow(leaf));
+  if (m === null) return [];
+  const first = m[0].codePointAt(0) ?? 0;
+  return [
+    {
+      signature_id: "variation-selector-concealment",
+      category: "OWASP-MCP-1",
+      severity: "high",
+      target,
+      // Deliberately does NOT name the carrier, for the same reason
+      // detectTagConcealment's excerpt does not: inspectServerInitiated re-tags
+      // prompt_content findings to sampling_prompt.
+      matched_text_excerpt: `run of ${[...m[0]].length} variation selectors starting ${classifyHiddenChar(String.fromCodePoint(first))}`,
+      remediation:
+        "Content contains a run of Unicode variation selectors. No standardized variation " +
+        "sequence has two in a row: they render as nothing and a decoder can read one byte " +
+        "from each — the documented 'emoji smuggling' concealment technique. mcpm-guard does " +
+        "not decode the payload, so this reports the concealment, not what it says. Inspect " +
+        "the server's output; if legitimate (rare), mute via " +
+        "`mcpm guard mute variation-selector-concealment`.",
+    },
+  ];
 }
 
 /**
@@ -1257,9 +1418,12 @@ export function inspectMessage(
       if (HIDDEN_CHAR_TARGETS.has(target)) {
         findings.push(...detectHiddenChars(leaf, target));
       } else {
-        // The tag block alone, on the carriers H2 skips. Disjoint from
-        // detectHiddenChars so a tag character is never reported twice. (#31)
+        // The two concealment channels that are safe to scan for in retrieved
+        // data, on the carriers H2 skips: the tag block (#31) and variation-
+        // selector RUNS (#114). Disjoint from detectHiddenChars, so a character
+        // is never reported twice.
         findings.push(...detectTagConcealment(leaf, target));
+        findings.push(...detectVariationSelectorConcealment(leaf, target));
       }
       const plain = inspectAgainstSignatures(leaf, signatures, target);
       findings.push(...plain);
