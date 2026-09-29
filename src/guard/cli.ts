@@ -761,31 +761,37 @@ export async function runCleanupCommand(opts: CleanupOpts): Promise<number> {
   // launch trusted afresh as a first session). So refuse only then, dry run
   // and --yes alike. This precedes the locked prune below, which is therefore
   // only reached when every detected client was read.
-  if (orphanPinned.length === 0) {
-    opts.write("mcpm guard cleanup: nothing to prune (0 orphan pins, 0 orphan wraps).\n");
-    if (unreadable.length > 0) {
-      const one = unreadable.length === 1;
-      opts.write(
-        `Note: the ${unreadable.map((u) => CLIENT_LABELS[u.clientId]).join(", ")} config${one ? "" : "s"} ` +
-          `could not be read (see \`mcpm guard status\`); ${one ? "it cannot" : "they cannot"} change this result.\n`,
-      );
-    }
-    return 0;
-  }
-
-  if (unreadable.length > 0) {
-    const n = orphanPinned.length;
-    const one = unreadable.length === 1;
-    opts.write(
-      `mcpm guard cleanup: ${n} pin entr${n === 1 ? "y is" : "ies are"} not held by any readable client config, ` +
-        `but ${one ? "this config" : "these configs"} could not be read:\n`,
-    );
+  const one = unreadable.length === 1;
+  // Inline, not a pointer to `guard status`: status uses the shared detector,
+  // which does not list an EACCES-hidden client at all.
+  const writeUnreadable = (): void => {
     for (const u of unreadable) {
       opts.write(
         `  - ${CLIENT_LABELS[u.clientId]} (${u.clientId}), ${sanitize(getConfigPath(u.clientId))}: ` +
           `${sanitize(u.error)}\n`,
       );
     }
+  };
+
+  if (orphanPinned.length === 0) {
+    opts.write("mcpm guard cleanup: nothing to prune (0 orphan pins, 0 orphan wraps).\n");
+    if (unreadable.length > 0) {
+      opts.write(
+        `Note: ${one ? "this config" : "these configs"} could not be read, ` +
+          `but ${one ? "it cannot" : "they cannot"} change this result:\n`,
+      );
+      writeUnreadable();
+    }
+    return 0;
+  }
+
+  if (unreadable.length > 0) {
+    const n = orphanPinned.length;
+    opts.write(
+      `mcpm guard cleanup: ${n} pin entr${n === 1 ? "y is" : "ies are"} not held by any readable client config, ` +
+        `but ${one ? "this config" : "these configs"} could not be read:\n`,
+    );
+    writeUnreadable();
     if (unreadable.some((u) => /\bJSON\b/.test(u.error))) {
       opts.write("mcpm reads client configs as strict JSON: comments and trailing commas are not supported.\n");
     }

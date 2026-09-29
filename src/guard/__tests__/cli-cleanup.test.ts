@@ -253,7 +253,8 @@ describe("runCleanupCommand when a client config cannot be read (#118)", () => {
     for (const apply of [false, true]) {
       const { text, code } = await cleanup(apply);
       expect(text).toContain("nothing to prune");
-      expect(text).toContain("Gemini CLI config could not be read");
+      expect(text).toContain("could not be read, but it cannot change this result");
+      expect(text).toContain("gemini-cli");
       expect(text).not.toContain("Refusing");
       expect(code).toBe(0);
     }
