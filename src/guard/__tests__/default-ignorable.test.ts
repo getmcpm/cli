@@ -16,6 +16,7 @@
 import { describe, expect, test } from "vitest";
 import type { JSONRPCMessage } from "@modelcontextprotocol/sdk/types.js";
 import {
+  BLANK_FILLER_CLASS,
   DEFAULT_IGNORABLE_CLASS,
   detectHiddenChars,
   detectVariationSelectorConcealment,
@@ -50,11 +51,12 @@ const DEFAULT_IGNORABLE = codepointsOf(new RegExp(`[${DEFAULT_IGNORABLE_CLASS}]`
 const VARIATION_SELECTORS = codepointsOf(/\p{Variation_Selector}/u);
 
 /**
- * What the match pipeline folds to a space rather than strips (see BLANK_FILLER_CLASS):
- * the fillers that render as blank WIDTH. U+115F and U+1160 are zero-advance and are
- * stripped like every other default-ignorable, so they are deliberately NOT here.
+ * What the match pipeline folds to a space rather than strips: the fillers that render as
+ * blank WIDTH, read from the shipped BLANK_FILLER_CLASS rather than copied. U+115F and
+ * U+1160 are zero-advance and stripped; the tests that pin THAT decision name them
+ * explicitly (and MISSED_RANGES carries them), so a change to the class fails there.
  */
-const BLANK_FILLERS = [0x3164, 0xffa0, 0x2800];
+const BLANK_FILLERS = codepointsOf(new RegExp(`[${BLANK_FILLER_CLASS}]`, "u"));
 const isBlankFiller = (cp: number): boolean => BLANK_FILLERS.includes(cp);
 
 const hex = (cp: number): string => `U+${cp.toString(16).toUpperCase().padStart(4, "0")}`;
@@ -141,6 +143,10 @@ describe("normalizeForMatch", () => {
   test.each(BLANK_FILLERS)("blank filler %i folds to a SPACE, not to nothing", (cp) => {
     // Stripping would fuse the words either side; they render as blank width.
     expect(normalizeForMatch(`a${ch(cp)}b`), hex(cp)).toBe("a b");
+  });
+
+  test("the blank-width fold covers exactly U+3164, U+FFA0 and U+2800 (never vacuous)", () => {
+    expect(BLANK_FILLERS).toEqual([0x2800, 0x3164, 0xffa0]);
   });
 
   test("the conjoining fillers U+115F and U+1160 are zero-advance, so they are STRIPPED, not spaced", () => {

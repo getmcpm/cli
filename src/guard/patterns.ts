@@ -307,11 +307,15 @@ export const DEFAULT_IGNORABLE_CLASS = "\\p{Default_Ignorable_Code_Point}";
  * U+2800. They read as a gap between words, so the match pipeline folds them to a
  * SPACE — stripping them would fuse the words either side into one.
  *
- * Measured in Chromium 152 (the engine behind Claude Desktop, Cursor, VS Code and
- * Windsurf), as the advance each one adds between two letters: U+3164 13.5 px,
- * U+FFA0 8 px, U+2800 10.9 px. The conjoining fillers U+115F and U+1160 are NOT
- * here: they measured 0 px — zero-advance, like every other default-ignorable —
- * so `ig<U+1160>nore` reads as "ignore" and they are stripped with the rest.
+ * Measured as the advance each one adds between two letters, in Chromium 152 on
+ * macOS system fonts (the engine family behind Claude Desktop, Cursor, VS Code
+ * and Windsurf): U+3164 13.5 px, U+FFA0 8 px, U+2800 10.9 px. The conjoining
+ * fillers U+115F and U+1160 are NOT here: they measured 0 px there — zero-advance,
+ * a small notdef box drawn over the next letter — so `ig<U+1160>nore` reads as
+ * "ignore", and they are stripped with the rest of the property. With a Hangul
+ * glyph in the fallback chain HarfBuzz gives them width instead; the strip is
+ * still the safe side, because the catalog's `[\s]*` separators match the
+ * words fused either way.
  *
  * The fold therefore runs BEFORE NFKC, and that order is load-bearing: NFKC maps
  * U+3164 and U+FFA0 onto U+1160, which would turn a visible gap into a stripped

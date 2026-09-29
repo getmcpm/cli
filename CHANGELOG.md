@@ -36,14 +36,17 @@ published section (it happened to #170).
   Behaviour that is not "strip everything":
   the blank-width fillers U+3164, U+FFA0 and U+2800 fold to a **space**, not to nothing,
   because they render as a gap between words — 13.5, 8 and 10.9 px between two letters in
-  Chromium 152, the engine behind Claude Desktop, Cursor, VS Code and Windsurf. The fold
+  Chromium 152 on macOS system fonts, the engine family behind Claude Desktop, Cursor,
+  VS Code and Windsurf. The fold
   runs before NFKC, which would otherwise map U+3164 and U+FFA0 onto U+1160. A filler
   *inside* a word therefore splits it (`ig<U+3164>nore` passes the match, exactly as
   `ig nore` with an ordinary space does, and the metadata carriers still flag the filler
-  itself). The conjoining fillers U+115F and U+1160 measured 0 px, so they are stripped
-  like every other default-ignorable: folding them to a space, as a first draft of this fix
-  did, let `ig<U+1160>nore all previous instructions` read as the phrase while the regex
-  saw `ig nore`, and a `tool_response` passed. On metadata carriers
+  itself). The conjoining fillers U+115F and U+1160 measured 0 px in the same environment
+  (zero-advance, a small notdef box drawn over the next letter; a Hangul glyph in the
+  fallback chain would give them width), so they are stripped like every other
+  default-ignorable: folding them to a space, as a first draft of this fix did, let
+  `ig<U+1160>nore all previous instructions` read as the phrase while the regex saw
+  `ig nore`, and a `tool_response` passed. On metadata carriers
   the presence detector now covers the whole property, with carve-outs that validate the
   neighbouring codepoints rather than trusting the selector: a single VS15 or VS16 after an
   `Extended_Pictographic` base, VS16 in a keycap (`1` + U+FE0F + U+20E3), plus the

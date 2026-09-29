@@ -3,7 +3,7 @@
   "category": "OWASP-MCP-2",
   "expected_action": "block",
   "expected_signature_id": "owasp-mcp-2-instruction-injection-in-response",
-  "notes": "U+3164 HANGUL FILLER renders as blank width (13.5 px in Chromium 152) and was on no list. It is folded to a SPACE (not stripped) BEFORE NFKC, which would otherwise map it onto the zero-advance U+1160 that the default-ignorable strip removes -- and stripping would fuse Sure+ignore and fail the leading anchor. A filler INSIDE a word (`ig<filler>nore`) splits the word the way an ordinary space does and is not matched -- a documented, pinned gap; the metadata carriers still flag the filler itself. #114.",
+  "notes": "U+3164 HANGUL FILLER renders as blank width (13.5 px in Chromium 152, macOS system fonts) and was on no list. It is folded to a SPACE (not stripped) BEFORE NFKC, which would otherwise map it onto the zero-advance U+1160 that the default-ignorable strip removes -- and stripping would fuse Sure+ignore and fail the leading anchor. A filler INSIDE a word (`ig<filler>nore`) splits the word the way an ordinary space does and is not matched -- a documented, pinned gap; the metadata carriers still flag the filler itself. #114.",
   "message": {
     "jsonrpc": "2.0",
     "id": 703,
