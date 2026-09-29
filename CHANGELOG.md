@@ -8,6 +8,25 @@ _Add entries here, never under a stamped version_ — a release commit renames t
 heading, and a branch that wrote beneath it merges without conflict straight into a
 published section (it happened to #170).
 
+### Fixed
+
+- **`mcpm_install` and `mcpm_setup` installed servers the registry has marked
+  `deleted`; the CLI has refused them since v0.17.0 (E9a, #116).** `mcpm install` and
+  `mcpm up` (and so `mcpm_up`) call `assessServerStatus` before touching a client
+  config; `handleInstall` in `src/server/handlers.ts` did not, and `handleSetup`
+  delegates to it. A `deleted` entry with `statusMessage: "malware reported"` scores
+  51/80 through the real scorer, over the MCP surface's default gate of 50, so an
+  agent with no human in the loop got `{"installed": true}` and a written client
+  config. Both tools now refuse before scoring, client resolution or any write:
+  `mcpm_install` throws `Server "<name>" is marked "deleted" (removed) in the MCP
+  registry (<statusMessage>). Install refused.` and `mcpm_setup` reports the same
+  text as a per-server `skipped` row (`Install failed: …`) without stopping the other
+  keywords. The registry's `statusMessage` is control-character-stripped and capped at
+  256 characters before it reaches the agent. As on the CLI, only an explicit
+  `deleted` blocks; `deprecated`, `active`, absent or unknown statuses still install.
+  Not fixed here: `mcpm update` (CLI only, behind a confirmation prompt unless
+  `--yes`) has no such gate (#116).
+
 ## [0.42.5] - 2026-09-29
 
 ### Fixed

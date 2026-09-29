@@ -52,6 +52,14 @@ before 0.42.0, not because anything froze.
   carrying the advisory lines `handleUp` printed, in order. These reached only
   the CLI's stdout before, which this surface does not have.
 
+**Changed outcome, unreleased (#116):** `mcpm_install` on a server the registry marks
+`deleted` now refuses (the tool call errors; nothing is written) where it installed
+it, and `mcpm_setup` reports such a match in `skipped` (`Install failed: …`) instead
+of `installed`. This aligns the MCP surface with the CLI's `mcpm install` / `mcpm up`
+gate above; only an explicit `deleted` blocks, `deprecated` and an absent status do
+not. The message names the status and carries the registry's `statusMessage`,
+control-character-stripped and capped at 256 characters.
+
 ## `--json` output (mostly UNSTABLE for now)
 
 `--json` is available on `search`, `install`, `list`, `info`, `audit`, `update`,

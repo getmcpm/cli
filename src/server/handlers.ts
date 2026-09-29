@@ -21,6 +21,8 @@ import { fetchNpmIntegrity as _fetchNpmIntegrity } from "../registry/npm-integri
 import { fetchNpmProvenance as _fetchNpmProvenance } from "../registry/npm-provenance.js";
 import { readPins as _readPins } from "../guard/pins.js";
 import { describeRegistryError } from "../registry/errors.js";
+import { assessServerStatus } from "../scanner/registry-status.js";
+import { sanitizeForTerminal } from "../guard/sanitize.js";
 
 // ---------------------------------------------------------------------------
 // Input validation for MCP server tool arguments
@@ -168,6 +170,23 @@ export async function handleInstall(
 ): Promise<object> {
   validateMcpServerName(args.name);
   const entry = preResolved?.entry ?? await deps.registryGetServer(args.name);
+
+  // Registry-delisting gate (E9a, #116): the CLI's `install` and `up` refuse a server the
+  // registry itself marks "deleted" (e.g. "malware reported"); this path did not, and a
+  // delisted listing still scores ~51/80 -- over the default gate of 50 -- so an agent with
+  // no human in the loop could install it. ONLY an explicit "deleted" blocks (deprecated /
+  // absent / unknown stay advisory, as in the CLI). Placed before scoring, client resolution
+  // and every write, and here rather than in handleSetup so mcpm_setup inherits it through
+  // its delegation to this function. statusMessage is registry free text read by an agent.
+  const statusGate = assessServerStatus(entry);
+  if (statusGate.blocks) {
+    throw new Error(
+      `Server "${args.name}" is marked "${statusGate.status}" (removed) in the MCP registry` +
+      (statusGate.statusMessage ? ` (${sanitizeForTerminal(statusGate.statusMessage)})` : "") +
+      `. Install refused.`
+    );
+  }
+
   const trust = preResolved?.trust ?? computeTrust(entry, deps);
 
   // Security gate: reject servers below the minimum trust score.
