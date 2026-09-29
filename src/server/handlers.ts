@@ -565,9 +565,8 @@ export async function handleSetup(
       // Backlog #116: a delisted listing is ineligible, not merely low-ranked. Ranked, it
       // took the keyword's slot from a healthy sibling that clears every gate (an old deleted
       // pypi listing scores 53; an active npm one under 30 days old with one medium finding,
-      // 52), and when
-      // it was the only match below the floor it was reported as a trust rejection --
-      // disagreeing with handleInstall, which refuses the delisting first.
+      // 52), and when it was the only match below the floor it was reported as a trust
+      // rejection -- disagreeing with handleInstall, which refuses the delisting first.
       const delisted = delistedRefusal(entry.server.name, entry);
       if (delisted !== null) {
         skipped.push({ name: entry.server.name, reason: delisted });
