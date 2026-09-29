@@ -17,7 +17,7 @@ published section (it happened to #170).
   listed that client's pinned servers as orphans and `--yes` pruned them, erasing their
   rug-pull baselines so the next launch was trusted afresh as a first session (since
   v0.5.0). The same happened when the config sat under a directory the user cannot
-  search (a root-owned `~/.gemini` left by one `sudo` run), because client detection
+  search (e.g. a root-owned, mode-700 `~/.gemini`), because client detection
   counts that as "not installed". Cleanup now refuses, in the dry run and with `--yes`
   alike, whenever a pin is held by no readable config while some detected client's
   config cannot be read: it names each such client, its config path and the

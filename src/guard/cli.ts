@@ -667,8 +667,8 @@ export interface CleanupOpts extends CommandIO {
 /**
  * #118: detectInstalledClients treats ANY access() failure as "not installed",
  * but only a missing path means a client holds no servers. A config under a
- * directory this user cannot search (EACCES — e.g. a root-owned ~/.gemini left
- * by one `sudo` run) would otherwise drop out of detection and every pin for a
+ * directory this user cannot search (EACCES — e.g. a root-owned, mode-700
+ * ~/.gemini) would otherwise drop out of detection and every pin for a
  * server it holds would read as an orphan. Here such a client stays detected,
  * so its read fails below and it is reported as unreadable. Cleanup-local on
  * purpose: other commands rely on the shared detector's EACCES-as-absent rule.
