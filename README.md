@@ -412,7 +412,7 @@ Categories are the [OWASP MCP Top 10 (beta)](https://github.com/OWASP/www-projec
 | MCP03 Tool Poisoning | Description-only drift (cosmetic tier) | warn |
 | MCP03 Tool Poisoning | Instruction injection in tool responses | block |
 | MCP03 Tool Poisoning | Exfil-named parameter in a tool's input schema (`_system_prompt_`, …) | block (list-time) |
-| MCP03 Tool Poisoning | Any invisible (`Default_Ignorable_Code_Point`) or control character in tool metadata — zero-width, bidi, combining grapheme joiner, fillers, variation selectors, Unicode TAG block — except single emoji presentation selectors, keycaps, ZWJ emoji sequences and the three RGI subdivision flags | warn |
+| MCP03 Tool Poisoning | Any invisible (`Default_Ignorable_Code_Point`) or control character in tool metadata — zero-width, bidi, combining grapheme joiner, fillers, variation selectors, Unicode TAG block — except a single VS15/VS16 after an emoji, keycaps, ZWJ emoji sequences and the three RGI subdivision flags | warn |
 | MCP03 Tool Poisoning | Payload concealed in U+E0000–U+E007F on any carrier ("ASCII smuggling") | decoded and re-scanned — the recovered signature decides; a bare presence floor warns |
 | MCP03 Tool Poisoning | One `tools/list` advertises two tool names that are visually indistinguishable after normalization | warn |
 | MCP03 Tool Poisoning | A run of two or more variation selectors on any other carrier ("emoji smuggling"; presence floor, no decode) | warn |

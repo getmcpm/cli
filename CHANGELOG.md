@@ -34,15 +34,22 @@ published section (it happened to #170).
   4,174 codepoints is enumerated at test time and pushed through the match pipeline, the
   presence detector, the block-tier elicitation carrier and the tool-name check.
   Behaviour that is not "strip everything":
-  the blank fillers U+115F, U+1160 and U+2800 — and U+3164 and U+FFA0, which NFKC maps
-  onto U+1160 — fold to a **space**, not to nothing, because they render as a gap
-  between words; a filler *inside* a word therefore splits it (`ig<filler>nore` passes
-  the match, and the metadata carriers still flag the filler itself). On metadata carriers
+  the blank-width fillers U+3164, U+FFA0 and U+2800 fold to a **space**, not to nothing,
+  because they render as a gap between words — 13.5, 8 and 10.9 px between two letters in
+  Chromium 152, the engine behind Claude Desktop, Cursor, VS Code and Windsurf. The fold
+  runs before NFKC, which would otherwise map U+3164 and U+FFA0 onto U+1160. A filler
+  *inside* a word therefore splits it (`ig<U+3164>nore` passes the match, exactly as
+  `ig nore` with an ordinary space does, and the metadata carriers still flag the filler
+  itself). The conjoining fillers U+115F and U+1160 measured 0 px, so they are stripped
+  like every other default-ignorable: folding them to a space, as a first draft of this fix
+  did, let `ig<U+1160>nore all previous instructions` read as the phrase while the regex
+  saw `ig nore`, and a `tool_response` passed. On metadata carriers
   the presence detector now covers the whole property, with carve-outs that validate the
-  neighbouring codepoints rather than trusting the selector: a single variation selector
-  after an `Extended_Pictographic` base or in a keycap (`1` + U+FE0F + U+20E3), plus the
-  existing ZWJ-between-emoji and RGI-flag carve-outs. A run of two or more selectors, and
-  a selector after an ASCII letter, a Han ideograph or a math symbol, are flagged. Han
+  neighbouring codepoints rather than trusting the selector: a single VS15 or VS16 after an
+  `Extended_Pictographic` base, VS16 in a keycap (`1` + U+FE0F + U+20E3), plus the
+  existing ZWJ-between-emoji and RGI-flag carve-outs. Any other selector after an emoji is
+  flagged (admitting all 260 would let each emoji carry a byte), as are a run of two or
+  more selectors and a selector after an ASCII letter, a Han ideograph or a math symbol. Han
   and math were left out on measurement, not principle: across 45,807 local text files
   (456.9 MB: dependency trees, plugin caches, this project's benchmark repositories) 15,510
   single selectors sat on an emoji base (15,180), a keycap (218), a math symbol (110, all in
@@ -52,29 +59,36 @@ published section (it happened to #170).
   signature (catalog 21 → 22, `high` → warn, OWASP MCP03) is the presence floor on the
   carriers the detector skips, mirroring `unicode-tag-concealment`: it fires on two or more
   consecutive selectors and nothing else. Tool names flag every default-ignorable codepoint
-  and the blank fillers with no carve-outs (SEP-986 names are ASCII). **A blank filler in a
-  tool name is a warn, not a block:** it canonicalizes to a space, a different key from the
-  incumbent's, so on the relay 10 of 10 sessions (U+115F, U+1160, U+2800, U+3164, U+FFA0,
-  armed and unarmed) forwarded the poisoned twin with a `tool-name-deceptive-characters`
-  warn — the same limit an out-of-table homoglyph twin already has.
+  and the blank fillers with no carve-outs (SEP-986 names are ASCII). **A blank-width
+  filler inside a tool name is a warn, not a block:** it canonicalizes to a space, a
+  different key from the incumbent's, and it shows as a visible gap, so on the relay 6 of 6
+  sessions (U+3164, U+FFA0, U+2800, armed and unarmed) forwarded `format<filler>_code` with a
+  `tool-name-deceptive-characters` warn — the same limit an out-of-table homoglyph twin
+  already has. The zero-advance U+115F and U+1160 are stripped and block (4 of 4). At either
+  END of a name a filler, or a plain space, renders as nothing, so the canonical tool name
+  now trims edge whitespace and that twin blocks too (12 of 12 trailing sessions, armed and
+  unarmed, for the three fillers, U+115F, U+1160 and an ASCII space) — which also closes a
+  pre-existing gap: `format_code ` with a trailing ASCII space was forwarded with no finding
+  at all.
   Measured cost, FP side: `guard inspect` verdicts between v0.42.5 and this build differ on
   8 of 92 fixture frames (all eight are fixtures added by this change — seven under
   `attacks/`, one under `warn/`; the two new benign emoji fixtures are unchanged), 0 of 24
   fp-rate-corpus frames and 0 of 57 mcp-guardbench frames.
   Measured cost, time side (in-process, minimum of 30 runs on one 64 KB leaf,
   `tool_response` / `tools/list`, Node 24.20.0, v0.42.5 and this build measured back to back
-  at a machine load average of 18–27, so absolute figures are pessimistic): prose
-  3.35 / 2.57 ms before and 3.12 / 2.26 after; 64 KB of dense benign emoji + VS16
-  4.25 / 4.04 before and 2.59 / 5.47 after — the added `tools/list` cost is the
-  per-selector carve-out lookup, linear at 0.67, 1.25, 2.59 and 5.18 ms for 8, 16, 32 and
-  64 KB (0.44, 0.89, 1.78 and 3.78 before); a 64 KB variation-selector run 3.75 / 3.73
-  before and 1.11 / 0.62 after; 64 KB of U+3164 3.93 / 3.88 before and 2.80 / 2.61 after
-  (the strip now shortens these leaves before matching). Timings through the built binary
-  (`guard inspect` over 12- and 60-leaf files) were too noisy at that load to use — one
-  figure came out negative — so none is quoted.
-  **Known gaps, not fixed:** one variation selector interleaved after each visible
-  character, or one VS16 after each of many emoji, is not a run and passes — a real
-  low-bandwidth covert channel with emoji cover; there is no variation-selector
+  at a machine load average of about 4): prose 3.50 / 2.54 ms before and 3.49 / 2.54 after;
+  64 KB of dense benign emoji + VS16 4.35 / 4.39 before and 2.62 / 5.52 after — the added
+  `tools/list` cost is the per-selector carve-out lookup, linear at 0.68, 1.35, 2.64 and
+  5.52 ms for 8, 16, 32 and 64 KB (0.49, 0.98, 1.97 and 4.05 before) and flat beyond the
+  64 KB window; a 64 KB variation-selector run 2.13 / 1.96 before and 0.71 / 0.39 after;
+  64 KB of U+3164 1.97 / 1.83 before and 1.24 / 1.06 after (the strip now shortens these
+  leaves before matching). A ~10 MiB `tools/list` frame, the relay's cap, of 53 dense
+  emoji + VS16 descriptions inspects in 286 ms (222 before); the same frame of prose, 281 ms
+  (288 before).
+  **Known gaps, not fixed:** on the retrieved-data carriers one variation selector
+  interleaved after each visible character is not a run and passes, and on every carrier
+  one VS15 or VS16 after each of many emoji passes — a real low-bandwidth covert channel
+  (under two bits per emoji) with emoji cover; there is no variation-selector
   decode-and-rescan pass, so the floor reports that something was concealed and never what
   it says; the census found the "run of two or more" rule is a property of the standard and
   not of real text — one README (grammy's) carries a run of four VS16 in front of ♿ and
