@@ -65,14 +65,14 @@ function inspectListMs(description: string): number {
 
 describe("default-ignorable (#114): 32-64 KB leaves of invisible characters stay cheap on both carriers", () => {
   test.each([
-    ["32K variation selectors (BMP, U+FE0F)", "x" + "️".repeat(32_767)],
+    ["32K variation selectors (BMP, U+FE0F)", "x" + "\uFE0F".repeat(32_767)],
     ["32K variation selectors (supplementary, U+E0100)", "x" + "\u{E0100}".repeat(32_767)],
-    ["32K Hangul fillers (U+3164)", "ㅤ".repeat(32_768)],
+    ["32K Hangul fillers (U+3164)", "\u3164".repeat(32_768)],
     // Every pair is a benign carve-out hit, so this is the per-selector lookup
     // cost and nothing else: the shape a per-hit linear scan turns quadratic.
-    ["64 KB of dense emoji + VS16 (32K carve-outs)", "✨️".repeat(32_768)],
+    ["64 KB of dense emoji + VS16 (32K carve-outs)", "\u2728\uFE0F".repeat(32_768)],
     // The opposite worst case for the carve-out: it never matches.
-    ["32K alternating letter + VS (no carve-out ever applies)", "a️".repeat(16_384)],
+    ["32K alternating letter + VS (no carve-out ever applies)", "a\uFE0F".repeat(16_384)],
   ])("%s", (_name, text) => {
     expect(inspectMs(text)).toBeLessThan(BOUND_MS);
     expect(inspectListMs(text)).toBeLessThan(BOUND_MS);

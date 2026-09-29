@@ -291,9 +291,9 @@ const MATCH_SEGMENT_CAP = 32 * 1_024; // 32 KB
  * most of the property: the combining grapheme joiner U+034F, the Arabic letter
  * mark U+061C, the Hangul fillers, Khmer inherent vowels, the Mongolian
  * selectors, every variation selector, U+FFF0–FFF8, and the tag block's other
- * 3,000 codepoints. `ig͏nore previous instructions` (CGJ) scored ZERO findings on
+ * 3,000 codepoints. `ig<U+034F>nore previous instructions` (CGJ) scored ZERO findings on
  * a block-capable carrier while the ZWSP spelling blocked — and it reopened #58
- * (`format؜_code`, ALM, was filed as a brand-new tool). Deriving all three from
+ * (`format<U+061C>_code`, ALM, was filed as a brand-new tool). Deriving all three from
  * the property means a newly assigned invisible codepoint is covered by a
  * Unicode/Node upgrade instead of by someone remembering to extend three lists.
  *
@@ -837,20 +837,21 @@ function isVariationSelector(cp: number | undefined): boolean {
 
 /**
  * A variation selector is only an emoji-presentation request when its BASE is an
- * emoji: `✨` + U+FE0F, `©` + U+FE0F, `👩‍❤️‍👨`, and the keycap `1` + U+FE0F +
- * U+20E3. In real text that is by far the dominant use (measured on local
- * documentation and dependency text; the CHANGELOG entry has the census).
- * Everything else is either a legitimate-but-rare shape this carve-out
- * deliberately does NOT admit (Han ideographic sequences, math symbols) or a
- * payload.
+ * emoji: sparkles U+2728 + U+FE0F, copyright U+00A9 + U+FE0F, a ZWJ family
+ * sequence, and the keycap `1` + U+FE0F + U+20E3. In real text that is by far the
+ * dominant use (measured on local documentation and dependency text; the
+ * CHANGELOG entry has the census). Everything else is either a
+ * legitimate-but-rare shape this carve-out deliberately does NOT admit (Han
+ * ideographic sequences, math symbols) or a payload.
  *
  * What is NEVER benign, whatever the base: two selectors in a row. No
  * standardized variation sequence contains one, and a run of 256 distinct
  * selectors is exactly the byte-per-codepoint channel the "emoji smuggling"
- * technique writes a payload into. A selector whose base is another selector
- * fails both base tests below, so a run is flagged structurally; the explicit
- * `after` check is only there so the finding names the FIRST selector of the
- * run. A selector after an ASCII letter (outside a keycap) is not benign either.
+ * technique writes a payload into. There is no run check here and none is needed:
+ * the SECOND selector of a run has a selector as its base, which is neither
+ * Extended_Pictographic nor a keycap base, so it falls through to `false` — the
+ * run is flagged at its second selector (the excerpt names that one). A selector
+ * after an ASCII letter (outside a keycap) is not benign either.
  *
  * Every check is O(1) in the leaf length (a codepoint either side), so a leaf
  * packed with emoji selectors costs one lookup per selector — the per-hit LINEAR
@@ -861,15 +862,13 @@ function isVariationSelector(cp: number | undefined): boolean {
  * covert channel and it is not closed by this check.
  */
 function isBenignVariationSelector(s: string, index: number): boolean {
-  const cp = s.codePointAt(index) ?? 0;
   const before = codePointBefore(s, index);
-  const after = s.codePointAt(index + (cp > 0xffff ? 2 : 1));
-  if (before === undefined || isVariationSelector(after)) return false;
+  if (before === undefined) return false;
   if (EXTENDED_PICTOGRAPHIC.test(String.fromCodePoint(before))) return true;
-  // keycap sequence: [0-9#*] U+FE0F U+20E3
+  // keycap sequence: [0-9#*] U+FE0F U+20E3 (the selector is BMP, so +1 is its end)
   const isKeycapBase =
     (before >= 0x30 && before <= 0x39) || before === 0x23 || before === 0x2a;
-  return isKeycapBase && cp === 0xfe0f && after === 0x20e3;
+  return isKeycapBase && s.codePointAt(index) === 0xfe0f && s.codePointAt(index + 1) === 0x20e3;
 }
 
 /**

@@ -11,7 +11,7 @@ published section (it happened to #170).
 ### Fixed
 
 - **The guard's three "renders as nothing" lists each missed about 4,020 of Unicode's
-  4,174 invisible codepoints, so `ig͏nore previous instructions` (U+034F) scored zero
+  4,174 invisible codepoints, so `ig<U+034F>nore previous instructions` scored zero
   findings on block-capable carriers where the ZWSP spelling blocks, and a poisoned tool
   renamed with an invisible character was forwarded as a new tool.** `PATTERN_BREAKERS`
   (what the match pipeline strips), `HIDDEN_CHAR_CLASS` (the metadata presence
