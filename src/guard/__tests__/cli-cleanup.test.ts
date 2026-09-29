@@ -285,6 +285,18 @@ describe("runCleanupCommand when a client config cannot be read (#118)", () => {
     },
   );
 
+  test("a config path under a regular file (ENOTDIR) is absent, not unreadable", async () => {
+    // ~/.gemini is a file, so ~/.gemini/settings.json cannot exist: no config.
+    writeClaudeCode({ "server-a": { command: "node", args: ["a.js"] } });
+    writeFileSync(path.join(tmpHome, ".gemini"), "not a directory");
+    await seedPins("server-a", "server-b");
+
+    const { text, code } = await cleanup(true);
+
+    expect(text).toContain("Pruned 1 orphan pin entry");
+    expect(code).toBe(0);
+  });
+
   test("a client that is simply not installed does not block cleanup", async () => {
     // Only Claude Code has a config; the other five clients do not exist.
     writeClaudeCode({ "server-a": { command: "node", args: ["a.js"] } });
