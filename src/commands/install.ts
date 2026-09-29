@@ -29,6 +29,7 @@ import type { InstalledServer } from "../store/servers.js";
 import { scoreBar, levelColor, levelLabel, extractRegistryMeta } from "../utils/format-trust.js";
 import { assessReleaseAge, DEFAULT_MIN_RELEASE_AGE_HOURS } from "../scanner/cooldown.js";
 import { assessServerStatus } from "../scanner/registry-status.js";
+import { sanitizeForTerminal } from "../guard/sanitize.js";
 import { DANGEROUS_FLAG_PREFIXES } from "../scanner/patterns.js";
 import { applyKeychainSecrets, type SecretsMode, setSecrets as _setSecrets } from "../store/keychain.js";
 
@@ -412,8 +413,10 @@ export async function handleInstall(
         )
       );
     }
+    // statusMessage is registry free text and this error is printed to the terminal;
+    // the --json branch above stays byte-faithful.
     throw new Error(
-      `"${name}" has been deleted from the MCP registry${statusGate.statusMessage ? ` (${statusGate.statusMessage})` : ""}. Installation aborted.`
+      `"${name}" has been deleted from the MCP registry${statusGate.statusMessage ? ` (${sanitizeForTerminal(statusGate.statusMessage)})` : ""}. Installation aborted.`
     );
   }
 
