@@ -55,7 +55,8 @@ published section (it happened to #170).
   single selectors sat on an emoji base (15,180), a keycap (218), a math symbol (110, all in
   HTML entity tables: seven files in three packages), an ASCII letter (2) and a Han ideograph (0). The cost is that a
   description using Japanese ideographic variation sequences would warn, and local
-  developer text is not a tool-description corpus. A new **`variation-selector-concealment`**
+  developer text is not a tool-description corpus; the registry snapshot below has 0
+  Han-ideograph + selector sequences in any scanned text field either. A new **`variation-selector-concealment`**
   signature (catalog 21 → 22, `high` → warn, OWASP MCP03) is the presence floor on the
   carriers the detector skips, mirroring `unicode-tag-concealment`: it fires on two or more
   consecutive selectors and nothing else. Tool names flag every default-ignorable codepoint
@@ -73,7 +74,10 @@ published section (it happened to #170).
   Measured cost, FP side: `guard inspect` verdicts between v0.42.5 and this build differ on
   8 of 92 fixture frames (all eight are fixtures added by this change — seven under
   `attacks/`, one under `warn/`; the two new benign emoji fixtures are unchanged), 0 of 24
-  fp-rate-corpus frames and 0 of 57 mcp-guardbench frames.
+  fp-rate-corpus frames and 0 of 57 mcp-guardbench frames. The wider strip also feeds the
+  tier-1 scanner (`normalizeForMatch`): over a read-only snapshot of the live registry
+  (125,177 parseable version entries, 37,391 latest, fetched 2026-09-30), tier-1 findings
+  plus the audit-shaped trust score change for 0 entries.
   Measured cost, time side (in-process, minimum of 30 runs on one 64 KB leaf,
   `tool_response` / `tools/list`, Node 24.20.0, v0.42.5 and this build measured back to back
   at a machine load average of about 4): prose 3.50 / 2.54 ms before and 3.49 / 2.54 after;
@@ -98,7 +102,10 @@ published section (it happened to #170).
   but not reported; the scanner's `zero-width characters (obfuscation)` list
   (`src/scanner/patterns.ts`) is a fourth hand list that feeds the registry trust score and
   is unchanged, because widening it without the carve-outs would lower the score of every
-  registry description containing an emoji; visible Latin look-alikes outside the
+  registry description containing an emoji (in that snapshot the only default-ignorable
+  codepoints outside the list are six VS15/VS16-after-emoji occurrences, and the guard's
+  carve-out detector flags exactly the same three distinct texts the old list does — so
+  swapping it in is a zero-verdict-change follow-up, not done here); visible Latin look-alikes outside the
   confusable table (`ı`, `ɡ`, small caps, Armenian `օ`) are unchanged; and the pin hash is
   unchanged (the v0.36.0 golden vector passes untouched). (#114)
 
