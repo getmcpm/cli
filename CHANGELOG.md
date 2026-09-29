@@ -29,13 +29,13 @@ published section (it happened to #170).
   it reaches the agent. As on the CLI, only an explicit `deleted` blocks; `deprecated`,
   `active`, absent or unknown statuses still install. Not fixed here: `mcpm update`
   (CLI only, behind a confirmation prompt unless `--yes`) has no such gate (maintainer
-  backlog #116).
+  backlog #116). (#234)
 - **`mcpm install` and `mcpm up` printed a deleted server's registry `statusMessage`
   to the terminal unsanitized, since v0.17.0 (#115).** An escape sequence in that
   registry field (screen clear, an OSC window-title write) reached the terminal as-is
   in `install`'s error and in `up`'s per-server block line, which `mcpm_up` also
   returns in `notices`. Both now go through the same sanitizer as the rest of the
-  CLI's registry text; `mcpm install --json` still reports the field byte-for-byte.
+  CLI's registry text; `mcpm install --json` still reports the field byte-for-byte (#234).
 
 ## [0.42.5] - 2026-09-29
 
