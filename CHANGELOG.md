@@ -58,9 +58,9 @@ published section (it happened to #170).
   armed and unarmed) forwarded the poisoned twin with a `tool-name-deceptive-characters`
   warn — the same limit an out-of-table homoglyph twin already has.
   Measured cost, FP side: `guard inspect` verdicts between v0.42.5 and this build differ on
-  8 of 92 fixture frames (all eight are the new attack fixtures; the two new benign
-  emoji fixtures are unchanged), 0 of 24 fp-rate-corpus frames and 0 of 57 mcp-guardbench
-  frames. Cost, time side (in-process, minimum of 30 runs on one 64 KB leaf, Node 24.20.0,
+  8 of 92 fixture frames (all eight are fixtures added by this change — seven under
+  `attacks/`, one under `warn/`; the two new benign emoji fixtures are unchanged), 0 of 24
+  fp-rate-corpus frames and 0 of 57 mcp-guardbench frames. Cost, time side (in-process, minimum of 30 runs on one 64 KB leaf, Node 24.20.0,
   machine load average ~30 so absolute figures are pessimistic): prose 3.4 / 2.5 ms
   (`tool_response` / `tools/list`) before and 3.4 / 2.5 after; 64 KB of dense benign
   emoji + VS16 4.3 / 4.4 ms before and 2.9 / 7.05 after — the added cost is the per-selector
