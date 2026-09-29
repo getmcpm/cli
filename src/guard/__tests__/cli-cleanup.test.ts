@@ -285,6 +285,22 @@ describe("runCleanupCommand when a client config cannot be read (#118)", () => {
     expect(snapshot()).toEqual(before);
   });
 
+  test("--yes prunes a genuine orphan but not the malformed server's pin (locked prune path)", async () => {
+    // With no true orphan the run stops at "nothing to prune" and never reaches
+    // the locked prune, so the test above cannot see a divergence there.
+    writeClaudeCode({
+      "server-a": { command: "node", args: ["a.js"] },
+      "server-b": { command: "npx", args: "-y pkg" },
+    });
+    await seedPins("server-a", "server-b", "server-gone");
+
+    const { text, code } = await cleanup(true);
+
+    expect(text).toContain("Pruned 1 orphan pin entry");
+    expect(code).toBe(0);
+    expect(Object.keys((await readPins()).servers).sort()).toEqual(["server-a", "server-b"]);
+  });
+
   test("terminal escapes in the parse error are stripped from the refusal", async () => {
     // Node's JSON.parse SyntaxError embeds a snippet of the file, and the file
     // is user-controlled text that reaches the terminal here.
