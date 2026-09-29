@@ -16,14 +16,22 @@ published section (it happened to #170).
   `~/.gemini/settings.json` with a trailing comma contributed no names: the dry run
   listed that client's pinned servers as orphans and `--yes` pruned them, erasing their
   rug-pull baselines so the next launch was trusted afresh as a first session (since
-  v0.5.0). Cleanup now refuses when any detected client's config cannot be read, in the
-  dry run and with `--yes` alike: it names the client and the (terminal-sanitized) error,
-  prunes nothing, and exits 1. A client with no config file is not detected, so a
-  machine without all six clients is unaffected; a server whose entry is malformed was
-  already counted as installed and still is (now pinned by a test). **Exit status
-  changes:** `guard cleanup` used to exit 0 on every refusal, including its existing
-  `pins.json` integrity refusals, so `mcpm guard cleanup --yes && …` read a refusal as
-  success; all refusals now exit 1. (backlog #118)
+  v0.5.0). The same happened when the config sat under a directory the user cannot
+  search (a root-owned `~/.gemini` left by one `sudo` run), because client detection
+  counts that as "not installed". Cleanup now refuses, in the dry run and with `--yes`
+  alike, whenever a pin is held by no readable config while some detected client's
+  config cannot be read: it names each such client, its config path and the
+  terminal-sanitized error, prunes nothing, and exits 1. When every pin is held by a
+  readable config, an unreadable one cannot change the answer, so cleanup still reports
+  "nothing to prune" (with a note naming the unreadable config) and exits 0. A client
+  with no config file is not detected, so a machine without all six clients is
+  unaffected; a server whose entry is malformed was already counted as installed and
+  still is (now pinned by a test). Not changed: mcpm reads client configs as strict
+  JSON, so a config with comments or trailing commas stays unreadable here as in every
+  other command; the refusal now says so. **Exit status changes:** `guard cleanup` used
+  to exit 0 on every refusal, including its existing `pins.json` integrity refusals, so
+  `mcpm guard cleanup --yes && …` read a refusal as success; all refusals now exit 1
+  (recorded in `docs/CONTRACTS.md`). (backlog #118)
 
 ## [0.42.5] - 2026-09-29
 
