@@ -8,6 +8,81 @@ _Add entries here, never under a stamped version_ — a release commit renames t
 heading, and a branch that wrote beneath it merges without conflict straight into a
 published section (it happened to #170).
 
+### Fixed
+
+- **The guard's three "renders as nothing" lists each missed about 4,020 of Unicode's
+  4,174 invisible codepoints, so `ig͏nore previous instructions` (U+034F) scored zero
+  findings on block-capable carriers where the ZWSP spelling blocks, and a poisoned tool
+  renamed with an invisible character was forwarded as a new tool.** `PATTERN_BREAKERS`
+  (what the match pipeline strips), `HIDDEN_CHAR_CLASS` (the metadata presence
+  detector) and `INVISIBLE_CHARS` (tool names) each named the same six families and
+  missed 4,018, 4,025 and 4,023 of the 4,174 `Default_Ignorable_Code_Point` codepoints
+  (Node 24.20.0, Unicode 17.0): the combining grapheme joiner U+034F, the Arabic letter
+  mark U+061C, the Hangul fillers, Khmer U+17B4–17B5, the Mongolian selectors
+  U+180B–180F, every variation selector, U+FFF0–FFF8, and the tag block above U+E007F.
+  Measured through the v0.42.5 binary: U+034F inside `ignore` on `tools/list`,
+  `tool_response` and `initialize.instructions`, and inside `seed` on
+  `elicitation/create`, all `pass` with no findings; a variation-selector run after one
+  emoji, no findings anywhere; and, through `guard run --inner` against a fake server, a
+  second `tools/list` renaming `format_code` with one codepoint from each of 18 missed
+  ranges was forwarded in 36 of 36 sessions (armed and unarmed) — 10 ranges with no
+  finding, 8 with only a mixed-script warn. That reopened #58 (v0.35.0).
+  All three now build from `\p{Default_Ignorable_Code_Point}` through one shared
+  definition, so a codepoint Unicode assigns later is covered by an upgrade instead of
+  by someone extending three lists. On this branch the same 36 sessions block, through
+  `schema-drift-in-session` (unarmed) or `schema-drift` (armed), and every one of the
+  4,174 codepoints is enumerated at test time and pushed through the match pipeline, the
+  presence detector, the block-tier elicitation carrier and the tool-name check.
+  Behaviour that is not "strip everything":
+  the blank fillers U+115F, U+1160 and U+2800 — and U+3164 and U+FFA0, which NFKC maps
+  onto U+1160 — fold to a **space**, not to nothing, because they render as a gap
+  between words; a filler *inside* a word therefore splits it (`ig<filler>nore` passes
+  the match, and the metadata carriers still flag the filler itself). On metadata carriers
+  the presence detector now covers the whole property, with carve-outs that validate the
+  neighbouring codepoints rather than trusting the selector: a single variation selector
+  after an `Extended_Pictographic` base or in a keycap (`1` + U+FE0F + U+20E3), plus the
+  existing ZWJ-between-emoji and RGI-flag carve-outs. A run of two or more selectors, and
+  a selector after an ASCII letter, a Han ideograph or a math symbol, are flagged. Han
+  and math were left out on measurement, not principle: across 45,807 local text files
+  (456.9 MB: dependency trees, plugin caches, this project's benchmark repositories) 15,510
+  single selectors sat on an emoji base (15,180), a keycap (218), a math symbol (110, all in
+  HTML entity tables: seven files in three packages), an ASCII letter (2) and a Han ideograph (0). The cost is that a
+  description using Japanese ideographic variation sequences would warn, and local
+  developer text is not a tool-description corpus. A new **`variation-selector-concealment`**
+  signature (catalog 21 → 22, `high` → warn, OWASP MCP03) is the presence floor on the
+  carriers the detector skips, mirroring `unicode-tag-concealment`: it fires on two or more
+  consecutive selectors and nothing else. Tool names flag every default-ignorable codepoint
+  and the blank fillers with no carve-outs (SEP-986 names are ASCII). **A blank filler in a
+  tool name is a warn, not a block:** it canonicalizes to a space, a different key from the
+  incumbent's, so on the relay 10 of 10 sessions (U+115F, U+1160, U+2800, U+3164, U+FFA0,
+  armed and unarmed) forwarded the poisoned twin with a `tool-name-deceptive-characters`
+  warn — the same limit an out-of-table homoglyph twin already has.
+  Measured cost, FP side: `guard inspect` verdicts between v0.42.5 and this build differ on
+  8 of 92 fixture frames (all eight are the new attack fixtures; the two new benign
+  emoji fixtures are unchanged), 0 of 24 fp-rate-corpus frames and 0 of 57 mcp-guardbench
+  frames. Cost, time side (in-process, minimum of 30 runs on one 64 KB leaf, Node 24.20.0,
+  machine load average ~30 so absolute figures are pessimistic): prose 3.4 / 2.5 ms
+  (`tool_response` / `tools/list`) before and 3.4 / 2.5 after; 64 KB of dense benign
+  emoji + VS16 4.3 / 4.4 ms before and 2.9 / 7.05 after — the added cost is the per-selector
+  carve-out lookup, linear at 0.79, 1.46, 3.01 and 6.12 ms for 8, 16, 32 and 64 KB; a
+  64 KB variation-selector run 3.9 / 3.9 before and 1.2 / 0.6 after; 64 KB of U+3164 4.0 / 4.0
+  before and 3.0 / 2.8 after (the strip now shortens these leaves before matching).
+  **Known gaps, not fixed:** one variation selector interleaved after each visible
+  character, or one VS16 after each of many emoji, is not a run and passes — a real
+  low-bandwidth covert channel with emoji cover; there is no variation-selector
+  decode-and-rescan pass, so the floor reports that something was concealed and never what
+  it says; the census found the "run of two or more" rule is a property of the standard and
+  not of real text — one README (grammy's) carries a run of four VS16 in front of ♿ and
+  would warn on a retrieved-data carrier, and one file (two copies) carries a stray VS16
+  after a letter that would warn on a metadata carrier; on carriers the detector skips,
+  invisible codepoints other than the tag block and selector runs are stripped for matching
+  but not reported; the scanner's `zero-width characters (obfuscation)` list
+  (`src/scanner/patterns.ts`) is a fourth hand list that feeds the registry trust score and
+  is unchanged, because widening it without the carve-outs would lower the score of every
+  registry description containing an emoji; visible Latin look-alikes outside the
+  confusable table (`ı`, `ɡ`, small caps, Armenian `օ`) are unchanged; and the pin hash is
+  unchanged (the v0.36.0 golden vector passes untouched). (#114)
+
 ## [0.42.5] - 2026-09-29
 
 ### Fixed

@@ -147,12 +147,12 @@ Most of this plan is *extension of existing seams*, not new architecture.
   (backlog #103 — the 64 MB counter documented here stopped enforcing once SDK 1.30.0's
   `ReadBuffer` began throwing at 10 MiB first).
 - **Inspection (`patterns.ts inspectMessage` + `targetSubtree`):** *(the 4-target / 3-signature
-  figures below are the **v0.5.0 baseline** this plan was written against — as of v0.42.0 it
-  is **8** `SignatureTarget`s (`src/guard/types.ts`) and **21** signatures
+  figures below are the **v0.5.0 baseline** this plan was written against — on `main` after #114 it
+  is **8** `SignatureTarget`s (`src/guard/types.ts`) and **22** signatures
   (`src/guard/signatures.ts`); see README's "What it catches" and `docs/SIGNATURES.md` for
   the shipped set.)* At the baseline: exactly **4** `SignatureTarget`s — `tool_response`,
   `tool_call_args`, `tool_description`, `tool_annotations`. Each string leaf is
-  `normalizeForMatch`-folded (NFKC + zero-width/bidi strip + confusable fold, ReDoS-bounded)
+  `normalizeForMatch`-folded (NFKC + default-ignorable strip + blank-filler-to-space fold + confusable fold, ReDoS-bounded)
   then tested against **3** signatures in `signatures.ts` (`OWASP_MCP_TOP_10`). Severity →
   action: critical = block, high = warn (critical is clamped to warn on the warn-only
   retrieved-data carriers `resource_content` / `prompt_content`).
@@ -219,6 +219,7 @@ warn/observability until their FP rate is measured. Ordered by impact-to-effort.
 #### H2 · Hidden-character *presence* detector  · `guard`+`scanner` · effort S · **impact High**
 - **Seam:** new check in `patterns.ts` / `signatures.ts`, run **before** `normalizeForMatch` strips them.
 - **Mechanism:** flag the mere presence of zero-width / bidi-override / non-printable / ANSI-escape characters in any tool `description`, `inputSchema`, annotation, or `initialize.instructions` as a **high** finding.
+- **As built:** v0.10.0 shipped a hand-enumerated subset (zero-width, bidi, soft hyphen, the first 128 tag codepoints, controls); since #114 the class is Unicode's whole `Default_Ignorable_Code_Point` property, shared with the match-pipeline strip and the tool-name check, with emoji carve-outs validated from the neighbouring codepoints — see `docs/SIGNATURES.md`.
 - **Mitigates:** T1, T2. Phrasing-independent; today normalization *erases this signal silently*.
 - **Critique note:** highest impact-to-effort in the set; near-zero FP. Both T1 and T2 name hidden-char presence as a standalone malice indicator that nothing currently flags.
 

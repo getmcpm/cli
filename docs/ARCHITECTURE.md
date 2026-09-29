@@ -81,7 +81,7 @@ mcpm/
 │   ├── guard/                       — v0.5.0 runtime defense (mcpm-guard)
 │   │   ├── types.ts                — Severity, Signature, InspectResult types (8 SignatureTargets)
 │   │   ├── patterns.ts             — pattern engine (NFKC + leaf walk + regex + decode-and-rescan)
-│   │   ├── signatures.ts           — the shipped signature catalog (21 entries)
+│   │   ├── signatures.ts           — the shipped signature catalog (22 entries)
 │   │   ├── owasp.ts                — OWASP MCP Top 10 (beta) pin carried on every emitted finding
 │   │   ├── inspect-frame.ts        — the ONE stateless composition every consumer shares (relay, `guard inspect`, release gate)
 │   │   ├── relay.ts                — production stdio MITM (subprocess + in-process variants)
