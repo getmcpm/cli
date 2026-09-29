@@ -103,6 +103,29 @@ describe("handleInstall — registry-delisting gate (#116)", () => {
     expect(h.detectClients).not.toHaveBeenCalled();
   });
 
+  it("reports the delisting, not a trust-floor rejection, when a deleted server also scores below the floor", async () => {
+    // Pins the gate's position: before scoring. Only the SCORE is stubbed (below the
+    // hard floor); status assessment and tier-1 scanning stay real. The delisting is the
+    // actionable reason for the agent, and a gate placed after the trust check would
+    // surface "trust score ..." instead.
+    const h = makeHarness([entryWithStatus(NAME, "deleted", "malware reported")]);
+    const deps: ServerDeps = {
+      ...h.deps,
+      computeTrustScore: vi.fn().mockReturnValue({
+        score: 10,
+        maxPossible: 80,
+        level: "risky",
+        breakdown: { healthCheck: 0, staticScan: 10, externalScan: 0, registryMeta: 0 },
+      }),
+    };
+
+    const err = (await handleInstall({ name: NAME }, deps).catch((e: Error) => e)) as Error;
+
+    expect(err.message).toMatch(/"deleted"/);
+    expect(err.message).not.toMatch(/trust score/i);
+    expect(h.addServer).not.toHaveBeenCalled();
+  });
+
   it("refuses a `deleted` server that carries no statusMessage", async () => {
     const h = makeHarness([entryWithStatus(NAME, "deleted")]);
     await expect(handleInstall({ name: NAME }, h.deps)).rejects.toThrow(/"deleted"/);
