@@ -31,7 +31,7 @@ published section (it happened to #170).
   other command; the refusal now says so. **Exit status changes:** `guard cleanup` used
   to exit 0 on every refusal, including its existing `pins.json` integrity refusals, so
   `mcpm guard cleanup --yes && …` read a refusal as success; all refusals now exit 1
-  (recorded in `docs/CONTRACTS.md`). (backlog #118)
+  (recorded in `docs/CONTRACTS.md`). (backlog #118, #236)
 
 ## [0.42.5] - 2026-09-29
 
