@@ -39,8 +39,8 @@ export function canonicalizeKey(rawKey: string): string {
  * the pin store (TODOS #58 residual, left open by #191's review).
  *
  * Deliberately a WEAKER fold than {@link canonicalizeKey}: normalizeForMatch
- * (NFKC + zero-width/TAG strip + confusable fold) plus a case-fold, and NOTHING
- * else. It must map only VISUALLY IDENTICAL spellings together — the concealed
+ * (NFKC + default-ignorable strip + confusable fold) plus an edge-whitespace trim
+ * and a case-fold, and NOTHING else. It must map only VISUALLY IDENTICAL spellings together — the concealed
  * twin an attacker ships to ride the "new tool name = legitimate addition"
  * carve-out — never spellings a human tells apart at a glance.
  *
@@ -63,7 +63,13 @@ export function canonicalizeKey(rawKey: string): string {
  * no observed server exposes a case-only pair. The separator/camel rungs scored
  * zero too, but VACUOUSLY — 0 of 96 servers mixes naming styles, so that zero is
  * absence of test input, not evidence of safety. See research/name-canon/.
+ *
+ * Leading and trailing whitespace is trimmed, which is still "visually identical":
+ * `format_code` followed by a blank filler (U+3164, U+FFA0, U+2800 — folded to a
+ * space) or by a plain space renders exactly like `format_code`, and without the
+ * trim it was filed as a brand-new tool and its poisoned definition forwarded.
+ * Interior whitespace is kept: `format _code` shows a visible gap. (#114 review)
  */
 export function canonicalToolName(rawName: string): string {
-  return normalizeForMatch(rawName).toLowerCase();
+  return normalizeForMatch(rawName).trim().toLowerCase();
 }

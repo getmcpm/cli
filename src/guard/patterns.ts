@@ -302,19 +302,23 @@ const MATCH_SEGMENT_CAP = 32 * 1_024; // 32 KB
 export const DEFAULT_IGNORABLE_CLASS = "\\p{Default_Ignorable_Code_Point}";
 
 /**
- * Codepoints that render as blank WIDTH rather than as nothing: the Hangul
- * choseong / jungseong fillers and the blank Braille cell U+2800. They read as a
- * gap between words, so the match pipeline folds them to a SPACE — stripping them
- * would fuse the words either side into one.
+ * Codepoints that render as blank WIDTH rather than as nothing: the compatibility
+ * Hangul filler U+3164, its halfwidth form U+FFA0, and the blank Braille cell
+ * U+2800. They read as a gap between words, so the match pipeline folds them to a
+ * SPACE — stripping them would fuse the words either side into one.
  *
- * U+115F, U+1160 and U+2800 only. NFKC already maps U+3164 and U+FFA0 (the
- * compatibility fillers) onto U+1160, and normalizeSegment runs NFKC before this
- * fold; a test pins that mapping, so a Unicode change that broke it fails by name
- * instead of quietly reopening the gap. U+2800 is not default-ignorable; U+115F
- * and U+1160 are, which is why the fold must run BEFORE the default-ignorable
- * strip.
+ * Measured in Chromium 152 (the engine behind Claude Desktop, Cursor, VS Code and
+ * Windsurf), as the advance each one adds between two letters: U+3164 13.5 px,
+ * U+FFA0 8 px, U+2800 10.9 px. The conjoining fillers U+115F and U+1160 are NOT
+ * here: they measured 0 px — zero-advance, like every other default-ignorable —
+ * so `ig<U+1160>nore` reads as "ignore" and they are stripped with the rest.
+ *
+ * The fold therefore runs BEFORE NFKC, and that order is load-bearing: NFKC maps
+ * U+3164 and U+FFA0 onto U+1160, which would turn a visible gap into a stripped
+ * zero-advance character and fuse the words either side. U+2800 is not
+ * default-ignorable; the other two are.
  */
-export const BLANK_FILLER_CLASS = "\\u115F\\u1160\\u2800";
+export const BLANK_FILLER_CLASS = "\\u3164\\uFFA0\\u2800";
 
 // Stripped post-NFKC, closing the "invisible separator" evasion class where an
 // attacker inserts U+200B (or any other default-ignorable) between "ignore" and
@@ -363,11 +367,11 @@ function foldConfusables(s: string): string {
 }
 
 function normalizeSegment(segment: string): string {
-  // Order matters: NFKC first (it maps U+3164/U+FFA0 onto U+1160), then the blank
-  // fillers become a space, and only THEN the default-ignorable strip — U+115F and
-  // U+1160 are themselves default-ignorable, so stripping first would fuse words.
+  // Order matters: the blank fillers become a space BEFORE NFKC, which would
+  // otherwise map U+3164/U+FFA0 onto the zero-advance U+1160 and let the
+  // default-ignorable strip fuse the words either side. See BLANK_FILLER_CLASS.
   return foldConfusables(
-    segment.normalize("NFKC").replace(BLANK_FILLERS, " ").replace(PATTERN_BREAKERS, ""),
+    segment.replace(BLANK_FILLERS, " ").normalize("NFKC").replace(PATTERN_BREAKERS, ""),
   );
 }
 
@@ -857,18 +861,26 @@ function isVariationSelector(cp: number | undefined): boolean {
  * packed with emoji selectors costs one lookup per selector — the per-hit LINEAR
  * scan this replaced in the TAG carve-out is what once stalled the relay for 24 s.
  *
- * The residual, stated rather than hidden: ONE selector after each of many
- * emoji-or-keycap bases passes here. That is a real (low-bandwidth, emoji-cover)
- * covert channel and it is not closed by this check.
+ * The residual, stated rather than hidden: ONE VS15 or VS16 after each of many
+ * emoji bases (or VS16 in each keycap) passes here — present, absent, text or
+ * emoji, under two bits per visible emoji. That is a real, low-bandwidth covert
+ * channel with emoji cover text, and it is not closed by this check. Any other
+ * selector after an emoji is flagged: admitting all 260 made it a byte per emoji.
  */
 function isBenignVariationSelector(s: string, index: number): boolean {
   const before = codePointBefore(s, index);
   if (before === undefined) return false;
-  if (EXTENDED_PICTOGRAPHIC.test(String.fromCodePoint(before))) return true;
+  const selector = s.codePointAt(index);
+  // Only the two emoji presentation selectors: VS15 (text) and VS16 (emoji). Every
+  // emoji variation sequence uses one of them; admitting any of the 260 selectors
+  // here would let each emoji carry a full byte. (#114 review)
+  if (EXTENDED_PICTOGRAPHIC.test(String.fromCodePoint(before))) {
+    return selector === 0xfe0e || selector === 0xfe0f;
+  }
   // keycap sequence: [0-9#*] U+FE0F U+20E3 (the selector is BMP, so +1 is its end)
   const isKeycapBase =
     (before >= 0x30 && before <= 0x39) || before === 0x23 || before === 0x2a;
-  return isKeycapBase && s.codePointAt(index) === 0xfe0f && s.codePointAt(index + 1) === 0x20e3;
+  return isKeycapBase && selector === 0xfe0f && s.codePointAt(index + 1) === 0x20e3;
 }
 
 /**
