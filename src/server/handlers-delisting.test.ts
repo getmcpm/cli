@@ -202,6 +202,8 @@ describe("handleSetup — registry-delisting gate (#116)", () => {
   });
 
   it("a deleted match does not stop the other keywords from installing", async () => {
+    // Also pins report-once: the harness's `includes(kw)` search makes "github" match
+    // io.github.acme/filesystem too, so a per-keyword report would list it twice.
     const h = makeHarness([
       entryWithStatus("io.github.acme/filesystem", "deleted", "malware reported"),
       entryWithStatus("io.github.acme/github"),
