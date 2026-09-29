@@ -7,7 +7,7 @@
  */
 
 import { describe, expect, test, vi, beforeEach, afterEach } from "vitest";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { _resetCachedStorePath } from "../../store/index.js";
@@ -211,8 +211,9 @@ describe("runCleanupCommand when a client config cannot be read (#118)", () => {
 
     const { text, code } = await cleanup(false);
 
-    expect(text).toContain("cannot determine");
+    expect(text).toContain("1 pin entry is not held by any readable client config");
     expect(text).toContain("gemini-cli");
+    expect(text).toContain("strict JSON");
     expect(text).toContain("Refusing to prune");
     // The bug: server-b was listed as an orphan, then pruned by --yes.
     expect(text).not.toContain("server-b");
@@ -236,6 +237,53 @@ describe("runCleanupCommand when a client config cannot be read (#118)", () => {
     expect(snapshot()).toEqual(before);
     expect(Object.keys((await readPins()).servers).sort()).toEqual(["server-a", "server-b"]);
   });
+
+  test("an unreadable config does not block cleanup when every pin is held by a readable one (exit 0)", async () => {
+    // An unreadable client can only ADD installed names, which can only remove
+    // candidates — with none left, "nothing to prune" is certain. Refusing here
+    // would lock out a machine with one permanently unreadable config.
+    writeClaudeCode({
+      "server-a": { command: "node", args: ["a.js"] },
+      "server-b": { command: "node", args: ["b.js"] },
+    });
+    writeGeminiSettings(BROKEN_GEMINI);
+    await seedPins("server-a", "server-b");
+    const before = snapshot();
+
+    for (const apply of [false, true]) {
+      const { text, code } = await cleanup(apply);
+      expect(text).toContain("nothing to prune");
+      expect(text).toContain("Gemini CLI config could not be read");
+      expect(text).not.toContain("Refusing");
+      expect(code).toBe(0);
+    }
+    expect(snapshot()).toEqual(before);
+  });
+
+  test.skipIf(process.getuid?.() === 0)(
+    "a config under a directory that cannot be searched (EACCES) is unreadable, not absent",
+    async () => {
+      // access() fails EACCES here, so the shared detector reports Gemini as
+      // not installed — and server-b's pin then read as an orphan and was pruned.
+      writeClaudeCode({ "server-a": { command: "node", args: ["a.js"] } });
+      writeGeminiSettings('{"mcpServers":{"server-b":{"command":"node"}}}');
+      await seedPins("server-a", "server-b");
+      const before = snapshot();
+      const geminiDir = path.join(tmpHome, ".gemini");
+      chmodSync(geminiDir, 0o000);
+      try {
+        const { text, code } = await cleanup(true);
+        expect(text).toContain("gemini-cli");
+        expect(text).toContain("EACCES");
+        expect(text).not.toContain("strict JSON");
+        expect(text).not.toContain("Pruned");
+        expect(code).toBe(1);
+      } finally {
+        chmodSync(geminiDir, 0o700);
+      }
+      expect(snapshot()).toEqual(before);
+    },
+  );
 
   test("a client that is simply not installed does not block cleanup", async () => {
     // Only Claude Code has a config; the other five clients do not exist.

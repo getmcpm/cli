@@ -6,8 +6,9 @@
  */
 
 import chalk from "chalk";
+import { access } from "node:fs/promises";
 import type { ClientId } from "../config/paths.js";
-import { getConfigPath } from "../config/paths.js";
+import { CLIENT_IDS, getConfigPath } from "../config/paths.js";
 import { detectInstalledClients } from "../config/detector.js";
 import { getAdapter } from "../config/adapters/factory.js";
 import {
@@ -664,13 +665,37 @@ export interface CleanupOpts extends CommandIO {
 }
 
 /**
+ * #118: detectInstalledClients treats ANY access() failure as "not installed",
+ * but only a missing path means a client holds no servers. A config under a
+ * directory this user cannot search (EACCES — e.g. a root-owned ~/.gemini left
+ * by one `sudo` run) would otherwise drop out of detection and every pin for a
+ * server it holds would read as an orphan. Here such a client stays detected,
+ * so its read fails below and it is reported as unreadable. Cleanup-local on
+ * purpose: other commands rely on the shared detector's EACCES-as-absent rule.
+ */
+async function detectClientsForCleanup(): Promise<ClientId[]> {
+  const present = await Promise.all(
+    CLIENT_IDS.map(async (clientId) => {
+      try {
+        await access(getConfigPath(clientId));
+        return clientId;
+      } catch (err) {
+        const code = (err as NodeJS.ErrnoException).code;
+        return code === "ENOENT" || code === "ENOTDIR" ? null : clientId;
+      }
+    }),
+  );
+  return present.filter((id): id is ClientId => id !== null);
+}
+
+/**
  * Exit status: 0 when cleanup ran (including "nothing to prune"), 1 when it
- * REFUSED — a client config it could not read, or a pins.json it could not
- * trust. A refusal is a failure to do what was asked, so a script that runs
- * `mcpm guard cleanup --yes && …` must not read it as success (#118).
+ * REFUSED — pins it could not prove orphaned because a client config could not
+ * be read, or a pins.json it could not trust. A refusal is a failure to do what
+ * was asked, so `mcpm guard cleanup --yes && …` must not read it as success (#118).
  */
 export async function runCleanupCommand(opts: CleanupOpts): Promise<number> {
-  const deps = buildDeps();
+  const deps = buildDeps({ detectClients: detectClientsForCleanup });
   const status = await statusAcrossClients(deps);
 
   // Collect the union of server names seen across detected client configs.
@@ -686,32 +711,6 @@ export async function runCleanupCommand(opts: CleanupOpts): Promise<number> {
   for (const c of status.clients) {
     for (const s of c.servers) installedServerNames.add(s.name);
     if (c.error !== undefined) unreadable.push({ clientId: c.clientId, error: c.error });
-  }
-
-  // #118: a client whose config exists but could not be read contributes no
-  // names, so every pin for a server it holds would look orphaned — and --yes
-  // would erase that server's rug-pull baseline, leaving its next launch to be
-  // trusted afresh as a first session. Its names are unknown, so no pin can be
-  // proven orphaned: refuse, in dry-run and apply alike (this precedes the
-  // report AND the locked prune below, which both close over this one set). A
-  // client with no config file is not in `status.clients` at all (detection is
-  // an access() probe), so a machine without all six clients is unaffected.
-  if (unreadable.length > 0) {
-    opts.write(
-      `mcpm guard cleanup: cannot determine which pins are orphans — ` +
-        `${unreadable.length === 1 ? "a client config" : "client configs"} could not be read:\n`,
-    );
-    for (const u of unreadable) {
-      opts.write(
-        `  - ${CLIENT_LABELS[u.clientId]} (${u.clientId}), ${sanitize(getConfigPath(u.clientId))}: ` +
-          `${sanitize(u.error)}\n`,
-      );
-    }
-    opts.write(
-      `Pins for servers configured there cannot be proven orphaned.\n` +
-        `Refusing to prune until ${unreadable.length === 1 ? "it is" : "they are"} fixed.\n`,
-    );
-    return 1;
   }
 
   const { readPins, updatePins, clearServerPins, PinsIntegrityError } = await import("./pins.js");
@@ -755,9 +754,46 @@ export async function runCleanupCommand(opts: CleanupOpts): Promise<number> {
   // command name not present in any other client's UNWRAPPED entries).
   // Conservative: skip for v0.5.0, report only pin orphans.
 
+  // #118: a client whose config exists but could not be read contributes no
+  // names. Its servers can only REMOVE candidates, never add one, so "nothing
+  // to prune" stays certain — but any candidate might be one of its servers,
+  // and pruning it would erase that server's rug-pull baseline (its next
+  // launch trusted afresh as a first session). So refuse only then, dry run
+  // and --yes alike. This precedes the locked prune below, which is therefore
+  // only reached when every detected client was read.
   if (orphanPinned.length === 0) {
     opts.write("mcpm guard cleanup: nothing to prune (0 orphan pins, 0 orphan wraps).\n");
+    if (unreadable.length > 0) {
+      const one = unreadable.length === 1;
+      opts.write(
+        `Note: the ${unreadable.map((u) => CLIENT_LABELS[u.clientId]).join(", ")} config${one ? "" : "s"} ` +
+          `could not be read (see \`mcpm guard status\`); ${one ? "it cannot" : "they cannot"} change this result.\n`,
+      );
+    }
     return 0;
+  }
+
+  if (unreadable.length > 0) {
+    const n = orphanPinned.length;
+    const one = unreadable.length === 1;
+    opts.write(
+      `mcpm guard cleanup: ${n} pin entr${n === 1 ? "y is" : "ies are"} not held by any readable client config, ` +
+        `but ${one ? "this config" : "these configs"} could not be read:\n`,
+    );
+    for (const u of unreadable) {
+      opts.write(
+        `  - ${CLIENT_LABELS[u.clientId]} (${u.clientId}), ${sanitize(getConfigPath(u.clientId))}: ` +
+          `${sanitize(u.error)}\n`,
+      );
+    }
+    if (unreadable.some((u) => /\bJSON\b/.test(u.error))) {
+      opts.write("mcpm reads client configs as strict JSON: comments and trailing commas are not supported.\n");
+    }
+    opts.write(
+      `A server configured there cannot be told apart from an orphan.\n` +
+        `Refusing to prune until ${one ? "it can" : "they can"} be read; fix ${one ? "it" : "them"} and re-run.\n`,
+    );
+    return 1;
   }
 
   opts.write(`mcpm guard cleanup: ${orphanPinned.length} orphan pin entr${orphanPinned.length === 1 ? "y" : "ies"} found:\n`);
