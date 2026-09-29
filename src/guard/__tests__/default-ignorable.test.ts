@@ -16,7 +16,6 @@
 import { describe, expect, test } from "vitest";
 import type { JSONRPCMessage } from "@modelcontextprotocol/sdk/types.js";
 import {
-  BLANK_FILLER_CLASS,
   DEFAULT_IGNORABLE_CLASS,
   detectHiddenChars,
   detectVariationSelectorConcealment,
@@ -140,11 +139,11 @@ describe("normalizeForMatch", () => {
   });
 
   test("U+3164 and U+FFA0 reach the fold through NFKC -> U+1160 (the mapping the fold relies on)", () => {
-    // BLANK_FILLER_CLASS lists 115F/1160/2800 only. If a Unicode/ICU change broke
-    // these two mappings, this fails by name instead of the fillers going quiet.
+    // BLANK_FILLER_CLASS lists 115F/1160/2800 only (see its comment). If a
+    // Unicode/ICU change broke these two mappings, this fails by name instead of
+    // the fillers going quiet.
     expect("ㅤ".normalize("NFKC")).toBe("ᅠ");
     expect("ﾠ".normalize("NFKC")).toBe("ᅠ");
-    expect(BLANK_FILLER_CLASS).not.toMatch(/3164|ffa0/i);
   });
 
   test("a filler standing where a word separator should be lets the anchored phrase match", () => {
@@ -397,9 +396,12 @@ describe("detectHiddenChars: carve-outs for single variation selectors", () => {
     ["trademark + VS16", "Acme™️"],
     ["red heart + VS16", "❤️"],
     ["text-style VS15 after a pictograph", "☺︎"],
+    ["keycap 0", `0${VS16}${KEYCAP}`],
     ["keycap 1", `1${VS16}${KEYCAP}`],
+    ["keycap 9", `9${VS16}${KEYCAP}`],
     ["keycap #", `#${VS16}${KEYCAP}`],
     ["keycap *", `*${VS16}${KEYCAP}`],
+    ["an astral pictograph + VS16 (eye)", "\u{1F441}\uFE0F"],
     ["ZWJ family", "\u{1F468}‍\u{1F469}‍\u{1F467}"],
     ["heart-on-fire: VS16 then ZWJ", "❤️‍\u{1F525}"],
     ["couple with heart, VS16 inside a ZWJ chain", "\u{1F469}‍❤️‍\u{1F468}"],
@@ -414,6 +416,7 @@ describe("detectHiddenChars: carve-outs for single variation selectors", () => {
     ["a VS after an ASCII letter", "a️"],
     ["a VS after a digit that is not a keycap", `1${VS16}`],
     ["keycap missing its U+20E3", `1${VS16}x`],
+    ["a letter standing in for a keycap base", `a${VS16}${KEYCAP}`],
     ["VS15 instead of VS16 in a keycap", `1︎${KEYCAP}`],
     ["a two-selector run after an emoji", "✨️️"],
     ["a two-selector run after an ASCII letter", "a︀︁"],

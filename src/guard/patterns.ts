@@ -838,18 +838,19 @@ function isVariationSelector(cp: number | undefined): boolean {
 /**
  * A variation selector is only an emoji-presentation request when its BASE is an
  * emoji: `✨` + U+FE0F, `©` + U+FE0F, `👩‍❤️‍👨`, and the keycap `1` + U+FE0F +
- * U+20E3. In real text that is by far the dominant use — over 457 MB of local
- * documentation and dependency text, 15,398 of 15,510 single selectors sat on an
- * Extended_Pictographic base or a keycap (see the CHANGELOG entry for the
- * census). Everything else is either a legitimate-but-rare shape this carve-out
- * deliberately does NOT admit (Han ideographic sequences — 0 occurrences measured
- * — and math symbols, which appeared only in HTML-entity tables) or a payload.
+ * U+20E3. In real text that is by far the dominant use (measured on local
+ * documentation and dependency text; the CHANGELOG entry has the census).
+ * Everything else is either a legitimate-but-rare shape this carve-out
+ * deliberately does NOT admit (Han ideographic sequences, math symbols) or a
+ * payload.
  *
  * What is NEVER benign, whatever the base: two selectors in a row. No
  * standardized variation sequence contains one, and a run of 256 distinct
  * selectors is exactly the byte-per-codepoint channel the "emoji smuggling"
- * technique writes a payload into. A selector after an ASCII letter (outside a
- * keycap) is not benign either — there is no such sequence.
+ * technique writes a payload into. A selector whose base is another selector
+ * fails both base tests below, so a run is flagged structurally; the explicit
+ * `after` check is only there so the finding names the FIRST selector of the
+ * run. A selector after an ASCII letter (outside a keycap) is not benign either.
  *
  * Every check is O(1) in the leaf length (a codepoint either side), so a leaf
  * packed with emoji selectors costs one lookup per selector — the per-hit LINEAR
@@ -863,7 +864,7 @@ function isBenignVariationSelector(s: string, index: number): boolean {
   const cp = s.codePointAt(index) ?? 0;
   const before = codePointBefore(s, index);
   const after = s.codePointAt(index + (cp > 0xffff ? 2 : 1));
-  if (before === undefined || isVariationSelector(before) || isVariationSelector(after)) return false;
+  if (before === undefined || isVariationSelector(after)) return false;
   if (EXTENDED_PICTOGRAPHIC.test(String.fromCodePoint(before))) return true;
   // keycap sequence: [0-9#*] U+FE0F U+20E3
   const isKeycapBase =
