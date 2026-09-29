@@ -110,7 +110,7 @@ published section (it happened to #170).
   carve-out detector flags exactly the same three distinct texts the old list does — so
   swapping it in is a zero-verdict-change follow-up, not done here); visible Latin look-alikes outside the
   confusable table (`ı`, `ɡ`, small caps, Armenian `օ`) are unchanged; and the pin hash is
-  unchanged (the v0.36.0 golden vector passes untouched). (#114)
+  unchanged (the v0.36.0 golden vector passes untouched). (maintainer backlog #114, #237)
 
 ## [0.42.5] - 2026-09-29
 
