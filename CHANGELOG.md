@@ -8,6 +8,23 @@ _Add entries here, never under a stamped version_ — a release commit renames t
 heading, and a branch that wrote beneath it merges without conflict straight into a
 published section (it happened to #170).
 
+### Fixed
+
+- **`mcpm guard cleanup --yes` could silently erase the pins of every server held by a
+  client whose config it failed to read.** The installed set was built from each
+  client's readable servers and ignored a client's read error, so a hand-edited
+  `~/.gemini/settings.json` with a trailing comma contributed no names: the dry run
+  listed that client's pinned servers as orphans and `--yes` pruned them, erasing their
+  rug-pull baselines so the next launch was trusted afresh as a first session (since
+  v0.5.0). Cleanup now refuses when any detected client's config cannot be read, in the
+  dry run and with `--yes` alike: it names the client and the (terminal-sanitized) error,
+  prunes nothing, and exits 1. A client with no config file is not detected, so a
+  machine without all six clients is unaffected; a server whose entry is malformed was
+  already counted as installed and still is (now pinned by a test). **Exit status
+  changes:** `guard cleanup` used to exit 0 on every refusal, including its existing
+  `pins.json` integrity refusals, so `mcpm guard cleanup --yes && …` read a refusal as
+  success; all refusals now exit 1. (backlog #118)
+
 ## [0.42.5] - 2026-09-29
 
 ### Fixed

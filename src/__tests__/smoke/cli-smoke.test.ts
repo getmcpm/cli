@@ -15,7 +15,7 @@
 
 import { describe, it, expect, beforeAll } from "vitest";
 import { spawnSync, execSync } from "node:child_process";
-import { mkdtempSync, rmSync, existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import os from "node:os";
 
@@ -176,6 +176,45 @@ describe("CLI smoke — CI-gate exit codes (docs/CONTRACTS.md)", () => {
     withHome((home) => {
       const r = run(["audit"], home);
       expect(r.code).toBe(0);
+    });
+  });
+
+  // #118: only the built binary sees `process.exitCode` — the wiring lives in the
+  // Commander action, which the handler-level tests bypass. A client config that
+  // cannot be parsed must stop `cleanup --yes` from erasing that client's pins.
+  it("guard cleanup --yes refuses (exit 1, pins untouched) when a client config is unreadable, and prunes once it is fixed", () => {
+    withHome((home) => {
+      const pin = (c: string) => ({
+        current_hash: `sha256:${c.repeat(64)}`,
+        previous_hashes: [],
+        captured_at: "x",
+        captured_via: "first-session",
+        signature_list_version: "v0.5.0",
+      });
+      mkdirSync(path.join(home, ".mcpm"), { recursive: true });
+      mkdirSync(path.join(home, ".gemini"), { recursive: true });
+      const pinsPath = path.join(home, ".mcpm", "pins.json");
+      writeFileSync(path.join(home, ".claude.json"), '{"mcpServers":{"a":{"command":"node","args":["a.js"]}}}');
+      writeFileSync(path.join(home, ".gemini", "settings.json"), '{"mcpServers":{"b":{"command":"node"},}}');
+      writeFileSync(
+        pinsPath,
+        JSON.stringify({ format_version: 1, servers: { a: { tool: pin("a") }, b: { tool: pin("b") } } }),
+      );
+      expect(run(["guard", "reset-integrity", "--yes"], home).code).toBe(0);
+      const before = readFileSync(pinsPath, "utf-8");
+
+      const refused = run(["guard", "cleanup", "--yes"], home);
+      expect(refused.code).toBe(1);
+      expect(refused.out).toMatch(/gemini-cli/);
+      expect(refused.out).toMatch(/refusing to prune/i);
+      expect(refused.out).not.toMatch(/pruned/i);
+      expect(readFileSync(pinsPath, "utf-8")).toBe(before);
+
+      // Positive control: same pins, Gemini config now readable and without `b`.
+      writeFileSync(path.join(home, ".gemini", "settings.json"), '{"mcpServers":{}}');
+      const pruned = run(["guard", "cleanup", "--yes"], home);
+      expect(pruned.code).toBe(0);
+      expect(pruned.out).toMatch(/pruned 1 orphan pin entry/i);
     });
   });
 });

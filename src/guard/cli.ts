@@ -663,7 +663,13 @@ export interface CleanupOpts extends CommandIO {
   readonly apply: boolean;
 }
 
-export async function runCleanupCommand(opts: CleanupOpts): Promise<void> {
+/**
+ * Exit status: 0 when cleanup ran (including "nothing to prune"), 1 when it
+ * REFUSED — a client config it could not read, or a pins.json it could not
+ * trust. A refusal is a failure to do what was asked, so a script that runs
+ * `mcpm guard cleanup --yes && …` must not read it as success (#118).
+ */
+export async function runCleanupCommand(opts: CleanupOpts): Promise<number> {
   const deps = buildDeps();
   const status = await statusAcrossClients(deps);
 
@@ -672,9 +678,40 @@ export async function runCleanupCommand(opts: CleanupOpts): Promise<void> {
   // #28: compare RAW names — pins.json is keyed by the raw server name, so
   // sanitizing here would mismatch every pin key and wrongly flag live pins as
   // orphans (or miss real orphans). sanitize() is for terminal display only.
+  // #118: a malformed entry is still an installed server — statusAcrossClients
+  // lists it in `servers` with `malformed: true`, so DO NOT filter on that flag
+  // here (printEnableDryRun does, because it asks a different question).
   const installedServerNames = new Set<string>();
+  const unreadable: { clientId: ClientId; error: string }[] = [];
   for (const c of status.clients) {
     for (const s of c.servers) installedServerNames.add(s.name);
+    if (c.error !== undefined) unreadable.push({ clientId: c.clientId, error: c.error });
+  }
+
+  // #118: a client whose config exists but could not be read contributes no
+  // names, so every pin for a server it holds would look orphaned — and --yes
+  // would erase that server's rug-pull baseline, leaving its next launch to be
+  // trusted afresh as a first session. Its names are unknown, so no pin can be
+  // proven orphaned: refuse, in dry-run and apply alike (this precedes the
+  // report AND the locked prune below, which both close over this one set). A
+  // client with no config file is not in `status.clients` at all (detection is
+  // an access() probe), so a machine without all six clients is unaffected.
+  if (unreadable.length > 0) {
+    opts.write(
+      `mcpm guard cleanup: cannot determine which pins are orphans — ` +
+        `${unreadable.length === 1 ? "a client config" : "client configs"} could not be read:\n`,
+    );
+    for (const u of unreadable) {
+      opts.write(
+        `  - ${CLIENT_LABELS[u.clientId]} (${u.clientId}), ${sanitize(getConfigPath(u.clientId))}: ` +
+          `${sanitize(u.error)}\n`,
+      );
+    }
+    opts.write(
+      `Pins for servers configured there cannot be proven orphaned.\n` +
+        `Refusing to prune until ${unreadable.length === 1 ? "it is" : "they are"} fixed.\n`,
+    );
+    return 1;
   }
 
   const { readPins, updatePins, clearServerPins, PinsIntegrityError } = await import("./pins.js");
@@ -705,7 +742,7 @@ export async function runCleanupCommand(opts: CleanupOpts): Promise<void> {
           `Refusing to prune until this is resolved.\n`,
       );
     }
-    return;
+    return 1;
   }
   const orphanPinned: string[] = [];
   for (const serverName of Object.keys(pins.servers)) {
@@ -720,7 +757,7 @@ export async function runCleanupCommand(opts: CleanupOpts): Promise<void> {
 
   if (orphanPinned.length === 0) {
     opts.write("mcpm guard cleanup: nothing to prune (0 orphan pins, 0 orphan wraps).\n");
-    return;
+    return 0;
   }
 
   opts.write(`mcpm guard cleanup: ${orphanPinned.length} orphan pin entr${orphanPinned.length === 1 ? "y" : "ies"} found:\n`);
@@ -728,7 +765,7 @@ export async function runCleanupCommand(opts: CleanupOpts): Promise<void> {
 
   if (!opts.apply) {
     opts.write("\nDry run. Re-run with --yes to prune.\n");
-    return;
+    return 0;
   }
 
   let prunedCount = 0;
@@ -749,9 +786,10 @@ export async function runCleanupCommand(opts: CleanupOpts): Promise<void> {
         `mcpm guard cleanup: cannot prune — ~/.mcpm/pins.json integrity check failed.\n` +
           `${err.message}\n`,
       );
-      return;
+      return 1;
     }
     throw err;
   }
   opts.write(`\nPruned ${prunedCount} orphan pin entr${prunedCount === 1 ? "y" : "ies"} from ~/.mcpm/pins.json.\n`);
+  return 0;
 }
