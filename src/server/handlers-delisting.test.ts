@@ -217,6 +217,78 @@ describe("handleSetup — registry-delisting gate (#116)", () => {
     expect(h.addServer).toHaveBeenCalledTimes(1);
   });
 
+  // The two cases below exist because the delisted entry used to be RANKED with the rest
+  // and only refused once it had won. Scores are asserted first: if either premise stops
+  // holding, the test would pass for the wrong reason.
+  it("a delisted match that outscores a healthy sibling does not take the keyword's slot", async () => {
+    const old = entryWithStatus("io.github.bad/files-pro", "deleted", "malware reported");
+    const deleted = {
+      ...old,
+      server: {
+        ...old.server,
+        packages: [{ registryType: "pypi", identifier: "files-pro", environmentVariables: [] }],
+      },
+    } as ServerEntry;
+    const fresh = entryWithStatus("io.github.good/files-lite", "active");
+    const healthy = {
+      ...fresh,
+      server: {
+        ...fresh.server,
+        packages: [
+          { registryType: "npm", identifier: "@test/files-lite", environmentVariables: [{ name: "WEBHOOK_URL" }] },
+        ],
+      },
+      _meta: {
+        [OFFICIAL_META_KEY]: {
+          status: "active",
+          publishedAt: new Date(Date.now() - 10 * 86_400_000).toISOString(),
+        },
+      },
+    } as ServerEntry;
+    const score = (e: ServerEntry) =>
+      computeTrustScore({
+        findings: scanTier1(e),
+        healthCheckPassed: null,
+        hasExternalScanner: false,
+        registryMeta: extractRegistryMeta(e),
+      }).score;
+    expect(score(deleted)).toBeGreaterThan(score(healthy));
+    expect(score(healthy)).toBeGreaterThanOrEqual(50);
+
+    const h = makeHarness([deleted, healthy]);
+    const r = (await handleSetup({ description: "files", minTrustScore: 50 }, h.deps)) as {
+      installed: Array<{ name: string }>;
+      skipped: Array<{ name: string; reason: string }>;
+    };
+
+    expect(r.installed.map((i) => i.name)).toEqual(["io.github.good/files-lite"]);
+    expect(r.skipped).toEqual([
+      { name: "io.github.bad/files-pro", reason: expect.stringMatching(/"deleted".*malware reported/) },
+    ]);
+  });
+
+  it("a delisted-only match below the trust floor is reported as delisted, not as a trust rejection", async () => {
+    const noAge = entryWithStatus("io.github.bad/files-pro", "deleted", "malware reported");
+    const deleted = { ...noAge, _meta: { [OFFICIAL_META_KEY]: { status: "deleted", statusMessage: "malware reported" } } } as ServerEntry;
+    expect(
+      computeTrustScore({
+        findings: scanTier1(deleted),
+        healthCheckPassed: null,
+        hasExternalScanner: false,
+        registryMeta: extractRegistryMeta(deleted),
+      }).score
+    ).toBeLessThan(50);
+
+    const h = makeHarness([deleted]);
+    const r = (await handleSetup({ description: "files", minTrustScore: 50 }, h.deps)) as {
+      skipped: Array<{ name: string; reason: string }>;
+    };
+
+    expect(r.skipped).toHaveLength(1);
+    expect(r.skipped[0].reason).toMatch(/"deleted"/);
+    expect(r.skipped[0].reason).not.toMatch(/trust score/i);
+  });
+
   it("still installs a deprecated match (advisory only)", async () => {
     const h = makeHarness([entryWithStatus("io.github.acme/filesystem", "deprecated")]);
 
