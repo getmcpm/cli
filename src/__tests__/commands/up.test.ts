@@ -217,6 +217,30 @@ describe("handleUp", () => {
     expect(adapter.addServer).not.toHaveBeenCalled();
   });
 
+  it("strips escapes from the registry's statusMessage in the printed block line (#116)", async () => {
+    const stackPath = await writeStackAndLock(basicStack, basicLock);
+    // Built with fromCharCode: a literal escape in source trips the no-raw-ansi invariant.
+    const esc = String.fromCharCode(0x1b);
+    const deleted = {
+      ...makeServerEntry("io.github.test/server-a", "1.2.0"),
+      _meta: {
+        "io.modelcontextprotocol.registry/official": {
+          status: "deleted",
+          statusMessage: `malware${esc}[2J${esc}]0;title${String.fromCharCode(7)} reported`,
+        },
+      },
+    } as ServerEntry;
+    const deps = makeDeps({ getServer: vi.fn().mockResolvedValue(deleted) });
+
+    await expect(handleUp({ stackFile: stackPath }, deps)).rejects.toThrow(/could not be installed/);
+
+    const lines = (deps.output as ReturnType<typeof vi.fn>).mock.calls.map((c) => String(c[0]));
+    const blockLine = lines.find((l) => l.includes("deleted from the MCP registry"));
+    expect(blockLine).toContain("malware");
+    // eslint-disable-next-line no-control-regex
+    expect(blockLine).not.toMatch(/[\u0000-\u001f\u007f-\u009f]/);
+  });
+
   it("does NOT block a DEPRECATED server (advisory only — installs) (E9a)", async () => {
     const stackPath = await writeStackAndLock(basicStack, basicLock);
     const deprecated = {
