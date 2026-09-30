@@ -8,6 +8,13 @@ _Add entries here, never under a stamped version_ — a release commit renames t
 heading, and a branch that wrote beneath it merges without conflict straight into a
 published section (it happened to #170).
 
+### Changed
+
+- `fast-uri` transitive override bumped `^3.1.6` → `^3.1.8`, closing Dependabot alert
+  #61 (GHSA-hrr3-gc8f-f4qj, medium: inconsistent host case normalization via
+  percent-encoded octets; fixed in 3.1.8). Pulled in via `@modelcontextprotocol/sdk` →
+  `ajv` / `ajv-formats`; `pnpm why fast-uri` resolves a single copy, 3.1.8.
+
 ## [0.43.0] - 2026-09-30
 
 ### Fixed
