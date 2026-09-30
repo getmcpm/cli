@@ -8,6 +8,35 @@ _Add entries here, never under a stamped version_ — a release commit renames t
 heading, and a branch that wrote beneath it merges without conflict straight into a
 published section (it happened to #170).
 
+### Fixed
+
+- **`mcpm_install` and `mcpm_setup` installed servers the registry has marked
+  `deleted`; the CLI has refused them since v0.17.0 (E9a, #115).** `mcpm install` and
+  `mcpm up` (and so `mcpm_up`) call `assessServerStatus` before touching a client
+  config; `handleInstall` in `src/server/handlers.ts` did not, and `handleSetup`
+  delegates to it. A minimal npm listing more than 30 days old, marked `deleted` with
+  `statusMessage: "malware reported"`, scores 51/80 through the real scorer, over the
+  MCP surface's default gate of 50, so an agent with no human in the loop got
+  `{"installed": true}` and a written client config. Both tools now refuse before
+  scoring, client resolution or any write: `mcpm_install` throws `Server "<name>" is
+  marked "deleted" (removed) in the MCP registry (<statusMessage>). Install refused.`,
+  and `mcpm_setup` drops a deleted match before ranking its candidates and reports it
+  once in `skipped` with that same text, so it no longer takes a keyword's slot from a
+  healthy match it outscores (an old deleted pypi listing scores 53/80, an active npm
+  one under 30 days old with one medium finding 52/80), and a deleted-only match is
+  reported as deleted rather than as a trust-score rejection. The registry's
+  `statusMessage` is control-character-stripped and truncated to 256 characters before
+  it reaches the agent. As on the CLI, only an explicit `deleted` blocks; `deprecated`,
+  `active`, absent or unknown statuses still install. Not fixed here: `mcpm update`
+  (CLI only, behind a confirmation prompt unless `--yes`) has no such gate (maintainer
+  backlog #116). (#234)
+- **`mcpm install` and `mcpm up` printed a deleted server's registry `statusMessage`
+  to the terminal unsanitized, since v0.17.0 (#115).** An escape sequence in that
+  registry field (screen clear, an OSC window-title write) reached the terminal as-is
+  in `install`'s error and in `up`'s per-server block line, which `mcpm_up` also
+  returns in `notices`. Both now go through the same sanitizer as the rest of the
+  CLI's registry text; `mcpm install --json` still reports the field byte-for-byte (#234).
+
 ## [0.42.5] - 2026-09-29
 
 ### Fixed

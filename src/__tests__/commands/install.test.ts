@@ -165,6 +165,21 @@ describe("handleInstall — registry-delisting gate (E9a)", () => {
     expect(deps.addToStore).not.toHaveBeenCalled();
   });
 
+  it("strips escapes from the registry's statusMessage before it reaches the terminal (#116)", async () => {
+    // Built with fromCharCode: a literal escape in source trips the no-raw-ansi invariant.
+    const esc = String.fromCharCode(0x1b);
+    const e = entryWithStatus("deleted");
+    (e._meta!["io.modelcontextprotocol.registry/official"] as Record<string, unknown>).statusMessage =
+      `malware${esc}[2J${esc}]0;title${String.fromCharCode(7)} reported`;
+    const deps = makeDeps({ registryClient: { getServer: vi.fn().mockResolvedValue(e) } });
+
+    const err = (await handleInstall("io.github.test/my-server", {}, deps).catch((x: Error) => x)) as Error;
+
+    expect(err.message).toContain("malware");
+    // eslint-disable-next-line no-control-regex
+    expect(err.message).not.toMatch(/[\u0000-\u001f\u007f-\u009f]/);
+  });
+
   it("does NOT block a DEPRECATED server (advisory only — install proceeds)", async () => {
     const deps = makeDeps({
       registryClient: { getServer: vi.fn().mockResolvedValue(entryWithStatus("deprecated")) },
