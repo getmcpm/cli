@@ -36,6 +36,28 @@ published section (it happened to #170).
   in `install`'s error and in `up`'s per-server block line, which `mcpm_up` also
   returns in `notices`. Both now go through the same sanitizer as the rest of the
   CLI's registry text; `mcpm install --json` still reports the field byte-for-byte (#234).
+- **`mcpm guard cleanup --yes` could silently erase the pins of every server held by a
+  client whose config it failed to read.** The installed set was built from each
+  client's readable servers and ignored a client's read error, so a hand-edited
+  `~/.gemini/settings.json` with a trailing comma contributed no names: the dry run
+  listed that client's pinned servers as orphans and `--yes` pruned them, erasing their
+  rug-pull baselines so the next launch was trusted afresh as a first session (since
+  v0.5.0). The same happened when the config sat under a directory the user cannot
+  search (e.g. a root-owned, mode-700 `~/.gemini`), because client detection
+  counts that as "not installed". Cleanup now refuses, in the dry run and with `--yes`
+  alike, whenever a pin is held by no readable config while some detected client's
+  config cannot be read: it names each such client, its config path and the
+  terminal-sanitized error, prunes nothing, and exits 1. When every pin is held by a
+  readable config, an unreadable one cannot change the answer, so cleanup still reports
+  "nothing to prune" (with a note naming the unreadable config) and exits 0. A client
+  with no config file is not detected, so a machine without all six clients is
+  unaffected; a server whose entry is malformed was already counted as installed and
+  still is (now pinned by a test). Not changed: mcpm reads client configs as strict
+  JSON, so a config with comments or trailing commas stays unreadable here as in every
+  other command; the refusal now says so. **Exit status changes:** `guard cleanup` used
+  to exit 0 on every refusal, including its existing `pins.json` integrity refusals, so
+  `mcpm guard cleanup --yes && …` read a refusal as success; all refusals now exit 1
+  (recorded in `docs/CONTRACTS.md`). (backlog #118, #236)
 
 ## [0.42.5] - 2026-09-29
 

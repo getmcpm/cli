@@ -236,7 +236,12 @@ export function registerGuardCommand(program: Command): void {
     .option("--yes", "skip the dry-run prompt")
     .action(async (opts: { yes?: boolean }) => {
       const { runCleanupCommand } = await import("../guard/cli.js");
-      await runCleanupCommand({ apply: opts.yes === true, write: (s) => process.stdout.write(s) });
+      // process.exitCode (not process.exit): stdout may be a pipe, and exiting
+      // would truncate what is still buffered. A refusal exits 1 (#118).
+      process.exitCode = await runCleanupCommand({
+        apply: opts.yes === true,
+        write: (s) => process.stdout.write(s),
+      });
     });
 
   guard

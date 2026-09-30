@@ -170,6 +170,8 @@ Use during debugging when guard is in the way and you want to turn it off withou
 ### `mcpm guard cleanup [--yes]`
 Prunes pin entries for servers no longer installed in any client config. Dry-run by default; pass `--yes` to apply.
 
+A server whose config entry is malformed still counts as installed, so its pin is kept. A detected client's config that **cannot be read** (unparseable — mcpm reads configs as strict JSON, so comments and trailing commas count — or a permission error, including on the directory that holds it) holds servers cleanup cannot see. So if any pin is held by no readable config, cleanup refuses — in the dry run and with `--yes` alike — names each unreadable client, its config path and the error, prunes nothing, and exits `1`: that pin cannot be told apart from one belonging to a live server there, and pruning it would erase the server's rug-pull baseline. Fix the config and re-run. If every pin is held by a readable config, the unreadable one cannot change the result: cleanup reports nothing to prune, notes the unreadable config, and exits `0`. A client with no config file at all is not an error. A refusal because `pins.json` fails its integrity check also exits `1`.
+
 ### `mcpm guard inspect [file] [--json]`
 
 Runs the signature catalog over MCP JSON-RPC frame(s) **offline** — no relay, no

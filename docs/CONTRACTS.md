@@ -21,6 +21,7 @@ do-not-proceed.
 | `mcpm doctor` | no blocking issues | `1` | health check; the cross-client advisory section never changes the exit code |
 | `mcpm install` | installed | `1` | non-zero on a policy/trust block (`--min-trust`, `--min-release-age`, a registry-**deleted** server) or any failure |
 | `mcpm guard run` (relay) | child exit `0` | child's code; `1` | propagates the wrapped child's exit; **fails closed with `1`** on a confine hash mismatch, a stripped required marker, or a pins-integrity error |
+| `mcpm guard cleanup` | ran: pruned, a dry run, or nothing to prune | `1` when it refuses | refuses when `pins.json` fails its integrity check, and when a pin is held by no readable client config while some detected client's config cannot be read (the servers there are unknown, so the pin cannot be proven orphaned). **Changed in #236 (unreleased):** every refusal exited **`0`**, so `mcpm guard cleanup --yes && <next step>` read a refusal as success |
 | `mcpm info` / `mcpm why` | found | `1` when the named server is not in the registry | **Changed in 0.42.0:** both printed `Server '<name>' not found` and exited **`0`**, so `mcpm info X && <next step>` ran the next step on a server that is not there. The message and its stream (stdout) are unchanged; only the code moved, to match `install`/`remove` and the general rule below |
 
 Any command exits `1` on an unhandled error. New non-zero codes may be *added* for

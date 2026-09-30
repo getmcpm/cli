@@ -7,7 +7,7 @@
  */
 
 import { describe, expect, test, vi, beforeEach, afterEach } from "vitest";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { _resetCachedStorePath } from "../../store/index.js";
@@ -48,11 +48,12 @@ describe("runCleanupCommand on a tampered pins file", () => {
 
     const { runCleanupCommand } = await import("../cli.js");
     const out: string[] = [];
-    await runCleanupCommand({ apply: false, write: (s) => out.push(s) });
+    const code = await runCleanupCommand({ apply: false, write: (s) => out.push(s) });
 
     const text = out.join("");
     expect(text).toContain("integrity check failed");
     expect(text).toContain("Refusing to prune");
+    expect(code).toBe(1);
     // The old buggy behavior printed this on a tampered file — it must NOT now.
     expect(text).not.toContain("nothing to prune");
   });
@@ -151,11 +152,227 @@ describe("runCleanupCommand --yes (apply)", () => {
 
     const { runCleanupCommand } = await import("../cli.js");
     const out: string[] = [];
-    await runCleanupCommand({ apply: true, write: (s) => out.push(s) });
+    const code = await runCleanupCommand({ apply: true, write: (s) => out.push(s) });
 
     const text = out.join("");
     expect(text).toContain("cannot prune");
     expect(text).toContain("integrity check failed");
     expect(text).not.toContain("Pruned");
+    expect(code).toBe(1);
+  });
+});
+
+// #118: `cleanup` derived its "installed" set from `status.clients[*].servers`
+// and never looked at a client's read error. A client whose config could not be
+// parsed contributed ZERO names, so every server it held read as an orphan and
+// `--yes` erased those servers' rug-pull baselines (the next launch is then
+// trusted afresh as a first session). Real adapters on real files throughout:
+// a mocked read() would return a state the real one cannot produce.
+describe("runCleanupCommand when a client config cannot be read (#118)", () => {
+  const entry = (c: string) => ({
+    current_hash: "sha256:" + c.repeat(64),
+    previous_hashes: [],
+    captured_at: "x",
+    captured_via: "first-session" as const,
+    signature_list_version: "v0.5.0",
+  });
+  const pinsFile = () => path.join(tmpHome, ".mcpm", "pins.json");
+  const snapshot = () => ({
+    pins: readFileSync(pinsFile(), "utf-8"),
+    sidecar: readFileSync(`${pinsFile()}.integrity`, "utf-8"),
+  });
+  async function seedPins(...names: string[]): Promise<void> {
+    let pins = emptyPinsFile();
+    names.forEach((n, i) => {
+      pins = upsertToolPin(pins, n, "tool", entry("abcdef"[i % 6]!));
+    });
+    await updatePins(() => pins);
+  }
+  const writeClaudeCode = (mcpServers: Record<string, unknown>): void =>
+    writeFileSync(path.join(tmpHome, ".claude.json"), JSON.stringify({ mcpServers }));
+  function writeGeminiSettings(raw: string): void {
+    mkdirSync(path.join(tmpHome, ".gemini"), { recursive: true });
+    writeFileSync(path.join(tmpHome, ".gemini", "settings.json"), raw);
+  }
+  // A trailing comma: what a hand-edit of Gemini's settings.json commonly leaves.
+  const BROKEN_GEMINI = '{"mcpServers":{"server-b":{"command":"node"},}}';
+  async function cleanup(apply: boolean): Promise<{ text: string; code: number }> {
+    const { runCleanupCommand } = await import("../cli.js");
+    const out: string[] = [];
+    const code = await runCleanupCommand({ apply, write: (s) => out.push(s) });
+    return { text: out.join(""), code };
+  }
+
+  test("dry run refuses, names the client, and lists no orphans (exit 1)", async () => {
+    writeClaudeCode({ "server-a": { command: "node", args: ["a.js"] } });
+    writeGeminiSettings(BROKEN_GEMINI);
+    await seedPins("server-a", "server-b");
+    const before = snapshot();
+
+    const { text, code } = await cleanup(false);
+
+    expect(text).toContain("1 pin entry is not held by any readable client config");
+    expect(text).toContain("gemini-cli");
+    expect(text).toContain("strict JSON");
+    expect(text).toContain("Refusing to prune");
+    // The bug: server-b was listed as an orphan, then pruned by --yes.
+    expect(text).not.toContain("server-b");
+    expect(text).not.toContain("orphan pin entr");
+    expect(text).not.toContain("nothing to prune");
+    expect(code).toBe(1);
+    expect(snapshot()).toEqual(before);
+  });
+
+  test("--yes prunes nothing: pins.json and its sidecar are byte-identical, exit 1", async () => {
+    writeClaudeCode({ "server-a": { command: "node", args: ["a.js"] } });
+    writeGeminiSettings(BROKEN_GEMINI);
+    await seedPins("server-a", "server-b");
+    const before = snapshot();
+
+    const { text, code } = await cleanup(true);
+
+    expect(text).toContain("gemini-cli");
+    expect(text).not.toContain("Pruned");
+    expect(code).toBe(1);
+    expect(snapshot()).toEqual(before);
+    expect(Object.keys((await readPins()).servers).sort()).toEqual(["server-a", "server-b"]);
+  });
+
+  test("an unreadable config does not block cleanup when every pin is held by a readable one (exit 0)", async () => {
+    // An unreadable client can only ADD installed names, which can only remove
+    // candidates — with none left, "nothing to prune" is certain. Refusing here
+    // would lock out a machine with one permanently unreadable config.
+    writeClaudeCode({
+      "server-a": { command: "node", args: ["a.js"] },
+      "server-b": { command: "node", args: ["b.js"] },
+    });
+    writeGeminiSettings(BROKEN_GEMINI);
+    await seedPins("server-a", "server-b");
+    const before = snapshot();
+
+    for (const apply of [false, true]) {
+      const { text, code } = await cleanup(apply);
+      expect(text).toContain("nothing to prune");
+      expect(text).toContain("could not be read, but it cannot change this result");
+      expect(text).toContain("gemini-cli");
+      expect(text).not.toContain("Refusing");
+      expect(code).toBe(0);
+    }
+    expect(snapshot()).toEqual(before);
+  });
+
+  test.skipIf(process.getuid?.() === 0)(
+    "a config under a directory that cannot be searched (EACCES) is unreadable, not absent",
+    async () => {
+      // access() fails EACCES here, so the shared detector reports Gemini as
+      // not installed — and server-b's pin then read as an orphan and was pruned.
+      writeClaudeCode({ "server-a": { command: "node", args: ["a.js"] } });
+      writeGeminiSettings('{"mcpServers":{"server-b":{"command":"node"}}}');
+      await seedPins("server-a", "server-b");
+      const before = snapshot();
+      const geminiDir = path.join(tmpHome, ".gemini");
+      chmodSync(geminiDir, 0o000);
+      try {
+        const { text, code } = await cleanup(true);
+        expect(text).toContain("gemini-cli");
+        expect(text).toContain("EACCES");
+        expect(text).not.toContain("strict JSON");
+        expect(text).not.toContain("Pruned");
+        expect(code).toBe(1);
+      } finally {
+        chmodSync(geminiDir, 0o700);
+      }
+      expect(snapshot()).toEqual(before);
+    },
+  );
+
+  test("a config path under a regular file (ENOTDIR) is absent, not unreadable", async () => {
+    // ~/.gemini is a file, so ~/.gemini/settings.json cannot exist: no config.
+    writeClaudeCode({ "server-a": { command: "node", args: ["a.js"] } });
+    writeFileSync(path.join(tmpHome, ".gemini"), "not a directory");
+    await seedPins("server-a", "server-b");
+
+    const { text, code } = await cleanup(true);
+
+    expect(text).toContain("Pruned 1 orphan pin entry");
+    expect(code).toBe(0);
+  });
+
+  test("a client that is simply not installed does not block cleanup", async () => {
+    // Only Claude Code has a config; the other five clients do not exist.
+    writeClaudeCode({ "server-a": { command: "node", args: ["a.js"] } });
+    await seedPins("server-a", "server-b");
+
+    const { text, code } = await cleanup(true);
+
+    expect(text).toContain("Pruned 1 orphan pin entry");
+    expect(code).toBe(0);
+    expect(Object.keys((await readPins()).servers)).toEqual(["server-a"]);
+  });
+
+  test("a readable config on every client still reports and prunes a genuine orphan", async () => {
+    writeClaudeCode({ "server-a": { command: "node", args: ["a.js"] } });
+    writeGeminiSettings('{"mcpServers":{"server-b":{"command":"node"}}}');
+    await seedPins("server-a", "server-b", "server-gone");
+
+    const dry = await cleanup(false);
+    expect(dry.text).toContain("1 orphan pin entry found");
+    expect(dry.text).toContain("server-gone");
+    expect(dry.code).toBe(0);
+
+    const applied = await cleanup(true);
+    expect(applied.text).toContain("Pruned 1 orphan pin entry");
+    expect(applied.code).toBe(0);
+    expect(Object.keys((await readPins()).servers).sort()).toEqual(["server-a", "server-b"]);
+  });
+
+  test("a malformed entry is still an installed server: its pin is not an orphan", async () => {
+    // `args` as a string instead of an array: read() drops it into onSkip, so it
+    // is absent from the validated map, but the server still launches.
+    writeClaudeCode({
+      "server-a": { command: "node", args: ["a.js"] },
+      "server-b": { command: "npx", args: "-y pkg" },
+    });
+    await seedPins("server-a", "server-b");
+    const before = snapshot();
+
+    const dry = await cleanup(false);
+    expect(dry.text).toContain("nothing to prune");
+    expect(dry.text).not.toContain("server-b");
+
+    const applied = await cleanup(true);
+    expect(applied.text).not.toContain("Pruned");
+    expect(applied.code).toBe(0);
+    expect(snapshot()).toEqual(before);
+  });
+
+  test("--yes prunes a genuine orphan but not the malformed server's pin (locked prune path)", async () => {
+    // With no true orphan the run stops at "nothing to prune" and never reaches
+    // the locked prune, so the test above cannot see a divergence there.
+    writeClaudeCode({
+      "server-a": { command: "node", args: ["a.js"] },
+      "server-b": { command: "npx", args: "-y pkg" },
+    });
+    await seedPins("server-a", "server-b", "server-gone");
+
+    const { text, code } = await cleanup(true);
+
+    expect(text).toContain("Pruned 1 orphan pin entry");
+    expect(code).toBe(0);
+    expect(Object.keys((await readPins()).servers).sort()).toEqual(["server-a", "server-b"]);
+  });
+
+  test("terminal escapes in the parse error are stripped from the refusal", async () => {
+    // Node's JSON.parse SyntaxError embeds a snippet of the file, and the file
+    // is user-controlled text that reaches the terminal here.
+    writeGeminiSettings('{"mcpServers": \u001b]0;evil\u0007}');
+    await seedPins("server-b");
+
+    const { text, code } = await cleanup(false);
+
+    expect(code).toBe(1);
+    expect(text).toContain("gemini-cli");
+    expect(text).not.toContain("\u001b");
+    expect(text).not.toContain("\u0007");
   });
 });
