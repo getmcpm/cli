@@ -160,6 +160,14 @@ published section (it happened to #170).
   `mcpm guard cleanup --yes && …` read a refusal as success; all refusals now exit 1
   (recorded in `docs/CONTRACTS.md`). (backlog #118, #236)
 
+### Changed
+
+- `ip-address` transitive override bumped `^10.1.1` → `^10.5.1`, closing Dependabot
+  alert #60 (GHSA-2vr4-cq9g-pvrc, medium: no classifier recognizes the NAT64 local-use
+  range `64:ff9b:1::/48`; fixed in 10.5.1). Pulled in via `@modelcontextprotocol/sdk` →
+  `express-rate-limit`, on the SDK's HTTP server path, which mcpm's stdio-only use never
+  exercises; `pnpm why ip-address` resolves a single copy, 10.7.2. (#235)
+
 ## [0.42.5] - 2026-09-29
 
 ### Fixed
