@@ -8,6 +8,8 @@ _Add entries here, never under a stamped version_ — a release commit renames t
 heading, and a branch that wrote beneath it merges without conflict straight into a
 published section (it happened to #170).
 
+## [0.43.0] - 2026-09-30
+
 ### Fixed
 
 - **The guard's three "renders as nothing" lists each missed about 4,020 of Unicode's
