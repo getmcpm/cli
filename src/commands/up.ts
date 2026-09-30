@@ -555,7 +555,8 @@ async function processServer(input: ProcessInput): Promise<ServerResult> {
     return {
       name,
       status: "blocked",
-      message: `deleted from the MCP registry${statusGate.statusMessage ? ` (${statusGate.statusMessage})` : ""}`,
+      // Registry free text, printed to the terminal and carried in mcpm_up's `notices`.
+      message: `deleted from the MCP registry${statusGate.statusMessage ? ` (${sanitizeForTerminal(statusGate.statusMessage)})` : ""}`,
     };
   }
 

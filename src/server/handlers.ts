@@ -21,6 +21,8 @@ import { fetchNpmIntegrity as _fetchNpmIntegrity } from "../registry/npm-integri
 import { fetchNpmProvenance as _fetchNpmProvenance } from "../registry/npm-provenance.js";
 import { readPins as _readPins } from "../guard/pins.js";
 import { describeRegistryError } from "../registry/errors.js";
+import { assessServerStatus } from "../scanner/registry-status.js";
+import { sanitizeForTerminal } from "../guard/sanitize.js";
 
 // ---------------------------------------------------------------------------
 // Input validation for MCP server tool arguments
@@ -161,6 +163,22 @@ function effectiveMinTrustScore(requested: number | undefined): number {
   return Math.max(requested ?? DEFAULT_MIN_TRUST_SCORE, HARD_TRUST_FLOOR);
 }
 
+/**
+ * The refusal for a server the registry marks "deleted", or null (E9a, backlog #116). ONLY
+ * an explicit "deleted" blocks; deprecated / absent / unknown stay advisory, as in the CLI.
+ * One copy, so handleInstall and handleSetup's pre-filter report the same reason.
+ * statusMessage is registry free text read by an agent.
+ */
+function delistedRefusal(name: string, entry: ServerEntry): string | null {
+  const gate = assessServerStatus(entry);
+  if (!gate.blocks) return null;
+  return (
+    `Server "${name}" is marked "${gate.status}" (removed) in the MCP registry` +
+    (gate.statusMessage ? ` (${sanitizeForTerminal(gate.statusMessage)})` : "") +
+    `. Install refused.`
+  );
+}
+
 export async function handleInstall(
   args: { name: string; client?: string; minTrustScore?: number },
   deps: ServerDeps,
@@ -168,6 +186,16 @@ export async function handleInstall(
 ): Promise<object> {
   validateMcpServerName(args.name);
   const entry = preResolved?.entry ?? await deps.registryGetServer(args.name);
+
+  // Registry-delisting gate (E9a, backlog #116): the CLI's `install` and `up` refuse a server
+  // the registry itself marks "deleted" (e.g. "malware reported"); this path did not, and a
+  // delisted listing still scores ~51/80 -- over the default gate of 50 -- so an agent with
+  // no human in the loop could install it. Placed before scoring, client resolution and every
+  // write. handleSetup filters delisted matches out before ranking, so on its `preResolved`
+  // path this check does not fire today; it stays as the enforcing gate for every caller.
+  const delisted = delistedRefusal(args.name, entry);
+  if (delisted !== null) throw new Error(delisted);
+
   const trust = preResolved?.trust ?? computeTrust(entry, deps);
 
   // Security gate: reject servers below the minimum trust score.
@@ -530,9 +558,22 @@ export async function handleSetup(
 
     let bestEntry: ServerEntry | null = null;
     let bestTrust: TrustScore | null = null;
+    let sawDelisted = false;
 
     for (const entry of entries) {
       if (seenNames.has(entry.server.name)) continue;
+      // Backlog #116: a delisted listing is ineligible, not merely low-ranked. Ranked, it
+      // took the keyword's slot from a healthy sibling that clears every gate (an old deleted
+      // pypi listing scores 53; an active npm one under 30 days old with one medium finding,
+      // 52), and when it was the only match below the floor it was reported as a trust
+      // rejection -- disagreeing with handleInstall, which refuses the delisting first.
+      const delisted = delistedRefusal(entry.server.name, entry);
+      if (delisted !== null) {
+        skipped.push({ name: entry.server.name, reason: delisted });
+        seenNames.add(entry.server.name); // report it once, not once per keyword that matches it
+        sawDelisted = true;
+        continue;
+      }
       const trust = computeTrust(entry, deps);
       if (bestTrust === null || trust.score > bestTrust.score) {
         bestEntry = entry;
@@ -541,7 +582,9 @@ export async function handleSetup(
     }
 
     if (bestEntry === null || bestTrust === null) {
-      skipped.push({ name: keyword, reason: "All results already installed or duplicated" });
+      if (!sawDelisted) {
+        skipped.push({ name: keyword, reason: "All results already installed or duplicated" });
+      }
       continue;
     }
 
