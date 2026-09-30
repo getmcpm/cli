@@ -147,12 +147,12 @@ Most of this plan is *extension of existing seams*, not new architecture.
   (backlog #103 — the 64 MB counter documented here stopped enforcing once SDK 1.30.0's
   `ReadBuffer` began throwing at 10 MiB first).
 - **Inspection (`patterns.ts inspectMessage` + `targetSubtree`):** *(the 4-target / 3-signature
-  figures below are the **v0.5.0 baseline** this plan was written against — on `main` after #114 it
+  figures below are the **v0.5.0 baseline** this plan was written against — as of v0.43.0 it
   is **8** `SignatureTarget`s (`src/guard/types.ts`) and **22** signatures
   (`src/guard/signatures.ts`); see README's "What it catches" and `docs/SIGNATURES.md` for
   the shipped set.)* At the baseline: exactly **4** `SignatureTarget`s — `tool_response`,
   `tool_call_args`, `tool_description`, `tool_annotations`. Each string leaf is
-  `normalizeForMatch`-folded (NFKC + default-ignorable strip + blank-filler-to-space fold + confusable fold, ReDoS-bounded)
+  `normalizeForMatch`-folded (blank-filler-to-space fold + NFKC + default-ignorable strip + confusable fold, ReDoS-bounded)
   then tested against **3** signatures in `signatures.ts` (`OWASP_MCP_TOP_10`). Severity →
   action: critical = block, high = warn (critical is clamped to warn on the warn-only
   retrieved-data carriers `resource_content` / `prompt_content`).

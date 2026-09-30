@@ -18,8 +18,10 @@ published section (it happened to #170).
   detector) and `INVISIBLE_CHARS` (tool names) each named the same six families and
   missed 4,018, 4,025 and 4,023 of the 4,174 `Default_Ignorable_Code_Point` codepoints
   (Node 24.20.0, Unicode 17.0): the combining grapheme joiner U+034F, the Arabic letter
-  mark U+061C, the Hangul fillers, Khmer U+17B4–17B5, the Mongolian selectors
-  U+180B–180F, every variation selector, U+FFF0–FFF8, and the tag block above U+E007F.
+  mark U+061C, the Hangul fillers, Khmer U+17B4–17B5, the Mongolian format
+  characters U+180B–180F, every variation selector, U+FFF0–FFF8, the Duployan and
+  musical-symbol format controls U+1BCA0–1BCA3 and U+1D173–1D17A, and the tag block above
+  U+E007F.
   Measured through the v0.42.5 binary: U+034F inside `ignore` on `tools/list`,
   `tool_response` and `initialize.instructions`, and inside `seed` on
   `elicitation/create`, all `pass` with no findings; a variation-selector run after one
@@ -40,8 +42,8 @@ published section (it happened to #170).
   VS Code and Windsurf. The fold
   runs before NFKC, which would otherwise map U+3164 and U+FFA0 onto U+1160. A filler
   *inside* a word therefore splits it (`ig<U+3164>nore` passes the match, exactly as
-  `ig nore` with an ordinary space does, and the metadata carriers still flag the filler
-  itself). The conjoining fillers U+115F and U+1160 measured 0 px in the same environment
+  `ig nore` with an ordinary space does, and the metadata carriers still flag U+3164 and
+  U+FFA0 themselves; U+2800 is real Braille and not flagged there). The conjoining fillers U+115F and U+1160 measured 0 px in the same environment
   (zero-advance, a small notdef box drawn over the next letter; a Hangul glyph in the
   fallback chain would give them width), so they are stripped like every other
   default-ignorable: folding them to a space, as a first draft of this fix did, let
@@ -87,9 +89,9 @@ published section (it happened to #170).
   64 KB of dense benign emoji + VS16 4.35 / 4.39 before and 2.62 / 5.52 after — the added
   `tools/list` cost is the per-selector carve-out lookup, linear at 0.68, 1.35, 2.64 and
   5.52 ms for 8, 16, 32 and 64 KB (0.49, 0.98, 1.97 and 4.05 before) and flat beyond the
-  64 KB window; a 64 KB variation-selector run 2.13 / 1.96 before and 0.71 / 0.39 after;
-  64 KB of U+3164 1.97 / 1.83 before and 1.24 / 1.06 after (the strip now shortens these
-  leaves before matching). A ~10 MiB `tools/list` frame, the relay's cap, of 53 dense
+  64 KB window; a 64 KB variation-selector run 2.13 / 1.96 before and 0.71 / 0.39 after
+  (the strip now removes it before matching); 64 KB of U+3164 1.97 / 1.83 before and
+  1.24 / 1.06 after (folded to spaces, so the leaf keeps its length). A ~10 MiB `tools/list` frame, the relay's cap, of 53 dense
   emoji + VS16 descriptions inspects in 286 ms (222 before); the same frame of prose, 281 ms
   (288 before).
   **Known gaps, not fixed:** on the retrieved-data carriers one variation selector
@@ -102,7 +104,9 @@ published section (it happened to #170).
   would warn on a retrieved-data carrier, and one file (two copies) carries a stray VS16
   after a letter that would warn on a metadata carrier; on carriers the detector skips,
   invisible codepoints other than the tag block and selector runs are stripped for matching
-  but not reported; the scanner's `zero-width characters (obfuscation)` list
+  but not reported; on a metadata leaf over 64 KB, a selector at the start of the scanned
+  tail whose emoji base fell in the discarded middle is flagged (warn), because the presence
+  scan joins head and tail without a seam; the scanner's `zero-width characters (obfuscation)` list
   (`src/scanner/patterns.ts`) is a fourth hand list that feeds the registry trust score and
   is unchanged, because widening it without the carve-outs would lower the score of every
   registry description containing an emoji (in that snapshot the only default-ignorable
@@ -129,8 +133,8 @@ published section (it happened to #170).
   `statusMessage` is control-character-stripped and truncated to 256 characters before
   it reaches the agent. As on the CLI, only an explicit `deleted` blocks; `deprecated`,
   `active`, absent or unknown statuses still install. Not fixed here: `mcpm update`
-  (CLI only, behind a confirmation prompt unless `--yes`) has no such gate (maintainer
-  backlog #116). (#234)
+  (CLI only, behind a confirmation prompt unless `--yes`) has no such gate.
+  (maintainer backlog #116, #234)
 - **`mcpm install` and `mcpm up` printed a deleted server's registry `statusMessage`
   to the terminal unsanitized, since v0.17.0 (#115).** An escape sequence in that
   registry field (screen clear, an OSC window-title write) reached the terminal as-is
