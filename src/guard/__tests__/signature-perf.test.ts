@@ -42,3 +42,39 @@ describe("signature-perf (#113): pathological 32-64 KB leaves inspect in well un
     expect(inspectMs(text)).toBeLessThan(BOUND_MS);
   });
 });
+
+/**
+ * #114 widened the strip and the metadata presence detector from six families of
+ * invisible characters to the whole Default_Ignorable_Code_Point property, and
+ * added a variation-selector run scan. None of it may be super-linear: the class
+ * is one regex pass, and the emoji carve-outs look one codepoint either side.
+ * Measured through `guard inspect` on Node 24.20.0 (start-up subtracted) the
+ * worst of these is a few ms to ~20 ms per 64 KB leaf; the bound is the same
+ * 250 ms as above, for the same flaky-CI reason.
+ */
+function inspectListMs(description: string): number {
+  const msg = {
+    jsonrpc: "2.0",
+    id: 1,
+    result: { tools: [{ name: "t", description, inputSchema: { type: "object" } }] },
+  } as JSONRPCMessage;
+  const t0 = process.hrtime.bigint();
+  inspectMessage(msg, OWASP_MCP_TOP_10);
+  return Number(process.hrtime.bigint() - t0) / 1e6;
+}
+
+describe("default-ignorable (#114): 32-64 KB leaves of invisible characters stay cheap on both carriers", () => {
+  test.each([
+    ["32K variation selectors (BMP, U+FE0F)", "x" + "\uFE0F".repeat(32_767)],
+    ["32K variation selectors (supplementary, U+E0100)", "x" + "\u{E0100}".repeat(32_767)],
+    ["32K Hangul fillers (U+3164)", "\u3164".repeat(32_768)],
+    // Every pair is a benign carve-out hit, so this is the per-selector lookup
+    // cost and nothing else: the shape a per-hit linear scan turns quadratic.
+    ["64 KB of dense emoji + VS16 (32K carve-outs)", "\u2728\uFE0F".repeat(32_768)],
+    // The opposite worst case for the carve-out: it never matches.
+    ["32K alternating letter + VS (no carve-out ever applies)", "a\uFE0F".repeat(16_384)],
+  ])("%s", (_name, text) => {
+    expect(inspectMs(text)).toBeLessThan(BOUND_MS);
+    expect(inspectListMs(text)).toBeLessThan(BOUND_MS);
+  });
+});
