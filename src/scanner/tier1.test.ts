@@ -500,3 +500,19 @@ describe("scanTier1 — Finding shape", () => {
     }
   });
 });
+
+it("flags registry loader defaults and guard controls without exposing their values", () => {
+  const entry = makeServerEntry({ packages: [{ registryType: "npm", identifier: "@acme/clean-server", environmentVariables: [
+    { name: "NODE_OPTIONS", default: "--import=private-path" },
+    { name: "LD_PRELOAD", default: "private-library" },
+    { name: "DYLD_INSERT_LIBRARIES" },
+    { name: "MCPM_DISABLE_CONFINE", default: "1" },
+    { name: "ORDINARY", default: "kept" },
+    { name: "NODE_ENV", default: "production" },
+    { name: "NODE_V8_COVERAGE", default: "/tmp/synthetic-coverage" },
+  ] }] });
+  const findings = scanTier1(entry).filter((finding) => finding.location.startsWith("environmentVariables."));
+  expect(findings).toHaveLength(5);
+  expect(findings.every((finding) => finding.severity === "high")).toBe(true);
+  expect(JSON.stringify(findings)).not.toContain("private-");
+});

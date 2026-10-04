@@ -8,6 +8,22 @@ _Add entries here, never under a stamped version_ — a release commit renames t
 heading, and a branch that wrote beneath it merges without conflict straight into a
 published section (it happened to #170).
 
+### Fixed
+
+- Server-declared Node startup and loader settings (including `NODE_OPTIONS --import/--require`)
+  no longer configure the IDE-launched guard before its inspection or confinement
+  code runs. They, declared `MCPM_*` controls, and home/path overrides are transported privately,
+  validated, and restored only into the server child env; keychain placeholders
+  remain unresolved references until child-only resolution. The transport is plaintext
+  JSON, not encryption. Disable reconstructs the original environment while
+  retaining the hash's original key list. Malformed transport refuses child startup.
+  Existing wraps must be disabled and enabled again; upgrading alone cannot fix
+  startup env already attached to the guard. Ambient IDE/shell loaders remain outside
+  this protection; the guard retains ambient home/path settings. Confined macOS launches refuse
+  declared `DYLD_*` settings because `sandbox-exec` strips them. Registry metadata
+  declaring loader/control settings now emits a high tier-1 `install-script`
+  advisory without exposing the value (#117).
+
 ### Changed
 
 - `fast-uri` transitive override bumped `^3.1.6` → `^3.1.8`, closing Dependabot alert

@@ -125,6 +125,41 @@ A pre-batch `.bak` snapshot is written per touched client (`<config>.guard-enabl
 
 The `--orig-hash` token is now verified at spawn time too (previously it was checked only on `disable`/unwrap). This is **Phase 1: warn-once** on mismatch — it does *not* fail closed yet (a future release promotes it after zero-mismatch dogfood evidence); an absent hash (a legacy pre-`--orig-hash` wrap) is skipped, not failed.
 
+Declared startup settings (`NODE_OPTIONS`, `NODE_PATH`, `NODE_EXTRA_CA_CERTS`,
+`NODE_ICU_DATA`, `NODE_V8_COVERAGE`, `NODE_COMPILE_CACHE`, `NODE_REDIRECT_WARNINGS`,
+`NODE_DEBUG`, `NODE_DEBUG_NATIVE`, `NODE_TLS_REJECT_UNAUTHORIZED`,
+`OPENSSL_CONF`, `OPENSSL_MODULES`, `GLIBC_TUNABLES`, `LD_*`, `DYLD_*`) and
+`MCPM_*` controls and `HOME`/`USERPROFILE`/`HOMEDRIVE`/`HOMEPATH`/`PATH` overrides are carried in the reserved `MCPM_GUARD_CHILD_ENV` field instead
+of configuring the guard process. The guard validates that transport against the
+original declared key list, resolves keychain placeholders into the child env,
+and never restores these settings into its own `process.env`. Disable reconstructs
+the original env. The transport is plaintext JSON; keychain placeholders remain
+unresolved references on disk. The existing original-entry hash still covers key names, not
+values. Registry metadata declaring these names produces a high tier-1
+`install-script` advisory finding, including names supplied through defaults.
+
+**Existing wrapped configs need migration:** upgrading alone cannot stop a loader
+variable already attached to the IDE-launched guard. Stop/restart the affected
+server after `mcpm guard disable --client <id> --server <name>` followed by
+`mcpm guard enable --client <id> --server <name>` (retain `--confine` if used).
+`enable` skips entries that are already wrapped. A legacy wrap with declared
+child-only settings refuses to spawn its server until rebuilt; a startup loader
+can still execute before that refusal, so rebuild before launching it.
+
+This protects settings declared in the server config. Loader settings inherited
+from the IDE or shell still act before mcpm starts and must be removed from that
+launch environment separately. An ambient loader setting that collides with a
+transported loader key also causes a child-startup refusal; remove it from the IDE
+environment before restarting. Declared home/path overrides apply only to the
+child, so they cannot redirect the guard away from its enrolled profile or binary. The reserved transport field cannot itself be declared by a
+server. Malformed, missing, or contradictory transport data refuses the child
+launch without printing its values.
+
+On macOS, the restricted `sandbox-exec` binary strips `DYLD_*` settings before
+executing its child (verified with `DYLD_LIBRARY_PATH`). A confined launch with
+any declared `DYLD_*` setting therefore refuses to start. Remove unused settings
+or explicitly reconsider confinement; unconfined launches preserve them.
+
 ### `mcpm guard enable [...] --allow-unguarded`
 A URL/HTTP-transport server entry has no `command`, so the stdio MITM relay cannot wrap it — it would run with **zero** runtime inspection. H9 turned that silent skip into a fail-closed deny-by-default: such a server is refused unless you record explicit, informed consent with `--allow-unguarded`. Consent is persisted to `~/.mcpm/guard-unguarded.json` (`src/guard/unguarded.ts`), so later runs stay quiet for the servers you already allowed instead of re-prompting. The same flag exists on `mcpm install` and `mcpm up`.
 

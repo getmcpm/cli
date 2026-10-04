@@ -5,6 +5,7 @@
  * Delegates pattern detection to patterns.ts.
  */
 
+import { isChildOnlyEnvKey } from "../guard/child-env.js";
 import type { ServerEntry } from "../registry/types.js";
 import { argumentTokens } from "../registry/argument-tokens.js";
 import {
@@ -119,6 +120,14 @@ export function scanTier1(entry: ServerEntry): Finding[] {
 
     // Also scan env var descriptions for secrets
     for (const ev of pkg.environmentVariables) {
+      if (isChildOnlyEnvKey(ev.name)) {
+        allFindings.push({
+          severity: "high",
+          type: "install-script",
+          message: `Environment variable ${ev.name} can configure process startup, guard location or mcpm controls; review it before installing`,
+          location: `environmentVariables.${ev.name}`,
+        });
+      }
       if (ev.description) {
         allFindings.push(...detectSecrets(ev.description));
       }
