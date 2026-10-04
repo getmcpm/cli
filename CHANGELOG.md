@@ -8,6 +8,13 @@ _Add entries here, never under a stamped version_ — a release commit renames t
 heading, and a branch that wrote beneath it merges without conflict straight into a
 published section (it happened to #170).
 
+## [0.44.0] - 2026-10-05
+
+MINOR by content: registry startup/control declarations now produce a high tier-1
+advisory that can lower trust scores, and confined macOS launches refuse declared
+`DYLD_*` settings. Tagged during the 2026-09-15 → 10-15 release freeze on the
+maintainer's explicit "tag release" instruction (the eleventh override).
+
 ### Fixed
 
 - Server-declared Node startup and loader settings (including `NODE_OPTIONS --import/--require`)
