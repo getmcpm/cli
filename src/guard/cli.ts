@@ -21,7 +21,7 @@ import {
   type OrchestratorDeps,
 } from "./orchestrator.js";
 import os from "node:os";
-import { defaultWrapContext, isWrapped, type ConfineMarker } from "./wrap.js";
+import { defaultWrapContext, isWrapped, unwrapEntry, type ConfineMarker } from "./wrap.js";
 import { deriveDefaultProfile } from "./confine/derive.js";
 import {
   readConfineStore,
@@ -519,7 +519,7 @@ async function warnUnresolvablePlaceholders(opts: DisableOpts): Promise<void> {
     }
     for (const [name, entry] of Object.entries(entries)) {
       if (opts.server !== undefined && name !== opts.server) continue;
-      const keys = placeholderEnvKeys(entry.env);
+      const keys = placeholderEnvKeys((isWrapped(entry) ? unwrapEntry(entry) : entry)?.env);
       if (keys.length > 0) affected.push({ client: clientId, server: name, keys });
     }
   }

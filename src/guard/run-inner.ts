@@ -32,6 +32,7 @@ import {
 import { readPins, updatePins } from "./pins.js";
 import { readPolicy, expireStale, PolicyIntegrityError, type GuardPolicyFile } from "./policy.js";
 import { appendEvent } from "./event-log.js";
+import { CHILD_ENV_FIELD, isChildOnlyEnvKey, readChildEnv, restoreChildEnv } from "./child-env.js";
 import { hashOriginalEntry } from "./wrap.js";
 import { loadProfile } from "./confine/store.js";
 import { isConfineBackendAvailable, wrapForConfinement } from "./confine/apply.js";
@@ -485,10 +486,20 @@ export async function runInner(parsed: RunInnerArgs): Promise<number> {
   // secrets`) are then resolved to their decrypted secrets, so the plaintext
   // exists only in this child's in-memory env and never on disk.
   const baselineEnv = buildSafeEnv(process.env);
-  const childEnvSource: NodeJS.ProcessEnv = { ...baselineEnv };
+  let childEnvSource: NodeJS.ProcessEnv = { ...baselineEnv };
   for (const key of parsed.declaredEnvKeys) {
+    if (isChildOnlyEnvKey(key)) continue;
     const value = process.env[key];
     if (value !== undefined) childEnvSource[key] = value;
+  }
+
+  try {
+    childEnvSource = restoreChildEnv(childEnvSource, readChildEnv(process.env, parsed.declaredEnvKeys, false, true));
+    delete childEnvSource[CHILD_ENV_FIELD];
+  } catch {
+    process.stderr.write(`[mcpm-guard] CHILD-ENV-ERROR ${safeName}: invalid or missing child environment transport. Refusing to start; disable then enable the guard again.\n`);
+    await eventsPersisted;
+    return 1;
   }
 
   let childEnv: Record<string, string>;
@@ -563,6 +574,14 @@ export async function runInner(parsed: RunInnerArgs): Promise<number> {
     process.exit(1);
   }
   if (confineDecision.action === "confine" && confineProfile !== null) {
+    // ponytail: measured on macOS with DYLD_LIBRARY_PATH=/tmp/synthetic;
+    // sandbox-exec is a restricted binary: dyld strips these settings
+    // before executing the child. Refuse rather than silently changing its env.
+    if (Object.keys(childEnv).some((key) => key.toUpperCase().startsWith("DYLD_"))) {
+      process.stderr.write(`[mcpm-guard] CHILD-ENV-ERROR ${safeName}: sandbox-exec cannot preserve declared DYLD_* settings. Refusing to start; remove unused DYLD_* settings or explicitly reconsider confinement.\n`);
+      await eventsPersisted;
+      return 1;
+    }
     const wrapped = wrapForConfinement(confineProfile, parsed.command, parsed.args);
     if (wrapped !== null) {
       spawnCommand = wrapped.command;

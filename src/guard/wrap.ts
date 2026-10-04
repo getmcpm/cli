@@ -13,8 +13,7 @@
  *               "--declared-env", <csv of orig.env KEY names>,
  *               "--orig-hash", <sha256 of original entry>, "--",
  *               <orig.command>, ...<orig.args>],
- *     env:     <orig.env>   // passthrough, including OAuth tokens the user
- *                            // explicitly placed in their MCP client config
+ *     env:     <orig.env, with child-only startup settings in a private field>
  *   }
  *
  * The absolute mcpm path (security review F1.4) is captured at wrap time
@@ -37,6 +36,7 @@
  *     attacker command into the IDE config.
  */
 
+import { CHILD_ENV_FIELD, wrapChildEnv, readChildEnv } from "./child-env.js";
 import { createHash } from "node:crypto";
 import { isAbsolute } from "node:path";
 import type { McpServerEntry } from "../config/adapters/index.js";
@@ -198,7 +198,7 @@ export function wrapEntry(
   return {
     command: ctx.mcpmBinary,
     args,
-    ...(entry.env !== undefined ? { env: { ...entry.env } } : {}),
+    ...(entry.env !== undefined ? { env: wrapChildEnv(entry.env) } : {}),
     ...(entry.disabled !== undefined ? { disabled: entry.disabled } : {}),
   };
 }
@@ -331,7 +331,15 @@ export function unwrapEntry(entry: McpServerEntry): McpServerEntry | null {
 
   const unwrapped: McpServerEntry = { command: origCommand };
   if (origArgs.length > 0) unwrapped.args = [...origArgs];
-  if (entry.env !== undefined) unwrapped.env = { ...entry.env };
+  try {
+    const child = readChildEnv(entry.env ?? {}, marker.declaredEnvKeys, true);
+    if (entry.env !== undefined) {
+      unwrapped.env = { ...entry.env, ...child };
+      delete unwrapped.env[CHILD_ENV_FIELD];
+    }
+  } catch {
+    return null;
+  }
   if (entry.disabled !== undefined) unwrapped.disabled = entry.disabled;
   return unwrapped;
 }
