@@ -188,6 +188,11 @@ export function wrapEntry(
       `Server "${serverName}" has no command field; cannot wrap. Only stdio-transport servers are wrappable in v0.5.0 (HTTP-transport via 'url' is deferred to V2).`,
     );
   }
+  // VS Code loads envFile into the launcher before spawning it. Such settings
+  // cannot pass through wrapChildEnv, so retaining it would configure the guard.
+  if ((entry as McpServerEntry & { envFile?: unknown }).envFile) {
+    throw new Error("Cannot guard a server with envFile; move its settings into env and remove envFile so startup controls can be isolated from the guard");
+  }
   const args = buildWrappedArgs(
     serverName,
     entry.command,
@@ -196,10 +201,10 @@ export function wrapEntry(
     { scriptPath: ctx.scriptPath, confine },
   );
   return {
+    ...entry,
     command: ctx.mcpmBinary,
     args,
     ...(entry.env !== undefined ? { env: wrapChildEnv(entry.env) } : {}),
-    ...(entry.disabled !== undefined ? { disabled: entry.disabled } : {}),
   };
 }
 
@@ -329,7 +334,8 @@ export function unwrapEntry(entry: McpServerEntry): McpServerEntry | null {
   const recomputed = hashOriginalEntry(origCommand, origArgs, marker.declaredEnvKeys);
   if (recomputed !== marker.origHash) return null;
 
-  const unwrapped: McpServerEntry = { command: origCommand };
+  const unwrapped: McpServerEntry = { ...entry, command: origCommand };
+  delete unwrapped.args;
   if (origArgs.length > 0) unwrapped.args = [...origArgs];
   try {
     const child = readChildEnv(entry.env ?? {}, marker.declaredEnvKeys, true);
@@ -340,6 +346,17 @@ export function unwrapEntry(entry: McpServerEntry): McpServerEntry | null {
   } catch {
     return null;
   }
-  if (entry.disabled !== undefined) unwrapped.disabled = entry.disabled;
   return unwrapped;
+}
+
+/** Update a verified wrap, retaining its launcher and confinement binding. */
+export function rewrapEntry(wrapped: McpServerEntry, original: McpServerEntry): McpServerEntry {
+  if (!wrapped.command || unwrapEntry(wrapped) === null) throw new Error("Guard wrap is malformed or has an integrity mismatch; refusing to update it");
+  const marker = parseMarker(wrapped.args!)!;
+  if (marker.confineRequired && !marker.confineProfileHash) {
+    throw new Error("Required confinement has no profile hash; refusing to update it");
+  }
+  const next = wrapEntry(marker.serverName, original, { mcpmBinary: wrapped.command! },
+    marker.confineProfileHash ? { profileHash: marker.confineProfileHash, required: marker.confineRequired } : undefined);
+  return { ...next, args: [...wrapped.args!.slice(0, findMarkerIndex(wrapped.args!)), ...next.args!] };
 }

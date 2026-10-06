@@ -100,6 +100,27 @@ describe("wrapEntry", () => {
 });
 
 describe("isWrapped + unwrapEntry round-trip", () => {
+  test("refuses external envFile settings before they can configure the guard startup", () => {
+    const entry = { command: "node", args: ["server.js"], envFile: "/user/.env" };
+    expect(() => wrapEntry("native", entry, ctx)).toThrow(/envFile.*env/);
+  });
+
+  test("enable and disable retain native client settings and startup-secret references", () => {
+    const orig = {
+      command: "npx", args: ["-y", "@test/server", "/data"],
+      env: { NODE_OPTIONS: "--require /data/bootstrap.cjs", API_KEY: "${mcpm:secret:test}" },
+      disabled: true, cwd: "/data", timeout: 1234, includeTools: ["read_file"],
+      type: "stdio",
+    };
+    const wrapped = wrapEntry("native", orig, ctx);
+    expect(wrapped).toMatchObject({
+      disabled: true, cwd: orig.cwd, timeout: orig.timeout, includeTools: orig.includeTools,
+      type: orig.type,
+    });
+    expect(wrapped.env?.NODE_OPTIONS).toBeUndefined();
+    expect(unwrapEntry(wrapped)).toEqual(orig);
+  });
+
   test("round-trips a typical entry", () => {
     const orig = {
       command: "npx",

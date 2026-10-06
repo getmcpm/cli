@@ -8,6 +8,23 @@ _Add entries here, never under a stamped version_ — a release commit renames t
 heading, and a branch that wrote beneath it merges without conflict straight into a
 published section (it happened to #170).
 
+### Fixed
+
+- `mcpm update` now keeps guard and confinement wrapping, disabled state,
+  credentials, appended user arguments and native client settings. Registry
+  launch arguments are refreshed against the installed version; ambiguous custom
+  launches, unreadable or missing configs, and malformed guard markers are left
+  untouched with a warning. Malformed-env recovery also keeps valid launch args,
+  disabled state and native settings. When no client is updated the stored version stays
+  unchanged; partial updates still name the clients left behind. Registry-deleted
+  servers are refused before confirmation or any config/store write.
+- Guard enable/disable now preserve per-server client fields, including `cwd`,
+  `timeout`, Gemini's `includeTools`, and VS Code's `type`. External `envFile`
+  settings are preserved on unguarded updates and guard disable; guard enable
+  and guarded updates refuse them with instructions to move settings into `env`,
+  because the client loads the file into the guard before it can isolate startup
+  controls. No config is rewritten on that refusal.
+
 ## [0.44.0] - 2026-10-05
 
 MINOR by content: registry startup/control declarations now produce a high tier-1
