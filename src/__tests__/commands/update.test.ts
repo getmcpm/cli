@@ -9,6 +9,12 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { mkdtemp, rm, readFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import { GeminiCliAdapter } from "../../config/adapters/gemini-cli.js";
+import { VSCodeAdapter } from "../../config/adapters/vscode.js";
+import { wrapEntry, unwrapEntry, isWrapped, WRAP_CONFINE_HASH_FLAG, WRAP_CONFINE_REQUIRED_FLAG } from "../../guard/wrap.js";
 import type { InstalledServer } from "../../store/servers.js";
 import type { ServerEntry } from "../../registry/types.js";
 import type { TrustScore } from "../../scanner/trust-score.js";
@@ -84,7 +90,10 @@ function makeTrustScore(
 function makeAdapter(clientId: ClientId): ConfigAdapter {
   return {
     clientId,
-    read: vi.fn().mockResolvedValue({}),
+    read: vi.fn().mockResolvedValue({
+      "io.github.test/server-a": { command: "npx", args: ["-y", "@test/server"] },
+      "io.github.test/server-b": { command: "npx", args: ["-y", "@test/server"] },
+    }),
     addServer: vi.fn().mockResolvedValue(undefined),
     removeServer: vi.fn().mockResolvedValue(undefined),
   };
@@ -134,6 +143,187 @@ function makeDeps(overrides: Partial<UpdateDeps> = {}): UpdateDeps {
 
 import { handleUpdate } from "../../commands/update.js";
 import type { UpdateOptions } from "../../commands/update.js";
+
+describe("handleUpdate — preserves launch protections and client settings (#115)", () => {
+  it("repairs malformed env without dropping disabled state, native settings or valid custom args", async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), "mcpm-update-recovery-"));
+    const configPath = path.join(dir, "config.json");
+    const name = "io.github.test/server-a";
+    const adapter = new GeminiCliAdapter();
+    const original = {
+      command: "npx", args: ["-y", "@test/server", "/user/data"],
+      env: { TOKEN: "keep", PORT: 1234 }, disabled: true,
+      cwd: "/user/data", timeout: 1234, includeTools: ["read_file"],
+    };
+    try {
+      await adapter.addServer(configPath, name, original as never);
+      await handleUpdate({ yes: true }, makeDeps({
+        getInstalledServers: vi.fn().mockResolvedValue([makeInstalledServer({ clients: [adapter.clientId] })]),
+        getServer: vi.fn(async (_name: string, version?: string) => makeServerEntry(name, version ?? "2.0.0")),
+        getAdapter: () => adapter, getConfigPath: () => configPath,
+      }));
+      expect((await adapter.read(configPath))[name]).toEqual({ ...original, env: { TOKEN: "keep" } });
+    } finally { await rm(dir, { recursive: true, force: true }); }
+  });
+
+  it.each([false, true])("preserves an external envFile and refuses only guarded updates (guarded=%s)", async (guarded) => {
+    const dir = await mkdtemp(path.join(tmpdir(), "mcpm-update-envfile-"));
+    const configPath = path.join(dir, "config.json");
+    const name = "io.github.test/server-a";
+    const adapter = new VSCodeAdapter();
+    const original = { command: "npx", args: ["-y", "@test/server"], disabled: true };
+    const configured = { ...(guarded ? wrapEntry(name, original, { mcpmBinary: "mcpm" }) : original), envFile: "/user/.env", type: "stdio" };
+    try {
+      await adapter.addServer(configPath, name, configured);
+      const before = await readFile(configPath, "utf8");
+      const deps = makeDeps({
+        getInstalledServers: vi.fn().mockResolvedValue([makeInstalledServer({ clients: [adapter.clientId] })]),
+        getServer: vi.fn().mockResolvedValue(makeServerEntry(name, "2.0.0")),
+        getAdapter: () => adapter, getConfigPath: () => configPath,
+      });
+      await handleUpdate({ yes: true, json: true }, deps);
+      expect((await adapter.read(configPath))[name]).toEqual(configured);
+      if (guarded) {
+        expect(await readFile(configPath, "utf8")).toBe(before);
+        expect(deps.addInstalledServer).not.toHaveBeenCalled();
+        expect(deps.removeInstalledServer).not.toHaveBeenCalled();
+        expect(JSON.parse((deps.output as ReturnType<typeof vi.fn>).mock.calls[0][0])[0]).toMatchObject({ updated: false, clientErrors: [expect.stringMatching(/envFile/)] });
+        expect(unwrapEntry(configured)).toEqual({ ...original, envFile: "/user/.env", type: "stdio" });
+      } else expect(deps.addInstalledServer).toHaveBeenCalled();
+    } finally { await rm(dir, { recursive: true, force: true }); }
+  });
+
+  it("keeps a custom arg on an unguarded server while replacing the old registry defaults", async () => {
+    const name = "io.github.test/server-a";
+    const adapter = makeAdapter("claude-desktop");
+    (adapter.read as ReturnType<typeof vi.fn>).mockResolvedValue({ [name]: {
+      command: "npx", args: ["-y", "@test/server", "--old", "user-arg"], env: { TOKEN: "keep" }, disabled: true, cwd: "/data",
+    } });
+    const getServer = vi.fn(async (_name: string, version?: string) => {
+      const entry = makeServerEntry(name, version ?? "2.0.0");
+      entry.server.packages[0].runtimeArguments = [version ? "--old" : "--new"];
+      return entry;
+    });
+    await handleUpdate({ yes: true }, makeDeps({ getServer, getAdapter: () => adapter }));
+    expect(adapter.addServer).toHaveBeenCalledWith(expect.any(String), name, {
+      command: "npx", args: ["-y", "@test/server", "--new", "user-arg"], env: { TOKEN: "keep" }, disabled: true, cwd: "/data",
+    }, { force: true });
+  });
+
+  it.each(["unavailable", "wrong version", "wrong identity", "changed launcher", "changed transport"])("leaves custom args untouched when the historical baseline is %s", async (kind) => {
+    const name = "io.github.test/server-a";
+    const adapter = makeAdapter("claude-desktop");
+    (adapter.read as ReturnType<typeof vi.fn>).mockResolvedValue({ [name]: { command: "npx", args: ["-y", "@test/server", "user-arg"] } });
+    const getServer = vi.fn(async (_name: string, version?: string) => {
+      if (version && kind === "unavailable") throw new NotFoundError(name);
+      const entry = makeServerEntry(version && kind === "wrong identity" ? "another-server" : name,
+        version && kind !== "wrong version" ? version : "2.0.0");
+      if (!version && kind === "changed launcher") {
+        entry.server.packages[0].registryType = "pypi";
+        entry.server.packages[0].identifier = "new-server";
+      }
+      if (!version && kind === "changed transport") {
+        entry.server.remotes = [{ type: "streamable-http", url: "https://example.com/mcp", headers: [] }];
+      }
+      return entry;
+    });
+    const deps = makeDeps({ getServer, getAdapter: () => adapter,
+      getInstalledServers: vi.fn().mockResolvedValue([makeInstalledServer({ clients: ["cursor"] })]),
+    });
+    await handleUpdate({ yes: true }, deps);
+    expect(adapter.addServer).not.toHaveBeenCalled();
+    expect(deps.removeInstalledServer).not.toHaveBeenCalled();
+    expect(deps.addInstalledServer).not.toHaveBeenCalled();
+  });
+
+  it("keeps remote credentials and native settings while replacing the registry URL", async () => {
+    const name = "io.github.test/server-a";
+    const adapter = makeAdapter("cursor");
+    (adapter.read as ReturnType<typeof vi.fn>).mockResolvedValue({ [name]: {
+      url: "https://old.example/mcp", headers: { Authorization: "Bearer user-token" }, disabled: true, timeout: 1234, type: "http",
+    } });
+    const getServer = vi.fn(async (_name: string, version?: string) => {
+      const entry = makeServerEntry(name, version ?? "2.0.0");
+      entry.server.remotes = [{ type: "streamable-http", url: version ? "https://old.example/mcp" : "https://new.example/mcp", headers: [{ name: "Authorization" }] }];
+      return entry;
+    });
+    await handleUpdate({ yes: true }, makeDeps({ getServer, getAdapter: () => adapter,
+      getInstalledServers: vi.fn().mockResolvedValue([makeInstalledServer({ clients: ["cursor"] })]),
+    }));
+    expect(adapter.addServer).toHaveBeenCalledWith(expect.any(String), name, {
+      url: "https://new.example/mcp", headers: { Authorization: "Bearer user-token" }, disabled: true, timeout: 1234, type: "http",
+    }, { force: true });
+  });
+
+  it.each([new GeminiCliAdapter(), new VSCodeAdapter()])("updates a confined disabled server through $clientId without losing user settings", async (adapter) => {
+    const dir = await mkdtemp(path.join(tmpdir(), "mcpm-update-"));
+    const configPath = path.join(dir, "config.json");
+    const name = "io.github.test/oci";
+    const original = {
+      command: "docker", args: ["run", "--rm", "-i", "ghcr.io/test/server:1.0.0", "--old-default", "/user/data"],
+      env: { NODE_OPTIONS: "--require /user/bootstrap.cjs", API_KEY: "${mcpm:secret:test}" },
+      disabled: true, cwd: "/user/data", timeout: 1234, includeTools: ["read_file"], type: "stdio",
+    };
+    const profileHash = "a".repeat(64);
+    const wrapper = { mcpmBinary: "/user/node", scriptPath: "/user/mcpm/dist/index.js" };
+    const getServer = vi.fn(async (_name: string, version?: string) => {
+      const entry = makeOciEntry(name, version ?? "2.0.0");
+      entry.server.packages[0].runtimeArguments = [version ? "--old-default" : "--new-default"];
+      return entry;
+    });
+    try {
+      await adapter.addServer(configPath, name, wrapEntry(name, original, wrapper, { profileHash, required: true }));
+      const deps = makeDeps({
+        getInstalledServers: vi.fn().mockResolvedValue([makeInstalledServer({ name, clients: [adapter.clientId] })]),
+        getServer, getAdapter: () => adapter, getConfigPath: () => configPath,
+      });
+      await handleUpdate({ yes: true, json: true }, deps);
+      const updated = (await adapter.read(configPath))[name];
+      expect(isWrapped(updated)).toBe(true);
+      expect(updated.command).toBe(wrapper.mcpmBinary);
+      expect(updated.args?.[0]).toBe(wrapper.scriptPath);
+      expect(updated.args).toContain(WRAP_CONFINE_REQUIRED_FLAG);
+      expect(updated.args?.[updated.args.indexOf(WRAP_CONFINE_HASH_FLAG) + 1]).toBe(profileHash);
+      expect(updated.env?.NODE_OPTIONS).toBeUndefined();
+      expect(unwrapEntry(updated)).toEqual({ ...original, args: ["run", "--rm", "-i", "ghcr.io/test/server:2.0.0", "--new-default", "/user/data"] });
+    } finally { await rm(dir, { recursive: true, force: true }); }
+  });
+
+  it.each([false, true])("refuses a deleted listing before confirmation or writes (json=%s)", async (json) => {
+    const entry = makeServerEntry("io.github.test/server-a", "2.0.0");
+    entry._meta!["io.modelcontextprotocol.registry/official"]!.status = "deleted";
+    entry._meta!["io.modelcontextprotocol.registry/official"]!.statusMessage = "malware reported";
+    const adapter = makeAdapter("claude-desktop");
+    const lines: string[] = [];
+    const deps = makeDeps({ getServer: vi.fn().mockResolvedValue(entry), getAdapter: () => adapter, output: (t) => lines.push(t) });
+    await handleUpdate({ json }, deps);
+    expect(deps.confirm).not.toHaveBeenCalled();
+    expect(deps.removeInstalledServer).not.toHaveBeenCalled();
+    expect(deps.addInstalledServer).not.toHaveBeenCalled();
+    expect(adapter.addServer).not.toHaveBeenCalled();
+    expect(lines.join("\n")).toMatch(/deleted.*malware reported/i);
+    if (json) expect(JSON.parse(lines.join("\n"))[0]).toMatchObject({ updated: false, error: expect.stringMatching(/deleted/i) });
+  });
+
+  it.each(["missing", "custom launcher", "tampered guard", "unreadable"])("does not overwrite %s config or advance the store", async (kind) => {
+    const adapter = makeAdapter("claude-desktop");
+    let existing = { command: "npx", args: ["-y", "@test/server"], env: { TOKEN: "keep" } };
+    if (kind === "custom launcher") existing.command = "custom-launcher";
+    if (kind === "tampered guard") {
+      existing = wrapEntry("io.github.test/server-a", existing, { mcpmBinary: "mcpm" }) as typeof existing;
+      existing.args[existing.args.length - 1] = "@attacker/server";
+    }
+    (adapter.read as ReturnType<typeof vi.fn>).mockResolvedValue(kind === "missing" ? {} : { "io.github.test/server-a": existing });
+    if (kind === "unreadable") (adapter.read as ReturnType<typeof vi.fn>).mockRejectedValue(new Error("permission denied"));
+    const lines: string[] = [];
+    const deps = makeDeps({ getServer: vi.fn().mockResolvedValue(makeServerEntry("io.github.test/server-a", "2.0.0")), getAdapter: () => adapter, output: (t) => lines.push(t) });
+    await handleUpdate({ yes: true, json: true }, deps);
+    expect(adapter.addServer).not.toHaveBeenCalled();
+    expect(deps.removeInstalledServer).not.toHaveBeenCalled();
+    expect(deps.addInstalledServer).not.toHaveBeenCalled();
+    expect(JSON.parse(lines.join("\n"))[0]).toMatchObject({ updated: false, clientErrors: expect.any(Array) });
+  });
+});
 
 // ---------------------------------------------------------------------------
 // No servers installed
@@ -296,11 +486,14 @@ function makeOciEntry(name: string, version: string): ServerEntry {
 describe("handleUpdate — writes new version to client config", () => {
   it("calls adapter.addServer with the new-version entry for each client", async () => {
     const adapter = makeAdapter("claude-desktop");
+    (adapter.read as ReturnType<typeof vi.fn>).mockResolvedValue({
+      "io.github.test/oci": { command: "docker", args: ["run", "--rm", "-i", "ghcr.io/test/server:1.0.0"] },
+    });
     const deps = makeDeps({
       getInstalledServers: vi.fn().mockResolvedValue([
         makeInstalledServer({ name: "io.github.test/oci", version: "1.0.0", clients: ["claude-desktop"] }),
       ]),
-      getServer: vi.fn().mockResolvedValue(makeOciEntry("io.github.test/oci", "2.0.0")),
+      getServer: vi.fn(async (name: string, version?: string) => makeOciEntry(name, version ?? "2.0.0")),
       getAdapter: vi.fn().mockReturnValue(adapter),
     });
 
@@ -388,17 +581,17 @@ describe("handleUpdate — partial config-write failure warning", () => {
     expect(out).toContain("config is read-only");
   });
 
-  it("still advances the store record despite a client-write failure", async () => {
+  it("advances the store on partial success while naming the client left behind", async () => {
     const adapter = makeAdapter("claude-desktop");
     (adapter.addServer as ReturnType<typeof vi.fn>).mockRejectedValue(
       new Error("config is read-only")
     );
     const deps = makeDeps({
       getInstalledServers: vi.fn().mockResolvedValue([
-        makeInstalledServer({ name: "io.github.test/server-a", version: "1.0.0", clients: ["claude-desktop"] }),
+        makeInstalledServer({ name: "io.github.test/server-a", version: "1.0.0", clients: ["claude-desktop", "cursor"] }),
       ]),
       getServer: vi.fn().mockResolvedValue(makeServerEntry("io.github.test/server-a", "1.1.0")),
-      getAdapter: vi.fn().mockReturnValue(adapter),
+      getAdapter: (id) => id === "claude-desktop" ? adapter : makeAdapter(id),
     });
 
     await handleUpdate({ yes: true }, deps);
@@ -950,7 +1143,11 @@ describe("handleUpdate — malformed client entry must not silently wipe env", (
         makeInstalledServer({ name: "srv-a", version: "1.0.0", clients: ["claude-desktop"] }),
         makeInstalledServer({ name: "srv-b", version: "1.0.0", clients: ["cursor"] }),
       ]),
-      getServer: vi.fn().mockImplementation((n: string) => Promise.resolve(makeServerEntry(n, "1.1.0"))),
+      getServer: vi.fn().mockImplementation((n: string, v?: string) => {
+        const entry = makeServerEntry(n, v ?? "1.1.0");
+        entry.server.packages[0].identifier = n === "srv-a" ? "a" : "b";
+        return Promise.resolve(entry);
+      }),
       getAdapter: vi.fn((id: ClientId) => (id === "cursor" ? cur : cd)),
       output: (t: string) => lines.push(t),
     });

@@ -6,7 +6,7 @@ import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { stringify } from "yaml";
 import { CHILD_ENV_FIELD, isChildOnlyEnvKey, readChildEnv, restoreChildEnv } from "../child-env.js";
-import { wrapEntry, unwrapEntry } from "../wrap.js";
+import { wrapEntry, unwrapEntry, rewrapEntry } from "../wrap.js";
 import { hashConfineProfile, type ConfineProfile } from "../confine/profile.js";
 import { fileSha } from "../store-integrity.js";
 import { setSecret, toPlaceholder } from "../../store/keychain.js";
@@ -167,6 +167,20 @@ describe("declared child-only environment", () => {
     const dir = home(); const f = fixture(dir);
     const wrapped = wrapEntry("synthetic", { command: process.execPath, args: [f.server], env: { NODE_OPTIONS: `--import=${f.hook}`, MCPM_DISABLE_CONFINE: "1", HOME: path.join(dir, "server-home"), PATH: "/synthetic/server/path" } }, ctx, enroll(dir, f.secret, false));
     const result = launch(wrapped, dir);
+    expect(result.status, result.stderr).toBe(0);
+    expect(JSON.parse(readFileSync(f.log, "utf8").trim())).toEqual({ script: f.server, value: "EPERM" });
+    expect(readFileSync(path.join(dir, ".mcpm/guard-events.jsonl"), "utf8")).toContain("confine-applied");
+  });
+  test.runIf(process.platform === "darwin")("updated launcher keeps operational confinement and child-only startup controls", ({ skip }) => {
+    const probe = spawnSync("/usr/bin/sandbox-exec", ["-p", "(version 1)(allow default)", "/usr/bin/true"], { encoding: "utf8" });
+    if (probe.status !== 0) skip();
+    const dir = home(); const f = fixture(dir);
+    const original = { command: process.execPath, args: ["-e", "process.exit(0)"], env: {
+      NODE_OPTIONS: `--import=${f.hook}`, MCPM_DISABLE_CONFINE: "1",
+    } };
+    const wrapped = wrapEntry("synthetic", original, ctx, enroll(dir, f.secret, true));
+    const updated = rewrapEntry(wrapped, { ...original, args: [f.server] });
+    const result = launch(updated, dir);
     expect(result.status, result.stderr).toBe(0);
     expect(JSON.parse(readFileSync(f.log, "utf8").trim())).toEqual({ script: f.server, value: "EPERM" });
     expect(readFileSync(path.join(dir, ".mcpm/guard-events.jsonl"), "utf8")).toContain("confine-applied");

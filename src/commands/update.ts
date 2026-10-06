@@ -27,6 +27,8 @@ import { resolveInstallEntry } from "./install.js";
 import { stdoutOutput } from "../utils/output.js";
 import { sanitizeForTerminal } from "../guard/sanitize.js";
 import { describeRegistryError } from "../registry/errors.js";
+import { assessServerStatus } from "../scanner/registry-status.js";
+import { isWrapped, unwrapEntry, rewrapEntry } from "../guard/wrap.js";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -39,7 +41,7 @@ export interface UpdateOptions {
 
 export interface UpdateDeps {
   getInstalledServers: () => Promise<InstalledServer[]>;
-  getServer: (name: string) => Promise<ServerEntry>;
+  getServer: (name: string, version?: string) => Promise<ServerEntry>;
   addInstalledServer: (server: InstalledServer) => Promise<void>;
   removeInstalledServer: (name: string) => Promise<void>;
   getAdapter: (clientId: ClientId) => ConfigAdapter;
@@ -63,79 +65,119 @@ interface UpdateResult {
 // ---------------------------------------------------------------------------
 
 /**
- * Read the env block already present for a server in a client config, so an
- * update preserves user-configured values (e.g. API keys) instead of wiping
- * them when the entry is re-resolved from the registry. Best-effort: returns
- * undefined if the config or entry can't be read.
+ * Keep the full validated entry. Malformed unguarded entries retain the #59
+ * per-key env recovery path; unreadable configs must never be overwritten.
  */
-async function readExistingEnv(
+async function readExistingEntry(
   getAdapter: UpdateDeps["getAdapter"],
   getConfigPath: UpdateDeps["getConfigPath"],
   clientId: ClientId,
   name: string,
   onNote: (message: string) => void,
   onNeighbour: (clientId: ClientId, skipped: string) => void
-): Promise<Record<string, string> | undefined> {
-  try {
-    const adapter = getAdapter(clientId);
-    const configPath = getConfigPath(clientId);
-    // #59: since #23 (v0.34.0) an entry failing shape validation is omitted
-    // from the returned map, so a plain `servers[name]?.env` returned undefined
-    // for it — and the caller's `force: true` re-write then DISCARDED a
-    // perfectly good env block (API keys) held by an entry malformed in some
-    // OTHER field, while printing "✓ Updated".
-    //
-    // The fix is to recover the env, NOT to refuse the write. Overwriting a
-    // mis-shaped entry with a freshly resolved one is the user's self-repair
-    // path; refusing it turns a self-healing case into a permanently stuck one.
-    //
-    // Recovery is PER KEY, not all-or-nothing. `env` is frequently the field
-    // that makes the entry invalid in the first place — a numeric port is the
-    // archetypal hand-edit — and parsing the whole record then rejects every
-    // key, destroying the API key beside the bad one. Only string-valued keys
-    // can be carried into a valid entry; any key that cannot is NAMED rather
-    // than dropped in silence.
-    let recovered: Record<string, string> | undefined;
-    const servers = await adapter.read(configPath, (skipped, raw) => {
-      if (skipped !== name) {
-        // Another malformed entry in the same config. Replacing the default
-        // onSkip suppressed its warning, so it is collected — but reported ONCE
-        // at the end of the run, and only for names this run did not itself
-        // update. Reporting here said `srv-b … (not updated)` one line before
-        // `✓ Updated srv-b`, and repeated it once per updated server.
-        onNeighbour(clientId, skipped);
-        return;
+): Promise<McpServerEntry | undefined> {
+  const adapter = getAdapter(clientId);
+  const configPath = getConfigPath(clientId);
+  // #59: since #23 (v0.34.0) an entry failing shape validation is omitted
+  // from the returned map, so a plain `servers[name]?.env` returned undefined
+  // for it — and the caller's `force: true` re-write then DISCARDED a
+  // perfectly good env block (API keys) held by an entry malformed in some
+  // OTHER field, while printing "✓ Updated".
+  //
+  // The fix is to recover the env, NOT to refuse the write. Overwriting a
+  // mis-shaped entry with a freshly resolved one is the user's self-repair
+  // path; refusing it turns a self-healing case into a permanently stuck one.
+  //
+  // Recovery is PER KEY, not all-or-nothing. `env` is frequently the field
+  // that makes the entry invalid in the first place — a numeric port is the
+  // archetypal hand-edit — and parsing the whole record then rejects every
+  // key, destroying the API key beside the bad one. Only string-valued keys
+  // can be carried into a valid entry; any key that cannot is NAMED rather
+  // than dropped in silence.
+  let recovered: McpServerEntry | undefined;
+  let malformedGuard = false;
+  const servers = await adapter.read(configPath, (skipped, raw) => {
+    if (skipped !== name) {
+      // Another malformed entry in the same config. Replacing the default
+      // onSkip suppressed its warning, so it is collected — but reported ONCE
+      // at the end of the run, and only for names this run did not itself
+      // update. Reporting here said `srv-b … (not updated)` one line before
+      // `✓ Updated srv-b`, and repeated it once per updated server.
+      onNeighbour(clientId, skipped);
+      return;
+    }
+    recovered = {};
+    const rawArgs = (raw as { args?: unknown } | null | undefined)?.args;
+    if (Array.isArray(rawArgs) && isWrapped({ args: rawArgs })) {
+      malformedGuard = true;
+      return;
+    }
+    if (raw !== null && typeof raw === "object" && !Array.isArray(raw)) {
+      // Native client settings are opaque passthrough fields, as in BaseAdapter.
+      // Recover valid launch fields too: a bad env value must not erase custom args.
+      const { command, args, url, headers, env: _env, disabled, ...settings } = raw as Record<string, unknown>;
+      recovered = { ...settings, ...(typeof disabled === "boolean" ? { disabled } : {}) };
+      if (typeof command === "string" &&
+          (args === undefined || (Array.isArray(args) && args.every((arg) => typeof arg === "string")))) {
+        recovered.command = command;
+        if (args !== undefined) recovered.args = args as string[];
       }
-      const env = (raw as { env?: unknown } | null | undefined)?.env;
-      if (env !== undefined && (env === null || typeof env !== "object" || Array.isArray(env))) {
-        onNote(`${clientId}: env is not an object — nothing could be carried over`);
-        return;
+      if (typeof url === "string") recovered.url = url;
+      if (headers !== null && typeof headers === "object" && !Array.isArray(headers) &&
+          Object.values(headers).every((value) => typeof value === "string")) {
+        recovered.headers = headers as Record<string, string>;
       }
-      if (env === undefined) return;
-      // Object.create(null): a plain literal routes an own `__proto__` key to
-      // Object.prototype's setter, which silently drops a string value — the
-      // same class v0.36.0 closed in the guard's pin hash, and it would break
-      // this block's own promise to NAME anything it cannot carry.
-      const kept = Object.create(null) as Record<string, string>;
-      const dropped: string[] = [];
-      for (const [k, v] of Object.entries(env as Record<string, unknown>)) {
-        if (typeof v === "string") kept[k] = v;
-        else dropped.push(k);
-      }
-      if (dropped.length > 0) {
-        onNote(
-          `${clientId}: env ${dropped.length === 1 ? "key" : "keys"} ` +
-            `${dropped.map((k) => `"${sanitizeForTerminal(k)}"`).join(", ")} ` +
-            `${dropped.length === 1 ? "is" : "are"} not a string and could not be carried over ` +
-            `— re-set ${dropped.length === 1 ? "it" : "them"} with the value quoted`
-        );
-      }
-      if (Object.keys(kept).length > 0) recovered = kept;
-    });
-    return servers[name]?.env ?? recovered;
-  } catch {
-    return undefined;
+    }
+    const env = (raw as { env?: unknown } | null | undefined)?.env;
+    if (env !== undefined && (env === null || typeof env !== "object" || Array.isArray(env))) {
+      onNote(`${clientId}: env is not an object — nothing could be carried over`);
+      return;
+    }
+    if (env === undefined) return;
+    // Object.create(null): a plain literal routes an own `__proto__` key to
+    // Object.prototype's setter, which silently drops a string value — the
+    // same class v0.36.0 closed in the guard's pin hash, and it would break
+    // this block's own promise to NAME anything it cannot carry.
+    const kept = Object.create(null) as Record<string, string>;
+    const dropped: string[] = [];
+    for (const [k, v] of Object.entries(env as Record<string, unknown>)) {
+      if (typeof v === "string") kept[k] = v;
+      else dropped.push(k);
+    }
+    if (dropped.length > 0) {
+      onNote(
+        `${clientId}: env ${dropped.length === 1 ? "key" : "keys"} ` +
+          `${dropped.map((k) => `"${sanitizeForTerminal(k)}"`).join(", ")} ` +
+          `${dropped.length === 1 ? "is" : "are"} not a string and could not be carried over ` +
+          `— re-set ${dropped.length === 1 ? "it" : "them"} with the value quoted`
+      );
+    }
+    if (Object.keys(kept).length > 0) recovered = { ...recovered, env: kept };
+  });
+  if (malformedGuard) throw new Error("Malformed guarded entry; repair it before updating so the guard is not removed");
+  return servers[name] ?? recovered;
+}
+
+/** Replace only registry-generated launch args; retain a user's appended args. */
+function mergeUpdateEntry(existing: McpServerEntry, next: McpServerEntry, previous: McpServerEntry): McpServerEntry {
+  if ((existing.command !== undefined) !== (next.command !== undefined)) {
+    throw new Error("Registry transport changed; update this client's launch configuration by hand");
   }
+  if (existing.command !== previous.command || existing.url !== previous.url ||
+      !(previous.args ?? []).every((arg, i) => existing.args?.[i] === arg)) {
+    throw new Error("Custom launch command or arguments differ from the installed registry version; update them by hand");
+  }
+  const extraArgs = (existing.args ?? []).slice(previous.args?.length ?? 0);
+  if (extraArgs.length > 0 && existing.command !== next.command) {
+    throw new Error("Registry launcher changed; cannot safely carry custom arguments to it — update them by hand");
+  }
+  const { command: _command, args: _args, url: _url, headers, ...settings } = existing;
+  return {
+    ...settings, ...next,
+    ...(next.command !== undefined ? { args: [...(next.args ?? []), ...extraArgs] } : {}),
+    ...(existing.env !== undefined ? { env: { ...next.env, ...existing.env } } : {}),
+    ...(next.url !== undefined && headers !== undefined ? { headers: { ...next.headers, ...headers } } : {}),
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -201,6 +243,13 @@ export async function handleUpdate(
       };
     }
     const { installed, entry } = outcome;
+    const status = assessServerStatus(entry);
+    if (status.blocks) {
+      return {
+        name: installed.name, oldVersion: installed.version, newVersion: entry.server.version, updated: false,
+        error: `Deleted from the MCP registry${status.statusMessage ? ` (${sanitizeForTerminal(status.statusMessage)})` : ""}; update refused`,
+      };
+    }
     entryMap.set(installed.name, entry);
     return {
       name: installed.name,
@@ -268,7 +317,7 @@ export async function handleUpdate(
       } else {
         output(
           JSON.stringify(
-            results.map((r) => ({ name: r.name, oldVersion: r.oldVersion, newVersion: r.newVersion, updated: false })),
+            results.map((r) => ({ name: r.name, oldVersion: r.oldVersion, newVersion: r.newVersion, updated: false, error: r.error ?? null })),
             null,
             2
           )
@@ -315,13 +364,6 @@ export async function handleUpdate(
       },
     });
 
-    // Update store: remove old, add new
-    try {
-      await removeInstalledServer(r.name);
-    } catch {
-      // Server may not be in store — non-fatal
-    }
-
     // Preserve original clients from installed server list (servers fetched once before this loop)
     const original = servers.find((s) => s.name === r.name);
     const originalClients = original?.clients ?? [];
@@ -333,17 +375,19 @@ export async function handleUpdate(
     //
     // Mirror the up.ts partial-failure pattern: collect the clients that failed
     // so we can warn the user instead of silently leaving them on the old
-    // version. The store record still advances (best-effort write semantics).
+    // version. Any successful client write advances the store record.
     const clientErrors: string[] = [];
     // #59: kept separate from clientErrors. These are things the user should
     // know about a client that WAS updated — routing them through the error
     // list made the output say "could not update claude-desktop" about a
     // client it had just updated.
     const clientNotes: string[] = [];
+    let written = 0;
+    let previousMetadata: Promise<ServerEntry> | undefined;
     for (const clientId of originalClients) {
       try {
         const rawEntry = resolveInstallEntry(entry, clientId);
-        const existingEnv = await readExistingEnv(
+        const configured = await readExistingEntry(
           getAdapter,
           getConfigPath,
           clientId,
@@ -352,19 +396,37 @@ export async function handleUpdate(
           (cid, skipped) =>
             neighbours.set(JSON.stringify([cid, skipped]), { name: skipped, clientId: cid })
         );
-        const newEntry: McpServerEntry = {
-          ...rawEntry,
-          ...(existingEnv && Object.keys(existingEnv).length > 0
-            ? { env: { ...rawEntry.env, ...existingEnv } }
-            : {}),
-        };
+        if (!configured) throw new Error("Server is missing from this client config; update will not reinstall it");
+        const wrapped = isWrapped(configured);
+        const existing = wrapped ? unwrapEntry(configured) : configured;
+        if (!existing) throw new Error("Guard wrap is malformed or has an integrity mismatch; refusing to update it");
+        // An unchanged launch needs no historical registry request. A malformed
+        // unguarded entry with no recoverable launch is repaired fresh (#59).
+        let previous = rawEntry;
+        if ((existing.command !== undefined || existing.url !== undefined) &&
+            (existing.command !== rawEntry.command || existing.url !== rawEntry.url ||
+             JSON.stringify(existing.args ?? []) !== JSON.stringify(rawEntry.args ?? []))) {
+          previousMetadata ??= getServer(r.name, original!.version).catch((err: unknown) => {
+            throw new Error(`Could not load installed registry version ${original!.version} to preserve launch arguments: ${describeRegistryError(err).message}`);
+          });
+          const old = await previousMetadata;
+          if (old.server.name !== r.name || old.server.version !== original!.version) {
+            throw new Error("Registry did not return the installed version; cannot safely preserve custom launch arguments");
+          }
+          previous = resolveInstallEntry(old, clientId);
+        }
+        const merged = existing.command === undefined && existing.url === undefined
+          ? { ...rawEntry, ...existing }
+          : mergeUpdateEntry(existing, rawEntry, previous);
+        const newEntry = wrapped ? rewrapEntry(configured, merged) : merged;
         const adapter = getAdapter(clientId);
         const configPath = getConfigPath(clientId);
         await adapter.addServer(configPath, r.name, newEntry, { force: true });
+        written += 1;
         writtenPairs.add(JSON.stringify([clientId, r.name]));
       } catch (err) {
         // Some clients may not support this server type, or the config may be
-        // unwritable — collect the failure and warn (store record still advances).
+        // unwritable — collect the failure and leave that client untouched.
         clientErrors.push(`${clientId}: ${err instanceof Error ? err.message : String(err)}`);
       }
     }
@@ -376,10 +438,14 @@ export async function handleUpdate(
       installedAt: new Date().toISOString(),
     };
 
-    await addInstalledServer(finalRecord);
+    const updated = written > 0 || originalClients.length === 0;
+    if (updated) {
+      try { await removeInstalledServer(r.name); } catch { /* Server may not be in store. */ }
+      await addInstalledServer(finalRecord);
+    }
 
     // Record outcome immutably instead of mutating the result object
-    updateOutcomes.set(r.name, { updated: true, trustScore, clientErrors, clientNotes });
+    updateOutcomes.set(r.name, { updated, trustScore, clientErrors, clientNotes });
 
     if (!isJson) {
       // Surface partial config-write failures so a client silently left on the
@@ -390,7 +456,9 @@ export async function handleUpdate(
           : "") +
         (clientNotes.length > 0 ? chalk.yellow(` (note: ${clientNotes.join("; ")})`) : "");
       output(
-        `  ${chalk.green("✓")} Updated ${chalk.white(r.name)} to ${chalk.green(r.newVersion)} [${levelColor(levelLabel(trustScore))}]${warning}`
+        updated
+          ? `  ${chalk.green("✓")} Updated ${chalk.white(r.name)} to ${chalk.green(r.newVersion)} [${levelColor(levelLabel(trustScore))}]${warning}`
+          : `  ${chalk.yellow("✗")} Could not update ${chalk.white(r.name)}; installed version remains ${r.oldVersion}${warning}`
       );
     }
   }
@@ -458,7 +526,7 @@ export function registerUpdateCommand(program: Command): void {
 
       const deps: UpdateDeps = {
         getInstalledServers,
-        getServer: (name) => client.getServer(name),
+        getServer: (name, version) => client.getServer(name, version),
         addInstalledServer,
         removeInstalledServer,
         getAdapter: getAdapterDefault,
