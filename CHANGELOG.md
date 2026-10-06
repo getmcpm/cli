@@ -8,6 +8,14 @@ _Add entries here, never under a stamped version_ — a release commit renames t
 heading, and a branch that wrote beneath it merges without conflict straight into a
 published section (it happened to #170).
 
+## [0.45.0] - 2026-10-06
+
+MINOR by content: updates now refuse registry-deleted servers and unsafe or
+ambiguous client configurations; guard enable and guarded updates refuse external
+`envFile` settings so they cannot configure the guard before startup isolation.
+Tagged during the 2026-09-15 → 10-15 release freeze on the maintainer's explicit
+"merge, and tag" instruction.
+
 ### Fixed
 
 - `mcpm update` now keeps guard and confinement wrapping, disabled state,
