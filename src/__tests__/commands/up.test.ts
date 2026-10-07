@@ -23,6 +23,7 @@ function makeServerEntry(name: string, version: string): ServerEntry {
         {
           registryType: "npm",
           identifier: `@test/${name.split("/").pop()}`,
+          version,
           environmentVariables: [],
         },
       ],
@@ -104,6 +105,7 @@ servers:
     version: "1.2.0"
     registryType: npm
     identifier: "@test/server-a"
+    packageVersion: "1.2.0"
     trust:
       score: 75
       maxPossible: 80
@@ -339,6 +341,7 @@ servers:
     version: "1.2.0"
     registryType: npm
     identifier: "@test/server-a"
+    packageVersion: "1.2.0"
     trust:
       score: 65
       maxPossible: 80
@@ -436,6 +439,7 @@ servers:
     version: "1.0.0"
     registryType: npm
     identifier: "@test/dev-only"
+    packageVersion: "1.0.0"
     trust:
       score: 75
       maxPossible: 80
@@ -445,6 +449,7 @@ servers:
     version: "1.0.0"
     registryType: npm
     identifier: "@test/prod-only"
+    packageVersion: "1.0.0"
     trust:
       score: 75
       maxPossible: 80
@@ -507,7 +512,7 @@ servers:
     expect(adapter.removeServer).not.toHaveBeenCalled();
   });
 
-  it("continues when one server fails and reports all errors", async () => {
+  it("refuses the batch before writes when a locked publication cannot be fetched", async () => {
     const twoServers = `
 version: "1"
 servers:
@@ -524,6 +529,7 @@ servers:
     version: "1.0.0"
     registryType: npm
     identifier: "@test/good"
+    packageVersion: "1.0.0"
     trust:
       score: 75
       maxPossible: 80
@@ -533,6 +539,7 @@ servers:
     version: "1.0.0"
     registryType: npm
     identifier: "@test/bad"
+    packageVersion: "1.0.0"
     trust:
       score: 75
       maxPossible: 80
@@ -549,18 +556,8 @@ servers:
       }),
     });
 
-    await expect(handleUp({ stackFile: stackPath }, deps)).rejects.toThrow(
-      "could not be installed"
-    );
-
-    // Good server should still have been installed
-    const adapter = (deps.getAdapter as ReturnType<typeof vi.fn>).mock.results[0].value;
-    expect(adapter.addServer).toHaveBeenCalledWith(
-      expect.anything(),
-      "io.github.test/good",
-      expect.anything(),
-      expect.anything()
-    );
+    await expect(handleUp({ stackFile: stackPath }, deps)).rejects.toThrow("Registry error");
+    expect((deps.getAdapter as ReturnType<typeof vi.fn>).mock.results[0].value.addServer).not.toHaveBeenCalled();
   });
 
   it("resolves env vars from process.env and .env file", async () => {
@@ -663,7 +660,7 @@ servers:
   it("counts strict-removed servers as removed, not installed", async () => {
     const stackPath = await writeStackAndLock(basicStack, basicLock);
     const adapter = makeAdapter({
-      "io.github.test/server-a": { command: "npx", args: ["-y", "server-a"] },
+      "io.github.test/server-a": { command: "npx", args: ["-y", "@test/server-a"] },
       "extra-server": { command: "npx", args: ["-y", "extra"] },
     });
     const deps = makeDeps({ getAdapter: vi.fn().mockReturnValue(adapter) });
@@ -1156,7 +1153,7 @@ describe("handleUp --strict — malformed undeclared entry", () => {
     expect(lines.join("\n")).not.toContain("\u001b");
   });
 
-  it("says nothing about a DECLARED server whose entry is malformed", async () => {
+  it("refuses a declared malformed entry before replacing the launch", async () => {
     // --strict only reconciles servers absent from mcpm.yaml. Reporting a
     // declared one as "not in mcpm.yaml" would be a false statement.
     const stackPath = await writeStackAndLock(basicStack, basicLock);
@@ -1175,17 +1172,9 @@ describe("handleUp --strict — malformed undeclared entry", () => {
       recordResult: (r: { name: string; status: string }) => recorded.push(r),
     });
 
-    await handleUp({ stackFile: stackPath, strict: true, yes: true }, deps);
-
-    // NB: assert on `recorded` and on the rendered line separately. An earlier
-    // assertion here matched "not in mcpm.yaml", which lives only in
-    // `results[].message` and is never rendered on the strict-removal path —
-    // so it could not fail, whatever the code did.
-    expect(lines.join("\n")).not.toContain("io.github.test/server-a: not removed");
-    expect(recorded).not.toContainEqual({
-      name: "io.github.test/server-a",
-      status: "skipped",
-    });
+    await expect(handleUp({ stackFile: stackPath, strict: true, yes: true }, deps)).rejects.toThrow(/Malformed client entry/);
+    expect(adapter.addServer).not.toHaveBeenCalled();
+    expect(adapter.removeServer).not.toHaveBeenCalled();
   });
 
   it("still removes a well-formed undeclared entry (negative control)", async () => {

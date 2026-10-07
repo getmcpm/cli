@@ -40,7 +40,7 @@ function makeServerEntry(name: string, version: string): ServerEntry {
       packages: [
         {
           registryType: "npm",
-          identifier: `@test/${name.split("/").pop()}`,
+          identifier: `@test/${name.split("/").pop()}`, version,
           environmentVariables: [],
         },
       ],
@@ -111,6 +111,7 @@ servers:
   ${name}:
     version: "1.0.0"
     registryType: npm
+    packageVersion: "1.0.0"
     identifier: "${identifier}"
     trust:
       score: 75

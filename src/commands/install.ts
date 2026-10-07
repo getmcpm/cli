@@ -32,6 +32,8 @@ import { assessServerStatus } from "../scanner/registry-status.js";
 import { sanitizeForTerminal } from "../guard/sanitize.js";
 import { DANGEROUS_FLAG_PREFIXES } from "../scanner/patterns.js";
 import { applyKeychainSecrets, type SecretsMode, setSecrets as _setSecrets } from "../store/keychain.js";
+import { packageCoordinate, preferredPackage, packageForCoordinate, validateIdentifier, assertPublication, type PackageCoordinate } from "../registry/package-coordinate.js";
+export { validateIdentifier } from "../registry/package-coordinate.js";
 
 // ---------------------------------------------------------------------------
 // URL validation — guard against malicious remote URLs
@@ -79,29 +81,6 @@ function isLoopbackHost(hostname: string): boolean {
     h === "127.0.0.1" ||
     h === "::1"
   );
-}
-
-const NPM_IDENTIFIER_RE = /^(@[a-z0-9-~][a-z0-9-._~]*\/)?[a-z0-9-~][a-z0-9-._~]*$/;
-const PYPI_IDENTIFIER_RE = /^[A-Za-z0-9]([A-Za-z0-9._-]*[A-Za-z0-9])?$/;
-const OCI_IDENTIFIER_RE =
-  /^[a-z0-9]+([._-][a-z0-9]+)*(\/[a-z0-9]+([._-][a-z0-9]+)*)*:[a-zA-Z0-9._-]+$/;
-
-/**
- * Validate a package identifier against the expected pattern for its registry
- * type. Throws if the identifier looks potentially malicious.
- */
-export function validateIdentifier(identifier: string, registryType: string): void {
-  const patterns: Record<string, RegExp> = {
-    npm: NPM_IDENTIFIER_RE,
-    pypi: PYPI_IDENTIFIER_RE,
-    oci: OCI_IDENTIFIER_RE,
-  };
-  const re = patterns[registryType];
-  if (re && !re.test(identifier)) {
-    throw new Error(
-      `Rejected potentially malicious ${registryType} identifier: "${identifier}"`
-    );
-  }
 }
 
 /**
@@ -254,19 +233,21 @@ export interface InstallDeps {
  * Decision tree:
  * 1. Cursor + server has HTTP remote → produce { url, headers } entry
  * 2. Otherwise pick from packages[]: npm → pypi → oci (first available)
- * 3. npm: { command: 'npx', args: ['-y', identifier, ...runtimeArgs], env }
- * 4. pypi: { command: 'uvx', args: [identifier, ...runtimeArgs], env }
+ * 3. npm: { command: 'npx', args: ['-y', identifier@packageVersion, ...runtimeArgs] }
+ * 4. pypi: { command: 'uvx', args: [identifier===packageVersion, ...runtimeArgs] }
  * 5. docker: { command: 'docker', args: ['run', '--rm', '-i', image], env }
  * 6. If no packages and no usable remote: throw
  */
 export function resolveInstallEntry(
   serverEntry: ServerEntry,
-  clientId: ClientId
+  clientId: ClientId,
+  coordinate?: PackageCoordinate,
+  legacy = false,
 ): McpServerEntry {
   const { server } = serverEntry;
 
   // Rule 1: Cursor + HTTP remote → streamable-http entry
-  if (clientId === "cursor" && server.remotes && server.remotes.length > 0) {
+  if (!coordinate && clientId === "cursor" && server.remotes && server.remotes.length > 0) {
     const httpRemote = server.remotes.find(
       (r) => r.type === "streamable-http" || r.type === "sse"
     );
@@ -284,47 +265,51 @@ export function resolveInstallEntry(
     }
   }
 
-  // Rule 2: Pick best package by priority: npm → pypi → oci
-  const npmPkg = server.packages.find((p) => p.registryType === "npm");
-  const pypiPkg = server.packages.find((p) => p.registryType === "pypi");
-  const ociPkg = server.packages.find((p) => p.registryType === "oci");
-
-  if (npmPkg) {
-    validateIdentifier(npmPkg.identifier, "npm");
-    const rtArgs = normalizeRuntimeArgs(npmPkg.runtimeArguments ?? []);
-    validateRuntimeArgs(rtArgs);
-    return {
-      command: "npx",
-      args: ["-y", npmPkg.identifier, ...rtArgs],
-    };
-  }
-
-  if (pypiPkg) {
-    validateIdentifier(pypiPkg.identifier, "pypi");
-    const rtArgs = normalizeRuntimeArgs(pypiPkg.runtimeArguments ?? []);
-    validateRuntimeArgs(rtArgs);
-    return {
-      command: "uvx",
-      args: [pypiPkg.identifier, ...rtArgs],
-    };
-  }
-
-  if (ociPkg) {
-    validateIdentifier(ociPkg.identifier, "oci");
-    const rtArgs = normalizeRuntimeArgs(ociPkg.runtimeArguments ?? []);
-    validateRuntimeArgs(rtArgs);
-    return {
-      command: "docker",
-      args: ["run", "--rm", "-i", ociPkg.identifier, ...rtArgs],
-    };
-  }
-
   // Rule 3: Cursor-only path — HTTP remote with no packages
-  if (clientId === "cursor" && server.remotes && server.remotes.length > 0) {
+  if (!coordinate && server.packages.length === 0 && clientId === "cursor" && server.remotes && server.remotes.length > 0) {
     const remote = server.remotes[0];
     validateRemoteUrl(remote.url);
     return { url: remote.url };
   }
+
+  // Rule 2: Pick best package by priority: npm → pypi → oci
+  const pkg = coordinate
+    ? packageForCoordinate(serverEntry, coordinate)
+    : preferredPackage(serverEntry);
+  if (!pkg) throw new Error("Locked package is absent from the registry publication");
+  // Legacy recognition reconstructs only the old generated prefix; it never
+  // launches anything or substitutes an MCP publication version for a package.
+  validateIdentifier(pkg.identifier, pkg.registryType);
+  const selected = legacy ? undefined : packageCoordinate(pkg);
+  if (coordinate && selected && selected.version !== coordinate.version) throw new Error("Registry package version differs from locked package version");
+
+  if (pkg.registryType === "npm") {
+    const rtArgs = normalizeRuntimeArgs(pkg.runtimeArguments ?? []);
+    validateRuntimeArgs(rtArgs);
+    return {
+      command: "npx",
+      args: ["-y", legacy ? pkg.identifier : `${pkg.identifier}@${selected!.version}`, ...rtArgs],
+    };
+  }
+
+  if (pkg.registryType === "pypi") {
+    const rtArgs = normalizeRuntimeArgs(pkg.runtimeArguments ?? []);
+    validateRuntimeArgs(rtArgs);
+    return {
+      command: "uvx",
+      args: [legacy ? pkg.identifier : `${pkg.identifier}===${selected!.version}`, ...rtArgs],
+    };
+  }
+
+  if (pkg.registryType === "oci") {
+    const rtArgs = normalizeRuntimeArgs(pkg.runtimeArguments ?? []);
+    validateRuntimeArgs(rtArgs);
+    return {
+      command: "docker",
+      args: ["run", "--rm", "-i", pkg.identifier, ...rtArgs],
+    };
+  }
+
 
   throw new Error(
     `No install path found for server "${server.name}": no packages and no compatible remotes.`
@@ -389,6 +374,7 @@ export async function handleInstall(
   // Step 1: Fetch server metadata
   // -------------------------------------------------------------------------
   const serverEntry = await registryClient.getServer(name);
+  assertPublication(serverEntry, name);
 
   // -------------------------------------------------------------------------
   // Step 1b: registry-delisting gate (fail closed, before any scan/output)
@@ -668,35 +654,6 @@ export async function handleInstall(
   }
 
   // -------------------------------------------------------------------------
-  // Step 6: Resolve env vars to prompt for
-  // -------------------------------------------------------------------------
-  // Collect env vars from the best-match package
-  const { server } = serverEntry;
-  const bestPkg =
-    server.packages.find((p) => p.registryType === "npm") ??
-    server.packages.find((p) => p.registryType === "pypi") ??
-    server.packages.find((p) => p.registryType === "oci") ??
-    server.packages[0];
-
-  const envVarDefs: EnvVar[] = bestPkg?.environmentVariables ?? [];
-  const resolvedEnvVars = await promptEnvVars(envVarDefs);
-
-  // Step 6b: In keychain mode, persist secret-flagged values encrypted and swap
-  // them for `mcpm:keychain:…` placeholders, so no plaintext is written to any
-  // client config. Non-secret vars stay inline; each secret is stored once and
-  // reused for every client. The placeholder resolves at launch only while mcpm
-  // guard wraps the server (run-inner.ts → resolveEnvPlaceholders). The swap
-  // (and the "no plaintext in config" invariant) lives in applyKeychainSecrets.
-  const secretsMode: SecretsMode = options.secrets ?? "plaintext";
-  const { env: envForConfig, storedCount: storedSecretCount } = await applyKeychainSecrets({
-    serverName: name,
-    resolvedEnv: resolvedEnvVars,
-    isSecret: (key) => envVarDefs.find((d) => d.name === key)?.isSecret === true,
-    mode: secretsMode,
-    setSecrets: deps.setSecrets,
-  });
-
-  // -------------------------------------------------------------------------
   // Step 7: Resolve (and thereby validate) each client's entry up front
   // -------------------------------------------------------------------------
   // resolveInstallEntry throws on an invalid identifier, so resolving here
@@ -754,6 +711,35 @@ export async function handleInstall(
       }
     }
   }
+
+  // -------------------------------------------------------------------------
+  // Step 6: Resolve env vars to prompt for
+  // -------------------------------------------------------------------------
+  // Collect env vars from the best-match package
+  const { server } = serverEntry;
+  const bestPkg =
+    server.packages.find((p) => p.registryType === "npm") ??
+    server.packages.find((p) => p.registryType === "pypi") ??
+    server.packages.find((p) => p.registryType === "oci") ??
+    server.packages[0];
+
+  const envVarDefs: EnvVar[] = bestPkg?.environmentVariables ?? [];
+  const resolvedEnvVars = await promptEnvVars(envVarDefs);
+
+  // Step 6b: In keychain mode, persist secret-flagged values encrypted and swap
+  // them for `mcpm:keychain:…` placeholders, so no plaintext is written to any
+  // client config. Non-secret vars stay inline; each secret is stored once and
+  // reused for every client. The placeholder resolves at launch only while mcpm
+  // guard wraps the server (run-inner.ts → resolveEnvPlaceholders). The swap
+  // (and the "no plaintext in config" invariant) lives in applyKeychainSecrets.
+  const secretsMode: SecretsMode = options.secrets ?? "plaintext";
+  const { env: envForConfig, storedCount: storedSecretCount } = await applyKeychainSecrets({
+    serverName: name,
+    resolvedEnv: resolvedEnvVars,
+    isSecret: (key) => envVarDefs.find((d) => d.name === key)?.isSecret === true,
+    mode: secretsMode,
+    setSecrets: deps.setSecrets,
+  });
 
   // -------------------------------------------------------------------------
   // Step 8: Write config to each client and record in store

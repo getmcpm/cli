@@ -3,7 +3,7 @@
  *
  * Covers:
  * - npm pkg with concrete pkg.version → snapshot attached
- * - pkg.version absent / "latest" / dist-tag / range → fetch NOT called, snapshot omitted
+ * - pkg.version absent / "latest" / dist-tag / range → refuse before fetch or lock write
  * - Regression C1: server.version !== pkg.version → fetch uses pkg.version
  * - fetch returns undefined → snapshot omitted, lock still succeeds
  * - non-npm registryType → fetchNpmIntegrity not called
@@ -30,7 +30,7 @@ const TEST_SRI = "sha512-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
 function makeServerEntryWithPkg(
   name: string,
   serverVersion: string,
-  pkgVersion: string,
+  pkgVersion: string | undefined,
   registryType = "npm"
 ): ServerEntry {
   return {
@@ -40,7 +40,7 @@ function makeServerEntryWithPkg(
       packages: [
         {
           registryType,
-          identifier: `@test/${name.split("/").pop()}`,
+          identifier: registryType === "pypi" ? "test-server" : `@test/${name.split("/").pop()}`,
           version: pkgVersion,
           environmentVariables: [],
         },
@@ -119,78 +119,23 @@ describe("handleLock — npm integrity snapshot capture", () => {
     expect(locked.npmIntegrity.integrity).toBe(TEST_SRI);
   });
 
-  // Regression C1: server.version is the MCP server version; pkg.version is the npm coordinate.
-  // If pkg.version is "latest" but server.version is "1.0.0", we must NOT feed
-  // server.version to fetchNpmIntegrity — that would 404 under the npm per-version endpoint.
-  it("C1 regression: uses pkg.version (not server.version) for fetch when they differ", async () => {
-    // Real-world fixture: server.version = "1.0.0" (the MCP release version),
-    // but pkg.version = "latest" (the npm dist-tag). The snapshot must be omitted
-    // (not fetched with the server version "1.0.0").
-    const entry = makeServerEntryWithPkg("io.github.test/my-server", "1.0.0", "latest");
-    const deps = makeDeps(entry);
+  it("uses the package version rather than the distinct MCP publication version", async () => {
+    const entry = makeServerEntryWithPkg("io.github.test/my-server", "1.0.0", "2.3.0");
+    const deps = makeDeps(entry, { fetchNpmIntegrity: vi.fn().mockResolvedValue({ npmVersion: "2.3.0", integrity: TEST_SRI }) });
     const stackPath = await writeTempStack(basicStack);
-
     await handleLock({ stackFile: stackPath }, deps);
-
-    // fetchNpmIntegrity must NOT be called with "1.0.0" (the server version)
-    // because pkg.version is "latest" (not a concrete semver)
-    expect(deps.fetchNpmIntegrity).not.toHaveBeenCalled();
-
-    // No npmIntegrity in lock
-    const [, content] = (deps.writeLockFile as ReturnType<typeof vi.fn>).mock.calls[0];
-    const parsed = parseYaml(content);
-    expect(parsed.servers["io.github.test/my-server"].npmIntegrity).toBeUndefined();
+    expect(deps.fetchNpmIntegrity).toHaveBeenCalledWith("@test/my-server", "2.3.0");
+    const parsed = parseYaml((deps.writeLockFile as ReturnType<typeof vi.fn>).mock.calls[0][1]);
+    expect(parsed.servers["io.github.test/my-server"]).toMatchObject({ version: "1.0.0", packageVersion: "2.3.0" });
   });
 
-  it("omits npmIntegrity when pkg.version is absent", async () => {
-    const entry: ServerEntry = {
-      server: {
-        name: "io.github.test/my-server",
-        version: "1.0.0",
-        packages: [
-          {
-            registryType: "npm",
-            identifier: "@test/my-server",
-            // no version field
-            environmentVariables: [],
-          },
-        ],
-      },
-    };
+  it.each([undefined, "latest", "^1.0.0", "~1.0.0"])("refuses package version %s without inventing a package coordinate", async (version) => {
+    const entry = makeServerEntryWithPkg("io.github.test/my-server", "1.0.0", version);
     const deps = makeDeps(entry);
     const stackPath = await writeTempStack(basicStack);
-
-    await handleLock({ stackFile: stackPath }, deps);
-
+    await expect(handleLock({ stackFile: stackPath }, deps)).rejects.toThrow(/lock not written/);
     expect(deps.fetchNpmIntegrity).not.toHaveBeenCalled();
-
-    const [, content] = (deps.writeLockFile as ReturnType<typeof vi.fn>).mock.calls[0];
-    const parsed = parseYaml(content);
-    expect(parsed.servers["io.github.test/my-server"].npmIntegrity).toBeUndefined();
-  });
-
-  it("omits npmIntegrity when pkg.version is a range (^1.0.0)", async () => {
-    const entry = makeServerEntryWithPkg("io.github.test/my-server", "1.0.0", "^1.0.0");
-    const deps = makeDeps(entry);
-    const stackPath = await writeTempStack(basicStack);
-
-    await handleLock({ stackFile: stackPath }, deps);
-
-    expect(deps.fetchNpmIntegrity).not.toHaveBeenCalled();
-
-    const [, content] = (deps.writeLockFile as ReturnType<typeof vi.fn>).mock.calls[0];
-    const parsed = parseYaml(content);
-    expect(parsed.servers["io.github.test/my-server"].npmIntegrity).toBeUndefined();
-  });
-
-  it("omits npmIntegrity when pkg.version is a tilde range (~1.0.0)", async () => {
-    const entry = makeServerEntryWithPkg("io.github.test/my-server", "1.0.0", "~1.0.0");
-    const deps = makeDeps(entry);
-    const stackPath = await writeTempStack(basicStack);
-
-    await handleLock({ stackFile: stackPath }, deps);
-
-    expect(deps.fetchNpmIntegrity).not.toHaveBeenCalled();
+    expect(deps.writeLockFile).not.toHaveBeenCalled();
   });
 
   it("omits npmIntegrity when fetchNpmIntegrity returns undefined — lock still succeeds", async () => {

@@ -124,7 +124,7 @@ interface UpdateDeps {
 function makeDeps(overrides: Partial<UpdateDeps> = {}): UpdateDeps {
   return {
     getInstalledServers: vi.fn().mockResolvedValue([makeInstalledServer()]),
-    getServer: vi.fn().mockResolvedValue(makeServerEntry("io.github.test/server-a", "1.0.0")),
+    getServer: vi.fn(async (name: string, version?: string) => makeServerEntry(name, version ?? "1.0.0")),
     addInstalledServer: vi.fn().mockResolvedValue(undefined),
     removeInstalledServer: vi.fn().mockResolvedValue(undefined),
     getAdapter: vi.fn().mockImplementation((id: ClientId) => makeAdapter(id)),
@@ -162,7 +162,7 @@ describe("handleUpdate — preserves launch protections and client settings (#11
         getServer: vi.fn(async (_name: string, version?: string) => makeServerEntry(name, version ?? "2.0.0")),
         getAdapter: () => adapter, getConfigPath: () => configPath,
       }));
-      expect((await adapter.read(configPath))[name]).toEqual({ ...original, env: { TOKEN: "keep" } });
+      expect((await adapter.read(configPath))[name]).toEqual({ ...original, args: ["-y", "@test/server@2.0.0", "/user/data"], env: { TOKEN: "keep" } });
     } finally { await rm(dir, { recursive: true, force: true }); }
   });
 
@@ -178,11 +178,11 @@ describe("handleUpdate — preserves launch protections and client settings (#11
       const before = await readFile(configPath, "utf8");
       const deps = makeDeps({
         getInstalledServers: vi.fn().mockResolvedValue([makeInstalledServer({ clients: [adapter.clientId] })]),
-        getServer: vi.fn().mockResolvedValue(makeServerEntry(name, "2.0.0")),
+        getServer: vi.fn(async (n: string, v?: string) => makeServerEntry(n, v ?? "2.0.0")),
         getAdapter: () => adapter, getConfigPath: () => configPath,
       });
       await handleUpdate({ yes: true, json: true }, deps);
-      expect((await adapter.read(configPath))[name]).toEqual(configured);
+      expect((await adapter.read(configPath))[name]).toEqual(guarded ? configured : { ...configured, args: ["-y", "@test/server@2.0.0"] });
       if (guarded) {
         expect(await readFile(configPath, "utf8")).toBe(before);
         expect(deps.addInstalledServer).not.toHaveBeenCalled();
@@ -206,7 +206,7 @@ describe("handleUpdate — preserves launch protections and client settings (#11
     });
     await handleUpdate({ yes: true }, makeDeps({ getServer, getAdapter: () => adapter }));
     expect(adapter.addServer).toHaveBeenCalledWith(expect.any(String), name, {
-      command: "npx", args: ["-y", "@test/server", "--new", "user-arg"], env: { TOKEN: "keep" }, disabled: true, cwd: "/data",
+      command: "npx", args: ["-y", "@test/server@2.0.0", "--new", "user-arg"], env: { TOKEN: "keep" }, disabled: true, cwd: "/data",
     }, { force: true });
   });
 
@@ -295,7 +295,7 @@ describe("handleUpdate — preserves launch protections and client settings (#11
     entry._meta!["io.modelcontextprotocol.registry/official"]!.statusMessage = "malware reported";
     const adapter = makeAdapter("claude-desktop");
     const lines: string[] = [];
-    const deps = makeDeps({ getServer: vi.fn().mockResolvedValue(entry), getAdapter: () => adapter, output: (t) => lines.push(t) });
+    const deps = makeDeps({ getServer: vi.fn(async (name: string, version?: string) => version ? makeServerEntry(name, version) : entry), getAdapter: () => adapter, output: (t) => lines.push(t) });
     await handleUpdate({ json }, deps);
     expect(deps.confirm).not.toHaveBeenCalled();
     expect(deps.removeInstalledServer).not.toHaveBeenCalled();
@@ -316,7 +316,7 @@ describe("handleUpdate — preserves launch protections and client settings (#11
     (adapter.read as ReturnType<typeof vi.fn>).mockResolvedValue(kind === "missing" ? {} : { "io.github.test/server-a": existing });
     if (kind === "unreadable") (adapter.read as ReturnType<typeof vi.fn>).mockRejectedValue(new Error("permission denied"));
     const lines: string[] = [];
-    const deps = makeDeps({ getServer: vi.fn().mockResolvedValue(makeServerEntry("io.github.test/server-a", "2.0.0")), getAdapter: () => adapter, output: (t) => lines.push(t) });
+    const deps = makeDeps({ getServer: vi.fn(async (name: string, version?: string) => makeServerEntry(name, version ?? "2.0.0")), getAdapter: () => adapter, output: (t) => lines.push(t) });
     await handleUpdate({ yes: true, json: true }, deps);
     expect(adapter.addServer).not.toHaveBeenCalled();
     expect(deps.removeInstalledServer).not.toHaveBeenCalled();
@@ -358,7 +358,7 @@ describe("handleUpdate — all up to date", () => {
       getInstalledServers: vi.fn().mockResolvedValue([
         makeInstalledServer({ version: "1.0.0" }),
       ]),
-      getServer: vi.fn().mockResolvedValue(makeServerEntry("io.github.test/server-a", "1.0.0")),
+      getServer: vi.fn(async (name: string, version?: string) => makeServerEntry(name, version ?? "1.0.0")),
     });
     const lines: string[] = [];
     await handleUpdate({}, { ...deps, output: (t) => lines.push(t) });
@@ -367,7 +367,7 @@ describe("handleUpdate — all up to date", () => {
 
   it("does not prompt for confirmation when nothing to update", async () => {
     const deps = makeDeps({
-      getServer: vi.fn().mockResolvedValue(makeServerEntry("io.github.test/server-a", "1.0.0")),
+      getServer: vi.fn(async (name: string, version?: string) => makeServerEntry(name, version ?? "1.0.0")),
     });
     await handleUpdate({}, deps);
     expect(deps.confirm).not.toHaveBeenCalled();
@@ -375,7 +375,7 @@ describe("handleUpdate — all up to date", () => {
 
   it("does not call addInstalledServer when all are current", async () => {
     const deps = makeDeps({
-      getServer: vi.fn().mockResolvedValue(makeServerEntry("io.github.test/server-a", "1.0.0")),
+      getServer: vi.fn(async (name: string, version?: string) => makeServerEntry(name, version ?? "1.0.0")),
     });
     await handleUpdate({}, deps);
     expect(deps.addInstalledServer).not.toHaveBeenCalled();
@@ -392,9 +392,7 @@ describe("handleUpdate — one update available", () => {
       getInstalledServers: vi.fn().mockResolvedValue([
         makeInstalledServer({ name: "io.github.test/server-a", version: "1.0.0" }),
       ]),
-      getServer: vi.fn().mockResolvedValue(
-        makeServerEntry("io.github.test/server-a", "1.1.0")
-      ),
+      getServer: vi.fn(async (name: string, version?: string) => makeServerEntry(name, version ?? "1.1.0")),
     });
   }
 
@@ -512,7 +510,7 @@ describe("handleUpdate — writes new version to client config", () => {
   it("does not write to client config when nothing is updated", async () => {
     const adapter = makeAdapter("claude-desktop");
     const deps = makeDeps({
-      getServer: vi.fn().mockResolvedValue(makeServerEntry("io.github.test/server-a", "1.0.0")),
+      getServer: vi.fn(async (name: string, version?: string) => makeServerEntry(name, version ?? "1.0.0")),
       getAdapter: vi.fn().mockReturnValue(adapter),
     });
     await handleUpdate({ yes: true }, deps);
@@ -540,7 +538,7 @@ describe("handleUpdate — preserves existing client-config env on update", () =
       getInstalledServers: vi.fn().mockResolvedValue([
         makeInstalledServer({ name: "io.github.test/server-a", version: "1.0.0", clients: ["claude-desktop"] }),
       ]),
-      getServer: vi.fn().mockResolvedValue(makeServerEntry("io.github.test/server-a", "1.1.0")),
+      getServer: vi.fn(async (name: string, version?: string) => makeServerEntry(name, version ?? "1.1.0")),
       getAdapter: vi.fn().mockReturnValue(adapter),
     });
 
@@ -568,7 +566,7 @@ describe("handleUpdate — partial config-write failure warning", () => {
       getInstalledServers: vi.fn().mockResolvedValue([
         makeInstalledServer({ name: "io.github.test/server-a", version: "1.0.0", clients: ["claude-desktop"] }),
       ]),
-      getServer: vi.fn().mockResolvedValue(makeServerEntry("io.github.test/server-a", "1.1.0")),
+      getServer: vi.fn(async (name: string, version?: string) => makeServerEntry(name, version ?? "1.1.0")),
       getAdapter: vi.fn().mockReturnValue(adapter),
       output: (t) => lines.push(t),
     });
@@ -590,7 +588,7 @@ describe("handleUpdate — partial config-write failure warning", () => {
       getInstalledServers: vi.fn().mockResolvedValue([
         makeInstalledServer({ name: "io.github.test/server-a", version: "1.0.0", clients: ["claude-desktop", "cursor"] }),
       ]),
-      getServer: vi.fn().mockResolvedValue(makeServerEntry("io.github.test/server-a", "1.1.0")),
+      getServer: vi.fn(async (name: string, version?: string) => makeServerEntry(name, version ?? "1.1.0")),
       getAdapter: (id) => id === "claude-desktop" ? adapter : makeAdapter(id),
     });
 
@@ -609,7 +607,7 @@ describe("handleUpdate — partial config-write failure warning", () => {
 describe("handleUpdate — --yes flag", () => {
   it("does not call confirm when --yes is set", async () => {
     const deps = makeDeps({
-      getServer: vi.fn().mockResolvedValue(makeServerEntry("io.github.test/server-a", "2.0.0")),
+      getServer: vi.fn(async (name: string, version?: string) => makeServerEntry(name, version ?? "2.0.0")),
     });
     await handleUpdate({ yes: true }, deps);
     expect(deps.confirm).not.toHaveBeenCalled();
@@ -617,7 +615,7 @@ describe("handleUpdate — --yes flag", () => {
 
   it("still updates the store when --yes is set", async () => {
     const deps = makeDeps({
-      getServer: vi.fn().mockResolvedValue(makeServerEntry("io.github.test/server-a", "2.0.0")),
+      getServer: vi.fn(async (name: string, version?: string) => makeServerEntry(name, version ?? "2.0.0")),
     });
     await handleUpdate({ yes: true }, deps);
     expect(deps.addInstalledServer).toHaveBeenCalledWith(
@@ -634,7 +632,7 @@ describe("handleUpdate — --json flag", () => {
   it("outputs valid JSON when --json is set and updates available", async () => {
     const lines: string[] = [];
     const deps = makeDeps({
-      getServer: vi.fn().mockResolvedValue(makeServerEntry("io.github.test/server-a", "2.0.0")),
+      getServer: vi.fn(async (name: string, version?: string) => makeServerEntry(name, version ?? "2.0.0")),
       output: (t) => lines.push(t),
     });
     await handleUpdate({ json: true, yes: true }, deps);
@@ -645,7 +643,7 @@ describe("handleUpdate — --json flag", () => {
   it("JSON output includes name, oldVersion, newVersion, updated", async () => {
     const lines: string[] = [];
     const deps = makeDeps({
-      getServer: vi.fn().mockResolvedValue(makeServerEntry("io.github.test/server-a", "2.0.0")),
+      getServer: vi.fn(async (name: string, version?: string) => makeServerEntry(name, version ?? "2.0.0")),
       output: (t) => lines.push(t),
     });
     await handleUpdate({ json: true, yes: true }, deps);
@@ -666,7 +664,7 @@ describe("handleUpdate — --json flag", () => {
   it("JSON output marks updated: false for up-to-date servers", async () => {
     const lines: string[] = [];
     const deps = makeDeps({
-      getServer: vi.fn().mockResolvedValue(makeServerEntry("io.github.test/server-a", "1.0.0")),
+      getServer: vi.fn(async (name: string, version?: string) => makeServerEntry(name, version ?? "1.0.0")),
       output: (t) => lines.push(t),
     });
     await handleUpdate({ json: true }, deps);
@@ -724,8 +722,10 @@ describe("handleUpdate — registry unavailable", () => {
         makeInstalledServer({ name: "io.github.test/server-b", version: "1.0.0" }),
       ]),
       getServer: vi.fn()
-        .mockRejectedValueOnce(new Error("Network failure"))
-        .mockResolvedValueOnce(makeServerEntry("io.github.test/server-b", "2.0.0")),
+        .mockImplementation(async (name: string, version?: string) => {
+          if (name.endsWith("server-a")) throw new Error("Network failure");
+          return makeServerEntry(name, version ?? "2.0.0");
+        }),
     });
     await handleUpdate({ yes: true }, deps);
     // Second server should be updated
@@ -743,7 +743,7 @@ describe("handleUpdate — trust score on update", () => {
   it("shows trust level in the output after update", async () => {
     const lines: string[] = [];
     const deps = makeDeps({
-      getServer: vi.fn().mockResolvedValue(makeServerEntry("io.github.test/server-a", "2.0.0")),
+      getServer: vi.fn(async (name: string, version?: string) => makeServerEntry(name, version ?? "2.0.0")),
       computeTrustScore: vi.fn().mockReturnValue(makeTrustScore("safe", 80, 15, 20)),
       output: (t) => lines.push(t),
     });
@@ -756,7 +756,7 @@ describe("handleUpdate — trust score on update", () => {
   it("still says safe when the health check actually ran", async () => {
     const lines: string[] = [];
     const deps = makeDeps({
-      getServer: vi.fn().mockResolvedValue(makeServerEntry("io.github.test/server-a", "2.0.0")),
+      getServer: vi.fn(async (name: string, version?: string) => makeServerEntry(name, version ?? "2.0.0")),
       computeTrustScore: vi.fn().mockReturnValue(makeTrustScore("safe", 80, 30, 20)),
       output: (t) => lines.push(t),
     });
@@ -779,8 +779,7 @@ describe("handleUpdate — multiple servers mixed state", () => {
         makeInstalledServer({ name: "io.github.test/server-b", version: "2.0.0" }),
       ]),
       getServer: vi.fn()
-        .mockResolvedValueOnce(makeServerEntry("io.github.test/server-a", "1.1.0")) // has update
-        .mockResolvedValueOnce(makeServerEntry("io.github.test/server-b", "2.0.0")), // up to date
+        .mockImplementation(async (name: string, version?: string) => makeServerEntry(name, version ?? (name.endsWith("server-a") ? "1.1.0" : "2.0.0"))),
     });
     await handleUpdate({ yes: true }, deps);
     expect(deps.addInstalledServer).toHaveBeenCalledOnce();
@@ -844,7 +843,7 @@ describe("handleUpdate — malformed client entry must not silently wipe env", (
       getInstalledServers: vi.fn().mockResolvedValue([
         makeInstalledServer({ name: "io.github.test/server-a", version: "1.0.0", clients: ["claude-desktop"] }),
       ]),
-      getServer: vi.fn().mockResolvedValue(makeServerEntry("io.github.test/server-a", "1.1.0")),
+      getServer: vi.fn(async (name: string, version?: string) => makeServerEntry(name, version ?? "1.1.0")),
       getAdapter: vi.fn().mockReturnValue(adapter),
     });
 
@@ -870,7 +869,7 @@ describe("handleUpdate — malformed client entry must not silently wipe env", (
       getInstalledServers: vi.fn().mockResolvedValue([
         makeInstalledServer({ name: "io.github.test/server-a", version: "1.0.0", clients: ["claude-desktop"] }),
       ]),
-      getServer: vi.fn().mockResolvedValue(makeServerEntry("io.github.test/server-a", "1.1.0")),
+      getServer: vi.fn(async (name: string, version?: string) => makeServerEntry(name, version ?? "1.1.0")),
       getAdapter: vi.fn().mockReturnValue(adapter),
     });
 
@@ -893,7 +892,7 @@ describe("handleUpdate — malformed client entry must not silently wipe env", (
       getInstalledServers: vi.fn().mockResolvedValue([
         makeInstalledServer({ name: "io.github.test/server-a", version: "1.0.0", clients: ["claude-desktop"] }),
       ]),
-      getServer: vi.fn().mockResolvedValue(makeServerEntry("io.github.test/server-a", "1.1.0")),
+      getServer: vi.fn(async (name: string, version?: string) => makeServerEntry(name, version ?? "1.1.0")),
       getAdapter: vi.fn().mockReturnValue(adapter),
     });
 
@@ -924,7 +923,7 @@ describe("handleUpdate — malformed client entry must not silently wipe env", (
       getInstalledServers: vi.fn().mockResolvedValue([
         makeInstalledServer({ name: "io.github.test/server-a", version: "1.0.0", clients: ["claude-desktop"] }),
       ]),
-      getServer: vi.fn().mockResolvedValue(makeServerEntry("io.github.test/server-a", "1.1.0")),
+      getServer: vi.fn(async (name: string, version?: string) => makeServerEntry(name, version ?? "1.1.0")),
       getAdapter: vi.fn().mockReturnValue(adapter),
       output: (t: string) => lines.push(t),
     });
@@ -1015,7 +1014,7 @@ describe("handleUpdate — malformed client entry must not silently wipe env", (
       getInstalledServers: vi.fn().mockResolvedValue([
         makeInstalledServer({ name: "io.github.test/server-a", version: "1.0.0", clients: ["claude-desktop"] }),
       ]),
-      getServer: vi.fn().mockResolvedValue(makeServerEntry("io.github.test/server-a", "1.1.0")),
+      getServer: vi.fn(async (name: string, version?: string) => makeServerEntry(name, version ?? "1.1.0")),
       getAdapter: vi.fn().mockReturnValue(adapter),
     });
 
@@ -1038,7 +1037,7 @@ describe("handleUpdate — malformed client entry must not silently wipe env", (
       getInstalledServers: vi.fn().mockResolvedValue([
         makeInstalledServer({ name: "io.github.test/server-a", version: "1.0.0", clients: ["claude-desktop"] }),
       ]),
-      getServer: vi.fn().mockResolvedValue(makeServerEntry("io.github.test/server-a", "1.1.0")),
+      getServer: vi.fn(async (name: string, version?: string) => makeServerEntry(name, version ?? "1.1.0")),
       getAdapter: vi.fn().mockReturnValue(adapter),
       output: (t: string) => lines.push(t),
     });
@@ -1074,7 +1073,7 @@ describe("handleUpdate — malformed client entry must not silently wipe env", (
         getInstalledServers: vi.fn().mockResolvedValue([
           makeInstalledServer({ name: "srv-a", version: "1.0.0", clients: ["claude-desktop"] }),
         ]),
-        getServer: vi.fn().mockResolvedValue(makeServerEntry("srv-a", "1.1.0")),
+        getServer: vi.fn(async (name: string, version?: string) => makeServerEntry(name, version ?? "1.1.0")),
         getAdapter: vi.fn().mockReturnValue(adapter),
         output: (t: string) => lines.push(t),
       });
@@ -1108,7 +1107,7 @@ describe("handleUpdate — malformed client entry must not silently wipe env", (
           clients: ["claude-desktop", "cursor"],
         }),
       ]),
-      getServer: vi.fn().mockResolvedValue(makeServerEntry("srv-a", "1.1.0")),
+      getServer: vi.fn(async (name: string, version?: string) => makeServerEntry(name, version ?? "1.1.0")),
       getAdapter: vi.fn().mockReturnValue(adapter),
       output: (t: string) => lines.push(t),
     });
@@ -1177,7 +1176,7 @@ describe("handleUpdate — malformed client entry must not silently wipe env", (
       getInstalledServers: vi.fn().mockResolvedValue([
         makeInstalledServer({ name: "srv-a", version: "1.0.0", clients: ["claude-desktop"] }),
       ]),
-      getServer: vi.fn().mockResolvedValue(makeServerEntry("srv-a", "1.1.0")),
+      getServer: vi.fn(async (name: string, version?: string) => makeServerEntry(name, version ?? "1.1.0")),
       getAdapter: vi.fn().mockReturnValue(adapter),
       output: (t: string) => lines.push(t),
     });
@@ -1235,7 +1234,7 @@ describe("handleUpdate — malformed client entry must not silently wipe env", (
       getInstalledServers: vi.fn().mockResolvedValue([
         makeInstalledServer({ name: "io.github.test/server-a", version: "1.0.0", clients: ["claude-desktop"] }),
       ]),
-      getServer: vi.fn().mockResolvedValue(makeServerEntry("io.github.test/server-a", "1.1.0")),
+      getServer: vi.fn(async (name: string, version?: string) => makeServerEntry(name, version ?? "1.1.0")),
       getAdapter: vi.fn().mockReturnValue(adapter),
       output: (t: string) => lines.push(t),
     });
@@ -1260,7 +1259,7 @@ describe("handleUpdate — malformed client entry must not silently wipe env", (
       getInstalledServers: vi.fn().mockResolvedValue([
         makeInstalledServer({ name: "io.github.test/server-a", version: "1.0.0", clients: ["claude-desktop"] }),
       ]),
-      getServer: vi.fn().mockResolvedValue(makeServerEntry("io.github.test/server-a", "1.1.0")),
+      getServer: vi.fn(async (name: string, version?: string) => makeServerEntry(name, version ?? "1.1.0")),
       getAdapter: vi.fn().mockReturnValue(adapter),
       output: (t: string) => lines.push(t),
     });
@@ -1280,7 +1279,7 @@ describe("handleUpdate — malformed client entry must not silently wipe env", (
       getInstalledServers: vi.fn().mockResolvedValue([
         makeInstalledServer({ name: "io.github.test/server-a", version: "1.0.0", clients: ["claude-desktop"] }),
       ]),
-      getServer: vi.fn().mockResolvedValue(makeServerEntry("io.github.test/server-a", "1.1.0")),
+      getServer: vi.fn(async (name: string, version?: string) => makeServerEntry(name, version ?? "1.1.0")),
       getAdapter: vi.fn().mockReturnValue(adapter),
     });
 

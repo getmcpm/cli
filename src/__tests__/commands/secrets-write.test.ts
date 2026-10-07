@@ -56,6 +56,7 @@ function installServerEntry(): ServerEntry {
         {
           registryType: "npm",
           identifier: "@test/my-server",
+          version: "1.0.0",
           environmentVariables: [
             { name: "API_KEY", isSecret: true },
             { name: "REGION", isSecret: false },
@@ -180,6 +181,7 @@ function upServerEntry(name: string, version: string): ServerEntry {
         {
           registryType: "npm",
           identifier: `@test/${name.split("/").pop()}`,
+          version,
           environmentVariables: [],
         },
       ],
@@ -251,6 +253,7 @@ servers:
   io.github.test/server-a:
     version: "1.2.0"
     registryType: npm
+    packageVersion: "1.2.0"
     identifier: "@test/server-a"
     trust:
       score: 75

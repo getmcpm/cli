@@ -15,6 +15,17 @@ published section (it happened to #170).
 
 ### Fixed
 
+- Package launches now include the actual npm/PyPI version or explicit OCI tag/digest;
+  MCP publication versions are never substituted for missing package versions.
+  PyPI uses strict equality to exclude unlocked local-version suffixes.
+  New locks record `packageVersion`. `up` checks the locked publication and package
+  tuple for every client before backups, secrets or config writes, including dry-run,
+  and keeps Cursor on a locked package instead of switching to HTTP. Conflicting
+  package/integrity/provenance versions refuse; old locks without package evidence
+  require re-locking. Existing generated launches migrate while retaining guard,
+  confinement, custom arguments, disabled state, credentials and native settings.
+  Explicit OCI tags remain mutable, and package-manager downloads remain independent
+  of mcpm's published-record integrity checks.
 - Patch transitive `proxy-addr` and `source-map-js` security advisories with
   versions 2.0.8 and 1.2.2 respectively.
 

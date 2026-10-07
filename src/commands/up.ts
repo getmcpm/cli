@@ -44,6 +44,9 @@ import {
 import { checkTrustPolicy } from "../stack/policy.js";
 import { parseEnvFile } from "../stack/env.js";
 import { resolveInstallEntry, parseSecretsMode, validateRemoteUrl } from "./install.js";
+import { assertLockedPackageConsistency, bindLockedPackage, packageCoordinate } from "../registry/package-coordinate.js";
+import { mergeUpdateEntry } from "./update.js";
+import { isWrapped, unwrapEntry, rewrapEntry } from "../guard/wrap.js";
 import { assessReleaseAge, DEFAULT_MIN_RELEASE_AGE_HOURS } from "../scanner/cooldown.js";
 import { extractRegistryMeta } from "../utils/format-trust.js";
 import { assessServerStatus } from "../scanner/registry-status.js";
@@ -270,6 +273,7 @@ export async function handleUp(
   // Step 2: Read or create lock file
   let lockFile = await parseLockFile(lockPath);
   if (lockFile === null) {
+    if (options.dryRun) throw new Error("No lock file for dry run; run mcpm lock first (dry run writes nothing)");
     deps.output("No lock file found. Running mcpm lock first...");
     await deps.runLock(stackPath);
     lockFile = await parseLockFile(lockPath);
@@ -297,6 +301,59 @@ export async function handleUp(
   // suspicious missing baseline; the Commander catch turns the throw into exit 1.
   if (options.frozen === true || stackFile.policy?.frozen === true) {
     await runFrozenPass(lockFile, deps);
+  }
+
+  // Bind every selected publication/client BEFORE backups or secret persistence.
+  // Retain this exact metadata and argv through apply; no second live fetch.
+  assertLockedPackageConsistency(lockFile);
+  const plans = new Map<string, RegistryPlan>();
+  for (const [name, server] of serverEntries) {
+    if (isUrlServer(server)) continue;
+    const locked = lockFile.servers[name];
+    if (!locked || !isLockedRegistryServer(locked)) throw new Error(`Missing locked package coordinate for ${name}; run mcpm lock`);
+    const publication = await deps.getServer(name, locked.version);
+    const coordinate = bindLockedPackage(publication, locked, name);
+    const entries = new Map<ClientId, McpServerEntry>();
+    const wrappers = new Map<ClientId, McpServerEntry>();
+    for (const client of clients) {
+      const next = resolveInstallEntry(publication, client, coordinate);
+      let malformed = false;
+      const configured = (await deps.getAdapter(client).read(deps.getPath(client), (skipped) => {
+        if (skipped === name) malformed = true;
+      }))[name];
+      if (malformed) throw new Error(`Malformed client entry for ${name}; repair it before installing the locked package`);
+      if (!configured) { entries.set(client, next); continue; }
+      const existing = isWrapped(configured) ? unwrapEntry(configured) : configured;
+      if (!existing) throw new Error(`Malformed guard marker for ${name}; refusing to replace it`);
+      const legacy = resolveInstallEntry(publication, client, coordinate, true);
+      let baseline = existing.command === legacy.command && existing.url === legacy.url &&
+        (legacy.args ?? []).every((arg, i) => existing.args?.[i] === arg) ? legacy : next;
+      // Fixed generated launchers can change package version without knowing the
+      // previous MCP publication. All other launcher/default args must still match.
+      const slot = coordinate.registryType === "npm" ? 1 : coordinate.registryType === "pypi" ? 0 : 3;
+      const oldReference = existing.args?.[slot];
+      if (baseline === next && oldReference && existing.command === next.command) {
+        const separator = coordinate.registryType === "npm" ? "@" : oldReference.includes("===") ? "===" : "==";
+        const boundary = oldReference.lastIndexOf(separator);
+        const oldIdentifier = coordinate.registryType === "oci" ? oldReference : oldReference.slice(0, boundary);
+        const version = coordinate.registryType === "oci" ? undefined : oldReference.slice(boundary + separator.length);
+        const old = boundary > 0 || coordinate.registryType === "oci"
+          ? packageCoordinate({ registryType: coordinate.registryType, identifier: oldIdentifier, version }) : undefined;
+        const repository = (ref: string) => ref.split("@")[0].replace(/:[^/:]+$/, "");
+        if (old && (coordinate.registryType === "oci" ? repository(old.identifier) === repository(coordinate.identifier) : old.identifier === coordinate.identifier)) {
+          baseline = { ...next, args: next.args!.map((arg, i) => i === slot ? oldReference : arg) };
+        }
+      }
+      const merged = mergeUpdateEntry(existing, next, baseline);
+      if (isWrapped(configured)) {
+        // Check newly declared keys too, before resolving/persisting secret values.
+        const declared = Object.fromEntries(Object.keys(server.env ?? {}).map((key) => [key, ""]));
+        rewrapEntry(configured, { ...merged, env: { ...merged.env, ...declared } });
+        wrappers.set(client, configured);
+      }
+      entries.set(client, merged);
+    }
+    plans.set(name, { publication, entries, wrappers });
   }
 
   // Step 5: Load .env file for env var resolution.
@@ -347,6 +404,7 @@ export async function handleUp(
         consentedUnguarded,
         options,
         deps,
+        plan: plans.get(name),
       });
       results.push(result);
       deps.recordResult?.({ name, status: result.status });
@@ -518,7 +576,14 @@ async function backupConfigs(
 // Per-server processing
 // ---------------------------------------------------------------------------
 
+interface RegistryPlan {
+  publication: ServerEntry;
+  entries: Map<ClientId, McpServerEntry>;
+  wrappers: Map<ClientId, McpServerEntry>;
+}
+
 interface ProcessInput {
+  plan?: RegistryPlan;
   name: string;
   server: StackFile["servers"][string];
   locked: LockedServer | undefined;
@@ -545,7 +610,7 @@ async function processServer(input: ProcessInput): Promise<ServerResult> {
   }
 
   // Trust re-assessment
-  const serverEntry = await deps.getServer(name, locked.version);
+  const serverEntry = input.plan!.publication;
 
   // Registry-delisting gate — fail closed if the registry marks this server
   // "deleted" (removed/withdrawn). Fail-SAFE: only an explicit "deleted"
@@ -680,14 +745,15 @@ async function processServer(input: ProcessInput): Promise<ServerResult> {
   const clientErrors: string[] = [];
   for (const clientId of clients) {
     try {
-      const entry = resolveInstallEntry(serverEntry, clientId);
+      const entry = input.plan!.entries.get(clientId)!;
       const entryWithEnv: McpServerEntry = {
         ...entry,
         ...(Object.keys(envVars).length > 0 ? { env: { ...entry.env, ...envVars } } : {}),
       };
       const adapter = deps.getAdapter(clientId);
       const configPath = deps.getPath(clientId);
-      await adapter.addServer(configPath, name, entryWithEnv, { force: true });
+      const wrapper = input.plan!.wrappers.get(clientId);
+      await adapter.addServer(configPath, name, wrapper ? rewrapEntry(wrapper, entryWithEnv) : entryWithEnv, { force: true });
       installedClients.push(clientId);
     } catch (err) {
       clientErrors.push(`${clientId}: ${err instanceof Error ? err.message : String(err)}`);
@@ -806,6 +872,7 @@ async function runFrozenPass(
   lockFile: LockFile,
   deps: Pick<UpDeps, "fetchNpmIntegrity" | "fetchNpmProvenance" | "output">
 ): Promise<void> {
+  assertLockedPackageConsistency(lockFile);
   // Two independent fail-closed gates in parallel: integrity drift (H11) and
   // provenance crypto-regression (F8/B3, evidence-gated to crypto-`verified`
   // servers). Both read npm's integrity for a checked coordinate, so memoize the

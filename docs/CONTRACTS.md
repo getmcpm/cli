@@ -34,6 +34,22 @@ new failure modes, but the meanings above will not be repurposed within `0.x`.
 - **`mcpm-lock.yaml`** carries `lockfileVersion: 1`. The `integrity` block is
   additive/optional (older locks still parse); a breaking change bumps the number.
 
+Registry locks distinguish the MCP publication `version` from the actual
+`packageVersion`. Launches use npm `identifier@version`, PyPI `identifier===version`,
+or an explicit OCI tag/digest. PyPI uses strict `===` equality so a locked public
+version cannot select a different local-version suffix. OCI tags are mutable; they pin a launch coordinate,
+not image bytes. A digest-bearing identifier is retained even when the registry
+also supplies a descriptive release version.
+
+`up` binds the retained publication metadata to the locked package type, identifier
+and package version for every selected server/client before backups, secrets or
+config writes, including dry-run. Cursor cannot switch a locked package to HTTP.
+Old npm locks may infer package versions from agreeing integrity/provenance
+snapshots; absent evidence requires re-locking. Missing/alias package versions in
+a registry listing require fixing the listing. Contradictory lock snapshots refuse
+in `up --frozen` and `verify`. Package-manager downloads are independent of mcpm's
+published-record checks: these are not `npm ci` enforcement of downloaded bytes.
+
 ## MCP tool-result shapes (UNSTABLE)
 
 The `mcpm serve` tool surface (`mcpm_search`, `mcpm_install`, `mcpm_audit`,

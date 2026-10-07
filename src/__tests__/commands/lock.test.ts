@@ -21,7 +21,8 @@ function makeServerEntry(name: string, version: string): ServerEntry {
       packages: [
         {
           registryType: "npm",
-          identifier: `@test/${name}`,
+          identifier: `@test/${name.split("/").pop()}`,
+          version,
           environmentVariables: [],
         },
       ],
@@ -57,6 +58,8 @@ function makeDeps(overrides: Partial<LockDeps> = {}): LockDeps {
       Promise.resolve(makeServerEntry(name, version ?? "1.2.0"))
     ),
     scanTier1: vi.fn().mockReturnValue([]),
+    fetchNpmIntegrity: vi.fn().mockResolvedValue(undefined),
+    fetchNpmProvenance: vi.fn().mockResolvedValue(undefined),
     checkScannerAvailable: vi.fn().mockResolvedValue(false),
     scanTier2: vi.fn().mockResolvedValue([]),
     computeTrustScore: vi.fn().mockReturnValue(defaultTrustScore),

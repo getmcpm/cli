@@ -29,6 +29,7 @@ import { sanitizeForTerminal } from "../guard/sanitize.js";
 import { describeRegistryError } from "../registry/errors.js";
 import { assessServerStatus } from "../scanner/registry-status.js";
 import { isWrapped, unwrapEntry, rewrapEntry } from "../guard/wrap.js";
+import { assertPublication } from "../registry/package-coordinate.js";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -159,7 +160,7 @@ async function readExistingEntry(
 }
 
 /** Replace only registry-generated launch args; retain a user's appended args. */
-function mergeUpdateEntry(existing: McpServerEntry, next: McpServerEntry, previous: McpServerEntry): McpServerEntry {
+export function mergeUpdateEntry(existing: McpServerEntry, next: McpServerEntry, previous: McpServerEntry): McpServerEntry {
   if ((existing.command !== undefined) !== (next.command !== undefined)) {
     throw new Error("Registry transport changed; update this client's launch configuration by hand");
   }
@@ -222,6 +223,7 @@ export async function handleUpdate(
     servers.map(async (installed): Promise<FetchOutcome> => {
       try {
         const entry = await getServer(installed.name);
+        assertPublication(entry, installed.name);
         return { kind: "ok", installed, entry };
       } catch (err) {
         // #92: a 404 (delisted) and an unparseable response are not "unavailable".
@@ -384,9 +386,15 @@ export async function handleUpdate(
     const clientNotes: string[] = [];
     let written = 0;
     let previousMetadata: Promise<ServerEntry> | undefined;
-    for (const clientId of originalClients) {
+    const resolved = new Map<ClientId, McpServerEntry>();
+    try {
+      for (const client of originalClients) resolved.set(client, resolveInstallEntry(entry, client));
+    } catch (err) {
+      resolved.clear();
+      clientErrors.push(`Package preflight: ${err instanceof Error ? err.message : String(err)}`);
+    }
+    for (const [clientId, rawEntry] of resolved) {
       try {
-        const rawEntry = resolveInstallEntry(entry, clientId);
         const configured = await readExistingEntry(
           getAdapter,
           getConfigPath,
@@ -413,7 +421,12 @@ export async function handleUpdate(
           if (old.server.name !== r.name || old.server.version !== original!.version) {
             throw new Error("Registry did not return the installed version; cannot safely preserve custom launch arguments");
           }
-          previous = resolveInstallEntry(old, clientId);
+          // Pre-#120 entries used the unversioned generated prefix. Match it
+          // only against this same verified publication; never infer a launcher.
+          const legacy = resolveInstallEntry(old, clientId, undefined, true);
+          previous = existing.command === legacy.command && existing.url === legacy.url &&
+              (legacy.args ?? []).every((arg, i) => existing.args?.[i] === arg)
+            ? legacy : resolveInstallEntry(old, clientId);
         }
         const merged = existing.command === undefined && existing.url === undefined
           ? { ...rawEntry, ...existing }

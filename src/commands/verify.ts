@@ -17,6 +17,7 @@
 
 import type { LockFile, StackFile } from "../stack/schema.js";
 import { lockPathFor } from "../stack/paths.js";
+import { assertLockedPackageConsistency } from "../registry/package-coordinate.js";
 import {
   classifyIntegrity,
   frozenVerdict,
@@ -114,6 +115,7 @@ export async function verifyHandler(deps: VerifyDeps, opts: VerifyOpts = {}): Pr
     // only the lock — so they all pass while coverage quietly shrinks. No mcpm.yaml
     // to compare against → nothing to check, not a failure (verify is lock-first).
     const stackFile = await deps.parseStack(stackPath);
+    assertLockedPackageConsistency(lockFile);
     const uncovered =
       stackFile === null
         ? []

