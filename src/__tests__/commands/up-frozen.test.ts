@@ -32,7 +32,7 @@ function makeServerEntry(name: string, version: string): ServerEntry {
     server: {
       name,
       version,
-      packages: [{ registryType: "npm", identifier: `@test/${name.split("/").pop()}`, environmentVariables: [] }],
+      packages: [{ registryType: name === "p" ? "pypi" : "npm", identifier: name === "p" ? "test-p" : `@test/${name.split("/").pop()}`, version, environmentVariables: [] }],
     },
   };
 }
@@ -93,6 +93,7 @@ function npmLock(name: string, integrity?: string): string {
   return `  ${name}:
     version: "1.0.0"
     registryType: npm
+    packageVersion: "1.0.0"
     identifier: "@test/${name}"
 ${trustBlock()}${baseline}`;
 }
@@ -102,6 +103,7 @@ function pypiLock(name: string): string {
   return `  ${name}:
     version: "1.0.0"
     registryType: pypi
+    packageVersion: "1.0.0"
     identifier: "test-${name}"
 ${trustBlock()}`;
 }

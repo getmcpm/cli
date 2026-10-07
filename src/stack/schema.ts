@@ -224,6 +224,8 @@ const LockedRegistryServerSchema = z.object({
   version: z.string(),
   registryType: z.string(),
   identifier: z.string(),
+  /** Actual package coordinate, distinct from the MCP publication's version. */
+  packageVersion: z.string().optional(),
   trust: TrustSnapshotSchema,
   /**
    * Npm artifact integrity snapshot (H11 slice 1). Optional: absent on old

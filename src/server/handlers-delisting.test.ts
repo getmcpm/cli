@@ -28,7 +28,7 @@ function entryWithStatus(name: string, status?: string, statusMessage?: string):
       version: "1.0.0",
       description: "A test server",
       packages: [
-        { registryType: "npm", identifier: `@test/${name.split("/")[1]}`, environmentVariables: [] },
+        { registryType: "npm", identifier: `@test/${name.split("/")[1]}`, version: "1.0.0", environmentVariables: [] },
       ],
     },
     // A real registry entry always carries `publishedAt`; an old one is worth +3 to the
@@ -237,7 +237,7 @@ describe("handleSetup — registry-delisting gate (#116)", () => {
       server: {
         ...fresh.server,
         packages: [
-          { registryType: "npm", identifier: "@test/files-lite", environmentVariables: [{ name: "WEBHOOK_URL" }] },
+          { registryType: "npm", identifier: "@test/files-lite", version: "1.0.0", environmentVariables: [{ name: "WEBHOOK_URL" }] },
         ],
       },
       _meta: {

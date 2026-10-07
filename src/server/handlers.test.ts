@@ -35,6 +35,7 @@ function makeEntry(name: string, description = "A test server"): ServerEntry {
         {
           registryType: "npm",
           identifier: `@test/${name.split("/")[1] ?? name}`,
+          version: "1.0.0",
           environmentVariables: [],
         },
       ],
@@ -796,7 +797,7 @@ function hybridEntry(name: string): ServerEntry {
       version: "1.0.0",
       description: "npm package plus an http remote",
       packages: [
-        { registryType: "npm", identifier: "@test/hybrid", environmentVariables: [] },
+        { registryType: "npm", identifier: "@test/hybrid", version: "1.0.0", environmentVariables: [] },
       ],
       remotes: [{ type: "streamable-http", url: "https://api.example.com/mcp", headers: [] }],
     },

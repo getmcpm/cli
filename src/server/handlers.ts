@@ -16,6 +16,7 @@ import { maxAchievableBeforeHealthCheck, nativeTrustScore } from "../scanner/tru
 import { extractRegistryMeta } from "../utils/format-trust.js";
 import { formatMcpEntryCommand } from "../utils/format-entry.js";
 import { resolveInstallEntry } from "../commands/install.js";
+import { assertPublication } from "../registry/package-coordinate.js";
 import { buildDoctorModel, makeCheckConfigExists, execCheckDefault } from "../commands/doctor.js";
 import { fetchNpmIntegrity as _fetchNpmIntegrity } from "../registry/npm-integrity.js";
 import { fetchNpmProvenance as _fetchNpmProvenance } from "../registry/npm-provenance.js";
@@ -186,6 +187,7 @@ export async function handleInstall(
 ): Promise<object> {
   validateMcpServerName(args.name);
   const entry = preResolved?.entry ?? await deps.registryGetServer(args.name);
+  assertPublication(entry, args.name);
 
   // Registry-delisting gate (E9a, backlog #116): the CLI's `install` and `up` refuse a server
   // the registry itself marks "deleted" (e.g. "malware reported"); this path did not, and a

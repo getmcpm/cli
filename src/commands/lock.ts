@@ -35,6 +35,7 @@ import {
   isLockedRegistryServer,
 } from "../stack/schema.js";
 import { compareProvenance } from "../registry/npm-provenance.js";
+import { packageCoordinate, preferredPackage, assertLockedPackageConsistency, assertPublication } from "../registry/package-coordinate.js";
 import { sanitizeForTerminal } from "../guard/sanitize.js";
 import { resolveVersion, resolveWithSingleVersion } from "../stack/resolve.js";
 import { lockPathFor } from "../stack/paths.js";
@@ -187,6 +188,7 @@ export async function handleLock(
     servers: lockedServers,
   };
 
+  assertLockedPackageConsistency(lockFile);
   await deps.writeLockFile(lockPath, serializeYaml(lockFile));
   deps.output(`Locked ${results.length} servers to ${lockPath}`);
 
@@ -380,6 +382,9 @@ async function resolveServer(
 
   // Step 2: Fetch the resolved version's full entry
   const serverEntry = await deps.getServer(name, resolvedVersion);
+  assertPublication(serverEntry, name, resolvedVersion);
+  const pkg = preferredPackage(serverEntry);
+  const coordinate = packageCoordinate(pkg);
 
   // Step 3: Trust assessment
   const tier1Findings = deps.scanTier1(serverEntry);
@@ -410,12 +415,6 @@ async function resolveServer(
   const trustScore = deps.computeTrustScore(trustInput);
 
   // Step 4: Determine registry type and identifier
-  const pkg =
-    serverEntry.server.packages.find((p) => p.registryType === "npm") ??
-    serverEntry.server.packages.find((p) => p.registryType === "pypi") ??
-    serverEntry.server.packages.find((p) => p.registryType === "oci") ??
-    serverEntry.server.packages[0];
-
   const snapshot: TrustSnapshot = {
     score: trustScore.score,
     maxPossible: trustScore.maxPossible,
@@ -511,6 +510,7 @@ async function resolveServer(
     version: resolvedVersion,
     registryType: pkg?.registryType ?? "unknown",
     identifier: pkg?.identifier ?? name,
+    packageVersion: coordinate.version,
     trust: snapshot,
     ...(npmIntegritySnap ? { npmIntegrity: npmIntegritySnap } : {}),
     ...(provenanceSnap ? { provenance: provenanceSnap } : {}),

@@ -207,6 +207,7 @@ servers:
   fs-mcp:
     version: "1.2.0"
     registryType: npm
+    packageVersion: "1.2.0"
     identifier: "@test/fs-mcp"
     trust:
       score: 75
@@ -228,7 +229,7 @@ servers:
         server: {
           name: "fs-mcp",
           version: "1.2.0",
-          packages: [{ registryType: "npm", identifier: "@test/fs-mcp", environmentVariables: [] }],
+          packages: [{ registryType: "npm", identifier: "@test/fs-mcp", version: "1.2.0", environmentVariables: [] }],
         },
       }),
       computeTrustScore: vi.fn().mockReturnValue({

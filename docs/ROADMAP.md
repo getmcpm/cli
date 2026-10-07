@@ -15,7 +15,7 @@
 > - ◑ **F3 Phase 1 (digest pin)** — npm `dist.integrity` capture-on-`lock` + WARN-on-drift at `up`
 >   shipped as **H11 slice 1** (PR #81, v0.10.0); the fail-closed **`up --frozen` BLOCK tier** shipped
 >   next (`--frozen` / `policy.frozen` — pre-install verify, block on drift / unverifiable / format /
->   suspicious-missing-baseline, `npm ci` semantics). Still pending: **multi-registry (pypi/oci) baselines**
+>   suspicious-missing-baseline, published-record checks; launch downloads remain independent). Still pending: **multi-registry (pypi/oci) baselines**
 >   and **registry-claim re-proof** (both need lock-schema work — see F3 below + Feature 8).
 > - ✅ **Guard hardening (H1/H2/H4/H5/H7-A/H9)** — shipped v0.10.0 (PRs #74/#76/#77/#78/#79); details
 >   in `docs/SECURITY-HARDENING.md` *Delivery status*.
@@ -151,7 +151,7 @@ Sequenced to keep momentum and the Dependabot surface clean (the v0.9–v0.15 se
 
 > **Shipped:** H11 (#81) captures npm `dist.integrity` at `lock` and WARNs on drift at `up`; `up --frozen`
 > / `policy.frozen` (this slice) promotes it to a fail-closed CI gate — a **pre-install** verify that
-> BLOCKS the whole run (installs nothing, exits non-zero, `npm ci` semantics) on **integrity drift**, an
+> BLOCKS the whole run (installs nothing, exits non-zero, published-record checks; launch downloads remain independent) on **integrity drift**, an
 > **unverifiable** record (offline/yanked/no-comparable-hash, fail-closed with a distinct transient
 > message), a **format mismatch**, or a **mixed-lock missing baseline**. Two corrections from the
 > adversarial critique: a **uniformly-baseline-less lock** (pre-v0.10 / offline) gets a benign
@@ -162,7 +162,7 @@ Sequenced to keep momentum and the Dependabot surface clean (the v0.9–v0.15 se
 > multi-registry (pypi/oci) baselines + the **registry-claim re-proof** (both need the optional lock
 > `integrity` block + a `lockfileVersion` bump), and the Sigstore provenance tier (= Feature 8).
 
-**Problem.** `mcpm-lock.yaml` pins a `version` string + trust snapshot, but **not the bytes**. `LockedRegistryServerSchema` (`src/stack/schema.ts`) stores only `{version, registryType, identifier, trust}`. A `version: "1.0.16"` entry happily installs a poisoned build (postmark). `up` never re-proves at install time that the registry coordinate still matches what was locked, nor recomputes trust for the resolved version.
+**Current boundary.** Locks record the MCP publication `version`, actual `packageVersion`, identifier/type and trust snapshot. `up` re-proves that package tuple and re-assesses trust before writing a version-bound launch. Integrity/provenance checks compare published registry records; package managers fetch launch artifacts independently. Enforcing downloaded bytes remains outside this gate.
 
 **🎯 Ship this slice first (critique verdict: REVISE → SPLIT).** **Phase 1 = digest-only (genuine M, zero new deps):** content pin via npm `dist.integrity` SRI / pypi sha256 / oci manifest digest + `lockfileVersion 1→2` back-compat (optional `integrity` block) + `up --frozen` fail-closed digest+registry-claim compare + the correctness fix that **trust is recomputed per resolved version in `up`** (today `lock` does this per-resolve but `up` never re-verifies). This alone moves version-poison detection **0%→100% on any byte change** and delivers the CI gate + SBOM value, with built-in `fetch` + `node:crypto` only. **Phase 2 = the full Sigstore provenance-identity-drift tier → that is Feature 8.** Do **not** drag `sigstore-js` into Phase 1.
 

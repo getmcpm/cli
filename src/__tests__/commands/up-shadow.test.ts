@@ -29,7 +29,7 @@ function makeServerEntry(name: string, version: string): ServerEntry {
       name,
       version,
       packages: [
-        { registryType: "npm", identifier: `@test/${name.split("/").pop()}`, environmentVariables: [] },
+        { registryType: "npm", identifier: `@test/${name.split("/").pop()}`, version, environmentVariables: [] },
       ],
     },
   };
@@ -97,6 +97,7 @@ ${policyBlock}servers:
   const lockServer = (name: string): string => `  ${name}:
     version: "1.0.0"
     registryType: npm
+    packageVersion: "1.0.0"
     identifier: "@test/${name}"
     trust:
       score: 75

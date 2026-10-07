@@ -39,7 +39,7 @@ function makeServerEntry(name: string, version: string): ServerEntry {
       packages: [
         {
           registryType: "npm",
-          identifier: `@test/${name.split("/").pop()}`,
+          identifier: `@test/${name.split("/").pop()}`, version,
           environmentVariables: [],
         },
       ],
@@ -121,6 +121,7 @@ servers:
   ${serverName}:
     version: "1.0.0"
     registryType: npm
+    packageVersion: "1.0.0"
     identifier: "@test/${serverName.split("/").pop()}"
     trust:
       score: 75
@@ -277,6 +278,7 @@ servers:
   io.github.test/server-a:
     version: "1.0.0"
     registryType: npm
+    packageVersion: "1.0.0"
     identifier: "@test/server-a"
     trust:
       score: 75
@@ -289,6 +291,7 @@ servers:
   io.github.test/server-b:
     version: "1.0.0"
     registryType: npm
+    packageVersion: "1.0.0"
     identifier: "@test/server-b"
     trust:
       score: 75
@@ -345,6 +348,7 @@ servers:
   io.github.test/server-a:
     version: "1.0.0"
     registryType: npm
+    packageVersion: "1.0.0"
     identifier: "@test/server-a"
     trust:
       score: 75
@@ -354,6 +358,7 @@ servers:
   io.github.test/server-b:
     version: "1.0.0"
     registryType: npm
+    packageVersion: "1.0.0"
     identifier: "@test/server-b"
     trust:
       score: 75
@@ -400,6 +405,7 @@ servers:
   io.github.test/server-a:
     version: "1.0.0"
     registryType: npm
+    packageVersion: "1.0.0"
     identifier: "@test/server-a"
     trust:
       score: 75
@@ -412,6 +418,7 @@ servers:
   io.github.test/server-b:
     version: "1.0.0"
     registryType: npm
+    packageVersion: "1.0.0"
     identifier: "@test/server-b"
     trust:
       score: 75
@@ -488,6 +495,7 @@ servers:
   io.github.test/server-a:
     version: "1.2.0"
     registryType: npm
+    packageVersion: "1.0.0"
     identifier: "@test/server-a"
     trust:
       score: 75

@@ -191,6 +191,13 @@ mcpm diff                        # compare installed vs declared state
 
 Stack files include a trust policy. If a server's trust score drops below the threshold, `mcpm up` blocks it.
 
+Locks record the MCP publication version separately from the actual package
+version. `up` verifies the locked package tuple before writing any client config,
+then launches that npm/PyPI version or explicit OCI tag/digest. Old locks without
+package-version evidence need `mcpm lock` again. OCI tags remain mutable, and
+integrity checks compare registry records; mcpm does not intercept the bytes that
+package managers download at launch.
+
 ```yaml
 version: "1"
 policy:

@@ -94,11 +94,11 @@ describe("handleLock — provenance capture", () => {
     expect(LockFileSchema.safeParse(parseYaml((deps.writeLockFile as ReturnType<typeof vi.fn>).mock.calls[0][1])).success).toBe(true);
   });
 
-  it("does NOT capture provenance for a non-concrete version (gate shared with integrity)", async () => {
+  it("refuses a non-concrete package version before provenance capture or lock writes", async () => {
     const deps = makeDeps(entry("^1.0.0"));
-    await handleLock({ stackFile: await writeTempStack() }, deps);
+    await expect(handleLock({ stackFile: await writeTempStack() }, deps)).rejects.toThrow(/lock not written/);
     expect(deps.fetchNpmProvenance).not.toHaveBeenCalled();
-    expect((lockedFromWrite(deps) as { provenance?: unknown }).provenance).toBeUndefined();
+    expect(deps.writeLockFile).not.toHaveBeenCalled();
   });
 
   it("fail-open: provenance undefined → block omitted, lock still succeeds", async () => {
