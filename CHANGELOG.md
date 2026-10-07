@@ -8,6 +8,16 @@ _Add entries here, never under a stamped version_ — a release commit renames t
 heading, and a branch that wrote beneath it merges without conflict straight into a
 published section (it happened to #170).
 
+### Changed
+
+- Refresh runtime dependencies to MCP SDK 1.31.0 and Chalk 6.0.1 while retaining
+  all security override constraints.
+
+### Fixed
+
+- Patch transitive `proxy-addr` and `source-map-js` security advisories with
+  versions 2.0.8 and 1.2.2 respectively.
+
 ## [0.45.0] - 2026-10-06
 
 MINOR by content: updates now refuse registry-deleted servers and unsafe or
