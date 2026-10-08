@@ -13,6 +13,7 @@
  */
 
 import type { JSONRPCMessage } from "@modelcontextprotocol/sdk/types.js";
+import { extractServerDeclaration, SERVER_INFO_META_KEY } from "./server-declaration.js";
 import type {
   InspectFinding,
   InspectResult,
@@ -183,16 +184,13 @@ function targetSubtree(msg: JSONRPCMessage, target: SignatureTarget): unknown {
       return null;
     }
     case "initialize_instructions": {
-      // initialize response → result.instructions + result.serverInfo. Pre-invocation
-      // CONTEXT (block-capable). Gated on result.protocolVersion (the reliable
-      // initialize discriminator) so a stray `instructions` key in a tools/call
-      // result is NOT mislabeled as block-capable context. (security: H1 #1)
+      // Only declarations carry instructions; reserved identity metadata is
+      // server-authored context on any result. A stray instructions key is not.
       if ("result" in msg) {
-        const result = (msg as {
-          result?: { protocolVersion?: unknown; instructions?: unknown; serverInfo?: unknown };
-        }).result;
-        if (typeof result?.protocolVersion !== "string") return null;
-        return [result.instructions ?? null, result.serverInfo ?? null];
+        const declaration = extractServerDeclaration(msg);
+        return [declaration?.instructions ?? null,
+          typeof msg.result?.protocolVersion === "string" ? msg.result.serverInfo ?? null : null,
+          msg.result?._meta?.[SERVER_INFO_META_KEY] ?? null];
       }
       return null;
     }

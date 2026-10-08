@@ -380,6 +380,11 @@ that treats every non-zero exit as "a server is risky" will misread the second.
 
 ## Runtime defense (mcpm-guard)
 
+The unreleased guard compatibility update inspects modern MCP discovery and
+embedded sampling/elicitation requests. Unknown embedded request shapes produce
+a coverage warning. See the [protocol coverage matrix](docs/GUARD.md#protocol-and-carrier-coverage)
+for the exact stdio boundaries and remaining gaps.
+
 Install-time trust scoring catches most poisoned servers before they ship. But what about **rug-pulls** — a server that changes its tool definitions after you've already approved them? Or **prompt-injection in tool responses** — adversarial text embedded in a Slack message, web page, or calendar invite that the agent reads through your trusted MCP server?
 
 `mcpm guard` adds a runtime inspection layer. It wraps every installed MCP server with a stdio relay, scans tool descriptions / responses / arguments for OWASP MCP Top 10 attack patterns, pins each tool's schema at install time, and blocks calls when the live response drifts from the pin (rug-pull defense).

@@ -335,6 +335,17 @@ is the big content vehicle.
 
 ---
 
+## Agent-trend follow-up (2026-10-09)
+
+The v0.46.0 evidence/usage-skill pilot is released. The next bounded change is
+unreleased modern MCP guard carrier coverage: discovery metadata and declaration
+pins, embedded sampling/elicitation content, and explicit unsupported-input
+warnings. The [coverage matrix](GUARD.md#protocol-and-carrier-coverage) records
+what is inspected and what remains outside this slice. Authored fixtures exercise
+offline inspection and a guarded stdio subprocess; installed-client protocol
+interoperability and usage-skill behavior still need evaluation. Jev/Clef stays
+deferred until users have subscription/access. No SDK or HTTP expansion is implied.
+
 ## Cross-cutting decisions (from the completeness critique)
 
 1. **One finding/event model.** D3 (SARIF), D7 (DoctorModel), E2 (events), E6

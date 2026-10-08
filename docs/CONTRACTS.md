@@ -174,6 +174,14 @@ Top 10 pin (see `docs/owasp-mcp-mapping.md`). `mcpm audit --sarif` gains a
 type is pinned to a category. `guard list-signatures`' human output gains an
 `owasp` line. Nothing existing is renamed, removed, or re-valued.
 
+**Unreleased coverage diagnostic:** `guard inspect --json` and relay events use
+the existing finding shape for `guard-unsupported-input-request` (`COVERAGE`,
+`high`, `sampling_prompt`, default `warn`). It means an embedded request's method
+or container/parameter shape was not covered; `warn` does not mean it was fully
+inspected. Known sampling/elicitation siblings still run the detectors and may
+block the enclosing result. This diagnostic is not a catalog regex signature;
+finding ids remain open to additions. See [protocol coverage](GUARD.md#protocol-and-carrier-coverage).
+
 The remaining `--json` shapes stabilize per-command as they are schema-typed and
 documented; until then, pin to the exit codes, not the field names.
 

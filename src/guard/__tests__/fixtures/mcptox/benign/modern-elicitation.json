@@ -1,0 +1,30 @@
+{
+  "name": "modern-elicitation",
+  "category": "OWASP-MCP-1",
+  "expected_action": "pass",
+  "notes": "Authored regression for MCP 2026-07-28 discovery/MRTR; see docs/GUARD.md protocol coverage matrix. No client adoption or general protocol conformance claim.",
+  "message": {
+    "jsonrpc": "2.0",
+    "id": "call-1",
+    "result": {
+      "resultType": "input_required",
+      "inputRequests": {
+        "request": {
+          "method": "elicitation/create",
+          "params": {
+            "message": "Which city?",
+            "requestedSchema": {
+              "type": "object",
+              "properties": {
+                "city": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      },
+      "requestState": "opaque-state"
+    }
+  }
+}

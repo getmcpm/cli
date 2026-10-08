@@ -16,6 +16,7 @@
  */
 
 import type { JSONRPCMessage } from "@modelcontextprotocol/sdk/types.js";
+import { extractServerDeclaration } from "./server-declaration.js";
 import type { InspectFinding, InspectResult } from "./types.js";
 import { worstAction } from "./patterns.js";
 import { sanitizeForTerminal } from "./sanitize.js";
@@ -582,19 +583,6 @@ export async function inspectForDrift(
 
 export type HandshakeDriftDeps = DriftCheckDeps;
 
-interface InitializeResult {
-  capabilities?: unknown;
-  serverInfo?: { name?: unknown };
-}
-
-function extractInitializeResult(msg: JSONRPCMessage): InitializeResult | null {
-  if (!("result" in msg)) return null;
-  const result = (msg as { result?: { protocolVersion?: unknown } }).result;
-  if (result === null || typeof result !== "object") return null;
-  if (typeof (result as { protocolVersion?: unknown }).protocolVersion !== "string") return null;
-  return result as InitializeResult;
-}
-
 /** Shared fail-closed-on-integrity finding, reused by the tools/list + handshake arms. */
 function pinsIntegrityBlock(): InspectResult {
   return {
@@ -632,7 +620,7 @@ export async function inspectHandshakeForDrift(
   serverName: string,
   deps: HandshakeDriftDeps,
 ): Promise<InspectResult> {
-  const result = extractInitializeResult(msg);
+  const result = extractServerDeclaration(msg);
   if (result === null) return { action: "pass", findings: [] };
 
   const liveFields = handshakeFieldHashesOf(result);

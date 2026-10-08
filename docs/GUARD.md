@@ -36,6 +36,45 @@ Detection is layered:
 | **Field-level drift tiering (H4)** | a drifted `tools/list` tool | Per-field hashes split a **description-only** change (cosmetic → warn, forwarded — the parallel description pattern scan still blocks regex-detectable injection) from a **schema / annotations** change (security → block); a pre-H4 pin with no field hashes stays a coarse block. An announced `notifications/tools/list_changed` arms a single-shot re-validation against the pin. `accept-drift` drops the field hashes (reverts that tool to coarse blocking) until the next first-session capture re-derives them. |
 | **Policy overrides** | Every message | `~/.mcpm/guard-policy.yaml` signature overrides (ignore / warn / block / log_only) and global pause state (paused_until) |
 
+### Protocol and carrier coverage
+
+The stdio relay inspects message content; it does not negotiate versions or
+translate protocols. Legacy and modern peers must still be compatible with each
+other. The following coverage is implemented in the working tree (unreleased),
+using the [MCP 2026-07-28 changes](https://modelcontextprotocol.io/specification/2026-07-28/changelog),
+[discovery](https://modelcontextprotocol.io/specification/2026-07-28/server/discover),
+and [MRTR contract](https://modelcontextprotocol.io/specification/2026-07-28/basic/patterns/mrtr).
+
+| Carrier | Inspection and limits |
+| --- | --- |
+| Legacy `initialize` | Existing instructions/identity patterns and capability/name drift pins remain in effect. |
+| Modern discovery | A `complete` result with nonempty string `supportedVersions` and object `capabilities` identifies a declaration. Instructions and `_meta["io.modelcontextprotocol/serverInfo"]` are pattern-scanned; capability/name drift shares the legacy pin format without moving the baseline automatically. |
+| Reserved server identity metadata | Pattern-scanned on every result, even without discovery. Identity metadata on ordinary results is not separately pinned. An unrelated top-level `instructions` field is not treated as declaration context. |
+| `inputRequests` sampling/elicitation | Embedded system prompts, message content, elicitation messages/schema text, and sampling tool definitions reach existing detectors. Detected critical input-context attacks block. Multiple requests share the existing traversal-budget checks. |
+| Unknown/malformed `inputRequests` | Emits `guard-unsupported-input-request` (`high`, default `warn`). Coverage is incomplete; the frame is forwarded and logged. Supported siblings are still inspected and can block. Local policy overrides apply normally. |
+| `roots/list` input requests | No model/user prompt content to scan. Forwarded; directory authorization remains the client's responsibility. |
+| `requestState` and retries | Opaque retry state is preserved without decoding or inspecting it. Retry correlation and the authorization of returned input are responsibilities of the client/server. |
+| Ordinary tool/resource/prompt results | Existing field-scoped detectors and retrieved-data warn clamp remain unchanged, including results that omit `resultType`. |
+| External schema references, skill archives, binary media | No external `$ref` resolution, archive fetching/extraction, image/audio understanding, or complete extension validation. Existing in-frame string scanning does not establish coverage of these contents. |
+| HTTP transports | No runtime relay inspection. Existing deny-by-default/explicit unguarded consent behavior remains. |
+
+The coverage warning detects unsupported methods and scan-container shapes; it
+is not general request-schema validation. Binary and external content can still
+be outside inspection even when a known request has no findings.
+
+A blocked MRTR input request is part of the original response: the guard sends
+a synthetic error to the **client**, preserving the outer response id. It does
+not send the legacy server-request error back to the child. Benign input requests,
+retry state and warnings are forwarded without editing their payloads. Repeated
+discovery with the same identity/capabilities does not produce drift; version and
+instructions remain outside drift hashes, as with legacy initialize.
+
+The authored modern fixtures run through `guard inspect` and a real guarded
+subprocess, alongside the existing legacy regression suite. These checks do not
+measure adoption or interoperability in installed IDE clients, and do not certify
+all 2026-07-28 protocol behavior. `mcpm serve` still uses the existing SDK; no SDK
+upgrade or negotiation behavior is included in this change.
+
 ### Full message flow
 
 The relay inspects each direction independently — a request (parent → child) and the matching response (child → parent) each run the full pattern + pin + policy pipeline before anything is forwarded:
