@@ -10,6 +10,12 @@ published section (it happened to #170).
 
 ### Changed
 
+- Give `mcpm_search` and `mcpm_info` versioned output schemas and structured
+  results alongside their existing JSON text. Preserve existing score fields;
+  add registry lifecycle status, findings, score context and checks not run.
+  Document the existing `verify --json` version-1 contract without changing its
+  gate behavior. Add a portable mcpm workflow skill and evaluation scenarios;
+  cross-client behavioral and performance evaluation remains pending.
 - Refresh runtime dependencies to MCP SDK 1.31.0 and Chalk 6.0.1 while retaining
   all security override constraints.
 

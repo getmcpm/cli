@@ -549,11 +549,23 @@ mcpm can run as an MCP server itself, letting AI agents search, install, and aud
 
 This exposes 9 tools: `mcpm_search`, `mcpm_install`, `mcpm_info`, `mcpm_list`, `mcpm_remove`, `mcpm_audit`, `mcpm_doctor`, `mcpm_setup`, and `mcpm_up`.
 
+**Unreleased:** search/info expose versioned structured evidence alongside their
+existing JSON text: lifecycle status, findings, score denominator/ceiling, and
+checks performed or not run. A score is not a safety probability, and an unrun
+check is not a pass. `verify --json` retains its existing versioned coverage and
+failure model. See [stability contracts](docs/CONTRACTS.md) and
+[agent workflows](docs/AGENT-WORKFLOW.md).
+
 The `mcpm_setup` tool takes a natural language description like "filesystem and GitHub" and handles everything: search, trust scoring, install. One tool call to assemble a working MCP toolchain.
 
 **Try it** -- add the config above to your MCP client, restart, then ask your agent:
 
-> You have mcpm tools available (from @getmcpm/cli, the MCP package manager, not the Minecraft one). Use them to find MCP servers for filesystem access and GitHub. Check their trust scores and install anything above 60.
+> Use mcpm to find MCP servers for filesystem access and GitHub. Explain their findings, lifecycle status, and checks that did not run. Show the proposed configuration changes before installing.
+
+The repository includes a portable [mcpm usage skill](skills/mcpm/SKILL.md).
+Install it from a reviewed, pinned repository checkout into your client's skill
+directory; it is not included in the npm package. It has no scripts, hooks,
+permission grants, model subscription or external decision service.
 
 ## Supported clients
 

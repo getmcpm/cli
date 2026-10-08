@@ -11,7 +11,7 @@ import { CLIENT_IDS } from "../config/paths.js";
 export const TOOL_DEFINITIONS = [
   {
     name: "mcpm_search",
-    description: "Search the MCP registry for servers. Returns results with trust scores.",
+    description: "Search the MCP registry. Returns trust scores, registry lifecycle status, findings and checks not run; a result is not approval to install.",
     inputSchema: {
       type: "object" as const,
       properties: {
@@ -36,7 +36,7 @@ export const TOOL_DEFINITIONS = [
   },
   {
     name: "mcpm_info",
-    description: "Show full details for an MCP server including trust score breakdown.",
+    description: "Show package details, trust score breakdown, registry lifecycle status and assessment coverage. Does not execute or verify the package.",
     inputSchema: {
       type: "object" as const,
       properties: {
@@ -182,3 +182,66 @@ export const UpInput = z.strictObject({
   profile: z.string().optional(),
   dryRun: z.boolean().optional().default(false),
 });
+
+// Output contracts allow additive fields; input schemas remain strict.
+const level = z.enum(["safe", "caution", "risky"]);
+const registryStatus = z.object({
+  status: z.string().nullable(),
+  statusMessage: z.string().nullable(),
+  blocksInstall: z.boolean(),
+}).passthrough();
+const checkStatus = z.enum(["completed", "not_run"]);
+const assessment = z.object({
+  maxAchievableScore: z.number(),
+  checks: z.object({
+    staticScan: checkStatus,
+    healthCheck: checkStatus,
+    externalScan: checkStatus,
+    releaseCooldown: checkStatus,
+    packageIntegrity: checkStatus,
+    provenance: checkStatus,
+  }).passthrough(),
+  findings: z.array(z.object({
+    severity: z.enum(["critical", "high", "medium", "low"]),
+    type: z.string(),
+    message: z.string(),
+    location: z.string(),
+    source: z.enum(["static", "external"]).optional(),
+  }).passthrough()),
+}).passthrough();
+
+export const SearchOutput = z.object({
+  schemaVersion: z.literal(1),
+  servers: z.array(z.object({
+    name: z.string(),
+    description: z.string(),
+    version: z.string(),
+    trustScore: z.number(),
+    maxPossible: z.number(),
+    level,
+    registryStatus,
+    assessment,
+  }).passthrough()),
+}).passthrough();
+
+export const InfoOutput = z.object({
+  schemaVersion: z.literal(1),
+  name: z.string(),
+  description: z.string(),
+  version: z.string(),
+  packages: z.array(z.object({ registryType: z.string(), identifier: z.string() }).passthrough()),
+  trustScore: z.object({
+    score: z.number(),
+    maxPossible: z.number(),
+    level,
+    breakdown: z.object({
+      healthCheck: z.number(),
+      staticScan: z.number(),
+      externalScan: z.number(),
+      registryMeta: z.number(),
+      nativeRegistryMeta: z.number().optional(),
+    }).passthrough(),
+  }).passthrough(),
+  registryStatus,
+  assessment,
+}).passthrough();

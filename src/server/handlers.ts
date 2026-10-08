@@ -86,14 +86,38 @@ export interface ServerDeps {
  * ServerDeps += now?: () => number, then append
  * assessReleaseAge({...}).finding here; no schema changes.
  */
-function computeTrust(entry: ServerEntry, deps: ServerDeps): TrustScore {
+function computeTrust(entry: ServerEntry, deps: ServerDeps): { trust: TrustScore; findings: Finding[] } {
   const findings = deps.scanTier1(entry);
-  return deps.computeTrustScore({
+  const trust = deps.computeTrustScore({
     findings,
     healthCheckPassed: null,
     hasExternalScanner: false,
     registryMeta: extractRegistryMeta(entry),
   });
+  return { trust, findings };
+}
+
+function describeAssessment(entry: ServerEntry, findings: Finding[]) {
+  const status = assessServerStatus(entry);
+  return {
+    registryStatus: {
+      status: status.status || null,
+      statusMessage: status.statusMessage ? sanitizeForTerminal(status.statusMessage).slice(0, 256) : null,
+      blocksInstall: status.blocks,
+    },
+    assessment: {
+      maxAchievableScore: maxAchievableBeforeHealthCheck(false).score,
+      checks: {
+        staticScan: "completed" as const,
+        healthCheck: "not_run" as const,
+        externalScan: "not_run" as const,
+        releaseCooldown: "not_run" as const,
+        packageIntegrity: "not_run" as const,
+        provenance: "not_run" as const,
+      },
+      findings,
+    },
+  };
 }
 
 async function resolveClients(
@@ -126,18 +150,21 @@ async function resolveClients(
 export async function handleSearch(
   args: { query: string; limit: number },
   deps: ServerDeps
-): Promise<object> {
+) {
   const entries = await deps.registrySearch(args.query, args.limit);
   const servers = entries.map((entry) => {
-    const trust = computeTrust(entry, deps);
+    const { trust, findings } = computeTrust(entry, deps);
     return {
       name: entry.server.name,
       description: entry.server.description ?? "",
       version: entry.server.version,
       trustScore: trust.score,
+      maxPossible: trust.maxPossible,
+      level: trust.level,
+      ...describeAssessment(entry, findings),
     };
   });
-  return { servers };
+  return { schemaVersion: 1 as const, servers };
 }
 
 /** Default minimum trust score for MCP server tool installs (no human in the loop). */
@@ -198,7 +225,7 @@ export async function handleInstall(
   const delisted = delistedRefusal(args.name, entry);
   if (delisted !== null) throw new Error(delisted);
 
-  const trust = preResolved?.trust ?? computeTrust(entry, deps);
+  const trust = preResolved?.trust ?? computeTrust(entry, deps).trust;
 
   // Security gate: reject servers below the minimum trust score.
   // Unlike the CLI path which has a human confirmation prompt, the MCP server
@@ -340,11 +367,12 @@ async function rollbackInstall(done: PlannedInstall[], name: string): Promise<Cl
 export async function handleInfo(
   args: { name: string },
   deps: ServerDeps
-): Promise<object> {
+) {
   validateMcpServerName(args.name);
   const entry = await deps.registryGetServer(args.name);
-  const trust = computeTrust(entry, deps);
+  const { trust, findings } = computeTrust(entry, deps);
   return {
+    schemaVersion: 1 as const,
     name: entry.server.name,
     description: entry.server.description ?? "",
     version: entry.server.version,
@@ -353,6 +381,7 @@ export async function handleInfo(
       identifier: p.identifier,
     })),
     trustScore: trust,
+    ...describeAssessment(entry, findings),
   };
 }
 
@@ -443,7 +472,7 @@ export async function handleAudit(deps: ServerDeps): Promise<object> {
     for (const name of Object.keys(installed)) {
       try {
         const entry = await deps.registryGetServer(name);
-        const trust = computeTrust(entry, deps);
+        const { trust } = computeTrust(entry, deps);
         results.push({ name, client: clientId, trustScore: trust, error: null });
       } catch (err) {
         results.push({
@@ -576,7 +605,7 @@ export async function handleSetup(
         sawDelisted = true;
         continue;
       }
-      const trust = computeTrust(entry, deps);
+      const { trust } = computeTrust(entry, deps);
       if (bestTrust === null || trust.score > bestTrust.score) {
         bestEntry = entry;
         bestTrust = trust;

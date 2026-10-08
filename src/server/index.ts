@@ -16,6 +16,8 @@ import {
   RemoveInput,
   SetupInput,
   UpInput,
+  SearchOutput,
+  InfoOutput,
 } from "./tools.js";
 import {
   handleSearch,
@@ -80,12 +82,13 @@ export function registerTools(
 ): void {
   // Register tools using registerTool API
   server.registerTool("mcpm_search", {
-    description: "Search the MCP registry for servers with trust scores",
+    description: "Search the MCP registry with trust scores, lifecycle status, findings and checks not run. A result is not approval to install.",
     inputSchema: SearchInput,
+    outputSchema: SearchOutput,
     annotations: { readOnlyHint: true },
   }, async (args) => {
     const result = await handleSearch(args, deps);
-    return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+    return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }], structuredContent: result };
   });
 
   server.registerTool("mcpm_install", {
@@ -98,12 +101,13 @@ export function registerTools(
   });
 
   server.registerTool("mcpm_info", {
-    description: "Show full details and trust score for an MCP server",
+    description: "Show package details, trust breakdown, lifecycle status and assessment coverage. Does not execute or verify the package.",
     inputSchema: InfoInput,
+    outputSchema: InfoOutput,
     annotations: { readOnlyHint: true },
   }, async (args) => {
     const result = await handleInfo(args, deps);
-    return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+    return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }], structuredContent: result };
   });
 
   server.registerTool("mcpm_list", {

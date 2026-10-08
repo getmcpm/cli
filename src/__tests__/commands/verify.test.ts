@@ -181,7 +181,19 @@ describe("verifyHandler — block matrix", () => {
     const code = await verifyHandler(badDeps, { json: true });
     expect(code).toBe(1);
     const model = JSON.parse(lines.join("\n")) as VerifyModel;
-    expect(model.ok).toBe(false);
+    expect(model).toMatchObject({
+      schemaVersion: 1,
+      ok: false,
+      verified: 0,
+      checkedNpmCount: 0,
+      noBaselines: false,
+      blocked: [],
+      unenforceable: [],
+      provenanceBlocked: [],
+      checkedProvenanceCount: 0,
+      uncovered: [],
+      vacuous: false,
+    });
     expect(model.error).toMatch(/could not verify.*Invalid lock file/i);
   });
 });
@@ -215,9 +227,39 @@ describe("verifyHandler — honesty + --json", () => {
     const code = await verifyHandler(d.deps, { json: true });
     expect(code).toBe(0);
     const model = JSON.parse(d.out()) as VerifyModel;
-    expect(model.ok).toBe(true);
-    expect(model.verified).toBe(2);
-    expect(model.checkedNpmCount).toBe(2);
+    expect(model).toMatchObject({
+      schemaVersion: 1,
+      ok: true,
+      verified: 2,
+      checkedNpmCount: 2,
+      noBaselines: false,
+      blocked: [],
+      unenforceable: [],
+      provenanceBlocked: [],
+      checkedProvenanceCount: 0,
+      uncovered: [],
+      vacuous: false,
+    });
+    expect(model.error).toBeUndefined();
+  });
+
+  it("--json preserves coverage limits when no package can be verified", async () => {
+    const d = deps(lockOf({ p: pypiEntry("test-p") }), async () => snap(SRI_OLD));
+    expect(await verifyHandler(d.deps, { json: true })).toBe(0);
+    expect(JSON.parse(d.out())).toMatchObject({
+      schemaVersion: 1,
+      ok: true,
+      verified: 0,
+      checkedNpmCount: 0,
+      noBaselines: false,
+      blocked: [],
+      unenforceable: ["p"],
+      provenanceBlocked: [],
+      checkedProvenanceCount: 0,
+      uncovered: [],
+      vacuous: false,
+    });
+    expect(d.fetch).not.toHaveBeenCalled();
   });
 });
 

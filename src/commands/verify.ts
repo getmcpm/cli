@@ -52,6 +52,7 @@ export interface VerifyBlocked {
   npmVersion?: string;
 }
 
+/** Versioned public JSON contract; see docs/CONTRACTS.md before changing core fields. */
 export interface VerifyModel {
   schemaVersion: 1;
   ok: boolean;
@@ -334,7 +335,7 @@ export function registerVerifyCommand(program: Command): void {
     .description(
       "Verify mcpm-lock.yaml against npm's published record — integrity drift + Sigstore provenance regression (repo-only CI gate)"
     )
-    .option("--json", "emit the structured verify model as JSON (shape UNSTABLE)")
+    .option("--json", "emit the versioned verify model as JSON (schemaVersion 1)")
     .option("-f, --file <path>", "path to mcpm.yaml (the lock inserts -lock before the extension)")
     .action(async (opts: { json?: boolean; file?: string }) => {
       const code = await verifyHandler(
