@@ -65,6 +65,29 @@ describe("modern MCP carrier coverage", () => {
     expect(inspectFrame(legacy).replyToOrigin).toBe(true);
   });
 
+  test("sampling tool-name collisions are scoped to each input request", () => {
+    const sampling = (names: string[]) => ({ method: "sampling/createMessage", params: {
+      messages: [], maxTokens: 10, tools: names.map((name) => ({ name, inputSchema: { type: "object" } })),
+    } });
+    const separate = frame({ resultType: "input_required", inputRequests: {
+      first: sampling(["Read"]), second: sampling(["read"]),
+    } });
+    expect(inspectFrame(separate)).toEqual({ action: "pass", findings: [] });
+    const together = frame({ resultType: "input_required", inputRequests: { first: sampling(["Read", "read"]) } });
+    expect(inspectFrame(together).findings.some((f) => f.signature_id === "tool-name-confusable-duplicate")).toBe(true);
+  });
+
+  test.each([
+    { messages: [null] },
+    { messages: [{ role: "user" }] },
+    { messages: [], tools: [null] },
+    { messages: [], systemPrompt: [INJECTION] },
+  ])("skipped sampling containers report incomplete coverage: %j", (params) => {
+    const result = inspectFrame(input("sampling/createMessage", { maxTokens: 10, ...params }));
+    expect(result.action).toBe("warn");
+    expect(result.findings.some((f) => f.signature_id === "guard-unsupported-input-request")).toBe(true);
+  });
+
   test("benign requests and opaque retry state pass untouched", () => {
     for (const msg of [
       input("elicitation/create", { message: "Which city?", requestedSchema: { type: "object", properties: {} } }),
@@ -98,6 +121,16 @@ describe("modern MCP carrier coverage", () => {
     expect(inspectFrame(input("elicitation/create", {
       message: "Choose an account", requestedSchema: { padding: Array(100_001).fill(0), description: SEED },
     })).action).toBe("block");
+  });
+
+  test("sampling requests share the metadata traversal budget", () => {
+    const sampling = { method: "sampling/createMessage", params: {
+      messages: [], maxTokens: 10, tools: [{ name: "read", inputSchema: { padding: Array(60_000).fill(0) } }],
+    } };
+    expect(inspectFrame(input(sampling.method, sampling.params)).action).toBe("pass");
+    const result = inspectFrame(frame({ resultType: "input_required", inputRequests: { first: sampling, second: sampling } }));
+    expect(result.action).toBe("block");
+    expect(result.findings.some((f) => f.signature_id === "guard-inspection-truncated")).toBe(true);
   });
 });
 

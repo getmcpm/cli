@@ -1,0 +1,21 @@
+{
+  "name": "modern-skipped-sampling",
+  "category": "COVERAGE",
+  "expected_action": "warn",
+  "expected_signature_id": "guard-unsupported-input-request",
+  "notes": "Malformed sampling entries skipped by content extraction must not produce a clean inspection.",
+  "message": {
+    "jsonrpc": "2.0",
+    "id": "call-1",
+    "result": {
+      "resultType": "input_required",
+      "inputRequests": {
+        "request": {
+          "method": "sampling/createMessage",
+          "params": { "messages": [null], "maxTokens": 10 }
+        }
+      },
+      "requestState": "opaque-state"
+    }
+  }
+}

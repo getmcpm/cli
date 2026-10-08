@@ -50,7 +50,7 @@ and [MRTR contract](https://modelcontextprotocol.io/specification/2026-07-28/bas
 | Legacy `initialize` | Existing instructions/identity patterns and capability/name drift pins remain in effect. |
 | Modern discovery | A `complete` result with nonempty string `supportedVersions` and object `capabilities` identifies a declaration. Instructions and `_meta["io.modelcontextprotocol/serverInfo"]` are pattern-scanned; capability/name drift shares the legacy pin format without moving the baseline automatically. |
 | Reserved server identity metadata | Pattern-scanned on every result, even without discovery. Identity metadata on ordinary results is not separately pinned. An unrelated top-level `instructions` field is not treated as declaration context. |
-| `inputRequests` sampling/elicitation | Embedded system prompts, message content, elicitation messages/schema text, and sampling tool definitions reach existing detectors. Detected critical input-context attacks block. Multiple requests share the existing traversal-budget checks. |
+| `inputRequests` sampling/elicitation | Embedded system prompts, message content, elicitation messages/schema text, and sampling tool definitions reach existing detectors. Detected critical input-context attacks block. Multiple requests share the existing traversal-budget checks; tool-name collisions are checked within each sampling request. |
 | Unknown/malformed `inputRequests` | Emits `guard-unsupported-input-request` (`high`, default `warn`). Coverage is incomplete; the frame is forwarded and logged. Supported siblings are still inspected and can block. Local policy overrides apply normally. |
 | `roots/list` input requests | No model/user prompt content to scan. Forwarded; directory authorization remains the client's responsibility. |
 | `requestState` and retries | Opaque retry state is preserved without decoding or inspecting it. Retry correlation and the authorization of returned input are responsibilities of the client/server. |
@@ -58,8 +58,9 @@ and [MRTR contract](https://modelcontextprotocol.io/specification/2026-07-28/bas
 | External schema references, skill archives, binary media | No external `$ref` resolution, archive fetching/extraction, image/audio understanding, or complete extension validation. Existing in-frame string scanning does not establish coverage of these contents. |
 | HTTP transports | No runtime relay inspection. Existing deny-by-default/explicit unguarded consent behavior remains. |
 
-The coverage warning detects unsupported methods and scan-container shapes; it
-is not general request-schema validation. Binary and external content can still
+The coverage warning detects unsupported methods and scan-container shapes,
+including skipped sampling message/tool entries and wrong-typed system prompts;
+it is not general request-schema validation. Binary and external content can still
 be outside inspection even when a known request has no findings.
 
 A blocked MRTR input request is part of the original response: the guard sends

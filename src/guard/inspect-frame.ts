@@ -117,12 +117,12 @@ export function inspectServerInitiated(msg: JSONRPCMessage): InspectResult | nul
   const tools = "method" in msg && msg.method === "sampling/createMessage" && Array.isArray(params?.tools) ? params.tools : [];
   if (contentLeaves.length === 0 && tools.length === 0) return null;
 
-  const result = inspectInputContent(contentLeaves, tools);
+  const result = inspectInputContent(contentLeaves, [tools]);
   if (result.findings.length === 0) return null;
   return withReplyToOrigin(result, "id" in msg && msg.id !== undefined);
 }
 
-function inspectInputContent(contentLeaves: unknown[], tools: unknown[]): InspectResult {
+function inspectInputContent(contentLeaves: unknown[], toolLists: unknown[][]): InspectResult {
   const synthetic = {
     jsonrpc: "2.0",
     id: 0, // dummy — the scan reads only the result subtree, never the id.
@@ -132,9 +132,14 @@ function inspectInputContent(contentLeaves: unknown[], tools: unknown[]): Inspec
   const scan = inspectMessage(synthetic, OWASP_MCP_TOP_10);
   const findings: InspectFinding[] = scan.findings.map((f) => ({ ...f, target: "sampling_prompt" }));
   const action = worstAction(findings);
-  return mergeInspect({ action, findings }, inspectStatelessDetectors({
-    jsonrpc: "2.0", id: 0, result: { tools },
-  } as JSONRPCMessage));
+  const toolFrame = { jsonrpc: "2.0", id: 0, result: { tools: toolLists.flat() } } as JSONRPCMessage;
+  // Share metadata walk budgets, but sampling tool names belong to each request.
+  const nameFindings = toolLists.flatMap((tools) =>
+    detectConfusableToolNames({ jsonrpc: "2.0", id: 0, result: { tools } } as JSONRPCMessage).findings);
+  return [
+    { action, findings }, inspectMessage(toolFrame, OWASP_MCP_TOP_10), detectExfilParams(toolFrame),
+    { action: worstAction(nameFindings), findings: nameFindings },
+  ].reduce(mergeInspect);
 }
 
 /** MRTR requests are part of a response: a block replaces that response to the client. */
@@ -146,7 +151,7 @@ function inspectEmbeddedInputRequests(msg: JSONRPCMessage): InspectResult | null
   const requests = result.inputRequests;
   let unsupported = result.resultType !== "input_required";
   const contentLeaves: unknown[] = [];
-  const tools: unknown[] = [];
+  const toolLists: unknown[][] = [];
   if (requests === null || typeof requests !== "object" || Array.isArray(requests)) {
     unsupported = true;
   } else {
@@ -163,9 +168,13 @@ function inspectEmbeddedInputRequests(msg: JSONRPCMessage): InspectResult | null
       }
       for (const content of serverInitiatedContent(r as JSONRPCMessage)) contentLeaves.push(content);
       if (r.method === "sampling/createMessage") {
-        if (!Array.isArray(r.params.messages)) unsupported = true;
+        if (!Array.isArray(r.params.messages) || r.params.messages.some((message) =>
+          message === null || typeof message !== "object" || Array.isArray(message) || !("content" in message)
+        )) unsupported = true;
+        if (r.params.systemPrompt !== undefined && typeof r.params.systemPrompt !== "string") unsupported = true;
         if (Array.isArray(r.params.tools)) {
-          for (const tool of r.params.tools) tools.push(tool);
+          toolLists.push(r.params.tools);
+          if (r.params.tools.some((tool) => tool === null || typeof tool !== "object" || Array.isArray(tool))) unsupported = true;
         } else if (r.params.tools !== undefined) unsupported = true;
       } else {
         if (typeof r.params.message !== "string") unsupported = true;
@@ -178,7 +187,7 @@ function inspectEmbeddedInputRequests(msg: JSONRPCMessage): InspectResult | null
       }
     }
   }
-  const scan = inspectInputContent(contentLeaves, tools);
+  const scan = inspectInputContent(contentLeaves, toolLists);
   if (!unsupported) return scan;
   return mergeInspect(scan, { action: "warn", findings: [{
     signature_id: "guard-unsupported-input-request", category: "COVERAGE", severity: "high", target: "sampling_prompt",

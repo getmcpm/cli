@@ -1,0 +1,24 @@
+{
+  "name": "modern-separate-sampling-tools",
+  "category": "OWASP-MCP-1",
+  "expected_action": "pass",
+  "notes": "Sampling tools belong to each input request. Read and read in separate requests are not a confusable pair in one tool list.",
+  "message": {
+    "jsonrpc": "2.0",
+    "id": "call-1",
+    "result": {
+      "resultType": "input_required",
+      "inputRequests": {
+        "first": {
+          "method": "sampling/createMessage",
+          "params": { "messages": [], "maxTokens": 10, "tools": [{ "name": "Read", "inputSchema": { "type": "object" } }] }
+        },
+        "second": {
+          "method": "sampling/createMessage",
+          "params": { "messages": [], "maxTokens": 10, "tools": [{ "name": "read", "inputSchema": { "type": "object" } }] }
+        }
+      },
+      "requestState": "opaque-state"
+    }
+  }
+}
