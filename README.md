@@ -549,7 +549,7 @@ mcpm can run as an MCP server itself, letting AI agents search, install, and aud
 
 This exposes 9 tools: `mcpm_search`, `mcpm_install`, `mcpm_info`, `mcpm_list`, `mcpm_remove`, `mcpm_audit`, `mcpm_doctor`, `mcpm_setup`, and `mcpm_up`.
 
-**Unreleased:** search/info expose versioned structured evidence alongside their
+**In v0.46.0:** search/info expose versioned structured evidence alongside their
 existing JSON text: lifecycle status, findings, score denominator/ceiling, and
 checks performed or not run. A score is not a safety probability, and an unrun
 check is not a pass. `verify --json` retains its existing versioned coverage and

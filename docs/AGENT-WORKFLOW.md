@@ -5,7 +5,7 @@ should consume those results rather than ask a second model to rediscover them.
 Jev/Clef integration is deferred: users need their own subscription/access, and
 its benefit for mcpm has not been measured.
 
-## Evidence available after v0.45.0
+## Evidence available in v0.46.0
 
 `mcpm_search` and `mcpm_info` advertise output schemas and return identical JSON
 objects in `structuredContent` and their existing text blocks. Prefer structured

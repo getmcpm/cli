@@ -10,8 +10,8 @@ metadata:
 
 Use the scoped `@getmcpm/cli` package; the Homebrew `mcpm` formula is an unrelated
 project. Check `mcpm --version` and available command help before relying on
-options. This skill uses the version-1 evidence contracts introduced after
-v0.45.0. If the served results lack them, use the installed version's documented
+options. This skill uses the version-1 evidence contracts available in v0.46.0
+and later. If the served results lack them, use the installed version's documented
 CLI evidence and state the limitation; do not invent fields or upgrade silently.
 
 ## Choose the evidence for the task

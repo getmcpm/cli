@@ -52,7 +52,7 @@ published-record checks: these are not `npm ci` enforcement of downloaded bytes.
 
 ## MCP tool-result shapes
 
-**Unreleased: `mcpm_search` and `mcpm_info` have versioned success contracts.**
+**Since v0.46.0: `mcpm_search` and `mcpm_info` have versioned success contracts.**
 Both return `schemaVersion: 1`, advertise an MCP `outputSchema`, and return the
 same object in `structuredContent` and the existing JSON text block. Existing
 fields retain their types: search's `trustScore` is a number; info's `trustScore`
@@ -140,7 +140,7 @@ exceptions:
 
 ### `verify --json`, schema version 1
 
-**Unreleased: the existing `VerifyModel` is now a stable versioned contract.**
+**Since v0.46.0: the existing `VerifyModel` has a stable versioned contract.**
 No result fields, gate decisions or exit codes change. Required fields:
 
 | Field | Type | Meaning |

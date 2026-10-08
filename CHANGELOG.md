@@ -8,6 +8,13 @@ _Add entries here, never under a stamped version_ — a release commit renames t
 heading, and a branch that wrote beneath it merges without conflict straight into a
 published section (it happened to #170).
 
+## [0.46.0] - 2026-10-08
+
+MINOR by content: versioned agent evidence contracts and a portable usage skill,
+plus actual package-version binding for generated launches. Tagged during the
+2026-09-15 → 10-15 release freeze on the maintainer's explicit "merge, and tag
+release" instruction.
+
 ### Changed
 
 - Give `mcpm_search` and `mcpm_info` versioned output schemas and structured

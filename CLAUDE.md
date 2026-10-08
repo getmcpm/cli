@@ -655,7 +655,7 @@ When helping with this project:
 
 - We are building `mcpm` — an open-source MCP package manager (npm: `@getmcpm/cli`)
 - Trust assessment is a core feature, not an afterthought
-- Agent evidence contracts and the portable mcpm usage skill (unreleased) are
+- Agent evidence contracts and the portable mcpm usage skill (v0.46.0) are
   documented in `docs/CONTRACTS.md` and `docs/AGENT-WORKFLOW.md`. Preserve the
   distinction between checks not run and checks passed; Jev/Clef is deferred.
 - We are OSS-first — avoid design decisions that require proprietary lock-in
