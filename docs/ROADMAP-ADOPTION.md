@@ -132,6 +132,11 @@ Cheap, and every enterprise conversation dies without them.
   CI consumes — hand-freeze that). **Cut:** generated JSON schemas (zero `--json`
   surfaces are Zod-typed today; 13 hand-written schemas would drift immediately).
   Add hermetic exit-code rows to `cli-smoke.test.ts`.
+  **Unreleased follow-up (2026-10-08):** document/freeze the existing version-1
+  `verify --json` model and add versioned output schemas to the read-only MCP
+  search/info tools. Their evidence and the portable usage skill are described
+  in `AGENT-WORKFLOW.md`; other JSON/tool results remain unstable. This does not
+  introduce a schema generator or change scoring policy.
 - **E9a · Registry delisting gate.** The official registry's `status` field
   (deleted/deprecated) is already parsed at `src/registry/schemas.ts:87` and ignored
   everywhere. BLOCK on install/up (WARN in audit) when a server is delisted. A

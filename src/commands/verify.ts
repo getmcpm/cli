@@ -52,6 +52,7 @@ export interface VerifyBlocked {
   npmVersion?: string;
 }
 
+/** Versioned public JSON contract; see docs/CONTRACTS.md before changing core fields. */
 export interface VerifyModel {
   schemaVersion: 1;
   ok: boolean;

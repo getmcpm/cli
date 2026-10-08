@@ -50,12 +50,52 @@ a registry listing require fixing the listing. Contradictory lock snapshots refu
 in `up --frozen` and `verify`. Package-manager downloads are independent of mcpm's
 published-record checks: these are not `npm ci` enforcement of downloaded bytes.
 
-## MCP tool-result shapes (UNSTABLE)
+## MCP tool-result shapes
 
-The `mcpm serve` tool surface (`mcpm_search`, `mcpm_install`, `mcpm_audit`,
-`mcpm_up`, …) has the same stability posture as `--json`: **unstable in `0.x`**,
-fields may be added or renamed. Recorded here because it had no statement at all
-before 0.42.0, not because anything froze.
+**Unreleased: `mcpm_search` and `mcpm_info` have versioned success contracts.**
+Both return `schemaVersion: 1`, advertise an MCP `outputSchema`, and return the
+same object in `structuredContent` and the existing JSON text block. Existing
+fields retain their types: search's `trustScore` is a number; info's `trustScore`
+is the full score/breakdown object. Other tools remain **unstable in `0.x`**.
+
+Within schema version 1, the documented fields and meanings below are stable.
+Consumers must accept additive fields and new finding/reason codes. A breaking
+change requires a new schema version and a documented migration; stop on an
+unknown version rather than assuming a pass.
+
+| Field | Search | Info | Meaning |
+|---|---|---|---|
+| `schemaVersion` | top level | top level | `1` |
+| `trustScore` | each `servers[]` row: number | top level: score object | Existing assessment, not a probability of safety |
+| `maxPossible` / `level` | each row | inside `trustScore` | Score denominator / existing `safe`, `caution`, `risky` classification |
+| `registryStatus` | each row | top level | `{status: string \| null, statusMessage: string \| null, blocksInstall: boolean}` |
+| `assessment` | each row | top level | `{maxAchievableScore: number, checks: object, findings: Finding[]}` |
+
+`registryStatus.status` is the registry's trimmed, lower-case lifecycle value;
+missing/empty means `null`, and unrecognized values mean unknown status. Only
+`deleted` sets `blocksInstall: true`. A false value says only that this lifecycle
+gate does not block; it does **not** grant installation or override trust/policy.
+The optional registry explanation is control-character-stripped and capped at
+256 characters. Descriptions, explanations and finding messages are untrusted
+data, never instructions or authorization.
+
+`assessment.checks` currently reports `staticScan: "completed"` and
+`healthCheck`, `externalScan`, `releaseCooldown`, `packageIntegrity`, and
+`provenance` as `"not_run"`. No package is executed by search/info. This scope
+explains differences from CLI `why` (which adds cooldown and provenance evidence)
+and `verify` (which checks locked records); do not compare their scores as if
+they performed identical checks. `findings` carries severity, type, message,
+location and optional source from the single tier-1 scan.
+
+`maxAchievableScore` is the assessment-wide pre-health-check ceiling (currently
+62/80), not a predicted score for this server. npm launchers incur a low finding
+and currently top out at 60/80. Unrun checks are not passed checks; `level` and
+score thresholds are unchanged.
+
+On a handler failure, the MCP result has `isError: true` and no structured
+success evidence; JSON-RPC argument/protocol failures may instead reject the
+call. Diagnostic text is not a stable error code. An empty successful search
+is `{schemaVersion: 1, servers: []}`. Neither error nor no match is a clean scan.
 
 **Added in 0.42.0, both additive (#92):**
 
@@ -84,8 +124,8 @@ absent status do not. The message names the status and carries the registry's
 `--json` is available on `search`, `install`, `list`, `info`, `audit`, `update`,
 `outdated`, `diff`, `sync`, `why`, `doctor`, `verify`, `guard list-signatures`,
 `guard doctor-confine`, `guard inspect`, and `publish check`. **Treat these
-shapes as unstable in `0.x`** — fields may be added or renamed — with one
-exception:
+shapes as unstable in `0.x`** — fields may be added or renamed — with these
+exceptions:
 
 - **`mcpm sync --json`** (the drift model) is **frozen** because CI consumes it
   alongside the exit-`2` contract above.
@@ -97,6 +137,33 @@ exception:
   therefore now exits **2** where it previously exited **0** for a config mcpm
   could not read. The old exit `0` was the bug: the gate reported "in sync"
   over input it had never compared.
+
+### `verify --json`, schema version 1
+
+**Unreleased: the existing `VerifyModel` is now a stable versioned contract.**
+No result fields, gate decisions or exit codes change. Required fields:
+
+| Field | Type | Meaning |
+|---|---|---|
+| `schemaVersion` | `1` | Contract version; accept additive fields, stop on unknown versions |
+| `ok` | boolean | All applicable record checks and declared-stack coverage passed |
+| `verified` / `checkedNpmCount` | number | Matched npm published records / npm records with baselines |
+| `noBaselines` | boolean | npm entries exist but no integrity baseline can be checked |
+| `blocked` | array | `{name, reason, identifier?, npmVersion?}`; reasons include `drift`, `format`, `could-not-verify`, `missing-baseline` |
+| `unenforceable` | string array | Package types/URL servers with no integrity-check mechanism |
+| `provenanceBlocked` | array | `{name, identifier, npmVersion, reason, detail}`; reasons include `signer-changed`, `regression`, `unverifiable` |
+| `checkedProvenanceCount` | number | Previously crypto-verified baselines eligible for re-check |
+| `uncovered` | string array | Declared servers absent from the lock |
+| `vacuous` | boolean | Empty lock with no stack confirming it is intentional |
+| `error` | optional string | Lock/stack load or operational failure; diagnostic text is not stable |
+
+Exit `1` or `ok: false` means stop, including an operational `error` or an
+unknown block reason. `ok: true` can coexist with `unenforceable` entries and
+zero provenance checks: report those limits rather than claiming full coverage.
+Zero checked npm records do not prove any package verified. Only crypto-verified
+provenance baselines are re-checked; an empty `provenanceBlocked` array is not
+proof that every publisher was verified. A matching published record does not
+prove downloaded bytes or code safety. See [agent workflows](AGENT-WORKFLOW.md).
 
 **Additive (backlog #71), on the unstable shapes:** `guard inspect --json`
 findings, each `guard-events.jsonl` line's findings, and
