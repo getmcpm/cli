@@ -2,7 +2,7 @@
   "name": "mcpm-protocol-sandbox",
   "private": true,
   "type": "module",
-  "scripts": { "test": "node --test harness.test.mjs && node run.mjs" },
+  "scripts": { "test": "node --test self-check.mjs && node run.mjs" },
   "dependencies": {
     "@getmcpm/cli": "0.47.0",
     "@modelcontextprotocol/sdk": "1.32.1",

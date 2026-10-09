@@ -9,6 +9,19 @@ export function equivalent(direct, guarded) {
   assert.deepEqual(guarded, direct, 'guard changed benign semantics');
 }
 
+export function assertEcho(result, expected) {
+  assert.ok(!result.isError, 'echo returned a tool error');
+  assert.deepEqual(result.content, [{ type: 'text', text: JSON.stringify(expected) }]);
+}
+
+export function assertUnsupported(observation, method, wireCode, clientCode) {
+  assert.equal(observation.value.code, clientCode);
+  const request = observation.wire.find(w => w.direction === 'to-server' && w.message.method === method)?.message;
+  assert.ok(request, `missing ${method} request`);
+  const response = observation.wire.find(w => w.direction === 'from-server' && w.message.id === request.id)?.message;
+  assert.equal(response?.error?.code, wireCode);
+}
+
 export function record(wire, direction, message) {
   const json = JSON.stringify(message);
   assert.ok(wire.length < 256, 'wire message budget exceeded');
@@ -49,8 +62,11 @@ export function exchange(command, args, options = {}) {
     try {
       assert.ok(line.length <= 11 * 1024 * 1024, 'wire frame budget exceeded');
       const message = JSON.parse(line);
+      assert.ok(message && typeof message === 'object' && !Array.isArray(message), 'invalid JSON-RPC object');
+      assert.equal(message.jsonrpc, '2.0', 'invalid JSON-RPC version');
       record(wire, 'from-server', message);
       if ('method' in message) return;
+      assert.notEqual('result' in message, 'error' in message, 'response needs exactly one result or error');
       const p = pending.get(message.id);
       assert.ok(p, `unmatched response ${message.id}`);
       clearTimeout(p.timer); pending.delete(message.id); p.resolve(message);

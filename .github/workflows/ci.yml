@@ -101,7 +101,9 @@ jobs:
           node-version: 26.11.1
 
       - name: Compare pinned peers directly and through the published guard
-        run: bash scripts/dogfood-protocol.sh "$RUNNER_TEMP/protocol-evidence"
+        run: |
+          node --test scripts/protocol-sandbox/launcher-check.mjs
+          bash scripts/dogfood-protocol.sh "$RUNNER_TEMP/protocol-evidence"
 
       - name: Preserve synthetic compatibility evidence
         if: always()

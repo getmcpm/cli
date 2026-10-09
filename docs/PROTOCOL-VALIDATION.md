@@ -12,6 +12,9 @@ Provisioning the image needs registry access; the test container has no network.
 CI runs this command on Ubuntu and uploads the evidence even when comparisons
 fail. This job tests the released baseline, independently of the source tests.
 It does **not** test a candidate runtime change or automatically follow `latest`.
+The isolated manifest's `npm test` is the container entry point; use the wrapper
+above on the host. Host-only launcher regression checks run with
+`node --test scripts/protocol-sandbox/launcher-check.mjs`.
 
 ## Reproducible inputs and isolation
 
@@ -37,8 +40,11 @@ The harness verifies its UID, effective capabilities, addressed network
 interfaces, read-only application directory and absence of host paths/sockets.
 The exported container configuration records the actual network/mount/resource
 settings. Requests and child shutdowns have deadlines; the outer test run has a
-120-second deadline. Wire captures have message/byte budgets, and large raw
-messages are represented by size/hash instead of full wire text. Everything is
+120-second deadline. On timeout the launcher kills the attach process and stops
+the container before exporting evidence. Raw wire captures have message/byte
+budgets; SDK captures are limited by the tmpfs and checked against a 1 MiB budget
+when read. Large raw messages are represented by size/hash instead of full wire
+text. Everything is
 public or synthetic. These checks are evidence of this container boundary, not a
 claim that containers resist a kernel exploit.
 
@@ -46,9 +52,12 @@ claim that containers resist a kernel exploit.
 
 Initial local run on **2026-10-10**, Docker Desktop Linux/arm64: **40 pass, zero
 fail, two expected unsupported combinations**, from **42 direct/guarded
-comparisons**, plus four explicit excluded scope categories. Four harness
-self-checks cover comparison failures, out-of-order correlation, silent/closed
-peers, and unterminated output. CI separately supplies Linux runner evidence.
+comparisons**, plus four explicit excluded scope categories. Seven harness
+self-checks cover comparison failures, recovery contents, unsupported-error
+correlation, invalid JSON-RPC envelopes, out-of-order correlation, silent/closed
+peers, and unterminated output. A host launcher regression covers successful,
+failed and timed-out runs, stop-before-export, cleanup and stale-evidence refusal.
+CI separately supplies Linux runner evidence.
 
 | Cases | Observations |
 | --- | --- |
@@ -67,7 +76,8 @@ peers, and unterminated output. CI separately supplies Linux runner evidence.
 SDK/Inspector agreement is not an independent conformance oracle: these tools
 share upstream code. Additional assertions check observed version metadata,
 result discriminators, error codes, request ids, retry arguments/state, callback
-counts, persisted pins/events and benign results. The relevant requirements are
+counts, cancellation forwarding, persisted pins/events and benign/recovery
+contents. The relevant requirements are
 the [versioning contract](https://modelcontextprotocol.io/specification/2026-07-28/basic/versioning)
 and [MRTR contract](https://modelcontextprotocol.io/specification/2026-07-28/basic/patterns/mrtr).
 
@@ -77,11 +87,14 @@ and [MRTR contract](https://modelcontextprotocol.io/specification/2026-07-28/bas
 CLI entrypoint and harness hashes, OS/architecture/Node, boundary checks,
 per-case outcomes and counts. Each successful comparison links separate direct
 and guarded files containing observed protocol, synthetic wire data where
-applicable, stderr, pins and events. `container.json` and `image.json` identify
-the executed settings and image. Failed assertions produce `fail` and a nonzero
-exit; unexpected peer failures cannot become `unsupported` automatically.
-Use a fresh output directory per run so older files cannot be mistaken for new
-evidence. The JSON schema is local harness output, not a public CLI contract.
+applicable, stderr, pins and events. Assertion failures retain links to observations
+already captured. `container.json` and `image.json` identify the executed settings
+and image. `execution.json` records the overall run status and exit code, including
+deadline failures (124), which may leave a partial `report.json`. Failed assertions
+produce `fail` and a nonzero exit; unsupported outcomes require the expected client
+error and a correlated protocol rejection. The launcher requires an empty output
+directory so older files cannot be mistaken for new evidence. The JSON schema is
+local harness output, not a public CLI contract.
 
 ## Remaining verification
 

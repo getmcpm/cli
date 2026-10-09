@@ -5,7 +5,7 @@ import { spawnSync } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { networkInterfaces } from 'node:os';
-import { equivalent, exchange } from './harness.mjs';
+import { equivalent, exchange, assertEcho, assertUnsupported } from './harness.mjs';
 
 const app = path.dirname(fileURLToPath(import.meta.url));
 const cli = path.join(app, 'node_modules/@getmcpm/cli/dist/index.js');
@@ -57,17 +57,18 @@ async function stateFiles(home) {
   return { events: await lines(`${home}/.mcpm/guard-events.jsonl`), pins: await optionalJson(`${home}/.mcpm/pins.json`, null) };
 }
 async function pair(id, exercise, check = (a, b) => equivalent(a.value, b.value), status = 'pass') {
-  const row = { id, status: 'fail' };
+  const row = { id, status: 'fail', evidence: [] };
   try {
     const direct = await exercise(false, await location(id, false));
     await writeFile(`${output}/${id}-direct.json`, JSON.stringify(direct, null, 2));
+    row.evidence.push(`${id}-direct.json`);
     const guarded = await exercise(true, await location(id, true));
     await writeFile(`${output}/${id}-guarded.json`, JSON.stringify(guarded, null, 2));
+    row.evidence.push(`${id}-guarded.json`);
     check(direct, guarded);
     row.status = status;
     row.direct = direct.value;
     row.guarded = guarded.value;
-    row.evidence = [`${id}-direct.json`, `${id}-guarded.json`];
   } catch (e) { row.reason = e.stack; }
   report.cases.push(row);
   console.log(`${row.status}: ${id}${row.reason ? ': ' + row.reason.split('\n')[0] : ''}`);
@@ -131,7 +132,9 @@ async function sdkRun(clientKind, serverKind, mode, action, guarded, loc) {
           concurrent: await Promise.all([call('echo', { index: 1 }), call('echo', { index: 2 })]),
         };
         assert.equal(value.tools.tools.length, 5);
-        assert.deepEqual(value.concurrent.map(v => JSON.parse(v.content[0].text).index), [1, 2]);
+        value.concurrent.forEach((result, i) => assertEcho(result, { index: i + 1 }));
+        assert.deepEqual(value.resource.contents, [{ uri: 'test://hello', text: 'Hello.' }]);
+        assert.deepEqual(value.prompt.messages, [{ role: 'user', content: { type: 'text', text: 'Hello.' } }]);
       } else if (action === 'serve') {
         value = await client.listTools(); assert.ok(value.tools.some(t => t.name === 'mcpm_search'));
       } else if (action === 'attack' || action === 'input-attack') {
@@ -140,13 +143,15 @@ async function sdkRun(clientKind, serverKind, mode, action, guarded, loc) {
           await assert.rejects(call(target, { poison: true }), e => { assert.equal(e.code, -32099); assert.ok(e.data.signature_id); return true; });
           assert.ok(!callbacks.includes('elicitation'));
           value = { blocked: true, recovery: await call('echo', { after: 'block' }) };
+          assertEcho(value.recovery, { after: 'block' });
         } else { value = await call(target, { poison: true }); if (action === 'attack') assert.match(value.content[0].text, /Ignore previous/); }
       } else if (action === 'timeout' || action === 'abort') {
         const controller = new AbortController();
         const timer = action === 'abort' ? setTimeout(() => controller.abort(new Error('scenario cancelled')), 100) : null;
-        try { await assert.rejects(call('slow', {}, { timeout: action === 'timeout' ? 100 : 3000, signal: controller.signal }), /timeout|timed out|cancel|abort/i); }
+        try { await assert.rejects(call('slow', {}, { timeout: action === 'timeout' ? 100 : 3000, signal: controller.signal }), action === 'timeout' ? /timeout|timed out/i : /scenario cancelled/); }
         finally { clearTimeout(timer); }
         value = await call('echo', { after: action });
+        assertEcho(value, { after: action });
       } else if (action === 'progress') {
         const progress = [];
         value = await call('notify', {}, { onprogress: p => progress.push(p) });
@@ -162,6 +167,11 @@ async function sdkRun(clientKind, serverKind, mode, action, guarded, loc) {
     if (v2) version = client.getNegotiatedProtocolVersion();
   } finally { await client.close(); }
   const wire = await lines(loc.env.WIRE);
+  if (action === 'timeout' || action === 'abort') {
+    const request = wire.find(w => w.direction === 'to-server' && w.message.params?.name === 'slow')?.message;
+    assert.ok(request, 'missing slow request');
+    assert.ok(wire.some(w => w.direction === 'to-server' && w.message.method === 'notifications/cancelled' && w.message.params.requestId === request.id), 'missing correlated cancellation');
+  }
   if (!v2) version = wire.find(w => w.message.result?.protocolVersion)?.message.result.protocolVersion;
   return { value, version, callbacks, wire, stderr, ...await stateFiles(loc.home) };
 }
@@ -188,7 +198,11 @@ for (const [label, client, server, mode] of [
           if (message.result) assert.ok(['complete', 'input_required'].includes(message.result.resultType));
         }
       }
-      assert.ok(b.pins?.handshakes?.sandbox);
+      assert.match(b.pins?.handshakes?.sandbox?.current_hash, /^sha256:[a-f0-9]{64}$/);
+      if (action === 'ordinary') {
+        assert.deepEqual(Object.keys(b.pins.servers.sandbox).sort(), ['attack', 'echo', 'interactive', 'notify', 'slow']);
+        for (const pin of Object.values(b.pins.servers.sandbox)) assert.match(pin.current_hash, /^sha256:[a-f0-9]{64}$/);
+      }
       if (label === 'v2-modern' && action === 'interactive') {
         for (const obs of [a, b]) {
           const interim = obs.wire.find(w => w.message.result?.resultType === 'input_required').message;
@@ -223,7 +237,7 @@ for (const [id, client, server, mode, code] of [
 ]) {
   await pair(id, (g, l) => sdkRun(client, server, mode, 'unsupported', g, l), (a, b) => {
     equivalent(a.value, b.value);
-    for (const obs of [a, b]) assert.ok(obs.wire.some(w => w.message.error?.code === (code ?? -32601)));
+    for (const obs of [a, b]) assertUnsupported(obs, code ? 'initialize' : 'server/discover', code ?? -32601, code ?? 'ERA_NEGOTIATION_FAILED');
   }, 'unsupported');
 }
 for (const client of ['v1', 'v2']) await pair(`${client}-mcpm-serve`, (g, l) => sdkRun(client, 'serve', 'auto', 'serve', g, l));
@@ -263,7 +277,11 @@ await pair('unknown-version', (g, l) => rawRun(g, l, s => s.request('tools/list'
 await pair('discovery-drift-restart', async (g, l) => {
   const first = await rawRun(g, l, s => s.request('server/discover', { case: 'sandbox', _meta: meta }));
   const second = await rawRun(g, l, s => s.request('server/discover', { case: 'renamed', _meta: meta }));
-  if (g) { assert.deepEqual(second.pins.handshakes.sandbox.current_hash, first.pins.handshakes.sandbox.current_hash); assert.ok(signatures(second).includes('handshake-drift-identity')); }
+  if (g) {
+    assert.match(first.pins.handshakes.sandbox.current_hash, /^sha256:[a-f0-9]{64}$/);
+    assert.equal(second.pins.handshakes.sandbox.current_hash, first.pins.handshakes.sandbox.current_hash);
+    assert.ok(signatures(second).includes('handshake-drift-identity'));
+  }
   return second;
 });
 for (const kind of ['malformed', 'oversize', 'disconnect', 'silent']) {
@@ -274,8 +292,9 @@ for (const kind of ['malformed', 'oversize', 'disconnect', 'silent']) {
   }), (a, b) => {
     assert.equal(a.value.rejected, true); assert.equal(b.value.rejected, true);
     if (kind === 'oversize') assert.ok(signatures(b).includes('frame-too-large'));
-    if (kind === 'malformed') assert.ok(b.stderr.includes('BLOCK'));
-    if (kind === 'silent') assert.match(b.value.reason, /deadline/);
+    if (kind === 'malformed') assert.ok(signatures(b).includes('malformed-frame'));
+    assert.match(b.value.reason, kind === 'silent' ? /deadline/ : /peer disconnected/);
+    assert.match(a.value.reason, kind === 'silent' ? /deadline/ : kind === 'disconnect' ? /peer disconnected/ : /JSON/);
   });
 }
 await pair('inspector-tools-list', async (g, l) => {

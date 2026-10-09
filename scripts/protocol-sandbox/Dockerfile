@@ -8,4 +8,4 @@ COPY fixtures ./fixtures
 ENV HOME=/work/home TMPDIR=/work
 USER 1000:1000
 WORKDIR /work
-CMD ["sh", "-c", "node --test /app/self-check.mjs && node /app/run.mjs"]
+CMD ["npm", "--prefix", "/app", "test"]
