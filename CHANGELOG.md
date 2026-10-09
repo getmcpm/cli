@@ -8,6 +8,19 @@ _Add entries here, never under a stamped version_ — a release commit renames t
 heading, and a branch that wrote beneath it merges without conflict straight into a
 published section (it happened to #170).
 
+### Fixed
+
+- Guard inspection now reaches MCP 2026-07-28 discovery instructions, reserved
+  server identity metadata, and sampling/elicitation embedded in `inputRequests`.
+  Discovery capabilities/identity reuse existing declaration pins and drift
+  warnings. Sampling tool definitions use existing metadata detectors in both
+  legacy requests and modern results. A blocked embedded request replaces the
+  enclosing response with a client-directed error preserving its id.
+- Unknown or malformed embedded input requests emit
+  `guard-unsupported-input-request` as a coverage warning in offline inspection
+  and the relay. Opaque `requestState` is forwarded untouched. This is bounded
+  stdio carrier coverage, not full modern-protocol conformance or HTTP protection.
+
 ## [0.46.0] - 2026-10-08
 
 MINOR by content: versioned agent evidence contracts and a portable usage skill,

@@ -44,6 +44,21 @@ signature match is annotated and **forwarded**, never dropped. They are neither
 clean attacks nor clean benigns, so they assert the warn-only carrier clamp (H1)
 in their own block.
 
+## Modern protocol regressions
+
+The `modern-*` fixtures cover MCP 2026-07-28 discovery instructions/identity,
+MRTR sampling/elicitation and sampling tool definitions, benign discovery/form
+requests, opaque retry state, and an unknown-input coverage warning. They are
+hand-authored from the official specification. `modern-relay.test.ts` runs these
+through the compiled inspection command and a real guarded subprocess, checks
+correlated client block errors and unchanged forwarded payloads, and verifies
+pin/event persistence. `modern-protocol.test.ts` adds malformed-container, sibling,
+policy, budget and declaration-drift checks. See the [coverage matrix](../../../../../docs/GUARD.md#protocol-and-carrier-coverage).
+
+The unknown-input warning is a coverage diagnostic, not a retrieved-data signature;
+it forwards by default and reports incomplete inspection. These fixtures do not
+establish full protocol conformance or real-client adoption.
+
 ## Coverage matrix (v0.28.x)
 
 | Category | Attack class | Fixtures |

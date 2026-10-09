@@ -113,8 +113,16 @@ function serverInitiatedContent(msg: JSONRPCMessage): unknown[] {
 export function inspectServerInitiated(msg: JSONRPCMessage): InspectResult | null {
   if (!isServerInitiatedMethod(msg)) return null;
   const contentLeaves = serverInitiatedContent(msg);
-  if (contentLeaves.length === 0) return null;
+  const params = (msg as { params?: { tools?: unknown } }).params;
+  const tools = "method" in msg && msg.method === "sampling/createMessage" && Array.isArray(params?.tools) ? params.tools : [];
+  if (contentLeaves.length === 0 && tools.length === 0) return null;
 
+  const result = inspectInputContent(contentLeaves, [tools]);
+  if (result.findings.length === 0) return null;
+  return withReplyToOrigin(result, "id" in msg && msg.id !== undefined);
+}
+
+function inspectInputContent(contentLeaves: unknown[], toolLists: unknown[][]): InspectResult {
   const synthetic = {
     jsonrpc: "2.0",
     id: 0, // dummy — the scan reads only the result subtree, never the id.
@@ -122,15 +130,70 @@ export function inspectServerInitiated(msg: JSONRPCMessage): InspectResult | nul
   } as JSONRPCMessage;
 
   const scan = inspectMessage(synthetic, OWASP_MCP_TOP_10);
-  if (scan.findings.length === 0) return null;
-
   const findings: InspectFinding[] = scan.findings.map((f) => ({ ...f, target: "sampling_prompt" }));
   const action = worstAction(findings);
+  const toolFrame = { jsonrpc: "2.0", id: 0, result: { tools: toolLists.flat() } } as JSONRPCMessage;
+  // Share metadata walk budgets, but sampling tool names belong to each request.
+  const nameFindings = toolLists.flatMap((tools) =>
+    detectConfusableToolNames({ jsonrpc: "2.0", id: 0, result: { tools } } as JSONRPCMessage).findings);
+  return [
+    { action, findings }, inspectMessage(toolFrame, OWASP_MCP_TOP_10), detectExfilParams(toolFrame),
+    { action: worstAction(nameFindings), findings: nameFindings },
+  ].reduce(mergeInspect);
+}
 
-  const hasId = "id" in msg && (msg as { id?: unknown }).id !== undefined;
-  return action === "block" && hasId
-    ? { action, findings, replyToOrigin: true }
-    : { action, findings };
+/** MRTR requests are part of a response: a block replaces that response to the client. */
+function inspectEmbeddedInputRequests(msg: JSONRPCMessage): InspectResult | null {
+  if (!("result" in msg) || msg.result === null || typeof msg.result !== "object") return null;
+  const result = msg.result;
+  if (result.resultType !== "input_required" && !("inputRequests" in result)) return null;
+  if (!("inputRequests" in result)) return null; // Opaque retry state alone is valid.
+  const requests = result.inputRequests;
+  let unsupported = result.resultType !== "input_required";
+  const contentLeaves: unknown[] = [];
+  const toolLists: unknown[][] = [];
+  if (requests === null || typeof requests !== "object" || Array.isArray(requests)) {
+    unsupported = true;
+  } else {
+    for (const request of Object.values(requests)) {
+      if (request === null || typeof request !== "object" || Array.isArray(request)) {
+        unsupported = true;
+        continue;
+      }
+      const r = request as { method?: unknown; params?: Record<string, unknown> };
+      if (r.method === "roots/list" && (r.params === undefined || (r.params !== null && typeof r.params === "object" && !Array.isArray(r.params)))) continue;
+      if (!isServerInitiatedMethod(r as JSONRPCMessage) || r.params === null || typeof r.params !== "object" || Array.isArray(r.params)) {
+        unsupported = true;
+        continue;
+      }
+      for (const content of serverInitiatedContent(r as JSONRPCMessage)) contentLeaves.push(content);
+      if (r.method === "sampling/createMessage") {
+        if (!Array.isArray(r.params.messages) || r.params.messages.some((message) =>
+          message === null || typeof message !== "object" || Array.isArray(message) || !("content" in message)
+        )) unsupported = true;
+        if (r.params.systemPrompt !== undefined && typeof r.params.systemPrompt !== "string") unsupported = true;
+        if (Array.isArray(r.params.tools)) {
+          toolLists.push(r.params.tools);
+          if (r.params.tools.some((tool) => tool === null || typeof tool !== "object" || Array.isArray(tool))) unsupported = true;
+        } else if (r.params.tools !== undefined) unsupported = true;
+      } else {
+        if (typeof r.params.message !== "string") unsupported = true;
+        if (r.params.mode === "url") {
+          if (typeof r.params.url === "string") contentLeaves.push(r.params.url);
+          else unsupported = true;
+        } else if (r.params.mode === undefined || r.params.mode === "form") {
+          if (r.params.requestedSchema === null || typeof r.params.requestedSchema !== "object" || Array.isArray(r.params.requestedSchema)) unsupported = true;
+        } else unsupported = true;
+      }
+    }
+  }
+  const scan = inspectInputContent(contentLeaves, toolLists);
+  if (!unsupported) return scan;
+  return mergeInspect(scan, { action: "warn", findings: [{
+    signature_id: "guard-unsupported-input-request", category: "COVERAGE", severity: "high", target: "sampling_prompt",
+    matched_text_excerpt: "Unrecognized or malformed embedded input request; inspection coverage is incomplete.",
+    remediation: "Review the server's inputRequests and client compatibility. The frame is forwarded with a coverage warning; this is not a clean inspection.",
+  }] });
 }
 
 /**
@@ -175,5 +238,7 @@ export function inspectStatelessDetectors(msg: JSONRPCMessage): InspectResult {
 export function inspectFrame(msg: JSONRPCMessage): InspectResult {
   const serverInitiated = inspectServerInitiated(msg);
   if (serverInitiated !== null) return serverInitiated;
-  return inspectStatelessDetectors(msg);
+  const stateless = inspectStatelessDetectors(msg);
+  const embedded = inspectEmbeddedInputRequests(msg);
+  return embedded === null ? stateless : mergeInspect(stateless, embedded);
 }

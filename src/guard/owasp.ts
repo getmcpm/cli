@@ -131,6 +131,7 @@ export const _SIGNATURE_OWASP_TABLE: Readonly<Record<string, PinState>> = Object
 
   // ── unpinnable — guard/relay health signals, not an attack class ──────────
   "guard-inspection-truncated": "unpinnable",
+  "guard-unsupported-input-request": "unpinnable",
   "pins-integrity-failure": "unpinnable",
   "orig-hash-mismatch": "unpinnable",
   "spawn-failure": "unpinnable",

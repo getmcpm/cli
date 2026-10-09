@@ -1,0 +1,23 @@
+{
+  "name": "modern-unsupported-input",
+  "category": "COVERAGE",
+  "expected_action": "warn",
+  "notes": "Authored regression for MCP 2026-07-28 discovery/MRTR; see docs/GUARD.md protocol coverage matrix. No client adoption or general protocol conformance claim.",
+  "message": {
+    "jsonrpc": "2.0",
+    "id": "call-1",
+    "result": {
+      "resultType": "input_required",
+      "inputRequests": {
+        "request": {
+          "method": "future/request",
+          "params": {
+            "description": "Unrecognized request"
+          }
+        }
+      },
+      "requestState": "opaque-state"
+    }
+  },
+  "expected_signature_id": "guard-unsupported-input-request"
+}

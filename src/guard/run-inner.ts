@@ -11,6 +11,7 @@
  */
 
 import type { JSONRPCMessage } from "@modelcontextprotocol/sdk/types.js";
+import { extractServerDeclaration } from "./server-declaration.js";
 import { defaultActionForFinding, ACTION_RANK, worstAction } from "./patterns.js";
 import {
   inspectFrame,
@@ -407,8 +408,8 @@ export async function runInner(parsed: RunInnerArgs): Promise<number> {
           );
         }
       };
-    } else if (isInitializeResult(msg)) {
-      // H5: handshake-drift inspection (capabilities + identity). WARN-tier —
+    } else if (extractServerDeclaration(msg) !== null) {
+      // H5: initialize/discovery declaration drift (capabilities + identity). WARN-tier —
       // never blocks (blocking an initialize result kills the session). The sync
       // pass compares against the FROZEN baseline; the off-thread async path does
       // first-session capture + the cross-session warn-once previous_hashes append.
@@ -1082,15 +1083,16 @@ export function inspectHandshakeDriftSync(
   baseline: PinsFile,
   state: SessionDriftState,
 ): InspectResult {
-  const result = (msg as { result?: { capabilities?: unknown; serverInfo?: { name?: unknown } } }).result;
+  const result = extractServerDeclaration(msg) ??
+    (msg as { result?: { capabilities?: unknown; serverInfo?: { name?: unknown } } }).result;
   if (result === null || typeof result !== "object") return { action: "pass", findings: [] };
 
   const liveFields = handshakeFieldHashesOf(result);
   const liveCapKeys = handshakeCapabilityKeys(result);
   const liveWhole = hashHandshake(liveFields);
 
-  // Same-session guard: initialize should happen once. A second, DIFFERING
-  // initialize is anomalous → warn (never block). Record on first sight.
+  // A changed identity/capability declaration is anomalous → warn. Repeated
+  // discovery with the same declaration is valid and silent.
   const seen = state.handshakeSeenHash;
   if (seen !== null && seen !== liveWhole) {
     return warnResult(handshakeInSessionFinding(serverName, seen, liveWhole));
@@ -1135,8 +1137,8 @@ function handshakeInSessionFinding(
     target: "initialize_instructions",
     matched_text_excerpt: `${sanitizeLabel(serverName)}: ${firstSeen.slice(7, 19)}… → ${liveWhole.slice(7, 19)}… (same session)`,
     remediation:
-      `Server "${sanitizeLabel(serverName)}" delivered two different initialize handshakes ` +
-      `in the same session — initialize should occur once. Inspect the wrapped command; ` +
+      `Server "${sanitizeLabel(serverName)}" delivered different identity/capability declarations ` +
+      `in the same process. Inspect the wrapped command; ` +
       `this is a warn-only signal and does not block the session.`,
   };
 }

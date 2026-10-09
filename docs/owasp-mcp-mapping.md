@@ -106,6 +106,8 @@ bucket things fall into:
 
 - **Inspection / relay health** — `guard-inspection-truncated` (the leaf-walk
   budget was exhausted, so the frame was not fully inspected),
+  `guard-unsupported-input-request` (unknown or malformed embedded requests
+  leave inspection coverage incomplete; this is not an identified attack),
   `inspect-rejected`, `forward-serialize-failed` (a frame passed inspection but
   could not be re-serialized for forwarding — e.g. nested too deep for
   `JSON.stringify`), `malformed-frame`, `spawn-failure`, `frame-too-large` (the
