@@ -12,13 +12,19 @@ An open-source, CLI-first MCP package manager — **"npm for MCP servers"**.
 A registry where developers can search, install, audit, publish, and update MCP servers
 across all major clients (Claude Desktop, Claude Code, Cursor, VS Code, Windsurf, Gemini CLI) from a single tool.
 
-**Release target:** `@getmcpm/cli@0.47.0` (2026-10-09). PR #247 is merged at
-`9d10830`, byte-identical to Astra-reviewed `7465a61`. Modern MCP discovery and
-embedded input requests now reach the existing scanners and declaration pins;
-unsupported scan shapes emit explicit coverage warnings. Local validation:
-3,569 tests, typecheck/build, real guarded-process parity and packed-artifact
-smoke passed; all eight PR checks passed. Release publication remains to be
-verified. The previous verified release is v0.46.0.
+**Current release:** `@getmcpm/cli@0.47.0` (2026-10-09), tag commit `472755e`.
+PR #247 merged as `9d10830`, byte-identical to Astra-reviewed `7465a61`. Modern
+MCP discovery and embedded input requests reach existing scanners and declaration
+pins; unsupported scan shapes emit explicit coverage warnings. All eight PR
+checks and release-main CI/CodeQL/Scorecard passed. Publish run `37936520627`
+passed every job, including pre-publish package checks on Node 22/24/26 and the
+registry listing. npm and MCP registry latest are 0.47.0.
+
+Downloaded tarball integrity and npm provenance bind to the expected tag/commit
+and GitHub Actions signer; the SBOM signature verifies and tampering is rejected.
+The actual published CLI passes release smoke, all 97 public fixtures and 11
+modern guarded-process cases, including legacy initialization and pin/event
+persistence. The reviewed full suite passed 3,569 tests; typecheck/build passed.
 
 No SDK upgrade, HTTP relay, or full protocol-conformance claim. Installed-client
 interoperability and usage-skill behavior remain unmeasured; Jev/Clef stays
