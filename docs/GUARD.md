@@ -76,6 +76,12 @@ measure adoption or interoperability in installed IDE clients, and do not certif
 all 2026-07-28 protocol behavior. `mcpm serve` still uses the existing SDK; no SDK
 upgrade or negotiation behavior is included in this change.
 
+The separate [sandbox compatibility harness](PROTOCOL-VALIDATION.md) compares
+the pinned published release with official SDK v1/v2 peers and Inspector over
+stdio. It records named protocol outcomes, guard errors and persistence under
+container isolation. Installed native clients and full conformance remain
+unverified; the matrix states the tested operations and exclusions.
+
 ### Full message flow
 
 The relay inspects each direction independently — a request (parent → child) and the matching response (child → parent) each run the full pattern + pin + policy pipeline before anything is forwarded:

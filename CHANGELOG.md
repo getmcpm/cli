@@ -8,6 +8,14 @@ _Add entries here, never under a stamped version_ — a release commit renames t
 heading, and a branch that wrote beneath it merges without conflict straight into a
 published section (it happened to #170).
 
+### Added
+
+- Reproducible offline container validation of the pinned published CLI against
+  SDK v1/v2 peers and Inspector, with direct/guarded comparisons, bounded
+  synthetic evidence and explicit unsupported/not-tested results. CI preserves
+  the compatibility report. This adds test tooling, not runtime behavior or an
+  installed-client/full-conformance guarantee.
+
 ## [0.47.0] - 2026-10-09
 
 MINOR by content: new modern MCP carrier coverage and an additive diagnostic

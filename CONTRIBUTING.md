@@ -59,6 +59,11 @@ macOS-only end-to-end check for the `--confine` sandbox:
 pnpm dogfood:confine    # hermetic; must print "✓ confine dogfood PASSED"
 ```
 
+For offline direct/guarded stdio comparisons using the pinned published release
+and official SDK v1/v2 peers, run `bash scripts/dogfood-protocol.sh /tmp/mcpm-protocol-evidence`.
+Docker provisions the test dependencies, then runs with no network or host
+mounts. See [the matrix, evidence and limits](docs/PROTOCOL-VALIDATION.md).
+
 ## Ground rules
 
 - **Tests first, and they must pass.** New behaviour needs a test; bug fixes need a
