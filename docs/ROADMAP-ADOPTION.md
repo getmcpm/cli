@@ -337,8 +337,8 @@ is the big content vehicle.
 
 ## Agent-trend follow-up (2026-10-09)
 
-The v0.46.0 evidence/usage-skill pilot is released. The next bounded change is
-unreleased modern MCP guard carrier coverage: discovery metadata and declaration
+The v0.46.0 evidence/usage-skill pilot is released. v0.47.0 adds
+modern MCP guard carrier coverage: discovery metadata and declaration
 pins, embedded sampling/elicitation content, and explicit unsupported-input
 warnings. The [coverage matrix](GUARD.md#protocol-and-carrier-coverage) records
 what is inspected and what remains outside this slice. Authored fixtures exercise

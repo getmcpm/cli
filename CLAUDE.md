@@ -12,18 +12,17 @@ An open-source, CLI-first MCP package manager — **"npm for MCP servers"**.
 A registry where developers can search, install, audit, publish, and update MCP servers
 across all major clients (Claude Desktop, Claude Code, Cursor, VS Code, Windsurf, Gemini CLI) from a single tool.
 
-**Current release:** `@getmcpm/cli@0.46.0` (2026-10-08), tag commit `b06471c`.
-PR #246 adds versioned search/info evidence and the repository-distributed usage
-skill; PR #245 binds generated launches to actual package versions. Publish run
-`37773502035` passed, npm and MCP registry latest are 0.46.0, npm provenance and
-the signed SBOM verified, and the published CLI smoke passed. Old locks without
-package-version evidence require `mcpm lock`; skill behavior across real clients
-remains unmeasured. See `CHANGELOG.md` and `docs/AGENT-WORKFLOW.md`.
+**Release target:** `@getmcpm/cli@0.47.0` (2026-10-09). PR #247 is merged at
+`9d10830`, byte-identical to Astra-reviewed `7465a61`. Modern MCP discovery and
+embedded input requests now reach the existing scanners and declaration pins;
+unsupported scan shapes emit explicit coverage warnings. Local validation:
+3,569 tests, typecheck/build, real guarded-process parity and packed-artifact
+smoke passed; all eight PR checks passed. Release publication remains to be
+verified. The previous verified release is v0.46.0.
 
-**Unreleased:** modern MCP guard carrier coverage adds discovery declaration
-inspection/pinning and embedded input-request scanning with explicit coverage
-warnings. No SDK migration, HTTP relay, or full protocol-conformance claim.
-See `docs/GUARD.md` for the matrix and `CHANGELOG.md` for behavior changes.
+No SDK upgrade, HTTP relay, or full protocol-conformance claim. Installed-client
+interoperability and usage-skill behavior remain unmeasured; Jev/Clef stays
+deferred for user subscription/access. See `docs/GUARD.md` and `CHANGELOG.md`.
 
 **Previous release context (historical):**
 

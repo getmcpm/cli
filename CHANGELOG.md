@@ -8,6 +8,13 @@ _Add entries here, never under a stamped version_ — a release commit renames t
 heading, and a branch that wrote beneath it merges without conflict straight into a
 published section (it happened to #170).
 
+## [0.47.0] - 2026-10-09
+
+MINOR by content: new modern MCP carrier coverage and an additive diagnostic
+change published guard verdicts. Tagged during the 2026-09-15 → 10-15 release
+freeze on the maintainer's explicit "merge, release" instruction. No SDK upgrade,
+HTTP relay, or complete protocol-conformance claim.
+
 ### Fixed
 
 - Guard inspection now reaches MCP 2026-07-28 discovery instructions, reserved

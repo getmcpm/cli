@@ -380,7 +380,7 @@ that treats every non-zero exit as "a server is risky" will misread the second.
 
 ## Runtime defense (mcpm-guard)
 
-The unreleased guard compatibility update inspects modern MCP discovery and
+The v0.47.0 guard compatibility update inspects modern MCP discovery and
 embedded sampling/elicitation requests. Unknown embedded request shapes produce
 a coverage warning. See the [protocol coverage matrix](docs/GUARD.md#protocol-and-carrier-coverage)
 for the exact stdio boundaries and remaining gaps.

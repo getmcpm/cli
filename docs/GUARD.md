@@ -40,7 +40,7 @@ Detection is layered:
 
 The stdio relay inspects message content; it does not negotiate versions or
 translate protocols. Legacy and modern peers must still be compatible with each
-other. The following coverage is implemented in the working tree (unreleased),
+other. The following coverage is available in v0.47.0,
 using the [MCP 2026-07-28 changes](https://modelcontextprotocol.io/specification/2026-07-28/changelog),
 [discovery](https://modelcontextprotocol.io/specification/2026-07-28/server/discover),
 and [MRTR contract](https://modelcontextprotocol.io/specification/2026-07-28/basic/patterns/mrtr).
