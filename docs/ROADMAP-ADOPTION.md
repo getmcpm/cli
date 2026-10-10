@@ -335,14 +335,16 @@ is the big content vehicle.
 
 ---
 
-## Agent-trend follow-up (2026-10-09)
+## Agent-trend follow-up (2026-10-10)
 
 The v0.46.0 evidence/usage-skill pilot is released. v0.47.0 adds
 modern MCP guard carrier coverage: discovery metadata and declaration
 pins, embedded sampling/elicitation content, and explicit unsupported-input
 warnings. The [coverage matrix](GUARD.md#protocol-and-carrier-coverage) records
-what is inspected and what remains outside this slice. Authored fixtures exercise
-offline inspection and a guarded stdio subprocess; installed-client protocol
+what is inspected and what remains outside this slice. v0.47.1 adds the
+[isolated reference-peer matrix](PROTOCOL-VALIDATION.md): 40 passing direct/guarded
+comparisons and two explicitly unsupported combinations on Linux/arm64 and
+Linux/amd64, against the pinned published v0.47.0 baseline. Installed native-client
 interoperability and usage-skill behavior still need evaluation. Jev/Clef stays
 deferred until users have subscription/access. No SDK or HTTP expansion is implied.
 
