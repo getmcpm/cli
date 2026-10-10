@@ -1,7 +1,7 @@
 # MCP Registry — Project Context
 
 > This file is automatically read by Claude Code on every session.
-> Keep it updated as decisions are made. Last updated: 2026-10-08.
+> Keep it updated as decisions are made. Last updated: 2026-10-10.
 
 ---
 
@@ -30,11 +30,17 @@ No SDK upgrade, HTTP relay, or full protocol-conformance claim. Installed-client
 interoperability and usage-skill behavior remain unmeasured; Jev/Clef stays
 deferred for user subscription/access. See `docs/GUARD.md` and `CHANGELOG.md`.
 
-**Next validation work (unreleased):** `scripts/dogfood-protocol.sh` runs a
+**v0.47.1 release preparation:** PR #248 merged as `235fd21`, byte-identical to
+Astra-reviewed `a6e8fcb`. PATCH: test tooling/docs only; production source and
+dependency locks are unchanged. `scripts/dogfood-protocol.sh` runs a
 separately locked, offline container matrix against published 0.47.0 and official
 SDK v1/v2 peers. See `docs/PROTOCOL-VALIDATION.md` for measured scope and evidence;
 this tests a published baseline, not candidate runtime code. Native client/adapter
-and model/skill validation remains pending.
+and model/skill validation remains pending. Local Linux/arm64 and hosted Linux/amd64
+runs passed 40 comparisons, with two expected unsupported combinations, seven
+container self-checks and a launcher regression. All nine PR checks passed;
+tagging/publication verification is pending. The maintainer explicitly requested
+"merge #248, release" during the recorded release freeze.
 
 **Previous release context (historical):**
 

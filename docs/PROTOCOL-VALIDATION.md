@@ -1,5 +1,8 @@
 # Sandboxed stdio compatibility validation
 
+Repository test tooling added in v0.47.1. The reference baseline deliberately
+remains published v0.47.0; a release does not silently repin the matrix.
+
 Run the pinned **published** CLI against official SDK reference peers, both
 directly and through `mcpm guard run --inner`:
 
