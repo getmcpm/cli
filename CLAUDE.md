@@ -12,35 +12,32 @@ An open-source, CLI-first MCP package manager — **"npm for MCP servers"**.
 A registry where developers can search, install, audit, publish, and update MCP servers
 across all major clients (Claude Desktop, Claude Code, Cursor, VS Code, Windsurf, Gemini CLI) from a single tool.
 
-**Current release:** `@getmcpm/cli@0.47.0` (2026-10-09), tag commit `472755e`.
-PR #247 merged as `9d10830`, byte-identical to Astra-reviewed `7465a61`. Modern
-MCP discovery and embedded input requests reach existing scanners and declaration
-pins; unsupported scan shapes emit explicit coverage warnings. All eight PR
-checks and release-main CI/CodeQL/Scorecard passed. Publish run `37936520627`
-passed every job, including pre-publish package checks on Node 22/24/26 and the
-registry listing. npm and MCP registry latest are 0.47.0.
+**Current release:** `@getmcpm/cli@0.47.1` (2026-10-10), tag commit `36a5f6b`.
+PATCH: repository test tooling/docs only; production source and dependencies
+remain unchanged from v0.47.0. PR #248 merged as `235fd21`, byte-identical to
+Astra-reviewed `a6e8fcb`; release-notes PR #255 merged as `36a5f6b` after all nine
+checks. Exact release-main CI/CodeQL/Scorecard passed. Publish run `38034076267`
+passed all five jobs, including Node 22/24/26 package checks and registry listing.
+GitHub release is published/immutable; npm and MCP registry latest are 0.47.1.
 
-Downloaded tarball integrity and npm provenance bind to the expected tag/commit
-and GitHub Actions signer; the SBOM signature verifies and tampering is rejected.
-The actual published CLI passes release smoke, all 97 public fixtures and 11
-modern guarded-process cases, including legacy initialization and pin/event
-persistence. The reviewed full suite passed 3,569 tests; typecheck/build passed.
+Downloaded tarball integrity and verified npm provenance bind to the expected
+release commit and GitHub Actions signer. The SBOM signature verifies and altered
+bytes are rejected. Actual published 0.47.1 passes clean-install release smoke,
+all 97 public fixtures and 11 modern guarded-process cases with pins/events.
+A throwaway copy of the harness repinned to actual 0.47.1 also passes 40
+comparisons, with two expected unsupported combinations and seven self-checks
+on Linux/arm64. Its locked artifact integrity matches the verified npm tarball.
 
-No SDK upgrade, HTTP relay, or full protocol-conformance claim. Installed-client
-interoperability and usage-skill behavior remain unmeasured; Jev/Clef stays
-deferred for user subscription/access. See `docs/GUARD.md` and `CHANGELOG.md`.
+The committed compatibility harness deliberately retains published 0.47.0 as
+its reproducible baseline: 40 passes/two expected unsupported combinations on
+local Linux/arm64 and hosted Linux/amd64, plus seven self-checks and a launcher
+regression. The implementation's full source suite passed 3,569 tests;
+typecheck/build passed. See `docs/PROTOCOL-VALIDATION.md` for scope and evidence.
 
-**v0.47.1 release preparation:** PR #248 merged as `235fd21`, byte-identical to
-Astra-reviewed `a6e8fcb`. PATCH: test tooling/docs only; production source and
-dependency locks are unchanged. `scripts/dogfood-protocol.sh` runs a
-separately locked, offline container matrix against published 0.47.0 and official
-SDK v1/v2 peers. See `docs/PROTOCOL-VALIDATION.md` for measured scope and evidence;
-this tests a published baseline, not candidate runtime code. Native client/adapter
-and model/skill validation remains pending. Local Linux/arm64 and hosted Linux/amd64
-runs passed 40 comparisons, with two expected unsupported combinations, seven
-container self-checks and a launcher regression. All nine PR checks passed;
-tagging/publication verification is pending. The maintainer explicitly requested
-"merge #248, release" during the recorded release freeze.
+No SDK upgrade, HTTP relay, or full protocol-conformance claim. Installed native
+client/adapter and model/skill behavior remain unverified; Jev/Clef stays deferred
+for user subscription/access. The maintainer explicitly requested "merge #248,
+release" during the recorded release freeze. See `CHANGELOG.md` and `docs/GUARD.md`.
 
 **Previous release context (historical):**
 
