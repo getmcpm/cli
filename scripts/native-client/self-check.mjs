@@ -1,12 +1,14 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { fixtureMetadata, serverName } from './fixture-registry.mjs';
-import { assertEcho, assertNativeWire, assertGuestBoundary, checkPayload, evidenceFiles, validateReport } from './checks.mjs';
+import { assertEcho, assertNativeWire, assertGuestBoundary, checkPayload, cliArtifact, evidenceFiles, validateReport } from './checks.mjs';
+import { createHash } from 'node:crypto';
+import { execFileSync } from 'node:child_process';
 import { mkdir, mkdtemp, readFile, rm, symlink, truncate, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { exchange } from '../protocol-sandbox/harness.mjs';
 import { gateway } from './gateway.mjs';
-import { fixtureApproval } from './approval.mjs';
+import { fixtureApproval, fixtureInput, fixtureInputPrompt, fixtureInputValue } from './approval.mjs';
 import { command } from './command.mjs';
 import { runInNewContext } from 'node:vm';
 import path from 'node:path';
@@ -36,6 +38,34 @@ test('UI consent automation is restricted to the synthetic fixture and excludes 
   assert.equal(fixtureApproval({ text: 'Sign in to GitHub', buttons: ['Allow', 'Sign in'] }), undefined);
   assert.equal(fixtureApproval({ text: 'native-fixture: Allow access to your account?', buttons: ['Allow'] }), undefined);
   assert.equal(fixtureApproval({ text: 'Unrelated command', buttons: ['Allow'] }), undefined);
+  assert.equal(fixtureInput({ text: fixtureInputPrompt, value: fixtureInputValue }), true);
+  assert.equal(fixtureInput({ text: fixtureInputPrompt, value: 'different' }), false);
+  assert.equal(fixtureInput({ text: 'Sign in to account ' + fixtureInputPrompt, value: fixtureInputValue }), false);
+});
+test('candidate identity binds archive, lock, version and the installed executable entry', async () => {
+  const root = await mkdtemp(tmpdir() + '/mcpm-candidate-');
+  const entry = 'public fixture entry';
+  try {
+    await mkdir(`${root}/package/dist`, { recursive: true });
+    await mkdir(`${root}/node_modules/@getmcpm/cli/dist`, { recursive: true });
+    await writeFile(`${root}/package/dist/index.js`, entry);
+    await writeFile(`${root}/node_modules/@getmcpm/cli/dist/index.js`, entry);
+    await writeFile(`${root}/node_modules/@getmcpm/cli/package.json`, '{"name":"@getmcpm/cli","version":"0.15.0"}');
+    execFileSync('/usr/bin/tar', ['-czf', `${root}/candidate.tgz`, '-C', root, 'package']);
+    const tar = await readFile(`${root}/candidate.tgz`);
+    const integrity = 'sha512-' + createHash('sha512').update(tar).digest('base64');
+    await writeFile(`${root}/package.json`, '{"dependencies":{"@getmcpm/cli":"file:./candidate.tgz"}}');
+    await writeFile(`${root}/package-lock.json`, JSON.stringify({ packages: { 'node_modules/@getmcpm/cli': { version: '0.15.0', resolved: 'file:candidate.tgz', integrity } } }));
+    const artifact = await cliArtifact(root, true);
+    assert.equal(artifact.kind, 'candidate'); assert.equal(artifact.version, '0.15.0'); assert.equal(artifact.integrity, integrity);
+    await writeFile(`${root}/node_modules/@getmcpm/cli/dist/index.js`, 'changed');
+    await assert.rejects(cliArtifact(root, true), /entry differs/);
+    await writeFile(`${root}/node_modules/@getmcpm/cli/dist/index.js`, entry);
+    await writeFile(`${root}/candidate.tgz`, 'changed');
+    await assert.rejects(cliArtifact(root, true), /integrity mismatch/);
+    await truncate(`${root}/candidate.tgz`, 33 * 1024 * 1024);
+    await assert.rejects(cliArtifact(root, true), /invalid candidate archive/);
+  } finally { await rm(root, { recursive: true, force: true }); }
 });
 test('guest export refuses traversal, wrong shapes, and empty success reports', () => {
   assert.throws(() => evidenceFiles({ '../outside.json': {} }));
@@ -60,6 +90,10 @@ test('complete reports require matching versions, all named cases and independen
     assert.throws(() => validateReport({ ...report, ...change }, 'vscode', pins, hashes, evidence));
   }
   assert.throws(() => validateReport(report, 'vscode', pins, hashes, {}), /incomplete case evidence/);
+  const artifact = { kind: 'candidate', version: '0.15.0', sha256: 'synthetic' };
+  const candidate = { ...report, cliVersion: artifact.version, cliArtifact: artifact };
+  validateReport(candidate, 'vscode', pins, hashes, evidence, artifact);
+  assert.throws(() => validateReport({ ...candidate, cliArtifact: {} }, 'vscode', pins, hashes, evidence, artifact), /CLI artifact differs/);
 });
 test('guest boundary rejects physical Macs, disabled filtering and extra allow rules', () => {
   const boundary = { model: 'VirtualMac2,1\n', mounts: '/dev/disk3s1 on / (apfs)', pfStatus: 'Status: Enabled for 0 days', pfRules: 'block drop all\n' };

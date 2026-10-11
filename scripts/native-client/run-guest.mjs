@@ -5,13 +5,18 @@ import { homedir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createHash } from 'node:crypto';
+import { applyEdits, getNodeValue, modify, parseTree } from 'jsonc-parser';
 import { serverName } from './fixture-registry.mjs';
-import { assertEcho, assertNativeWire, assertGuestBoundary } from './checks.mjs';
+import { assertEcho as checkEcho, assertNativeWire, assertGuestBoundary, cliArtifact } from './checks.mjs';
 import { gateway } from './gateway.mjs';
-import { approveFixtureDialogs } from './approval.mjs';
+import { approveFixtureDialogs, fixtureInputPrompt, fixtureInputValue } from './approval.mjs';
 
 const root = path.dirname(fileURLToPath(import.meta.url));
 const client = process.argv[2];
+const flags = process.argv.slice(3);
+assert.ok(flags.every(f => ['candidate', 'realistic'].includes(f)) && new Set(flags).size === flags.length);
+const candidate = flags.includes('candidate'), realistic = flags.includes('realistic');
+assert.ok(!realistic || candidate);
 assert.ok(['vscode', 'claude-code'].includes(client));
 assert.equal(process.platform, 'darwin', 'native test requires macOS guest');
 assert.equal(root, '/opt/mcpm-native', 'native test must run inside the prepared guest');
@@ -29,16 +34,35 @@ const cli = `${root}/node_modules/@getmcpm/cli/dist/index.js`;
 const node = `${root}/node/bin/node`;
 const env = { PATH: `${root}/bin:${root}/node/bin:${root}/node_modules/.bin:/usr/bin:/bin:/usr/sbin:/sbin`, HOME: homedir(), TMPDIR: '/tmp',
   MCPM_NATIVE_WORK: work, CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1', DISABLE_AUTOUPDATER: '1', ENABLE_TOOL_SEARCH: 'false' };
+const bindings = { env: 'synthetic env "quoted" \\ path', input: fixtureInputValue };
+if (realistic) env.NATIVE_FIXTURE_SOURCE = bindings.env;
 const configPath = client === 'vscode' ? `${homedir()}/Library/Application Support/Code/User/mcp.json` : `${homedir()}/.claude.json`;
 const key = client === 'vscode' ? 'servers' : 'mcpServers';
 const seed = client === 'vscode' ? { servers: {}, inputs: [{ id: 'retained', type: 'promptString', description: 'Synthetic fixture' }] }
   : { mcpServers: {}, hasCompletedOnboarding: true, projects: { '/opt/unrelated': { allowedTools: ['Read'] } } };
+if (realistic && client === 'vscode') seed.inputs.push({ id: 'native-fixture-input', type: 'promptString', description: fixtureInputPrompt, default: fixtureInputValue });
+const seedText = realistic && client === 'vscode'
+  ? '// native-fixture user-owned comment\n' + JSON.stringify(seed, null, 2).replace(/\n}$/, ',\n}\n') : JSON.stringify(seed, null, 2);
+function assertEcho(content, expected) {
+  const result = checkEcho(content, expected);
+  if (realistic) assert.deepEqual(result.bindings, bindings, 'client must resolve and preserve declared variables');
+  return result;
+}
 let currentCase;
 let observationNumber = 0;
-const report = { schemaVersion: 1, boundary, client, platform: process.platform, arch: process.arch, node: process.version,
+const report = { schemaVersion: 1, boundary, client, suite: realistic ? 'realistic-config' : 'baseline', cliArtifact: await cliArtifact(root, candidate), platform: process.platform, arch: process.arch, node: process.version,
   configPath, syntheticRegistryAndLauncher: true, syntheticModelGateway: client === 'claude-code', cases: [],
   notTested: ['Live registry/npm service behavior', 'Real provider/model or usage-skill behavior', 'Interactive chat/approval UI', 'All protocol features or other platforms/clients'] };
-async function json(file, fallback) { try { return JSON.parse(await readFile(file, 'utf8')); } catch (e) { if (e.code === 'ENOENT') return fallback; throw e; } }
+async function json(file, fallback) {
+  try {
+    const raw = await readFile(file, 'utf8');
+    if (file === configPath && client === 'vscode') {
+      const errors = [], tree = parseTree(raw, errors, { allowTrailingComma: true });
+      assert.equal(errors.length, 0); assert.ok(tree); return getNodeValue(tree);
+    }
+    return JSON.parse(raw);
+  } catch (e) { if (e.code === 'ENOENT') return fallback; throw e; }
+}
 async function lines(file) { try { const s = await readFile(file, 'utf8'); assert.ok(s.length < 4 * 1024 * 1024); return s.trim() ? s.trim().split('\n').map(s => JSON.parse(s)) : []; } catch (e) { if (e.code === 'ENOENT') return []; throw e; } }
 function product(args, version = '1.0.0') {
   const r = spawnSync(node, ['--import', `${root}/fixture-registry.mjs`, cli, ...args], { env: { ...env, MCPM_NATIVE_REGISTRY_DOUBLE: '1', MCPM_NATIVE_VERSION: version }, cwd: root, encoding: 'utf8', timeout: 20000, maxBuffer: 1024 * 1024 });
@@ -87,7 +111,10 @@ async function native(caseName, version) {
   }
   const wire = await lines(`${work}/wire.jsonl`);
   const events = (await lines(`${homedir()}/.mcpm/guard-events.jsonl`)).slice(eventOffset);
-  const observation = { request, execution, receipt, wire, events, config: await json(configPath), pins: await json(`${homedir()}/.mcpm/pins.json`, null) };
+  const observation = { request, execution, receipt, wire, events, config: await json(configPath),
+    configText: await readFile(configPath, 'utf8'),
+    backupText: await readFile(configPath + '.bak', 'utf8').catch(e => { if (e.code !== 'ENOENT') throw e; return null; }),
+    pins: await json(`${homedir()}/.mcpm/pins.json`, null) };
   const filename = `${++observationNumber}-${caseName}-${version}.json`;
   await writeFile(`${evidence}/${filename}`, JSON.stringify(observation, null, 2), { flag: 'wx' });
   currentCase.evidence.push(filename);
@@ -114,8 +141,8 @@ report.clientVersion = client === 'vscode' ? JSON.parse(await readFile('/Applica
   : JSON.parse(await readFile(`${root}/node_modules/@anthropic-ai/claude-code/package.json`)).version;
 report.cliVersion = JSON.parse(await readFile(`${root}/node_modules/@getmcpm/cli/package.json`)).version;
 report.hashes = {};
-for (const file of [...(await readdir(root)).filter(f => /\.(mjs|json)$/.test(f)), 'vscode-extension/package.json', 'vscode-extension/tests.cjs']) report.hashes[file] = createHash('sha256').update(await readFile(`${root}/${file}`)).digest('hex');
-await mkdir(path.dirname(configPath), { recursive: true }); await writeFile(configPath, JSON.stringify(seed, null, 2));
+for (const file of [...(await readdir(root)).filter(f => /\.(mjs|json|tgz)$/.test(f)), 'vscode-extension/package.json', 'vscode-extension/tests.cjs']) report.hashes[file] = createHash('sha256').update(await readFile(`${root}/${file}`)).digest('hex');
+await mkdir(path.dirname(configPath), { recursive: true }); await writeFile(configPath, seedText);
 if (client === 'vscode') await writeFile(`${homedir()}/Library/Application Support/Code/User/settings.json`, JSON.stringify({ 'chat.tools.global.autoApprove': true, 'telemetry.telemetryLevel': 'off', 'update.mode': 'none', 'extensions.autoUpdate': false, 'chat.mcp.discovery.enabled': {} }));
 // Simulate npm's launcher only for the named, dependency-free fixture package.
 await chmod(`${root}/launcher.mjs`, 0o755);
@@ -123,8 +150,14 @@ await symlink(`${root}/launcher.mjs`, `${root}/bin/npx`);
 
 await run('install-and-native-echo', async () => {
   product(['install', serverName, '--client', client, '--yes', '--skip-health-check', '--json']);
-  const config = await json(configPath); config[key][serverName].args.push('--native-marker', 'retained'); config[key][serverName].env = { NATIVE_RETAINED: 'synthetic' };
-  await writeFile(configPath, JSON.stringify(config, null, 2));
+  const config = await json(configPath); config[key][serverName].args.push('--native-marker', 'retained'); config[key][serverName].env = { NATIVE_RETAINED: 'synthetic', ...(realistic ? {
+    NATIVE_ENV: client === 'vscode' ? '${env:NATIVE_FIXTURE_SOURCE}' : '${NATIVE_FIXTURE_SOURCE}',
+    NATIVE_INPUT: client === 'vscode' ? '${input:native-fixture-input}' : '${NATIVE_FIXTURE_MISSING:-' + fixtureInputValue + '}',
+  } : {}) };
+  const raw = await readFile(configPath, 'utf8');
+  await writeFile(configPath, realistic && client === 'vscode'
+    ? applyEdits(raw, modify(raw, [key, serverName], config[key][serverName], {}))
+    : JSON.stringify(config, null, 2));
   const obs = await native('echo', '1.0.0'); success(obs); assertEcho(results(obs).at(-1).content, { text: 'native-echo', version: '1.0.0' });
 });
 await run('enable-and-native-block-recovery', async () => {
@@ -189,6 +222,14 @@ await run('disable-restores-launch-and-remove-preserves-settings', async () => {
   product(['remove', serverName, '--client', client, '--yes']);
   const after = await json(configPath); assert.equal(after[key][serverName], undefined);
   for (const field of Object.keys(seed).filter(k => k !== key)) assert.deepEqual(after[field], config[field]);
+  if (realistic) {
+    assert.equal(await readFile(configPath + '.bak', 'utf8'), seedText, 'first raw backup must survive all operations');
+    if (client === 'vscode') {
+      const raw = await readFile(configPath, 'utf8');
+      assert.ok(raw.startsWith('// native-fixture user-owned comment\n'));
+      assert.ok(raw.endsWith(',\n}\n'), 'unrelated trailing comma must survive the lifecycle');
+    }
+  }
   if (client === 'vscode') { const removed = await native('absent', '2.0.0'); assert.equal(removed.execution.status, 0); assert.equal(removed.receipt.status, 'pass'); }
   else { const removed = await execute(`${root}/node_modules/.bin/claude`, ['mcp', 'get', serverName]); assert.notEqual(removed.status, 0); assert.match(removed.stdout + removed.stderr, /not found|no.*server/i); }
 });

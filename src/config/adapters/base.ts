@@ -11,6 +11,7 @@
 import { readFile, writeFile, rename, mkdir, lstat, unlink } from "fs/promises";
 import path from "path";
 import { z } from "zod";
+import { applyEdits, createScanner, findNodeAtLocation, getNodeValue, modify, parseTree, type ParseError } from "jsonc-parser";
 import type { ClientId } from "../paths.js";
 import type { ConfigAdapter, McpServerEntry } from "./index.js";
 import { sanitizeForTerminal } from "../../guard/sanitize.js";
@@ -35,6 +36,7 @@ const McpServerEntrySchema = z.looseObject({
 export abstract class BaseAdapter implements ConfigAdapter {
   abstract readonly clientId: ClientId;
   protected abstract readonly rootKey: string;
+  protected readonly supportsJsonc: boolean = false;
 
   // ---------------------------------------------------------------------------
   // Internal helpers
@@ -68,8 +70,25 @@ export abstract class BaseAdapter implements ConfigAdapter {
       return {};
     }
 
-    // JSON.parse throws on malformed input — let it propagate.
-    return JSON.parse(raw) as Record<string, unknown>;
+    return this.parseConfig(raw);
+  }
+
+  private parseConfig(raw: string): Record<string, unknown> {
+    if (!this.supportsJsonc) return JSON.parse(raw) as Record<string, unknown>;
+    const errors: ParseError[] = [];
+    const tree = parseTree(raw, errors, { allowTrailingComma: true, allowEmptyContent: true });
+    if (errors.length || (tree && tree.type !== "object")) {
+      throw new SyntaxError("Invalid VS Code JSONC configuration");
+    }
+    const roots = tree?.children?.filter(p => p.children?.[0]?.value === this.rootKey) ?? [];
+    const servers = roots[0]?.children?.[1];
+    const names = servers?.type === "object" ? servers.children?.map(p => p.children?.[0]?.value) ?? [] : [];
+    // The editor selects the first path, while value parsing selects the last.
+    if (roots.length > 1 || new Set(names).size !== names.length) {
+      throw new SyntaxError("Ambiguous duplicate VS Code server configuration");
+    }
+    // getNodeValue keeps __proto__ as an own key; parse() uses ordinary assignment.
+    return tree ? getNodeValue(tree) as Record<string, unknown> : {};
   }
 
   /**
@@ -93,7 +112,8 @@ export abstract class BaseAdapter implements ConfigAdapter {
    */
   private async writeAtomic(
     configPath: string,
-    data: Record<string, unknown>
+    data: Record<string, unknown>,
+    serverName: string,
   ): Promise<void> {
     const dir = path.dirname(configPath);
     await mkdir(dir, { recursive: true, mode: 0o700 });
@@ -113,6 +133,27 @@ export abstract class BaseAdapter implements ConfigAdapter {
       original = await readFile(configPath, "utf-8");
     } catch (err) {
       if (!isEnoent(err)) throw err;
+    }
+    let content = JSON.stringify(data, null, 2);
+    if (this.supportsJsonc && original?.trim()) {
+      this.parseConfig(original);
+      const entry = (data[this.rootKey] as Record<string, McpServerEntry>)[serverName];
+      if (entry !== undefined) {
+        content = applyEdits(original, modify(original, [this.rootKey, serverName], entry, {}));
+      } else {
+        const tree = parseTree(original, [], { allowTrailingComma: true });
+        const property = tree && findNodeAtLocation(tree, [this.rootKey, serverName])?.parent;
+        if (!property) throw new Error("VS Code server configuration changed before removal");
+        const edits = [{ offset: property.offset, length: property.length, content: "" }];
+        // Remove only the property/comma, keeping neighboring user comments.
+        const scanner = createScanner(original, true);
+        scanner.setPosition(property.offset + property.length);
+        scanner.scan();
+        if (original[scanner.getTokenOffset()] === ",") {
+          edits.push({ offset: scanner.getTokenOffset(), length: scanner.getTokenLength(), content: "" });
+        }
+        content = applyEdits(original, edits);
+      }
     }
     if (original !== null) {
       try {
@@ -137,7 +178,7 @@ export abstract class BaseAdapter implements ConfigAdapter {
     } catch (err) {
       if (!isEnoent(err)) throw err;
     }
-    await writeFile(tmpPath, JSON.stringify(data, null, 2), {
+    await writeFile(tmpPath, content, {
       encoding: "utf-8",
       mode: 0o600,
       flag: "wx",
@@ -243,7 +284,7 @@ export abstract class BaseAdapter implements ConfigAdapter {
       [this.rootKey]: updatedServers,
     };
 
-    await this.writeAtomic(configPath, updated);
+    await this.writeAtomic(configPath, updated, name);
   }
 
   async removeServer(configPath: string, name: string): Promise<void> {
@@ -264,7 +305,7 @@ export abstract class BaseAdapter implements ConfigAdapter {
       [this.rootKey]: remaining,
     };
 
-    await this.writeAtomic(configPath, updated);
+    await this.writeAtomic(configPath, updated, name);
   }
 
   async setServerDisabled(configPath: string, name: string, disabled: boolean): Promise<void> {
@@ -311,7 +352,7 @@ export abstract class BaseAdapter implements ConfigAdapter {
       [this.rootKey]: updatedServers,
     };
 
-    await this.writeAtomic(configPath, updated);
+    await this.writeAtomic(configPath, updated, name);
   }
 
   async replaceServer(configPath: string, name: string, entry: McpServerEntry): Promise<void> {
@@ -332,7 +373,7 @@ export abstract class BaseAdapter implements ConfigAdapter {
       [this.rootKey]: updatedServers,
     };
 
-    await this.writeAtomic(configPath, updated);
+    await this.writeAtomic(configPath, updated, name);
   }
 }
 

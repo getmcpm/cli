@@ -594,6 +594,13 @@ permission grants, model subscription or external decision service.
 | Windsurf | `~/.codeium/windsurf/mcp_config.json` |
 | Gemini CLI | `~/.gemini/settings.json` (user-global `mcpServers`) |
 
+VS Code's managed `mcp.json` supports JSONC comments and trailing commas. Changes
+edit the selected server while preserving unrelated settings/comments and the
+original backup. Other clients retain strict JSON parsing. Variable references
+are retained for the client to resolve. Portable/workspace configurations and
+Copilot Agent Host configuration paths are not managed by these adapters; see
+the [native validation scope](docs/NATIVE-CLIENT-VALIDATION.md).
+
 Linux and Windows paths are also supported. See `mcpm doctor` to verify which clients are detected on your system.
 
 ## How it works

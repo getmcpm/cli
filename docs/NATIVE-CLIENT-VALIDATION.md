@@ -38,6 +38,56 @@ archive hashes and installs npm dependencies with lifecycle scripts disabled.
 Claude Code's reviewed, pinned native-binary installer runs inside the offline
 guest to connect its preloaded platform binary to the CLI entry point.
 
+### Test a candidate with realistic configuration
+
+Build and pack the current checkout, then explicitly prepare/run that artifact:
+
+```sh
+mkdir -p /tmp/mcpm-candidate
+pnpm build
+pnpm pack --pack-destination /tmp/mcpm-candidate
+node scripts/native-client/prepare.mjs /tmp/mcpm-candidate-payload /tmp/mcpm-candidate/getmcpm-cli-0.15.0.tgz
+node scripts/native-client/run-vm.mjs /path/to/tart \
+  /tmp/mcpm-native-vms /tmp/mcpm-candidate-payload /tmp/mcpm-candidate-evidence \
+  --candidate --realistic-config
+```
+
+The source package uses placeholder version 0.15.0; that candidate is not the
+published 0.15.0 release. `cliArtifact.kind`, archive SHA-256/SHA-512, lock integrity
+and installed executable hash identify it. Candidate mode verifies that the
+installed entry matches the archive and that guest/host identities agree. It
+does not establish source provenance; record the source revision/diff used for
+the fresh build separately. The default published baseline and pins are unchanged.
+Candidate preparation freezes its own dependency lock with scripts disabled.
+
+The realistic suite adds comments/trailing commas and input declarations to VS
+Code's actual user-global file. Ordinary declared environment values use client
+variable references, including quotes/backslashes; VS Code also resolves a known
+synthetic input prompt. Claude Code exercises environment/default references in
+its user-global file. Echo replies must contain the exact resolved values before
+and after wrapping/update. Raw backup bytes, input declarations and unrelated
+comments/settings must survive the lifecycle. All eight/seven baseline case
+requirements still apply. The helper accepts only the named fixture prompt with
+its exact prefilled synthetic value; account/sign-in prompts remain excluded.
+
+VS Code parsing uses Microsoft's `jsonc-parser`, checks every parse error and
+rejects duplicate server containers/names before edits. Only the managed entry
+is edited; removal can retain a legal trailing comma. Other clients continue
+to use strict JSON. This does not migrate configuration scopes or resolve
+variables inside mcpm.
+
+Current [VS Code documentation](https://code.visualstudio.com/docs/agent-customization/mcp-servers)
+prefers portable `.mcp.json`/Copilot global locations and distinguishes Agent Host
+routing. This harness still measures the adapter's user-profile `mcp.json` through
+the native Tool API. Portable/workspace paths, alternate profiles and Agent Host
+chat routing remain separate, unverified integration paths.
+
+Initial local candidate measurement on 2026-10-12 passed **8/8 VS Code and 7/7
+Claude Code** realistic cases. This used macOS 26.6.2/arm64, the named client
+versions below, and the candidate archive/entry hashes in its manifest. All
+3,585 source tests, typecheck/build and 12 harness self-checks passed. Astra
+review and exact-final candidate verification are pending.
+
 ## Boundary and fixture scope
 
 The runner clones the immutable image independently for **VS Code first, then
@@ -133,7 +183,7 @@ evidence local; publish scoped results rather than entire client transcripts.
 ## Remaining verification
 
 Live providers and actual model/usage-skill behavior, interactive chat/default
-approval workflows, other clients/platforms, JSONC/input-variable configuration,
+approval workflows, other clients/platforms, additional configuration variants,
 and complete protocol conformance remain unverified. Native client versions
 and observed wire protocol must be recorded rather than inferred from package
 versions. Updating pins requires repeating the native matrix. SIGKILL, host

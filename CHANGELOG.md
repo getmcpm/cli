@@ -8,6 +8,21 @@ _Add entries here, never under a stamped version_ — a release commit renames t
 heading, and a branch that wrote beneath it merges without conflict straight into a
 published section (it happened to #170).
 
+### Fixed
+
+- VS Code user-global `mcp.json` accepts comments and trailing commas. Install,
+  guard, update, toggle and remove edit only the selected server, preserving
+  unrelated configuration/comments and the original raw backup. Invalid JSONC
+  and ambiguous duplicate server paths refuse before writes. Other clients keep
+  strict JSON parsing; managed configuration locations are unchanged.
+
+### Added
+
+- Explicit candidate-artifact native validation, with archive integrity and
+  executable hashes, plus realistic JSONC/input/environment-variable fixtures.
+  The default published baseline remains 0.47.1; live model and normal approval
+  behavior remain outside these tests.
+
 ## [0.47.2] - 2026-10-12
 
 PATCH by content: native-client test tooling and documentation only; production

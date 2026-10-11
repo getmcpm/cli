@@ -4,4 +4,5 @@ import type { ClientId } from "../paths.js";
 export class VSCodeAdapter extends BaseAdapter {
   readonly clientId: ClientId = "vscode";
   protected readonly rootKey = "servers";
+  protected override readonly supportsJsonc = true;
 }
