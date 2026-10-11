@@ -77,8 +77,8 @@ this smoke suite.
 ## Named cases and evidence
 
 Initial local measurement on 2026-10-11: **8/8 VS Code and 7/7 Claude Code cases
-passed** on macOS 26.6.2/arm64 with Node 26.11.1. Actual native openings identify
-the clients and use the observed legacy `2025-11-25` protocol. This result does
+passed** on macOS 26.6.2/arm64 with Node 26.11.1. Actual native traffic identifies
+VS Code using legacy `2025-11-25` and Claude Code using modern `2026-07-28`. This result does
 not imply every protocol mode supported by either product has been exercised.
 The six account/VM-free self-checks and existing 3,569 source tests passed;
 typecheck/build passed. Native raw evidence is local and may expire; the result
