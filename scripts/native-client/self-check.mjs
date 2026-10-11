@@ -144,6 +144,49 @@ test('VS Code drift observation finishes even when native startup waits forever 
     assert.equal(receipt.status, 'pass');
   } finally { clearTimeout(timeout); }
 });
+test('VS Code cancellation waits for its current wire call and fails when that call never starts', { timeout: 5000 }, async () => {
+  const source = await readFile(new URL('./vscode-extension/tests.cjs', import.meta.url), 'utf8');
+  for (const mode of ['delayed', 'missing', 'rejected']) {
+    let receipt, startTimer, disposed = false, echoCalls = 0;
+    const frame = id => ({ direction: 'to-server', message: { id, method: 'tools/call', params: { name: 'slow', arguments: { text: 'nonce' } } } });
+    const wire = [frame('stale')];
+    class CancellationTokenSource {
+      token = { isCancellationRequested: false };
+      cancel() { if (!this.token.isCancellationRequested) { this.token.isCancellationRequested = true; clearTimeout(startTimer); this.token.reject?.(Error('cancelled')); } }
+      dispose() { disposed = true; }
+    }
+    const vscode = { version: '1.141.0', CancellationTokenSource,
+      window: { activeTextEditor: { document: { uri: { fsPath: '/Users/admin/Library/Application Support/Code/User/mcp.json' } } } },
+      commands: { executeCommand: () => Promise.resolve() },
+      lm: { tools: [{ name: 'slow' }, { name: 'echo' }], invokeTool: (name, options, token) => {
+        if (name === 'echo') { echoCalls++; return Promise.resolve({ content: [] }); }
+        if (mode === 'rejected') return Promise.reject(Error('fixture launch failed'));
+        return new Promise((resolve, reject) => {
+          token.reject = reject;
+          if (mode === 'delayed') startTimer = setTimeout(() => wire.push(frame('current')), 650);
+        });
+      } } };
+    const fs = { existsSync: () => true, readFileSync: name => name.endsWith('request.json') ? '{"case":"cancel","text":"nonce"}' : wire.map(w => JSON.stringify(w) + '\n').join(''),
+      writeFileSync: (name, content) => { receipt = JSON.parse(content); } };
+    const exports = {};
+    runInNewContext(source, {
+      exports, __dirname: '/fixture/vscode-extension', console,
+      setTimeout: (fn, delay) => delay === 45000 ? undefined : setTimeout(fn, delay === 300 || mode !== 'delayed' ? 0 : delay), clearTimeout,
+      require: name => ({ vscode, 'node:fs': fs, 'node:path': path, 'node:assert/strict': assert })[name],
+    });
+    try {
+      if (mode === 'delayed') {
+        await exports.run();
+        assert.equal(wire.at(-1).message.id, 'current', 'cancellation must not prevent the slow call reaching the peer');
+        assert.equal(receipt.cancelledRequestId, 'current'); assert.equal(receipt.status, 'pass'); assert.equal(echoCalls, 1);
+      } else {
+        await assert.rejects(exports.run(), /slow call did not reach the peer/);
+        assert.equal(receipt.status, 'fail'); assert.equal(echoCalls, 0);
+      }
+      assert.equal(disposed, true);
+    } finally { clearTimeout(startTimer); }
+  }
+});
 test('synthetic gateway emits a real tool-use round and accepts only its correlated results', async () => {
   const work = await mkdtemp(tmpdir() + '/mcpm-gateway-');
   const g = await gateway(work, { case: 'echo', text: 'nonce' });

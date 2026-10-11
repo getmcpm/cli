@@ -86,7 +86,7 @@ chat routing remain separate, unverified integration paths.
 Initial local candidate measurement on 2026-10-12 passed **8/8 VS Code and 7/7
 Claude Code** realistic cases. This used macOS 26.6.2/arm64, the named client
 versions below, and the candidate archive/entry hashes in its manifest. All
-3,588 source tests, typecheck/build and 12 harness self-checks passed after Astra
+3,588 source tests, typecheck/build and 13 harness self-checks passed after Astra
 review fixed inherited-key server removal and candidate chunk identity checks.
 Exact-final candidate verification is pending.
 
@@ -154,7 +154,7 @@ VS Code completion for drift. A separate interrupted VM run verifies cleanup.
 | Install and echo | mcpm writes the actual global file; native opening identifies the client and a real tool call returns the exact nonce/version/marker. |
 | Enable, block and recovery | The app loads the wrapped launcher; attack content produces the guard block message, then an echo succeeds. Declaration/tool pins contain real hashes. |
 | Warn and forward | The existing Unicode-warning fixture arrives unchanged and the guard records its expected warning signature. |
-| Cancel and recover | VS Code forwards correlated cancellation and continues. Claude Code is deliberately interrupted during a real slow call; a new invocation succeeds. A deadline alone cannot count as cancellation. |
+| Cancel and recover | VS Code waits up to 10 seconds for its current slow call to reach the peer, then forwards correlated cancellation and continues. Claude Code is deliberately interrupted during a real slow call; a new invocation succeeds. A deadline or cancellation before the wire call cannot count as success. |
 | VS Code reload | A real window reload reestablishes MCP; the repeated echo has a different peer PID. |
 | Update | The public CLI updates the fixture package coordinate while retaining the guard, extra arguments, environment and unrelated configuration. The native tool reports 2.0.0. |
 | Schema drift | Changed tool schema is blocked, no call reaches the peer, pins remain unchanged, and the attempt finishes without a deadline kill. Reverting the fixture restores a successful native call. |

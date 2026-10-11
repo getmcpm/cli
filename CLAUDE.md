@@ -40,10 +40,11 @@ backup. Invalid/duplicate server paths fail before writes; other clients remain
 strict JSON. Microsoft `jsonc-parser` 3.3.1 is the sole new production dependency.
 The explicit native candidate mode records archive/lock/complete executable file
 hashes and exercises real client input/environment expansion. Source checks: 3,588 tests,
-typecheck/build and 12 harness self-checks passed. Initial realistic native
+typecheck/build and 13 harness self-checks passed. Initial realistic native
 candidate run passed 8/8 VS Code and 7/7 Claude Code. Astra review fixed inherited-key
 server removal and candidate chunk identity checks; final candidate verification
-is pending. User-global paths remain unchanged;
+is pending. Native cancellation waits for the current slow wire call before
+cancelling, avoiding a startup race in the fixture. User-global paths remain unchanged;
 portable/Agent Host routes and normal approval/model behavior remain unverified.
 
 **Released native validation baseline (v0.47.2):** `scripts/native-client/` retains published mcpm
