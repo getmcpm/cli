@@ -83,12 +83,17 @@ routing. This harness still measures the adapter's user-profile `mcp.json` throu
 the native Tool API. Portable/workspace paths, alternate profiles and Agent Host
 chat routing remain separate, unverified integration paths.
 
-Initial local candidate measurement on 2026-10-12 passed **8/8 VS Code and 7/7
-Claude Code** realistic cases. This used macOS 26.6.2/arm64, the named client
-versions below, and the candidate archive/entry hashes in its manifest. All
-3,588 source tests, typecheck/build and 13 harness self-checks passed after Astra
-review fixed inherited-key server removal and candidate chunk identity checks.
-Exact-final candidate verification is pending.
+Reviewed and independently repeated local measurements on 2026-10-12 passed
+**8/8 VS Code and 7/7 Claude Code** in both the realistic candidate suite and the
+unchanged published-baseline mode. These use macOS 26.6.2/arm64 and the named
+client versions below. Host/guest hashes, all 134 candidate distribution files,
+raw configuration/backups, actual variable bindings, correlated cancellation,
+post-removal receipts and cleanup were checked. All 3,588 source tests,
+typecheck/build and 13 harness self-checks passed. Astra fixed inherited-key
+server removal, incomplete candidate chunk identity and a pre-wire cancellation
+fixture race; cancellation now waits for the current slow request before firing.
+The managed server entry can be reformatted; comments/settings outside it and
+the original raw backup are preserved.
 
 ## Boundary and fixture scope
 
