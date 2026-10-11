@@ -166,7 +166,9 @@ hashes, and rejects empty/incomplete success reports or missing/reused
 observations. Per-case JSON records include execution status/deadlines, client receipts, synthetic wire
 traffic, configuration, pins and events from that invocation. Each observation
 has a unique filename linked from its case; recovery calls cannot overwrite
-earlier evidence. `manifest.json` identifies pins, flags, VM configuration,
+earlier evidence. The final removal observation includes raw configuration and
+backup bytes; Claude Code also exports its `mcp get` not-found receipt.
+`manifest.json` identifies pins, flags, VM configuration,
 all guest fixture/extension hashes, host harness hashes and cleanup.
 Read failures and unexpected client behavior are
 failures; they are not silently classified as unsupported.

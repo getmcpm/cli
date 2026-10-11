@@ -231,7 +231,14 @@ await run('disable-restores-launch-and-remove-preserves-settings', async () => {
     }
   }
   if (client === 'vscode') { const removed = await native('absent', '2.0.0'); assert.equal(removed.execution.status, 0); assert.equal(removed.receipt.status, 'pass'); }
-  else { const removed = await execute(`${root}/node_modules/.bin/claude`, ['mcp', 'get', serverName]); assert.notEqual(removed.status, 0); assert.match(removed.stdout + removed.stderr, /not found|no.*server/i); }
+  else {
+    const removed = await execute(`${root}/node_modules/.bin/claude`, ['mcp', 'get', serverName]);
+    assert.equal(removed.timedOut, false); assert.notEqual(removed.status, 0); assert.match(removed.stdout + removed.stderr, /not found|no.*server/i);
+    const filename = `${++observationNumber}-absent-2.0.0.json`;
+    await writeFile(`${evidence}/${filename}`, JSON.stringify({ request: { case: 'absent', version: '2.0.0' }, execution: removed,
+      config: after, configText: await readFile(configPath, 'utf8'), backupText: await readFile(configPath + '.bak', 'utf8') }, null, 2), { flag: 'wx' });
+    currentCase.evidence.push(filename);
+  }
 });
 report.counts = { pass: report.cases.filter(c => c.status === 'pass').length, fail: report.cases.filter(c => c.status === 'fail').length };
 await writeFile(`${evidence}/report.json`, JSON.stringify(report, null, 2));
