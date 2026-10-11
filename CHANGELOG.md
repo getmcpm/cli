@@ -8,6 +8,12 @@ _Add entries here, never under a stamped version_ — a release commit renames t
 heading, and a branch that wrote beneath it merges without conflict straight into a
 published section (it happened to #170).
 
+## [0.47.2] - 2026-10-12
+
+PATCH by content: native-client test tooling and documentation only; production
+source and dependencies are unchanged. Tagged during the 2026-09-15 → 10-15
+release freeze on the maintainer's explicit "merge #257, release" instruction.
+
 ### Added
 
 - Native VS Code/Claude Code smoke tooling with pinned public inputs, fresh
