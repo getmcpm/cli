@@ -12,13 +12,27 @@ An open-source, CLI-first MCP package manager — **"npm for MCP servers"**.
 A registry where developers can search, install, audit, publish, and update MCP servers
 across all major clients (Claude Desktop, Claude Code, Cursor, VS Code, Windsurf, Gemini CLI) from a single tool.
 
-**Release preparation:** `@getmcpm/cli@0.47.2` (2026-10-12), PATCH by content:
-repository native-client tooling/docs only; production source and dependencies
-are unchanged from v0.47.1. PR #257 merged as `9e96bfd`, byte-identical to
-Astra-reviewed `89fad08`, after all nine checks passed. The maintainer explicitly
-requested "merge #257, release" during the recorded release freeze. Release
-publication and artifact verification are pending; published latest remains
-0.47.1 until those checks complete.
+**Current release:** `@getmcpm/cli@0.47.2` (2026-10-12), tag commit `aaf358f`.
+PATCH: repository native-client validation tooling/docs only; production source
+and dependencies are unchanged from v0.47.1. PR #257 merged as `9e96bfd`,
+byte-identical to Astra-reviewed `89fad08`, after all nine checks passed.
+Documentation-only release PR #258 merged as `aaf358f` after all nine checks.
+Exact release-main CI/CodeQL/Scorecard passed before tagging. The maintainer
+explicitly requested "merge #257, release" during the recorded release freeze.
+
+Publish run `38162631692` passed all five jobs, including Node 22/24/26 package
+gates and official registry listing. GitHub release is published/immutable;
+npm and MCP registry exact/latest are 0.47.2. Downloaded tarball integrity and
+verified npm provenance bind to release commit `aaf358f` and the exact tagged
+GitHub Actions workflow identity. The SBOM signature verifies; altered bytes
+are rejected. These verify build identity, not code safety.
+
+The actual published 0.47.2 tarball passes clean-install release smoke, all
+97 public fixtures and 11 modern guarded-process cases, with legacy
+initialization and pin/event persistence. A throwaway reference-peer harness
+repinned to actual 0.47.2 passes 40 comparisons, with zero failures, two expected
+unsupported combinations and seven self-checks; its locked integrity matches
+the verified npm tarball. The committed harness baselines remain unchanged.
 
 **Native validation tooling:** `scripts/native-client/` retains published mcpm
 0.47.1 as its fixed baseline. VS Code 1.141.0 passed 8/8 and Claude Code 2.1.296
