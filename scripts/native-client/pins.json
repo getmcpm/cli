@@ -1,0 +1,8 @@
+{
+  "tart": { "version": "2.40.1", "url": "https://github.com/openai/tart/releases/download/2.40.1/tart.tar.gz", "sha256": "363e2701154a8155cbc1bb6d845430c9b42697d2a186bc49574471ca2877db46" },
+  "image": "ghcr.io/cirruslabs/macos-tahoe-base@sha256:87f3aa5ce21b5c876268f233bdfecf38b4c2a8116fe9bbb718e714cbae187377",
+  "node": { "version": "26.11.1", "url": "https://nodejs.org/dist/v26.11.1/node-v26.11.1-darwin-arm64.tar.gz", "sha256": "d916511b55965e91be7a88e17f88d895b6793ceaba3e6c9b194aefe51c2c65ac" },
+  "vscode": { "version": "1.141.0", "commit": "2a59476c9bfcb90b3ddc372c36762471b7dfad1c", "url": "https://vscode.download.prss.microsoft.com/dbazure/download/stable/2a59476c9bfcb90b3ddc372c36762471b7dfad1c/VSCode-darwin-arm64.zip", "sha256": "9b4ae386e3cf738d7ba990237ddf0a18092c924a1bcae465ed4697964745f42d" },
+  "claudeCode": "2.1.296",
+  "mcpm": "0.47.1"
+}

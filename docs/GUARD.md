@@ -79,8 +79,10 @@ upgrade or negotiation behavior is included in this change.
 The separate [sandbox compatibility harness](PROTOCOL-VALIDATION.md) compares
 the pinned published release with official SDK v1/v2 peers and Inspector over
 stdio. It records named protocol outcomes, guard errors and persistence under
-container isolation. Installed native clients and full conformance remain
-unverified; the matrix states the tested operations and exclusions.
+container isolation. The separate [native client suite](NATIVE-CLIENT-VALIDATION.md)
+exercises named VS Code/Claude Code builds, their real global configurations and
+MCP calls in disposable macOS VMs. Other clients/platforms, live model behavior
+and full conformance remain unverified; each matrix states its tested scope.
 
 ### Full message flow
 
