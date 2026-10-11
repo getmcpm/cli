@@ -1,12 +1,12 @@
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
-import { readFile, writeFile, mkdir, rm, chmod, symlink } from 'node:fs/promises';
+import { readFile, writeFile, mkdir, rm, chmod, symlink, readdir } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createHash } from 'node:crypto';
 import { serverName } from './fixture-registry.mjs';
-import { assertEcho, assertNativeWire } from './checks.mjs';
+import { assertEcho, assertNativeWire, assertGuestBoundary } from './checks.mjs';
 import { gateway } from './gateway.mjs';
 import { approveFixtureDialogs } from './approval.mjs';
 
@@ -16,6 +16,13 @@ assert.ok(['vscode', 'claude-code'].includes(client));
 assert.equal(process.platform, 'darwin', 'native test requires macOS guest');
 assert.equal(root, '/opt/mcpm-native', 'native test must run inside the prepared guest');
 assert.equal(homedir(), '/Users/admin', 'unexpected guest account');
+function probe(file, args) {
+  const result = spawnSync(file, args, { encoding: 'utf8', timeout: 5000, maxBuffer: 1024 * 1024 });
+  assert.equal(result.status, 0, result.stderr); return result.stdout;
+}
+const boundary = { model: probe('/usr/sbin/sysctl', ['-n', 'hw.model']), mounts: probe('/sbin/mount', []),
+  pfRules: probe('/usr/bin/sudo', ['/sbin/pfctl', '-sr']), pfStatus: probe('/usr/bin/sudo', ['/sbin/pfctl', '-s', 'info']) };
+assertGuestBoundary(boundary);
 const work = `${root}/work`; const evidence = `${root}/evidence`;
 await mkdir(work, { recursive: true }); await mkdir(evidence, { recursive: true }); await mkdir(`${root}/bin`, { recursive: true });
 const cli = `${root}/node_modules/@getmcpm/cli/dist/index.js`;
@@ -26,7 +33,9 @@ const configPath = client === 'vscode' ? `${homedir()}/Library/Application Suppo
 const key = client === 'vscode' ? 'servers' : 'mcpServers';
 const seed = client === 'vscode' ? { servers: {}, inputs: [{ id: 'retained', type: 'promptString', description: 'Synthetic fixture' }] }
   : { mcpServers: {}, hasCompletedOnboarding: true, projects: { '/opt/unrelated': { allowedTools: ['Read'] } } };
-const report = { schemaVersion: 1, client, platform: process.platform, arch: process.arch, node: process.version,
+let currentCase;
+let observationNumber = 0;
+const report = { schemaVersion: 1, boundary, client, platform: process.platform, arch: process.arch, node: process.version,
   configPath, syntheticRegistryAndLauncher: true, syntheticModelGateway: client === 'claude-code', cases: [],
   notTested: ['Live registry/npm service behavior', 'Real provider/model or usage-skill behavior', 'Interactive chat/approval UI', 'All protocol features or other platforms/clients'] };
 async function json(file, fallback) { try { return JSON.parse(await readFile(file, 'utf8')); } catch (e) { if (e.code === 'ENOENT') return fallback; throw e; } }
@@ -53,6 +62,7 @@ async function execute(command, args, extraEnv = {}, interrupt) {
   } finally { clearTimeout(timeout); clearInterval(poll); }
 }
 async function native(caseName, version) {
+  const eventOffset = (await lines(`${homedir()}/.mcpm/guard-events.jsonl`)).length;
   const request = { case: caseName, text: `native-${caseName}`, version };
   for (const name of ['wire.jsonl', 'gateway.jsonl', 'receipt.json', 'reload.json']) await rm(`${work}/${name}`, { force: true });
   await writeFile(`${work}/request.json`, JSON.stringify(request));
@@ -72,20 +82,20 @@ async function native(caseName, version) {
     try {
       execution = await execute(`${root}/node_modules/.bin/claude`, ['-p', `Run the native fixture ${caseName} check.`, '--output-format', 'stream-json', '--verbose', '--max-turns', '4', '--dangerously-skip-permissions'],
         { ANTHROPIC_BASE_URL: model.url, ANTHROPIC_API_KEY: 'synthetic-native-fixture-key' }, caseName === 'cancel');
-      const responses = model.observations.flatMap(o => (o.data?.messages || []).flatMap(m => Array.isArray(m.content) ? m.content : []).filter(c => c.type === 'tool_result' && c.tool_use_id?.startsWith('native-')));
-      receipt = { client, case: caseName, status: execution.status === 0 ? 'pass' : 'fail', responses, gateway: model.observations };
+      receipt = { client, case: caseName, status: execution.status === 0 && !model.observations.some(o => o.error) ? 'pass' : 'fail', responses: model.results, gateway: model.observations };
     } finally { await model.close(); }
   }
   const wire = await lines(`${work}/wire.jsonl`);
-  const events = await lines(`${homedir()}/.mcpm/guard-events.jsonl`);
+  const events = (await lines(`${homedir()}/.mcpm/guard-events.jsonl`)).slice(eventOffset);
   const observation = { request, execution, receipt, wire, events, config: await json(configPath), pins: await json(`${homedir()}/.mcpm/pins.json`, null) };
-  await writeFile(`${evidence}/${caseName}-${version}.json`, JSON.stringify(observation, null, 2));
+  const filename = `${++observationNumber}-${caseName}-${version}.json`;
+  await writeFile(`${evidence}/${filename}`, JSON.stringify(observation, null, 2), { flag: 'wx' });
+  currentCase.evidence.push(filename);
   return observation;
 }
 function results(obs) {
   if (client === 'vscode') return obs.receipt.results;
-  const seen = new Set();
-  return obs.receipt.responses.filter(r => { if (seen.has(r.tool_use_id)) return false; seen.add(r.tool_use_id); return true; }).map(r => ({ content: typeof r.content === 'string' ? [{ type: 'text', text: r.content }] : r.content }));
+  return obs.receipt.responses.map(r => ({ content: typeof r.content === 'string' ? [{ type: 'text', text: r.content }] : r.content }));
 }
 function success(obs, tool = 'echo') {
   assert.equal(obs.execution.timedOut, false, 'native execution deadline exceeded');
@@ -93,22 +103,18 @@ function success(obs, tool = 'echo') {
   assert.equal(obs.receipt?.status, 'pass'); assertNativeWire(obs.wire, client, tool);
 }
 async function run(id, fn) {
-  const row = { id, status: 'fail' };
+  const row = { id, status: 'fail', evidence: [] };
+  currentCase = row;
   try { await fn(); row.status = 'pass'; } catch (e) { row.reason = e.stack; }
   report.cases.push(row); console.log(`${row.status}: ${client}/${id}${row.reason ? ': ' + row.reason.split('\n')[0] : ''}`);
   await writeFile(`${evidence}/report.json`, JSON.stringify(report, null, 2));
 }
 
-// The guest was started without shares/clipboard and put behind a deny-all PF rule.
-const mounts = spawnSync('/sbin/mount', [], { encoding: 'utf8' }).stdout;
-assert.ok(!mounts.includes('virtiofs') && !mounts.includes('My Shared Files'));
-const pf = spawnSync('/usr/bin/sudo', ['/sbin/pfctl', '-sr'], { encoding: 'utf8' });
-assert.equal(pf.status, 0); assert.match(pf.stdout, /block drop all/);
-report.boundary = { mounts, pfRules: pf.stdout, hostShares: false };
 report.clientVersion = client === 'vscode' ? JSON.parse(await readFile('/Applications/Visual Studio Code.app/Contents/Resources/app/package.json')).version
   : JSON.parse(await readFile(`${root}/node_modules/@anthropic-ai/claude-code/package.json`)).version;
 report.cliVersion = JSON.parse(await readFile(`${root}/node_modules/@getmcpm/cli/package.json`)).version;
-for (const file of ['peer.mjs', 'fixture-registry.mjs', 'gateway.mjs', 'run-guest.mjs', 'checks.mjs']) report[file + 'Sha256'] = createHash('sha256').update(await readFile(`${root}/${file}`)).digest('hex');
+report.hashes = {};
+for (const file of [...(await readdir(root)).filter(f => /\.(mjs|json)$/.test(f)), 'vscode-extension/package.json', 'vscode-extension/tests.cjs']) report.hashes[file] = createHash('sha256').update(await readFile(`${root}/${file}`)).digest('hex');
 await mkdir(path.dirname(configPath), { recursive: true }); await writeFile(configPath, JSON.stringify(seed, null, 2));
 if (client === 'vscode') await writeFile(`${homedir()}/Library/Application Support/Code/User/settings.json`, JSON.stringify({ 'chat.tools.global.autoApprove': true, 'telemetry.telemetryLevel': 'off', 'update.mode': 'none', 'extensions.autoUpdate': false, 'chat.mcp.discovery.enabled': {} }));
 // Simulate npm's launcher only for the named, dependency-free fixture package.
@@ -167,6 +173,8 @@ await run('schema-drift-and-recovery', async () => {
   await writeFile(`${work}/drift`, 'synthetic');
   try {
     const obs = await native('drift', '2.0.0'); assertNativeWire(obs.wire, client);
+    assert.equal(obs.execution.timedOut, false, 'a schema block must not strand the client');
+    if (client === 'vscode') { assert.equal(obs.execution.status, 0); assert.equal(obs.receipt?.status, 'pass'); }
     assert.ok(obs.wire.some(w => w.message.method === 'tools/list'));
     assert.ok(!obs.wire.some(w => w.message.method === 'tools/call'));
     assert.ok(obs.events.some(e => e.action === 'block' && e.findings.some(f => f.signature_id === 'schema-drift')));

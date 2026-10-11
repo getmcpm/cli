@@ -39,17 +39,23 @@ guest to connect its preloaded platform binary to the CLI entry point.
 
 The runner clones the immutable image independently for **VS Code first, then
 Claude Code**, using the base image's synthetic `admin` account. Each clone is
-stopped/deleted after its client completes or fails. The image cache remains for
-repeat runs. Reclaim it by removing only the task-owned storage after checking
+stopped/deleted after its client completes, fails, or the runner receives
+SIGINT/SIGTERM. An interrupted run fails and does not start the next client.
+The image cache remains for repeat runs. Reclaim it by removing only the
+task-owned storage after checking
 that no VM is running; never use personal VM storage for these tests.
 
 The VM has no host filesystem shares, clipboard, audio or USB sharing. It uses
 host-only networking and a guest PF deny-all rule with loopback excluded. Only
 the whitelisted public client/runtime payload and fixture code cross the guest
 control channel. Evidence returns as bounded, validated JSON filenames/data;
-the host does not extract a guest-controlled archive. CPU/memory limits and
-actual guest mounts/filter rules are recorded. This tests the declared boundary;
-it does not establish resistance to a hypervisor or kernel exploit.
+the host does not extract a guest-controlled archive. The public payload is
+capped at 1 GiB/50,000 entries and rejects escaping
+symlinks before copying. Evidence is limited to 32 files, 4 MiB per file and
+16 MiB total. CPU/memory limits, the guest VirtualMac model, actual mounts,
+enabled PF status and exact deny-all filter rules are checked and recorded.
+This tests the declared boundary; it does not establish resistance to a
+hypervisor or kernel exploit.
 
 The public CLI runs `install`, `guard enable`, `update`, `guard disable` and
 `remove`. A marked Node test loader supplies two fixture registry/package
@@ -76,13 +82,17 @@ this smoke suite.
 
 ## Named cases and evidence
 
-Initial local measurement on 2026-10-11: **8/8 VS Code and 7/7 Claude Code cases
+Reviewed local measurement on 2026-10-11: **8/8 VS Code and 7/7 Claude Code cases
 passed** on macOS 26.6.2/arm64 with Node 26.11.1. Actual native traffic identifies
-VS Code using legacy `2025-11-25` and Claude Code using modern `2026-07-28`. This result does
-not imply every protocol mode supported by either product has been exercised.
-The six account/VM-free self-checks and existing 3,569 source tests passed;
+VS Code using legacy `2025-11-25` and Claude Code using modern `2026-07-28`.
+This result does not imply every protocol mode supported by either product
+has been exercised.
+The eleven account/VM-free self-checks and existing 3,569 source tests passed;
 typecheck/build passed. Native raw evidence is local and may expire; the result
-summary is also recorded in the project's Obsidian validation note.
+summary is also recorded in the project's Obsidian validation note. Review
+found that an earlier nominal pass accepted a timed-out VS Code drift attempt;
+that result is superseded. The corrected run requires and observed normal
+VS Code completion for drift. A separate interrupted VM run verifies cleanup.
 
 | Case | Required observation |
 | --- | --- |
@@ -92,14 +102,18 @@ summary is also recorded in the project's Obsidian validation note.
 | Cancel and recover | VS Code forwards correlated cancellation and continues. Claude Code is deliberately interrupted during a real slow call; a new invocation succeeds. A deadline alone cannot count as cancellation. |
 | VS Code reload | A real window reload reestablishes MCP; the repeated echo has a different peer PID. |
 | Update | The public CLI updates the fixture package coordinate while retaining the guard, extra arguments, environment and unrelated configuration. The native tool reports 2.0.0. |
-| Schema drift | Changed tool schema is blocked, no call reaches the peer, and pins remain unchanged. Reverting the fixture restores a successful native call. |
+| Schema drift | Changed tool schema is blocked, no call reaches the peer, pins remain unchanged, and the attempt finishes without a deadline kill. Reverting the fixture restores a successful native call. |
 | Disable and remove | Unwrapping restores the updated original launcher and forwards direct attack text. Removing the fixture preserves unrelated settings and the native client observes its absence. |
 
 The matrix contains eight VS Code cases and seven Claude Code cases. The runner
-requires every named case and rejects empty/incomplete success reports. Per-case
-JSON records include execution status/deadlines, client receipts, synthetic wire
-traffic, configuration, pins and events. `manifest.json` identifies pins, flags,
-VM configuration and cleanup. Read failures and unexpected client behavior are
+requires every named case, matching runtime/client versions and matching fixture
+hashes, and rejects empty/incomplete success reports or missing/reused
+observations. Per-case JSON records include execution status/deadlines, client receipts, synthetic wire
+traffic, configuration, pins and events from that invocation. Each observation
+has a unique filename linked from its case; recovery calls cannot overwrite
+earlier evidence. `manifest.json` identifies pins, flags, VM configuration,
+all guest fixture/extension hashes, host harness hashes and cleanup.
+Read failures and unexpected client behavior are
 failures; they are not silently classified as unsupported.
 
 Run the account/VM-free harness self-checks with:
@@ -119,7 +133,9 @@ Live providers and actual model/usage-skill behavior, interactive chat/default
 approval workflows, other clients/platforms, JSONC/input-variable configuration,
 and complete protocol conformance remain unverified. Native client versions
 and observed wire protocol must be recorded rather than inferred from package
-versions. Updating pins requires repeating the native matrix.
+versions. Updating pins requires repeating the native matrix. SIGKILL, host
+shutdown and hypervisor crashes cannot guarantee cleanup; inspect the task-owned storage
+before reclaiming any leftover clone.
 
 The next step is real model/skill evaluation with dedicated, authorized test
 access and bounded usage, followed by additional named clients/platforms.

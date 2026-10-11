@@ -19,7 +19,11 @@ exports.run = async () => {
     await vscode.commands.executeCommand('workbench.action.closeQuickOpen');
     await listing;
     let startupError;
-    try { await vscode.commands.executeCommand('workbench.mcp.startServer', '*', { autoTrustChanges: true, waitForLiveTools: true }); }
+    try {
+      const startup = vscode.commands.executeCommand('workbench.mcp.startServer', '*', { autoTrustChanges: true, waitForLiveTools: true });
+      if (request.case === 'drift') void startup.catch(e => { receipt.driftError = e.message; });
+      else await startup;
+    }
     catch (e) { startupError = e.message; if (request.case !== 'drift') throw e; }
     let tools = vscode.lm.tools;
     for (let i = 0; i < 20 && !tools.some(t => /(?:^|_)echo$/.test(t.name)) && !['absent', 'drift'].includes(request.case); i++) {
@@ -30,13 +34,15 @@ exports.run = async () => {
     if (request.case === 'drift') {
       receipt.startupError = startupError;
       for (let i = 0; i < 40; i++) {
-        try { await vscode.commands.executeCommand('workbench.mcp.startServer', '*', { autoTrustChanges: true, waitForLiveTools: true }); }
-        catch (e) { receipt.driftError = e.message; }
+        void vscode.commands.executeCommand('workbench.mcp.startServer', '*', { autoTrustChanges: true, waitForLiveTools: false })
+          .then(undefined, e => { receipt.driftError = e.message; });
         const wireFile = path.join(root, 'work/wire.jsonl');
-        if (fs.existsSync(wireFile) && fs.readFileSync(wireFile, 'utf8').includes('"method":"tools/list"')) break;
+        const eventsFile = '/Users/admin/.mcpm/guard-events.jsonl';
+        if (fs.existsSync(wireFile) && fs.readFileSync(wireFile, 'utf8').includes('"method":"tools/list"') &&
+          fs.existsSync(eventsFile) && fs.readFileSync(eventsFile, 'utf8').includes('"signature_id":"schema-drift"')) { receipt.status = 'pass'; return; }
         await new Promise(resolve => setTimeout(resolve, 250));
       }
-      receipt.status = 'pass'; return;
+      throw Error('native schema-drift block was not observed');
     }
     if (request.case === 'absent') {
       assert.ok(!tools.some(t => /(?:^|_)echo$/.test(t.name))); receipt.status = 'pass'; return;

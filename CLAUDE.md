@@ -34,8 +34,8 @@ local Linux/arm64 and hosted Linux/amd64, plus seven self-checks and a launcher
 regression. The implementation's full source suite passed 3,569 tests;
 typecheck/build passed. See `docs/PROTOCOL-VALIDATION.md` for scope and evidence.
 
-No SDK upgrade, HTTP relay, or full protocol-conformance claim. Installed native
-client/adapter and model/skill behavior remain unverified; Jev/Clef stays deferred
+No SDK upgrade, HTTP relay, or full protocol-conformance claim. That reference-peer
+matrix does not measure native clients or model/skill behavior; Jev/Clef stays deferred
 for user subscription/access. The maintainer explicitly requested "merge #248,
 release" during the recorded release freeze. See `CHANGELOG.md` and `docs/GUARD.md`.
 

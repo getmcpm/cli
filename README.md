@@ -387,8 +387,8 @@ for the exact stdio boundaries and remaining gaps.
 
 v0.47.1 adds a reproducible [sandbox compatibility harness](docs/PROTOCOL-VALIDATION.md)
 for the pinned published v0.47.0 baseline and official SDK v1/v2 peers. Its named
-stdio matrix passes on Linux/arm64 and Linux/amd64; installed native clients and
-complete protocol conformance remain unverified. Runtime behavior is unchanged.
+stdio matrix passes on Linux/arm64 and Linux/amd64; that matrix does not exercise
+installed native clients or complete protocol conformance. Runtime behavior is unchanged.
 
 Repository contributors can also run the [native client smoke suite](docs/NATIVE-CLIENT-VALIDATION.md)
 for pinned VS Code and Claude Code builds in disposable macOS VMs. It exercises

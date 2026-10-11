@@ -1,10 +1,11 @@
 import assert from 'node:assert/strict';
-import { spawn, spawnSync } from 'node:child_process';
+import { spawn } from 'node:child_process';
 import { readFile, writeFile, mkdir, readdir, rm, copyFile, cp } from 'node:fs/promises';
 import { createHash, randomBytes } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
-import { evidenceFiles, validateReport } from './checks.mjs';
+import { checkPayload, evidenceFiles, validateReport } from './checks.mjs';
+import { command } from './command.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const repo = path.resolve(here, '../..');
@@ -22,19 +23,22 @@ catch (e) {
   await writeFile(owner, 'mcpm-native-client-validation\n', { flag: 'wx' });
 }
 const pins = JSON.parse(await readFile(`${here}/pins.json`));
+const payloadBudget = await checkPayload(payload);
 for (const [file, pin] of [['node.tar.gz', pins.node], ['vscode.zip', pins.vscode]]) {
   assert.equal(createHash('sha256').update(await readFile(`${payload}/${file}`)).digest('hex'), pin.sha256);
 }
-assert.equal(await readFile(`${payload}/package-lock.json`, 'utf8'), await readFile(`${here}/package-lock.json`, 'utf8'));
+for (const file of ['package.json', 'package-lock.json', 'pins.json']) assert.equal(await readFile(`${payload}/${file}`, 'utf8'), await readFile(`${here}/${file}`, 'utf8'));
 for (const [name, version] of [['@getmcpm/cli', pins.mcpm], ['@anthropic-ai/claude-code', pins.claudeCode]]) {
   assert.equal(JSON.parse(await readFile(`${payload}/node_modules/${name}/package.json`)).version, version);
 }
 const env = { PATH: '/usr/bin:/bin:/usr/sbin:/sbin', TART_HOME: storage, TART_NO_AUTO_PRUNE: '1' };
-function call(args, opts = {}) {
-  const r = spawnSync(tart, args, { encoding: 'utf8', env, timeout: 60000, maxBuffer: 8 * 1024 * 1024, ...opts });
+const controller = new AbortController();
+for (const signal of ['SIGINT', 'SIGTERM']) process.on(signal, () => controller.abort(Error(signal)));
+async function call(args, opts = {}) {
+  const r = await command(tart, args, { env, signal: controller.signal, ...opts });
   assert.equal(r.status, 0, `${args.join(' ')}: ${r.stderr}\n${r.stdout}`); return r.stdout;
 }
-assert.equal(call(['--version']).trim(), pins.tart.version);
+assert.equal((await call(['--version'])).trim(), pins.tart.version);
 const stage = `${output}/stage`; await mkdir(stage);
 // Whitelist public artifacts; never archive a checkout, home or host profile.
 for (const file of ['package.json', 'package-lock.json', 'pins.json', 'node.tar.gz', 'vscode.zip']) await copyFile(`${payload}/${file}`, `${stage}/${file}`);
@@ -43,32 +47,40 @@ for (const file of ['peer.mjs', 'launcher.mjs', 'fixture-registry.mjs', 'checks.
 await cp(`${here}/vscode-extension`, `${stage}/vscode-extension`, { recursive: true });
 await copyFile(`${repo}/src/guard/__tests__/fixtures/mcptox/warn/quoted-attack-phrase-near-non-rgi-flag.json`, `${stage}/warn.json`);
 const archive = `${output}/payload.tar`;
-const packed = spawnSync('/usr/bin/tar', ['-cf', archive, '-C', stage, '.'], { encoding: 'utf8', timeout: 60000 }); assert.equal(packed.status, 0, packed.stderr);
-const report = { schemaVersion: 1, pins, runFlags: ['--no-graphics', '--no-audio', '--no-usb-accessories', '--no-clipboard', '--net-host'], clients: [] };
+const packed = await command('/usr/bin/tar', ['-cf', archive, '-C', stage, '.'], { signal: controller.signal }); assert.equal(packed.status, 0, packed.stderr);
+const hashes = {};
+for (const file of [...(await readdir(stage)).filter(f => /\.(mjs|json)$/.test(f)), 'vscode-extension/package.json', 'vscode-extension/tests.cjs']) {
+  hashes[file] = createHash('sha256').update(await readFile(`${stage}/${file}`)).digest('hex');
+}
+const hostHashes = {};
+for (const file of (await readdir(here)).filter(f => /\.(mjs|json)$/.test(f))) hostHashes[file] = createHash('sha256').update(await readFile(`${here}/${file}`)).digest('hex');
+const report = { schemaVersion: 1, pins, hashes, hostHashes, payloadBudget, runFlags: ['--no-graphics', '--no-audio', '--no-usb-accessories', '--no-clipboard', '--net-host'], clients: [] };
 await writeFile(`${output}/manifest.json`, JSON.stringify(report, null, 2));
 for (const client of ['vscode', 'claude-code']) {
   const name = `mcpm-native-${client}-${randomBytes(4).toString('hex')}`;
   let running;
-  const log = [];
+  if (controller.signal.aborted) break;
+  let log = '';
   const row = { client, vm: name, status: 'fail' };
   try {
-    call(['clone', pins.image, name], { timeout: 1800000 });
-    call(['set', name, '--cpu', '2', '--memory', '6144', '--display', '1200x800']);
+    await call(['clone', pins.image, name], { timeout: 1800000 });
+    await call(['set', name, '--cpu', '2', '--memory', '6144', '--display', '1200x800']);
     running = spawn(tart, ['run', name, ...report.runFlags], { env, stdio: ['ignore', 'pipe', 'pipe'] });
-    running.stdout.on('data', b => { log.push(String(b)); }); running.stderr.on('data', b => { log.push(String(b)); });
+    const logChunk = b => { log = (log + String(b)).slice(-1024 * 1024); };
+    running.stdout.on('data', logChunk); running.stderr.on('data', logChunk);
+    running.on('error', e => { logChunk(e.message); controller.abort(e); });
     const bootDeadline = Date.now() + 180000;
     while (true) {
-      const probe = spawnSync(tart, ['exec', name, '/usr/bin/true'], { env, timeout: 5000, encoding: 'utf8' });
+      controller.signal.throwIfAborted();
+      const probe = await command(tart, ['exec', name, '/usr/bin/true'], { env, timeout: 5000, signal: controller.signal });
       if (probe.status === 0) break;
       assert.ok(Date.now() < bootDeadline, 'guest agent boot deadline');
       await new Promise(resolve => setTimeout(resolve, 2000));
     }
-    row.vmConfig = JSON.parse(call(['get', name, '--format', 'json']));
-    call(['exec', name, '/usr/bin/sudo', '/bin/mkdir', '-p', '/opt/mcpm-native']);
-    call(['exec', name, '/usr/bin/sudo', '/usr/sbin/chown', 'admin:staff', '/opt/mcpm-native']);
-    const archiveFd = (await import('node:fs')).openSync(archive, 'r');
-    try { call(['exec', '-i', name, '/usr/bin/tar', '-xf', '-', '-C', '/opt/mcpm-native'], { timeout: 180000, stdio: [archiveFd, 'pipe', 'pipe'] }); }
-    finally { (await import('node:fs')).closeSync(archiveFd); }
+    row.vmConfig = JSON.parse(await call(['get', name, '--format', 'json']));
+    await call(['exec', name, '/usr/bin/sudo', '/bin/mkdir', '-p', '/opt/mcpm-native']);
+    await call(['exec', name, '/usr/bin/sudo', '/usr/sbin/chown', 'admin:staff', '/opt/mcpm-native']);
+    await call(['exec', '-i', name, '/usr/bin/tar', '-xf', '-', '-C', '/opt/mcpm-native'], { timeout: 180000, input: archive });
     const provision = `set -eu
 cd /opt/mcpm-native
 mkdir node
@@ -84,28 +96,31 @@ printf 'export PATH=/opt/mcpm-native/bin:/opt/mcpm-native/node/bin:/opt/mcpm-nat
 sw_vers
 id
 `;
-    row.provision = call(['exec', name, '/bin/bash', '-c', provision], { timeout: 180000 });
-    const result = spawnSync(tart, ['exec', name, '/opt/mcpm-native/node/bin/node', '/opt/mcpm-native/run-guest.mjs', client], { env, timeout: 900000, encoding: 'utf8', maxBuffer: 8 * 1024 * 1024 });
-    await writeFile(`${output}/${client}-execution.json`, JSON.stringify({ status: result.status, signal: result.signal, error: result.error?.code, stdout: result.stdout, stderr: result.stderr }, null, 2));
-    const exporter = "const fs=require('node:fs');const d='/opt/mcpm-native/evidence';const out={};for(const n of fs.readdirSync(d)){if(!/^[a-z0-9.-]+\\.json$/.test(n)||fs.lstatSync(d+'/'+n).isSymbolicLink())throw Error('Invalid evidence file');const s=fs.readFileSync(d+'/'+n,'utf8');if(s.length>4*1024*1024)throw Error('Evidence budget');out[n]=JSON.parse(s);}process.stdout.write(JSON.stringify(out));";
-    const exported = JSON.parse(call(['exec', name, '/opt/mcpm-native/node/bin/node', '-e', exporter], { maxBuffer: 32 * 1024 * 1024 }));
+    row.provision = await call(['exec', name, '/bin/bash', '-c', provision], { timeout: 180000 });
+    const result = await command(tart, ['exec', name, '/opt/mcpm-native/node/bin/node', '/opt/mcpm-native/run-guest.mjs', client], { env, timeout: 900000, signal: controller.signal });
+    await writeFile(`${output}/${client}-execution.json`, JSON.stringify({ status: result.status, signal: result.signal, error: result.error, stdout: result.stdout, stderr: result.stderr }, null, 2));
+    const exporter = "const fs=require('node:fs');const d='/opt/mcpm-native/evidence';const out={};const names=fs.readdirSync(d);if(names.length>32)throw Error('Evidence file count');let total=0;for(const n of names){const stat=fs.lstatSync(d+'/'+n);if(!/^[a-z0-9.-]+\\.json$/.test(n)||!stat.isFile())throw Error('Invalid evidence file');total+=stat.size;if(stat.size>4*1024*1024||total>16*1024*1024)throw Error('Evidence budget');out[n]=JSON.parse(fs.readFileSync(d+'/'+n,'utf8'));}process.stdout.write(JSON.stringify(out));";
+    const exported = JSON.parse(await call(['exec', name, '/opt/mcpm-native/node/bin/node', '-e', exporter], { maxBuffer: 16 * 1024 * 1024 }));
     const evidence = `${output}/${client}`; await mkdir(evidence);
     for (const [file, value] of evidenceFiles(exported)) {
       await writeFile(`${evidence}/${file}`, JSON.stringify(value, null, 2), { flag: 'wx' });
     }
     row.report = JSON.parse(await readFile(`${evidence}/report.json`));
     assert.equal(result.status, 0, result.stderr + result.stdout);
-    validateReport(row.report, client, client === 'vscode' ? pins.vscode.version : pins.claudeCode); row.status = 'pass';
+    validateReport(row.report, client, pins, hashes, exported); row.status = 'pass';
   } catch (e) { row.reason = e.stack; }
   finally {
-    const stop = spawnSync(tart, ['stop', name], { env, timeout: 20000, encoding: 'utf8' });
-    if (running) await new Promise(resolve => { if (running.exitCode !== null) resolve(); else { running.once('close', resolve); setTimeout(() => { running.kill('SIGKILL'); resolve(); }, 10000).unref(); } });
-    const deleted = spawnSync(tart, ['delete', name], { env, timeout: 20000, encoding: 'utf8' });
+    const stop = await command(tart, ['stop', name], { env, timeout: 20000, encoding: 'utf8' });
+    if (running && running.exitCode === null && running.signalCode === null) await new Promise(resolve => {
+      const timer = setTimeout(() => { running.kill('SIGKILL'); resolve(); }, 10000);
+      running.once('close', () => { clearTimeout(timer); resolve(); });
+    });
+    const deleted = await command(tart, ['delete', name], { env, timeout: 20000, encoding: 'utf8' });
     row.cleanup = { stopStatus: stop.status, deleteStatus: deleted.status };
     if (deleted.status !== 0) row.status = 'fail';
-    await writeFile(`${output}/${client}-vm.log`, log.join('').slice(-1024 * 1024));
+    await writeFile(`${output}/${client}-vm.log`, log);
     report.clients.push(row); await writeFile(`${output}/manifest.json`, JSON.stringify(report, null, 2));
   }
 }
 await rm(stage, { recursive: true, force: true }); await rm(archive, { force: true });
-process.exitCode = report.clients.every(r => r.status === 'pass') ? 0 : 1;
+process.exitCode = !controller.signal.aborted && report.clients.length === 2 && report.clients.every(r => r.status === 'pass') ? 0 : 1;
