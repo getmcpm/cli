@@ -35,8 +35,27 @@ export async function cliArtifact(root, candidate = false) {
     const tar = await readFile(`${root}/candidate.tgz`);
     result.sha256 = createHash('sha256').update(tar).digest('hex');
     assert.equal(lock.integrity, 'sha512-' + createHash('sha512').update(tar).digest('base64'), 'candidate integrity mismatch');
-    const packedEntry = execFileSync('/usr/bin/tar', ['-xOf', `${root}/candidate.tgz`, 'package/dist/index.js'], { timeout: 10000, maxBuffer: 8 * 1024 * 1024 });
-    assert.equal(createHash('sha256').update(packedEntry).digest('hex'), result.entrySha256, 'installed candidate entry differs from archive');
+    const packedFiles = execFileSync('/usr/bin/tar', ['-tf', `${root}/candidate.tgz`], { timeout: 10000, maxBuffer: 1024 * 1024 })
+      .toString().trim().split('\n').filter(f => f === 'package/package.json' || (f.startsWith('package/dist/') && !f.endsWith('/')))
+      .map(f => f.slice('package/'.length)).sort();
+    assert.ok(packedFiles.length > 1 && packedFiles.length <= 1024 && new Set(packedFiles).size === packedFiles.length, 'invalid candidate file set');
+    assert.ok(packedFiles.every(f => f.split('/').every(p => p && p !== '.' && p !== '..')), 'invalid candidate path');
+    const installed = `${root}/node_modules/@getmcpm/cli`;
+    const installedFiles = ['package.json'];
+    for (const name of await readdir(`${installed}/dist`, { recursive: true })) {
+      const stat = await lstat(`${installed}/dist/${name}`);
+      assert.ok(stat.isFile() || stat.isDirectory(), 'invalid installed candidate file');
+      if (stat.isFile()) installedFiles.push(`dist/${name}`);
+    }
+    assert.deepEqual(installedFiles.sort(), packedFiles, 'installed candidate file set differs from archive');
+    result.filesSha256 = {};
+    // index.js imports split chunks; bind every shipped dist file as well as the entry.
+    for (const file of packedFiles) {
+      const packed = execFileSync('/usr/bin/tar', ['-xOf', `${root}/candidate.tgz`, `package/${file}`], { timeout: 10000, maxBuffer: 8 * 1024 * 1024 });
+      const hash = createHash('sha256').update(await readFile(`${installed}/${file}`)).digest('hex');
+      assert.equal(hash, createHash('sha256').update(packed).digest('hex'), `installed candidate ${file} differs from archive`);
+      result.filesSha256[file] = hash;
+    }
     assert.match(lock.resolved, /^file:(?:\.\/)?candidate\.tgz$/);
     const manifest = JSON.parse(await readFile(`${root}/package.json`));
     assert.match(manifest.dependencies['@getmcpm/cli'], /^file:(?:\.\/)?candidate\.tgz$/);

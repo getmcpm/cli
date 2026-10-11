@@ -19,7 +19,7 @@ published section (it happened to #170).
 ### Added
 
 - Explicit candidate-artifact native validation, with archive integrity and
-  executable hashes, plus realistic JSONC/input/environment-variable fixtures.
+  complete executable file-set hashes, plus realistic JSONC/input/environment-variable fixtures.
   The default published baseline remains 0.47.1; live model and normal approval
   behavior remain outside these tests.
 

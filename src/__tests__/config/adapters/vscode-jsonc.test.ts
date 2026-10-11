@@ -64,6 +64,15 @@ describe("VS Code JSONC configuration", () => {
     expect(Object.prototype).not.toHaveProperty("command");
   });
 
+  it.each(["__proto__", "constructor", "toString"])("removes an own %s server without consulting the object prototype", async (name) => {
+    const text = `{ /* keep */ "servers": { ${JSON.stringify(name)}: {"command":"safe"}, "other": {"command":"other"} } }`;
+    await writeFile(file, text);
+    await adapter.removeServer(file, name);
+    expect(await adapter.read(file)).toEqual({ other: { command: "other" } });
+    expect(await readFile(file, "utf8")).toContain("/* keep */");
+    expect(await readFile(file + ".bak", "utf8")).toBe(text);
+  });
+
   it.each([
     '{ "servers": { "fixture": {"command":"x"}, /* keep sibling */ "other": {"command":"y"} } }',
     '{ "servers": { "other": {"command":"y"}, /* keep sibling */ "fixture": {"command":"x"}, } }',

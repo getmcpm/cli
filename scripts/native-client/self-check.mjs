@@ -42,7 +42,7 @@ test('UI consent automation is restricted to the synthetic fixture and excludes 
   assert.equal(fixtureInput({ text: fixtureInputPrompt, value: 'different' }), false);
   assert.equal(fixtureInput({ text: 'Sign in to account ' + fixtureInputPrompt, value: fixtureInputValue }), false);
 });
-test('candidate identity binds archive, lock, version and the installed executable entry', async () => {
+test('candidate identity binds archive, lock, version and every installed dist file', async () => {
   const root = await mkdtemp(tmpdir() + '/mcpm-candidate-');
   const entry = 'public fixture entry';
   try {
@@ -50,6 +50,9 @@ test('candidate identity binds archive, lock, version and the installed executab
     await mkdir(`${root}/node_modules/@getmcpm/cli/dist`, { recursive: true });
     await writeFile(`${root}/package/dist/index.js`, entry);
     await writeFile(`${root}/node_modules/@getmcpm/cli/dist/index.js`, entry);
+    await writeFile(`${root}/package/dist/chunk.js`, 'public lazy chunk');
+    await writeFile(`${root}/node_modules/@getmcpm/cli/dist/chunk.js`, 'public lazy chunk');
+    await writeFile(`${root}/package/package.json`, '{"name":"@getmcpm/cli","version":"0.15.0"}');
     await writeFile(`${root}/node_modules/@getmcpm/cli/package.json`, '{"name":"@getmcpm/cli","version":"0.15.0"}');
     execFileSync('/usr/bin/tar', ['-czf', `${root}/candidate.tgz`, '-C', root, 'package']);
     const tar = await readFile(`${root}/candidate.tgz`);
@@ -58,8 +61,18 @@ test('candidate identity binds archive, lock, version and the installed executab
     await writeFile(`${root}/package-lock.json`, JSON.stringify({ packages: { 'node_modules/@getmcpm/cli': { version: '0.15.0', resolved: 'file:candidate.tgz', integrity } } }));
     const artifact = await cliArtifact(root, true);
     assert.equal(artifact.kind, 'candidate'); assert.equal(artifact.version, '0.15.0'); assert.equal(artifact.integrity, integrity);
+    await writeFile(`${root}/node_modules/@getmcpm/cli/dist/chunk.js`, 'changed lazy chunk');
+    await assert.rejects(cliArtifact(root, true), /differs from archive/);
+    await writeFile(`${root}/node_modules/@getmcpm/cli/dist/chunk.js`, 'public lazy chunk');
+    assert.equal(artifact.filesSha256['dist/chunk.js'], createHash('sha256').update('public lazy chunk').digest('hex'));
+    await rm(`${root}/node_modules/@getmcpm/cli/dist/chunk.js`);
+    await assert.rejects(cliArtifact(root, true), /file set differs/);
+    await writeFile(`${root}/node_modules/@getmcpm/cli/dist/chunk.js`, 'public lazy chunk');
+    await writeFile(`${root}/node_modules/@getmcpm/cli/dist/extra.js`, 'extra');
+    await assert.rejects(cliArtifact(root, true), /file set differs/);
+    await rm(`${root}/node_modules/@getmcpm/cli/dist/extra.js`);
     await writeFile(`${root}/node_modules/@getmcpm/cli/dist/index.js`, 'changed');
-    await assert.rejects(cliArtifact(root, true), /entry differs/);
+    await assert.rejects(cliArtifact(root, true), /index.js differs/);
     await writeFile(`${root}/node_modules/@getmcpm/cli/dist/index.js`, entry);
     await writeFile(`${root}/candidate.tgz`, 'changed');
     await assert.rejects(cliArtifact(root, true), /integrity mismatch/);

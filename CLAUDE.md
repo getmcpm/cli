@@ -38,11 +38,12 @@ the verified npm tarball. The committed harness baselines remain unchanged.
 only the selected server while preserving unrelated bytes/comments and the raw
 backup. Invalid/duplicate server paths fail before writes; other clients remain
 strict JSON. Microsoft `jsonc-parser` 3.3.1 is the sole new production dependency.
-The explicit native candidate mode records archive/lock/executable hashes and
-exercises real client input/environment expansion. Source checks: 3,585 tests,
+The explicit native candidate mode records archive/lock/complete executable file
+hashes and exercises real client input/environment expansion. Source checks: 3,588 tests,
 typecheck/build and 12 harness self-checks passed. Initial realistic native
-candidate run passed 8/8 VS Code and 7/7 Claude Code; Astra review and final
-candidate verification are pending. User-global paths remain unchanged;
+candidate run passed 8/8 VS Code and 7/7 Claude Code. Astra review fixed inherited-key
+server removal and candidate chunk identity checks; final candidate verification
+is pending. User-global paths remain unchanged;
 portable/Agent Host routes and normal approval/model behavior remain unverified.
 
 **Released native validation baseline (v0.47.2):** `scripts/native-client/` retains published mcpm

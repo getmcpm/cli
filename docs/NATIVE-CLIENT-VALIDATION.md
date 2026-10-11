@@ -54,8 +54,9 @@ node scripts/native-client/run-vm.mjs /path/to/tart \
 
 The source package uses placeholder version 0.15.0; that candidate is not the
 published 0.15.0 release. `cliArtifact.kind`, archive SHA-256/SHA-512, lock integrity
-and installed executable hash identify it. Candidate mode verifies that the
-installed entry matches the archive and that guest/host identities agree. It
+and installed file hashes identify it. Candidate mode verifies that the package
+manifest and complete `dist` file set/bytes match the archive (including lazy
+chunks, missing files and extra files), and that guest/host identities agree. It
 does not establish source provenance; record the source revision/diff used for
 the fresh build separately. The default published baseline and pins are unchanged.
 Candidate preparation freezes its own dependency lock with scripts disabled.
@@ -85,8 +86,9 @@ chat routing remain separate, unverified integration paths.
 Initial local candidate measurement on 2026-10-12 passed **8/8 VS Code and 7/7
 Claude Code** realistic cases. This used macOS 26.6.2/arm64, the named client
 versions below, and the candidate archive/entry hashes in its manifest. All
-3,585 source tests, typecheck/build and 12 harness self-checks passed. Astra
-review and exact-final candidate verification are pending.
+3,588 source tests, typecheck/build and 12 harness self-checks passed after Astra
+review fixed inherited-key server removal and candidate chunk identity checks.
+Exact-final candidate verification is pending.
 
 ## Boundary and fixture scope
 

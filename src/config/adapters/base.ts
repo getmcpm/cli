@@ -137,9 +137,9 @@ export abstract class BaseAdapter implements ConfigAdapter {
     let content = JSON.stringify(data, null, 2);
     if (this.supportsJsonc && original?.trim()) {
       this.parseConfig(original);
-      const entry = (data[this.rootKey] as Record<string, McpServerEntry>)[serverName];
-      if (entry !== undefined) {
-        content = applyEdits(original, modify(original, [this.rootKey, serverName], entry, {}));
+      const servers = data[this.rootKey] as Record<string, McpServerEntry>;
+      if (Object.prototype.hasOwnProperty.call(servers, serverName)) {
+        content = applyEdits(original, modify(original, [this.rootKey, serverName], servers[serverName], {}));
       } else {
         const tree = parseTree(original, [], { allowTrailingComma: true });
         const property = tree && findNodeAtLocation(tree, [this.rootKey, serverName])?.parent;
