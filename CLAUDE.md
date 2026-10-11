@@ -1,7 +1,7 @@
 # MCP Registry — Project Context
 
 > This file is automatically read by Claude Code on every session.
-> Keep it updated as decisions are made. Last updated: 2026-10-11.
+> Keep it updated as decisions are made. Last updated: 2026-10-12.
 
 ---
 
@@ -12,39 +12,32 @@ An open-source, CLI-first MCP package manager — **"npm for MCP servers"**.
 A registry where developers can search, install, audit, publish, and update MCP servers
 across all major clients (Claude Desktop, Claude Code, Cursor, VS Code, Windsurf, Gemini CLI) from a single tool.
 
-**Current release:** `@getmcpm/cli@0.47.1` (2026-10-10), tag commit `36a5f6b`.
-PATCH: repository test tooling/docs only; production source and dependencies
-remain unchanged from v0.47.0. PR #248 merged as `235fd21`, byte-identical to
-Astra-reviewed `a6e8fcb`; release-notes PR #255 merged as `36a5f6b` after all nine
-checks. Exact release-main CI/CodeQL/Scorecard passed. Publish run `38034076267`
-passed all five jobs, including Node 22/24/26 package checks and registry listing.
-GitHub release is published/immutable; npm and MCP registry latest are 0.47.1.
+**Release preparation:** `@getmcpm/cli@0.47.2` (2026-10-12), PATCH by content:
+repository native-client tooling/docs only; production source and dependencies
+are unchanged from v0.47.1. PR #257 merged as `9e96bfd`, byte-identical to
+Astra-reviewed `89fad08`, after all nine checks passed. The maintainer explicitly
+requested "merge #257, release" during the recorded release freeze. Release
+publication and artifact verification are pending; published latest remains
+0.47.1 until those checks complete.
 
-Downloaded tarball integrity and verified npm provenance bind to the expected
-release commit and GitHub Actions signer. The SBOM signature verifies and altered
-bytes are rejected. Actual published 0.47.1 passes clean-install release smoke,
-all 97 public fixtures and 11 modern guarded-process cases with pins/events.
-A throwaway copy of the harness repinned to actual 0.47.1 also passes 40
-comparisons, with two expected unsupported combinations and seven self-checks
-on Linux/arm64. Its locked artifact integrity matches the verified npm tarball.
+**Native validation tooling:** `scripts/native-client/` retains published mcpm
+0.47.1 as its fixed baseline. VS Code 1.141.0 passed 8/8 and Claude Code 2.1.296
+passed 7/7 in separate disposable macOS 26.6.2/arm64 VMs, independently repeated
+against the final reviewed harness with matching host/guest hashes and cleanup.
+Actual traffic identifies VS Code legacy `2025-11-25` and Claude Code modern
+`2026-07-28`. Registry, package-launch and model inputs are test doubles; the
+native apps, global adapters and guard processes are real. Astra fixed timeout
+false passes, evidence correlation/bounds, VM/filter assertions and interruption
+cleanup. Eleven account/VM-free self-checks pass on Node 22/24/26; the source
+suite passed 3,569 tests, typecheck/build. See `docs/NATIVE-CLIENT-VALIDATION.md`.
 
-The committed compatibility harness deliberately retains published 0.47.0 as
-its reproducible baseline: 40 passes/two expected unsupported combinations on
-local Linux/arm64 and hosted Linux/amd64, plus seven self-checks and a launcher
-regression. The implementation's full source suite passed 3,569 tests;
-typecheck/build passed. See `docs/PROTOCOL-VALIDATION.md` for scope and evidence.
+The separate reference-peer harness retains published mcpm 0.47.0: 40 passes,
+two expected unsupported combinations on Linux/arm64 and Linux/amd64, plus seven
+self-checks and a launcher regression. See `docs/PROTOCOL-VALIDATION.md`.
 
-No SDK upgrade, HTTP relay, or full protocol-conformance claim. That reference-peer
-matrix does not measure native clients or model/skill behavior; Jev/Clef stays deferred
-for user subscription/access. The maintainer explicitly requested "merge #248,
-release" during the recorded release freeze. See `CHANGELOG.md` and `docs/GUARD.md`.
-
-**Native validation follow-up (unreleased):** `scripts/native-client/` pins
-VS Code 1.141.0 and Claude Code 2.1.296 in separate disposable macOS 26.6.2/arm64
-VMs. The real apps use mcpm-written global configurations and MCP calls; registry,
-package-launch and model inputs are test doubles. See
-`docs/NATIVE-CLIENT-VALIDATION.md` for execution, evidence and remaining limits.
-This does not measure live model/skill behavior or all client/protocol variants.
+No SDK upgrade, HTTP relay or full protocol-conformance claim. Live provider,
+model/usage-skill behavior, ordinary approval flows and other client/platform
+combinations remain unverified. Jev/Clef stays deferred for subscription/access.
 
 **Previous release context (historical):**
 

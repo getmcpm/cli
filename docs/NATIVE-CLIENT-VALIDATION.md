@@ -1,5 +1,8 @@
 # Native MCP client smoke tests
 
+Repository tooling added in v0.47.2. Its reproducible published mcpm baseline
+remains 0.47.1; a release does not silently repin the native measurements.
+
 This repository harness exercises installed VS Code and Claude Code inside
 separate disposable macOS VM clones. It uses the actual user-global configuration
 paths written by mcpm, records real native MCP traffic and invokes harmless tools.

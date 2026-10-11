@@ -390,8 +390,9 @@ for the pinned published v0.47.0 baseline and official SDK v1/v2 peers. Its name
 stdio matrix passes on Linux/arm64 and Linux/amd64; that matrix does not exercise
 installed native clients or complete protocol conformance. Runtime behavior is unchanged.
 
-Repository contributors can also run the [native client smoke suite](docs/NATIVE-CLIENT-VALIDATION.md)
-for pinned VS Code and Claude Code builds in disposable macOS VMs. It exercises
+v0.47.2 adds the repository [native client smoke suite](docs/NATIVE-CLIENT-VALIDATION.md)
+for pinned VS Code and Claude Code builds in disposable macOS VMs. Its published
+mcpm baseline remains 0.47.1. It exercises
 actual global configurations and MCP calls with synthetic inputs; live models,
 interactive chat and other client/platform combinations require separate tests.
 
