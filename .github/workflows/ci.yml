@@ -34,6 +34,9 @@ jobs:
 
       - run: pnpm run build
 
+      - name: Native-client harness self-checks (no VM or accounts)
+        run: node --test scripts/native-client/self-check.mjs
+
       - run: pnpm run test:coverage
 
       - run: bash scripts/probe-coverage-thresholds.sh

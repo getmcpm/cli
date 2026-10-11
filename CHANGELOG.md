@@ -8,6 +8,14 @@ _Add entries here, never under a stamped version_ — a release commit renames t
 heading, and a branch that wrote beneath it merges without conflict straight into a
 published section (it happened to #170).
 
+### Added
+
+- Native VS Code/Claude Code smoke tooling with pinned public inputs, fresh
+  macOS VM clones, actual global adapter lifecycle/tool calls, scoped fixture
+  consent, deterministic model inputs and bounded evidence. Account-free
+  self-checks run in CI; live providers/chat behavior and other platforms remain
+  outside the measured scope. Production dependencies/runtime are unchanged.
+
 ## [0.47.1] - 2026-10-10
 
 PATCH by content: test tooling and documentation only; production source and

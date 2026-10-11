@@ -1,7 +1,7 @@
 # MCP Registry — Project Context
 
 > This file is automatically read by Claude Code on every session.
-> Keep it updated as decisions are made. Last updated: 2026-10-10.
+> Keep it updated as decisions are made. Last updated: 2026-10-11.
 
 ---
 
@@ -38,6 +38,13 @@ No SDK upgrade, HTTP relay, or full protocol-conformance claim. Installed native
 client/adapter and model/skill behavior remain unverified; Jev/Clef stays deferred
 for user subscription/access. The maintainer explicitly requested "merge #248,
 release" during the recorded release freeze. See `CHANGELOG.md` and `docs/GUARD.md`.
+
+**Native validation follow-up (unreleased):** `scripts/native-client/` pins
+VS Code 1.141.0 and Claude Code 2.1.296 in separate disposable macOS 26.6.2/arm64
+VMs. The real apps use mcpm-written global configurations and MCP calls; registry,
+package-launch and model inputs are test doubles. See
+`docs/NATIVE-CLIENT-VALIDATION.md` for execution, evidence and remaining limits.
+This does not measure live model/skill behavior or all client/protocol variants.
 
 **Previous release context (historical):**
 

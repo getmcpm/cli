@@ -64,6 +64,11 @@ and official SDK v1/v2 peers, run `bash scripts/dogfood-protocol.sh /tmp/mcpm-pr
 Docker provisions the test dependencies, then runs with no network or host
 mounts. See [the matrix, evidence and limits](docs/PROTOCOL-VALIDATION.md).
 
+For installed VS Code/Claude Code checks inside disposable macOS VMs, see
+[native client validation](docs/NATIVE-CLIENT-VALIDATION.md). Its fixture/evidence
+self-checks run with `node --test scripts/native-client/self-check.mjs`; native
+VM runs require the separately pinned public client/runtime payload.
+
 ## Ground rules
 
 - **Tests first, and they must pass.** New behaviour needs a test; bug fixes need a

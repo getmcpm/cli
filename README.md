@@ -390,6 +390,11 @@ for the pinned published v0.47.0 baseline and official SDK v1/v2 peers. Its name
 stdio matrix passes on Linux/arm64 and Linux/amd64; installed native clients and
 complete protocol conformance remain unverified. Runtime behavior is unchanged.
 
+Repository contributors can also run the [native client smoke suite](docs/NATIVE-CLIENT-VALIDATION.md)
+for pinned VS Code and Claude Code builds in disposable macOS VMs. It exercises
+actual global configurations and MCP calls with synthetic inputs; live models,
+interactive chat and other client/platform combinations require separate tests.
+
 Install-time trust scoring catches most poisoned servers before they ship. But what about **rug-pulls** — a server that changes its tool definitions after you've already approved them? Or **prompt-injection in tool responses** — adversarial text embedded in a Slack message, web page, or calendar invite that the agent reads through your trusted MCP server?
 
 `mcpm guard` adds a runtime inspection layer. It wraps every installed MCP server with a stdio relay, scans tool descriptions / responses / arguments for OWASP MCP Top 10 attack patterns, pins each tool's schema at install time, and blocks calls when the live response drifts from the pin (rug-pull defense).
