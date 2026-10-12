@@ -34,7 +34,21 @@ repinned to actual 0.47.2 passes 40 comparisons, with zero failures, two expecte
 unsupported combinations and seven self-checks; its locked integrity matches
 the verified npm tarball. The committed harness baselines remain unchanged.
 
-**Native validation tooling:** `scripts/native-client/` retains published mcpm
+**Unreleased Phase 2B:** VS Code user-global configuration reads JSONC and edits
+only the selected server while preserving unrelated bytes/comments and the raw
+backup. Invalid/duplicate server paths fail before writes; other clients remain
+strict JSON. Microsoft `jsonc-parser` 3.3.1 is the sole new production dependency.
+The explicit native candidate mode binds archive/lock/package/complete dist-file
+identity and exercises actual client input/environment expansion. Independent
+final candidate and default published-baseline runs both pass 8/8 VS Code and
+7/7 Claude Code, with matching hashes, raw preservation and cleanup. Source
+checks: 3,588 tests, typecheck/build and 13 harness self-checks pass. Astra fixed
+inherited-key removal, incomplete chunk binding and a pre-wire cancellation
+fixture race; cancellation requires the current matching request before firing.
+User-global paths are unchanged; portable/Agent Host routes and normal approval,
+provider/model/usage-skill behavior remain unverified.
+
+**Released native validation baseline (v0.47.2):** `scripts/native-client/` retains published mcpm
 0.47.1 as its fixed baseline. VS Code 1.141.0 passed 8/8 and Claude Code 2.1.296
 passed 7/7 in separate disposable macOS 26.6.2/arm64 VMs, independently repeated
 against the final reviewed harness with matching host/guest hashes and cleanup.

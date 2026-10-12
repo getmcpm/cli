@@ -68,6 +68,8 @@ For installed VS Code/Claude Code checks inside disposable macOS VMs, see
 [native client validation](docs/NATIVE-CLIENT-VALIDATION.md). Its fixture/evidence
 self-checks run with `node --test scripts/native-client/self-check.mjs`; native
 VM runs require the separately pinned public client/runtime payload.
+Candidate changes must use the explicit candidate mode and a fresh packed CLI;
+a passing published-baseline run does not validate changed production code.
 
 ## Ground rules
 

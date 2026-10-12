@@ -54,9 +54,25 @@ exports.run = async () => {
     };
     const invoke = (name, token) => vscode.lm.invokeTool(tool(name), { toolInvocationToken: undefined, input: { text: request.text } }, token);
     if (request.case === 'cancel') {
+      const wireFile = path.join(root, 'work/wire.jsonl');
+      const readWire = () => fs.existsSync(wireFile) ? fs.readFileSync(wireFile, 'utf8').split('\n').slice(0, -1).map(line => JSON.parse(line)) : [];
+      const offset = readWire().length;
       const c = new vscode.CancellationTokenSource();
-      const t = setTimeout(() => c.cancel(), 500);
-      try { await assert.rejects(invoke('slow', c.token)); } finally { clearTimeout(t); c.dispose(); }
+      try {
+        // Observe rejection immediately, including when startup fails before the wire call.
+        const rejected = invoke('slow', c.token).then(() => false, () => true);
+        let call;
+        for (let i = 0; i < 100; i++) {
+          call = readWire().slice(offset).find(w => w.direction === 'to-server' && w.message.method === 'tools/call' &&
+            w.message.params?.name === 'slow' && w.message.params.arguments?.text === request.text);
+          if (call) break;
+          await new Promise(resolve => setTimeout(resolve, 100));
+        }
+        assert.ok(call, 'native slow call did not reach the peer before cancellation deadline');
+        receipt.cancelledRequestId = call.message.id;
+        c.cancel();
+        assert.equal(await rejected, true, 'native slow invocation must reject after cancellation');
+      } finally { c.cancel(); c.dispose(); }
       receipt.results.push(await invoke('echo'));
     } else if (request.case === 'restart') {
       const stateFile = path.join(root, 'work/reload.json');

@@ -1,3 +1,9 @@
+export const fixtureInputPrompt = 'native-fixture synthetic input';
+export const fixtureInputValue = 'synthetic input "quoted" \\ path';
+export function fixtureInput(widget) {
+  return !/sign.?in|account|oauth|authentication/i.test(widget.text) && widget.text.includes(fixtureInputPrompt) && widget.value === fixtureInputValue;
+}
+
 export function fixtureApproval(dialog) {
   if (/sign.?in|account|oauth|authentication/i.test(dialog.text)) return undefined;
   if (!/Enable global auto approve\?/.test(dialog.text) && !/native-fixtur/.test(dialog.text)) return undefined;
@@ -31,6 +37,11 @@ export async function approveFixtureDialogs(port, log, signal) {
           if (!button) continue;
           const clicked = await evaluate(`(()=>{const d=Array.from(document.querySelectorAll('.monaco-dialog-box')).find(d=>d.innerText===${JSON.stringify(dialog.text)});const b=d&&Array.from(d.querySelectorAll('.monaco-button')).find(b=>b.innerText===${JSON.stringify(button)});if(b&&b.getAttribute('aria-disabled')!=='true'){b.click();return true;}return false;})()`);
           if (clicked) log.push({ text: dialog.text, button });
+        }
+        const widgets = await evaluate("Array.from(document.querySelectorAll('.quick-input-widget')).filter(w=>w.offsetWidth>0).map(w=>({text:w.innerText,value:w.querySelector('input')?.value}))");
+        if ((widgets || []).some(fixtureInput)) {
+          for (const type of ['keyDown', 'keyUp']) ws.send(JSON.stringify({ id: Math.floor(Math.random() * 1000000), method: 'Input.dispatchKeyEvent', params: { type, key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13, nativeVirtualKeyCode: 13 } }));
+          log.push({ inputPrompt: fixtureInputPrompt, value: fixtureInputValue });
         }
       }
     } catch (e) { if (signal.aborted) return; }

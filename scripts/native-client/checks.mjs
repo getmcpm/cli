@@ -1,8 +1,10 @@
 import assert from 'node:assert/strict';
-import { lstat, readdir, realpath } from 'node:fs/promises';
+import { lstat, readFile, readdir, realpath } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
+import { execFileSync } from 'node:child_process';
 import path from 'node:path';
 
-export async function checkPayload(root) {
+export async function checkPayload(root, candidate = false) {
   root = await realpath(root);
   let bytes = 0, entries = 0;
   async function visit(file) {
@@ -17,8 +19,48 @@ export async function checkPayload(root) {
       bytes += stat.size; assert.ok(bytes <= 1024 * 1024 * 1024, 'payload byte budget exceeded');
     }
   }
-  for (const file of ['node_modules', 'node.tar.gz', 'vscode.zip', 'package.json', 'package-lock.json', 'pins.json']) await visit(path.join(root, file));
+  for (const file of ['node_modules', 'node.tar.gz', 'vscode.zip', 'package.json', 'package-lock.json', 'pins.json', ...(candidate ? ['candidate.tgz'] : [])]) await visit(path.join(root, file));
   return { bytes, entries };
+}
+
+export async function cliArtifact(root, candidate = false) {
+  const pkg = JSON.parse(await readFile(`${root}/node_modules/@getmcpm/cli/package.json`));
+  const lock = JSON.parse(await readFile(`${root}/package-lock.json`)).packages['node_modules/@getmcpm/cli'];
+  assert.equal(pkg.name, '@getmcpm/cli'); assert.equal(pkg.version, lock.version);
+  const result = { kind: candidate ? 'candidate' : 'published', version: pkg.version, integrity: lock.integrity,
+    entrySha256: createHash('sha256').update(await readFile(`${root}/node_modules/@getmcpm/cli/dist/index.js`)).digest('hex') };
+  if (candidate) {
+    const stat = await lstat(`${root}/candidate.tgz`);
+    assert.ok(stat.isFile() && stat.size <= 32 * 1024 * 1024, 'invalid candidate archive');
+    const tar = await readFile(`${root}/candidate.tgz`);
+    result.sha256 = createHash('sha256').update(tar).digest('hex');
+    assert.equal(lock.integrity, 'sha512-' + createHash('sha512').update(tar).digest('base64'), 'candidate integrity mismatch');
+    const packedFiles = execFileSync('/usr/bin/tar', ['-tf', `${root}/candidate.tgz`], { timeout: 10000, maxBuffer: 1024 * 1024 })
+      .toString().trim().split('\n').filter(f => f === 'package/package.json' || (f.startsWith('package/dist/') && !f.endsWith('/')))
+      .map(f => f.slice('package/'.length)).sort();
+    assert.ok(packedFiles.length > 1 && packedFiles.length <= 1024 && new Set(packedFiles).size === packedFiles.length, 'invalid candidate file set');
+    assert.ok(packedFiles.every(f => f.split('/').every(p => p && p !== '.' && p !== '..')), 'invalid candidate path');
+    const installed = `${root}/node_modules/@getmcpm/cli`;
+    const installedFiles = ['package.json'];
+    for (const name of await readdir(`${installed}/dist`, { recursive: true })) {
+      const stat = await lstat(`${installed}/dist/${name}`);
+      assert.ok(stat.isFile() || stat.isDirectory(), 'invalid installed candidate file');
+      if (stat.isFile()) installedFiles.push(`dist/${name}`);
+    }
+    assert.deepEqual(installedFiles.sort(), packedFiles, 'installed candidate file set differs from archive');
+    result.filesSha256 = {};
+    // index.js imports split chunks; bind every shipped dist file as well as the entry.
+    for (const file of packedFiles) {
+      const packed = execFileSync('/usr/bin/tar', ['-xOf', `${root}/candidate.tgz`, `package/${file}`], { timeout: 10000, maxBuffer: 8 * 1024 * 1024 });
+      const hash = createHash('sha256').update(await readFile(`${installed}/${file}`)).digest('hex');
+      assert.equal(hash, createHash('sha256').update(packed).digest('hex'), `installed candidate ${file} differs from archive`);
+      result.filesSha256[file] = hash;
+    }
+    assert.match(lock.resolved, /^file:(?:\.\/)?candidate\.tgz$/);
+    const manifest = JSON.parse(await readFile(`${root}/package.json`));
+    assert.match(manifest.dependencies['@getmcpm/cli'], /^file:(?:\.\/)?candidate\.tgz$/);
+  }
+  return result;
 }
 
 export function assertEcho(content, expected) {
@@ -45,12 +87,13 @@ export function assertGuestBoundary(boundary) {
   assert.equal(boundary.pfRules.trim(), 'block drop all', 'unexpected guest packet-filter rules');
 }
 
-export function validateReport(report, client, pins, hashes, evidence) {
+export function validateReport(report, client, pins, hashes, evidence, artifact) {
   const expected = ['install-and-native-echo', 'enable-and-native-block-recovery', 'warn-and-forward', 'cancel-and-recover',
     ...(client === 'vscode' ? ['restart-without-cached-result'] : []), 'update-preserves-wrap-and-settings', 'schema-drift-and-recovery', 'disable-restores-launch-and-remove-preserves-settings'];
   assert.equal(report.schemaVersion, 1);
   assert.equal(report.client, client); assert.equal(report.clientVersion, client === 'vscode' ? pins.vscode.version : pins.claudeCode);
-  assert.equal(report.cliVersion, pins.mcpm); assert.equal(report.node, 'v' + pins.node.version);
+  assert.equal(report.cliVersion, artifact?.version ?? pins.mcpm); assert.equal(report.node, 'v' + pins.node.version);
+  if (artifact) assert.deepEqual(report.cliArtifact, artifact, 'guest CLI artifact differs from host');
   assert.equal(report.platform, 'darwin'); assert.equal(report.arch, 'arm64');
   assertGuestBoundary(report.boundary); assert.deepEqual(report.hashes, hashes, 'guest payload differs from host');
   assert.deepEqual(report.cases.map(c => c.id), expected, 'incomplete native matrix');
