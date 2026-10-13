@@ -23,12 +23,12 @@ export async function gateway(work, request) {
       assert.deepEqual(completed.map(c => c.tool_use_id), issued.slice(0, completed.length).map(c => c.id), 'uncorrelated or duplicate tool result');
       results = completed;
       const step = completed.length;
-      const done = step >= (request.case === 'block' ? 2 : 1);
+      const done = step >= (['block', 'one-shot'].includes(request.case) ? 2 : 1);
       const desired = request.case === 'block' ? (step ? 'echo' : 'attack') : request.case === 'cancel' ? 'slow' : ['attack', 'warn'].includes(request.case) ? request.case : 'echo';
       const tool = (data.tools || []).find(t => t.name?.endsWith('__' + desired));
       if (!done && !tool) throw Error(`Native ${desired} tool missing from Claude request`);
       const content = done ? { type: 'text', text: 'Synthetic gateway observed the native tool result.' }
-        : { type: 'tool_use', id: `native-${step}`, name: tool.name, input: { text: request.text } };
+        : { type: 'tool_use', id: `native-${step}`, name: tool.name, input: { text: request.case === 'one-shot' ? `${request.text}-${step + 1}` : request.text } };
       if (!done) {
         if (issued[step]) assert.deepEqual(content, issued[step], 'changed tool-use retry');
         else issued.push(content);

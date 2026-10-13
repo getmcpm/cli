@@ -87,8 +87,44 @@ export function assertGuestBoundary(boundary) {
   assert.equal(boundary.pfRules.trim(), 'block drop all', 'unexpected guest packet-filter rules');
 }
 
+export const approvalCases = ['one-shot-reprompts', 'deny-and-cancel-before-dispatch', 'persistent-exact-tool-permission', 'guard-block-after-approval'];
+
+export function assertConsentObservation(obs, client, action, tool) {
+  assert.equal(obs.execution.timedOut, false, 'consent deadline is not a result');
+  assert.equal(obs.execution.status, 0, obs.execution.stderr + obs.execution.stdout);
+  assert.equal(obs.execution.failure, undefined); assert.equal(obs.receipt?.status, 'pass'); assert.equal(obs.receipt.approvalError, undefined);
+  assert.deepEqual(obs.request.consent, { action, tool }); assertNativeWire(obs.wire, client);
+  const decisions = obs.receipt.fixtureApprovals;
+  assert.ok(Array.isArray(decisions)); assert.ok(decisions.every(d => !d.error));
+  const nonces = obs.request.case === 'one-shot' ? [obs.request.text + '-1', obs.request.text + '-2'] : [obs.request.text];
+  assert.equal(decisions.length, action === 'persisted' ? 0 : nonces.length, 'missing, repeated or unexpected permission decision');
+  for (const [i, decision] of decisions.entries()) {
+    assert.equal(decision.action, action); assert.equal(decision.tool, tool); assert.equal(decision.text, nonces[i]);
+    if (client === 'claude-code' || action !== 'always') assert.equal(decision.callsBeforeDecision, 0, 'tool dispatched before permission');
+  }
+  if (client === 'vscode') { assert.equal(obs.clientSettings['chat.tools.global.autoApprove'], false); assert.equal(obs.clientSettings['chat.permissions.default'], 'default'); }
+  else { assert.equal(obs.receipt.permissionMode, 'default'); assert.equal(obs.execution.ptyVerified, true); assert.equal(obs.execution.exiting, true); }
+  const calls = obs.wire.filter(w => w.direction === 'to-server' && w.message.method === 'tools/call');
+  if (['deny', 'cancel'].includes(action)) assert.equal(calls.length, 0, 'refused tool reached server');
+  else {
+    assert.deepEqual(calls.map(w => w.message.params.name), obs.request.case === 'block' ? ['attack', 'echo'] : nonces.map(() => tool));
+    assert.deepEqual(calls.map(w => w.message.params.arguments?.text), obs.request.case === 'block' ? [obs.request.text, obs.request.text] : nonces, 'wrong consent arguments reached server');
+    const results = client === 'vscode' ? obs.receipt.results : obs.receipt.responses;
+    const echoes = (obs.request.case === 'block' ? results.slice(-1) : results).map((result, i) => {
+      const content = result.content;
+      return assertEcho(typeof content === 'string' ? [{ type: 'text', text: content }] : content, { text: nonces[i], version: obs.request.version });
+    });
+    assert.equal(echoes.length, nonces.length);
+    if (obs.request.case === 'one-shot') assert.equal(echoes[0].pid, echoes[1].pid, 'one-shot check must stay in the same native session');
+    if (client === 'claude-code' && ['always', 'persisted'].includes(action)) {
+      const name = obs.receipt.gateway.flatMap(g => g.data?.tools ?? []).find(t => t.name.endsWith('__echo'))?.name;
+      assert.ok(name); assert.deepEqual(obs.clientSettings?.permissions?.allow, [name], 'persistent grant must cover exactly echo');
+    }
+  }
+}
+
 export function validateReport(report, client, pins, hashes, evidence, artifact) {
-  const expected = ['install-and-native-echo', 'enable-and-native-block-recovery', 'warn-and-forward', 'cancel-and-recover',
+  const expected = report.suite === 'approvals' ? approvalCases : ['install-and-native-echo', 'enable-and-native-block-recovery', 'warn-and-forward', 'cancel-and-recover',
     ...(client === 'vscode' ? ['restart-without-cached-result'] : []), 'update-preserves-wrap-and-settings', 'schema-drift-and-recovery', 'disable-restores-launch-and-remove-preserves-settings'];
   assert.equal(report.schemaVersion, 1);
   assert.equal(report.client, client); assert.equal(report.clientVersion, client === 'vscode' ? pins.vscode.version : pins.claudeCode);
@@ -102,6 +138,28 @@ export function validateReport(report, client, pins, hashes, evidence, artifact)
   const references = report.cases.flatMap(c => { assert.ok(Array.isArray(c.evidence) && c.evidence.length > 0, 'missing case evidence'); return c.evidence; });
   assert.equal(new Set(references).size, references.length, 'case evidence was overwritten');
   assert.deepEqual(references.sort(), Object.keys(evidence).filter(f => f !== 'report.json').sort(), 'incomplete case evidence export');
+  if (report.suite === 'approvals') {
+    const plans = [[['allow', 'echo']], [['deny', 'echo'], ['cancel', 'echo']],
+      [['always', 'echo'], ['persisted', 'echo'], ['deny', 'warn']], [['allow', 'attack']]];
+    const nonces = new Set();
+    report.cases.forEach((row, i) => {
+      assert.equal(row.evidence.length, plans[i].length, 'incomplete approval observations');
+      row.evidence.forEach((file, j) => {
+        const obs = evidence[file]; assertConsentObservation(obs, client, ...plans[i][j]);
+        if (i === 0) assert.equal(obs.request.case, 'one-shot', 'one-shot requires two calls within one client session');
+        assert.ok(obs.request.text && !nonces.has(obs.request.text), 'reused consent arguments'); nonces.add(obs.request.text);
+      });
+    });
+    const rows = report.cases[2].evidence.slice(0, 2).map(file => evidence[file]);
+    const echoes = rows.map(obs => {
+      const content = client === 'vscode' ? obs.receipt.results.at(-1).content : obs.receipt.responses.at(-1).content;
+      return assertEcho(typeof content === 'string' ? [{ type: 'text', text: content }] : content, { text: obs.request.text, version: obs.request.version });
+    });
+    assert.notEqual(echoes[0].pid, echoes[1].pid, 'restart reused peer process');
+    const blocked = evidence[report.cases[3].evidence[0]];
+    assert.match(JSON.stringify(blocked.receipt), /BLOCKED by mcpm-guard/);
+    assert.ok(blocked.events.some(e => e.action === 'block'), 'missing guard block event');
+  }
 }
 
 export function evidenceFiles(value) {

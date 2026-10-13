@@ -97,6 +97,51 @@ the original raw backup are preserved.
 
 ## Boundary and fixture scope
 
+### Default consent suite (Phase 2C)
+
+Run the separate approval suite with the same prepared payload and a fresh
+evidence directory:
+
+```sh
+node scripts/native-client/run-vm.mjs /path/to/tart \
+  /tmp/mcpm-native-vms /tmp/mcpm-native-payload /tmp/mcpm-consent-evidence \
+  --approvals
+```
+
+Add `--candidate` when using a freshly packed candidate payload. `--approvals`
+and `--realistic-config` are separate suites. The default baseline and existing
+lifecycle cases retain their original behavior and pins.
+
+The consent suite disables VS Code global auto-approval and uses native Tool
+API confirmation dialogs. An exact echo grant is made through the normal
+**Manage Tool Approval** UI at profile scope. It does not edit the approval
+database. Inline chat and Agent Host permission flows remain separate.
+
+Claude Code runs its interactive terminal UI with `--permission-mode default`,
+without print mode, permission bypass flags, or seeded tool grants. The guest's
+built-in Expect provides a real 120×40 PTY; the driver records raw output and
+the current rendered screen, including Unicode, cursor movement and erasure.
+Only the exact synthetic fixture choices are selected. Workspace trust and
+the synthetic loopback API-key prompt are recorded separately. The native
+client writes its exact-tool grant to local settings; the harness only reads it.
+The Messages gateway supplies deterministic responses without a live provider.
+
+| Case | Required observation |
+| --- | --- |
+| One-shot re-prompts | Two different echo arguments in one client session each require visible approval, dispatch once and return the exact value from the same peer PID. |
+| Deny and Escape | Refuse and cancel separately at the visible permission prompt; neither dispatches a tool call. Initialization/discovery traffic is allowed. |
+| Persistent exact-tool grant | Grant echo through the client UI, restart the client with a new nonce and peer PID, and call echo without another prompt. An ungranted warn tool still prompts and is denied. |
+| Guard after approval | Approve the attack fixture through the native UI, observe the peer call and guard block, then recover with the previously approved echo. |
+
+Consent decisions must precede dispatch. Missing/repeated decisions, mismatched
+arguments, unexpected grants, timeout kills, reused observations and incomplete
+case reports fail validation. Negative Claude decisions can stop the turn
+without returning a tool result to the gateway. They require a usable native
+prompt and orderly exit, rather than an invented denial response.
+
+Native Phase 2C measurements are pending. Mock PTY and harness self-checks do
+not establish installed-client compatibility.
+
 The runner clones the immutable image independently for **VS Code first, then
 Claude Code**, using the base image's synthetic `admin` account. Each clone is
 stopped/deleted after its client completes, fails, or the runner receives

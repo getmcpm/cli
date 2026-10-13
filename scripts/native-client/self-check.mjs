@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { fixtureMetadata, serverName } from './fixture-registry.mjs';
-import { assertEcho, assertNativeWire, assertGuestBoundary, checkPayload, cliArtifact, evidenceFiles, validateReport } from './checks.mjs';
+import { assertEcho, assertNativeWire, assertGuestBoundary, assertConsentObservation, checkPayload, cliArtifact, evidenceFiles, validateReport } from './checks.mjs';
 import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { mkdir, mkdtemp, readFile, rm, symlink, truncate, writeFile } from 'node:fs/promises';
@@ -12,6 +12,92 @@ import { fixtureApproval, fixtureInput, fixtureInputPrompt, fixtureInputValue } 
 import { command } from './command.mjs';
 import { runInNewContext } from 'node:vm';
 import path from 'node:path';
+import { readFileSync } from 'node:fs';
+import { consentButton } from './consent-vscode.mjs';
+import { TerminalScreen } from './terminal.mjs';
+import { claudeConsent, claudeStartup, interactiveClaude, terminalChoices } from './consent-claude.mjs';
+
+test('macOS PTY driver uses the visible choice and exits after success or pre-dispatch refusal', { skip: process.platform !== 'darwin', timeout: 10000 }, async () => {
+  const work = await mkdtemp(tmpdir() + '/mcpm-consent-pty-');
+  try {
+    const script = `${work}/mock.mjs`;
+    await writeFile(script, `import fs from 'node:fs';
+const [work,action]=process.argv.slice(2);process.stdin.setRawMode(true);let input='';let count=0;let done=false;
+const prompt=()=>process.stdout.write('\\x1b[2J\\x1b[Hio.github.getmcpm/native-fixture — echo Tool:\\r\\ntext: nonce'+(action==='one-shot'?'-'+(count+1):'')+'\\r\\nDo you want to proceed?\\r\\n  1. No\\r\\n❯ 2. Yes\\r\\n');prompt();
+process.stdin.on('data',b=>{input+=b.toString();if(!done&&(input.includes('\\r')||input.includes('\\x1b'))){count++;fs.appendFileSync(work+'/selected',input);input='';
+if(action==='allow'||action==='one-shot'){fs.writeFileSync(work+'/result',String(count));if(action==='one-shot'&&count===1){prompt();return;}done=true;process.stdout.write('\\x1b[2J\\x1b[HSynthetic gateway observed the native tool result.\\r\\n❯ \\r\\n');}
+else {done=true;process.stdout.write('\\x1b[2J\\x1b[HInterrupted. What should Claude do instead?\\r\\n❯ \\r\\n');}}
+else if(done&&input.includes('/exit\\r'))process.exit(0);});`);
+    for (const action of ['allow', 'deny', 'cancel', 'one-shot']) {
+      for (const name of ['result', 'selected']) await rm(`${work}/${name}`, { force: true });
+      const model = { get results() { try { return Array(Number(readFileSync(`${work}/result`, 'utf8'))).fill({}); } catch { return []; } } };
+      const result = await interactiveClaude(process.execPath, [script, work, action],
+        { PATH: process.env.PATH, HOME: work, ANTHROPIC_BASE_URL: 'http://127.0.0.1:1', ANTHROPIC_API_KEY: 'synthetic-native-fixture-key' }, work, work,
+        { case: action === 'one-shot' ? action : 'echo', text: 'nonce', consent: { action: action === 'one-shot' ? 'allow' : action, tool: 'echo' } }, model);
+      assert.equal(result.status, 0, result.stdout + result.stderr + (result.failure ?? '')); assert.equal(result.exiting, true); assert.equal(result.ptyVerified, true);
+      assert.equal(result.decisions.length, action === 'one-shot' ? 2 : 1); assert.equal(result.decisions[0].action, action === 'one-shot' ? 'allow' : action);
+      assert.equal(await readFile(`${work}/selected`, 'utf8'), action === 'one-shot' ? '2\r2\r' : action === 'cancel' ? '\x1b' : action === 'deny' ? '1\r' : '2\r');
+    }
+  } finally { await rm(work, { recursive: true, force: true }); }
+});
+
+test('native consent selectors accept only the current fixture and explicit narrow decision', () => {
+  const dialog = { text: 'Run `echo`\nnative-fixture: Synthetic compatibility fixture.', buttons: ['Yes', 'Cancel'] };
+  assert.equal(consentButton(dialog, { action: 'allow', tool: 'echo' }), 'Yes');
+  assert.equal(consentButton(dialog, { action: 'deny', tool: 'echo' }), 'Cancel');
+  assert.equal(consentButton(dialog, { action: 'cancel', tool: 'echo' }), 'Cancel');
+  assert.equal(consentButton(dialog, { action: 'persisted', tool: 'echo' }), undefined);
+  for (const text of ['Run `warn`\nnative-fixture: Synthetic compatibility fixture.', 'Run `echo`\nunrelated', dialog.text + '\nSign in to account', 'Enable global auto approve?']) {
+    assert.equal(consentButton({ ...dialog, text }, { action: 'allow', tool: 'echo' }), undefined);
+  }
+  const screen = 'io.github.getmcpm/native-fixture — echo Tool:\ntext: nonce\nDo you want to proceed?\n  1. No\n❯ 2. Yes\n  3. Yes, and don\'t ask again for io.github.getmcpm/native-fixture — echo commands in /opt/mcpm-native';
+  const request = { text: 'nonce', consent: { action: 'allow', tool: 'echo' } };
+  assert.equal(claudeConsent(screen, request).key, '2');
+  assert.equal(claudeConsent(screen, { ...request, consent: { action: 'deny', tool: 'echo' } }).key, '1');
+  assert.equal(claudeConsent(screen, { ...request, consent: { action: 'always', tool: 'echo' } }).key, '3');
+  assert.equal(claudeConsent(screen, { ...request, consent: { action: 'cancel', tool: 'echo' } }).key, '\x1b');
+  assert.throws(() => claudeConsent(screen, { ...request, consent: { action: 'persisted', tool: 'echo' } }), /prompted again/);
+  assert.equal(claudeConsent(screen, { ...request, text: 'different' }), undefined);
+  assert.equal(claudeConsent(screen.replaceAll('native-fixture', 'unrelated'), request), undefined);
+  assert.equal(claudeConsent(screen + '\nBash command\nunexpected command\nDo you want to proceed?\n❯ 1. Yes\n 2. No', request), undefined);
+  assert.equal(claudeConsent(screen.replace('Do you want to proceed?', 'Tool completed'), request), undefined);
+  const startup = 'Accessing workspace:\n/opt/mcpm-native\nQuick safety check:\n  Yes, I trust this folder\n❯ No, exit';
+  assert.equal(claudeStartup(startup, '/opt/mcpm-native').key, '\x1b[A');
+  assert.equal(claudeStartup(startup, '/elsewhere'), undefined);
+  assert.equal(claudeStartup('Detected a custom API key in your environment\nANTHROPIC_API_KEY: synthetic\nDo you want to use this API key?\n  Yes\n❯ No (recommended)', '/opt/mcpm-native').key, '\x1b[A');
+  assert.deepEqual(terminalChoices('❯ 1. Yes, and don\'t ask again\n       for this exact tool\n  2. No'), [{ key: '1', label: "Yes, and don't ask again for this exact tool" }, { key: '2', label: 'No' }]);
+});
+
+test('terminal screen tracks chunked cursor movement, erasure and scrolling without stale prompts', () => {
+  const screen = new TerminalScreen(40, 4);
+  screen.feed('old permission\r\ncurrent');
+  screen.feed('\x1b[1A\r\x1b[2Knew permission');
+  assert.equal(screen.text, 'new permission\ncurrent');
+  screen.feed('\x1b[2'); screen.feed('J\x1b[Hfresh');
+  assert.equal(screen.text, 'fresh'); assert.ok(!screen.text.includes('permission'));
+  screen.feed('\x1b]0;hidden title\x07\r\nsecond\r\nthird\r\nfourth\r\nfifth');
+  assert.equal(screen.text, 'second\nthird\nfourth\nfifth');
+  const margin = new TerminalScreen(5, 4); margin.feed('12345\r\nnext'); assert.equal(margin.text, '12345\nnext');
+  const wrap = new TerminalScreen(5, 4); wrap.feed('123456'); assert.equal(wrap.text, '12345\n6');
+});
+
+test('consent proof rejects dispatch before permission, silent bypass, mismatched arguments and deadlines', () => {
+  const obs = { request: { case: 'echo', text: 'nonce', version: '1.0.0', consent: { action: 'allow', tool: 'echo' } }, execution: { status: 0, timedOut: false },
+    receipt: { status: 'pass', fixtureApprovals: [{ action: 'allow', tool: 'echo', text: 'nonce', callsBeforeDecision: 0 }], results: [{ content: [{ type: 'text', text: '{"text":"nonce","version":"1.0.0","marker":"retained","pid":1}' }] }] },
+    clientSettings: { 'chat.tools.global.autoApprove': false, 'chat.permissions.default': 'default' },
+    wire: [{ direction: 'to-server', message: { method: 'initialize', params: { clientInfo: { name: 'Visual Studio Code' } } } },
+      { direction: 'to-server', message: { method: 'tools/call', params: { name: 'echo', arguments: { text: 'nonce' } } } }] };
+  assertConsentObservation(obs, 'vscode', 'allow', 'echo');
+  const changed = structuredClone(obs); changed.receipt.fixtureApprovals[0].callsBeforeDecision = 1;
+  assert.throws(() => assertConsentObservation(changed, 'vscode', 'allow', 'echo'), /dispatched before permission/);
+  for (const change of [{ execution: { status: 0, timedOut: true } }, { receipt: { status: 'pass', fixtureApprovals: [] } },
+    { clientSettings: { 'chat.tools.global.autoApprove': true } }]) assert.throws(() => assertConsentObservation({ ...obs, ...change }, 'vscode', 'allow', 'echo'));
+  const denied = structuredClone(obs); denied.request.consent.action = 'deny'; denied.receipt.fixtureApprovals[0].action = 'deny';
+  assert.throws(() => assertConsentObservation(denied, 'vscode', 'deny', 'echo'), /refused tool reached server/);
+  denied.wire.pop(); assertConsentObservation(denied, 'vscode', 'deny', 'echo');
+  const wrong = structuredClone(obs); wrong.wire[1].message.params.arguments.text = 'other';
+  assert.throws(() => assertConsentObservation(wrong, 'vscode', 'allow', 'echo'), /wrong consent arguments/);
+});
 
 test('fixture registry keeps exact and latest versions distinct and denies external requests', () => {
   const base = 'https://registry.modelcontextprotocol.io/v0.1/servers/' + encodeURIComponent(serverName) + '/versions/';
