@@ -1,5 +1,8 @@
 # Sandboxed stdio compatibility validation
 
+Repository test tooling added in v0.47.1. The reference baseline deliberately
+remains published v0.47.0; a release does not silently repin the matrix.
+
 Run the pinned **published** CLI against official SDK reference peers, both
 directly and through `mcpm guard run --inner`:
 
@@ -98,15 +101,15 @@ local harness output, not a public CLI contract.
 
 ## Remaining verification
 
-Installed native clients and their configuration-adapter lifecycles, model/skill
+The separate [native client harness](NATIVE-CLIENT-VALIDATION.md) exercises named
+VS Code/Claude Code builds and their actual global adapters in disposable macOS
+VMs, using synthetic dependencies. Other native clients/platforms, model/skill
 behavior, HTTP/OAuth, and universal protocol conformance remain **not tested**.
 This matrix does not cover every method, extension, subscription or repeated
 MRTR depth; it does not claim complete schema validation or detection coverage.
 It neither upgrades `mcpm serve` nor translates protocols in the guard.
 
-Next, use a disposable macOS VM with synthetic settings to validate VS Code and
-Claude Code, including real harmless tool calls and the user-global files mcpm
-actually manages. Isolated-profile connection tests alone do not establish
-adapter compatibility. Expand to other clients/platforms only with named
-versions and observed results; test-account access may be needed for real agent
-tool invocation.
+Native results are separate from this reference-peer matrix. Isolated-profile
+connection tests alone do not establish adapter compatibility. Expand to other
+clients/platforms only with named versions and observed results; real provider
+or agent behavior may need dedicated test-account access.

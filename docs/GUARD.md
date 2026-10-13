@@ -79,8 +79,10 @@ upgrade or negotiation behavior is included in this change.
 The separate [sandbox compatibility harness](PROTOCOL-VALIDATION.md) compares
 the pinned published release with official SDK v1/v2 peers and Inspector over
 stdio. It records named protocol outcomes, guard errors and persistence under
-container isolation. Installed native clients and full conformance remain
-unverified; the matrix states the tested operations and exclusions.
+container isolation. The separate [native client suite](NATIVE-CLIENT-VALIDATION.md)
+exercises named VS Code/Claude Code builds, their real global configurations and
+MCP calls in disposable macOS VMs. Other clients/platforms, live model behavior
+and full conformance remain unverified; each matrix states its tested scope.
 
 ### Full message flow
 
@@ -251,7 +253,7 @@ Use during debugging when guard is in the way and you want to turn it off withou
 ### `mcpm guard cleanup [--yes]`
 Prunes pin entries for servers no longer installed in any client config. Dry-run by default; pass `--yes` to apply.
 
-A server whose config entry is malformed still counts as installed, so its pin is kept. A detected client's config that **cannot be read** (unparseable — mcpm reads configs as strict JSON, so comments and trailing commas count — or a permission error, including on the directory that holds it) holds servers cleanup cannot see. So if any pin is held by no readable config, cleanup refuses — in the dry run and with `--yes` alike — names each unreadable client, its config path and the error, prunes nothing, and exits `1`: that pin cannot be told apart from one belonging to a live server there, and pruning it would erase the server's rug-pull baseline. Fix the config and re-run. If every pin is held by a readable config, the unreadable one cannot change the result: cleanup reports nothing to prune, notes the unreadable config, and exits `0`. A client with no config file at all is not an error. A refusal because `pins.json` fails its integrity check also exits `1`.
+A server whose config entry is malformed still counts as installed, so its pin is kept. A detected client's config that **cannot be read** (unparseable — VS Code permits JSONC comments/trailing commas, while the other clients use strict JSON — or a permission error, including on the directory that holds it) holds servers cleanup cannot see. So if any pin is held by no readable config, cleanup refuses — in the dry run and with `--yes` alike — names each unreadable client, its config path and the error, prunes nothing, and exits `1`: that pin cannot be told apart from one belonging to a live server there, and pruning it would erase the server's rug-pull baseline. Fix the config and re-run. If every pin is held by a readable config, the unreadable one cannot change the result: cleanup reports nothing to prune, notes the unreadable config, and exits `0`. A client with no config file at all is not an error. A refusal because `pins.json` fails its integrity check also exits `1`.
 
 ### `mcpm guard inspect [file] [--json]`
 

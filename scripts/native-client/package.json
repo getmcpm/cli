@@ -1,0 +1,10 @@
+{
+  "name": "mcpm-native-client-validation",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@getmcpm/cli": "0.47.1",
+    "@anthropic-ai/claude-code": "2.1.296",
+    "jsonc-parser": "3.3.1"
+  }
+}

@@ -385,6 +385,23 @@ embedded sampling/elicitation requests. Unknown embedded request shapes produce
 a coverage warning. See the [protocol coverage matrix](docs/GUARD.md#protocol-and-carrier-coverage)
 for the exact stdio boundaries and remaining gaps.
 
+v0.47.1 adds a reproducible [sandbox compatibility harness](docs/PROTOCOL-VALIDATION.md)
+for the pinned published v0.47.0 baseline and official SDK v1/v2 peers. Its named
+stdio matrix passes on Linux/arm64 and Linux/amd64; that matrix does not exercise
+installed native clients or complete protocol conformance. Runtime behavior is unchanged.
+
+v0.47.2 adds the repository [native client smoke suite](docs/NATIVE-CLIENT-VALIDATION.md)
+for pinned VS Code and Claude Code builds in disposable macOS VMs. Its published
+mcpm baseline remains 0.47.1. It exercises
+actual global configurations and MCP calls with synthetic inputs; live models,
+interactive chat and other client/platform combinations require separate tests.
+
+v0.47.3 fixes VS Code user-global JSONC configuration edits so unrelated
+comments/settings and the raw backup survive the MCP lifecycle. It also adds
+separate native approval/denial tests: four cases each in the pinned VS Code
+and Claude Code builds, with synthetic model responses. Native macOS dialogs,
+workspace/server trust, inline chat/Agent Host and live providers remain unverified.
+
 Install-time trust scoring catches most poisoned servers before they ship. But what about **rug-pulls** — a server that changes its tool definitions after you've already approved them? Or **prompt-injection in tool responses** — adversarial text embedded in a Slack message, web page, or calendar invite that the agent reads through your trusted MCP server?
 
 `mcpm guard` adds a runtime inspection layer. It wraps every installed MCP server with a stdio relay, scans tool descriptions / responses / arguments for OWASP MCP Top 10 attack patterns, pins each tool's schema at install time, and blocks calls when the live response drifts from the pin (rug-pull defense).
@@ -582,6 +599,13 @@ permission grants, model subscription or external decision service.
 | VS Code | `~/Library/Application Support/Code/User/mcp.json` |
 | Windsurf | `~/.codeium/windsurf/mcp_config.json` |
 | Gemini CLI | `~/.gemini/settings.json` (user-global `mcpServers`) |
+
+VS Code's managed `mcp.json` supports JSONC comments and trailing commas. Changes
+edit the selected server while preserving unrelated settings/comments and the
+original backup. Other clients retain strict JSON parsing. Variable references
+are retained for the client to resolve. Portable/workspace configurations and
+Copilot Agent Host configuration paths are not managed by these adapters; see
+the [native validation scope](docs/NATIVE-CLIENT-VALIDATION.md).
 
 Linux and Windows paths are also supported. See `mcpm doctor` to verify which clients are detected on your system.
 
