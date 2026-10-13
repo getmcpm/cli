@@ -104,6 +104,25 @@ test('VS Code consent observer retries a transient startup fetch timeout', async
   } finally { globalThis.fetch = original; await rm(work, { recursive: true, force: true }); }
 });
 
+test('VS Code shutdown connection error events never become empty approval decisions', async () => {
+  const work = await mkdtemp(tmpdir() + '/mcpm-consent-socket-');
+  const controller = new AbortController(), originalFetch = globalThis.fetch, originalSocket = globalThis.WebSocket, log = [];
+  let attempts = 0;
+  try {
+    await writeFile(`${work}/consent-intent.json`, JSON.stringify({ text: 'nonce', tool: 'echo', action: 'persisted' }));
+    globalThis.fetch = async () => { if (++attempts === 2) controller.abort(); return { json: async () => [{ type: 'page', url: 'vscode-file:fixture', webSocketDebuggerUrl: 'ws://fixture' }] }; };
+    globalThis.WebSocket = class {
+      addEventListener(type, listener) { if (type === 'error') setImmediate(() => listener(new Event('error'))); }
+      close() {}
+    };
+    await consentDialogs(work, log, controller.signal);
+    assert.equal(attempts, 2); assert.deepEqual(log, []);
+    globalThis.fetch = async () => { throw { message: 'unexpected fixture failure' }; };
+    await assert.rejects(consentDialogs(work, log, new AbortController().signal), e => e.message === 'unexpected fixture failure');
+    assert.deepEqual(log, [{ error: 'unexpected fixture failure' }]);
+  } finally { globalThis.fetch = originalFetch; globalThis.WebSocket = originalSocket; await rm(work, { recursive: true, force: true }); }
+});
+
 test('terminal screen tracks chunked cursor movement, erasure and scrolling without stale prompts', () => {
   const screen = new TerminalScreen(40, 4);
   screen.feed('old permission\r\ncurrent');

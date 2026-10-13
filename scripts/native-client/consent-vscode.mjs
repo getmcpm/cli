@@ -35,7 +35,7 @@ export async function consentDialogs(work, log, signal, diagnostic = {}) {
       await new Promise((resolve, reject) => {
         const timer = setTimeout(() => reject(Error('consent UI connection deadline')), 1000);
         ws.addEventListener('open', () => { clearTimeout(timer); resolve(); }, { once: true });
-        ws.addEventListener('error', e => { clearTimeout(timer); reject(e); }, { once: true });
+        ws.addEventListener('error', () => { clearTimeout(timer); reject(Error('consent UI connection failed')); }, { once: true });
       });
       let serial = 0;
       const evaluate = expression => new Promise((resolve, reject) => {
@@ -75,7 +75,7 @@ export async function consentDialogs(work, log, signal, diagnostic = {}) {
       }
     } catch (e) {
       if (signal.aborted) return;
-      if (e.code !== 'ENOENT' && e.name !== 'TimeoutError' && !/fetch failed|deadline|ECONNREFUSED/.test(e.message)) { log.push({ error: e.stack }); throw e; }
+      if (e.code !== 'ENOENT' && e.name !== 'TimeoutError' && !/fetch failed|deadline|ECONNREFUSED|consent UI connection failed/.test(e.message)) { log.push({ error: String(e?.stack ?? e?.message ?? e) }); throw e; }
     } finally { ws?.close(); }
     await new Promise(r => setTimeout(r, 100));
   }

@@ -98,7 +98,7 @@ async function native(caseName, version, consent) {
   if (client === 'vscode') {
     const approvalLog = [], approvalUI = {}, controller = new AbortController();
     let approvalError;
-    const approval = (approvals ? consentDialogs(work, approvalLog, controller.signal, approvalUI) : approveFixtureDialogs(9222, approvalLog, controller.signal)).catch(e => { approvalError = e.stack; });
+    const approval = (approvals ? consentDialogs(work, approvalLog, controller.signal, approvalUI) : approveFixtureDialogs(9222, approvalLog, controller.signal)).catch(e => { approvalError = String(e?.stack ?? e?.message ?? e); });
     try {
       execution = await execute('/Applications/Visual Studio Code.app/Contents/MacOS/Code', [root, '--user-data-dir', `${homedir()}/Library/Application Support/Code`,
         '--extensions-dir', `${root}/extensions`, '--extensionDevelopmentPath', `${root}/vscode-extension`, '--remote-debugging-port=9222',

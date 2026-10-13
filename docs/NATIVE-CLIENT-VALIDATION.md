@@ -172,7 +172,7 @@ observations per client, on macOS
 finished normally without deadline kills. Host/guest fixture hashes match,
 and both clones were stopped/deleted. The original published-baseline suite
 was then repeated against the same harness: **8/8 VS Code and 7/7 Claude Code**
-passed, with matching hashes and cleanup. All 21 account/VM-free harness checks
+passed, with matching hashes and cleanup. All 22 account/VM-free harness checks
 pass on Node 22, 24 and 26; mocks remain separate from the native evidence.
 
 Review corrected native dialog title ordering/capitalization, approval-tree
@@ -180,7 +180,14 @@ pointer interaction and accessible labels, terminal input/redraw timing,
 interactive startup racing MCP discovery, and the separate synthetic title
 request. Validation now requires the actual Claude launch/prompt readiness,
 the VS Code checkbox transition, and a refusal receipt. Earlier exploratory
-failures and one interrupted attempt are superseded; none count as passes.
+failures and one interrupted attempt are superseded; none count as passes. An
+independent candidate repeat later exposed a shutdown race: a raw CDP socket
+error event had no stack and serialized as an empty approval record, falsely
+failing a successful persisted echo. Connection errors now follow the bounded
+transport retry path, and fatal errors always retain a diagnostic. The
+zero-decision requirement after restart is unchanged. The same candidate
+then passed all four cases in both clients. The unchanged published baseline
+also passed 8/8 VS Code and 7/7 Claude Code again after this fix.
 
 The runner clones the immutable image independently for **VS Code first, then
 Claude Code**, using the base image's synthetic `admin` account. Each clone is

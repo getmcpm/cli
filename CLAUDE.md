@@ -55,13 +55,16 @@ deny/Escape before dispatch, exact echo grants surviving restart while warn
 still prompts, and guard blocking after client approval with echo recovery.
 The reviewed macOS 26.6.2/arm64 run has matching host/guest hashes and clean
 clone cleanup. The unchanged published-baseline suite also passes 8/8 VS Code
-and 7/7 Claude Code; 21 harness checks pass on Node 22/24/26. VS Code uses custom
+and 7/7 Claude Code; 22 harness checks pass on Node 22/24/26. VS Code uses custom
 in-app Tool API dialogs and the normal profile approval manager; native macOS
 dialog rendering, workspace/server trust integration, inline chat and Agent
 Host remain unverified. Claude uses a real interactive PTY and synthetic
 loopback model/title responses. No live provider/model/usage-skill evidence.
 Review fixed native UI selectors, pointer/input timing, discovery readiness,
-startup retry and evidence gaps. See `docs/NATIVE-CLIENT-VALIDATION.md`.
+startup retry and evidence gaps. An independent candidate repeat exposed a
+CDP shutdown error event recorded as an empty decision; the focused fix
+preserves fatal diagnostics and passes a candidate repeat with strict checks.
+See `docs/NATIVE-CLIENT-VALIDATION.md`.
 
 **Released native validation baseline (v0.47.2):** `scripts/native-client/` retains published mcpm
 0.47.1 as its fixed baseline. VS Code 1.141.0 passed 8/8 and Claude Code 2.1.296
