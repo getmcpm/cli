@@ -396,6 +396,12 @@ mcpm baseline remains 0.47.1. It exercises
 actual global configurations and MCP calls with synthetic inputs; live models,
 interactive chat and other client/platform combinations require separate tests.
 
+v0.47.3 fixes VS Code user-global JSONC configuration edits so unrelated
+comments/settings and the raw backup survive the MCP lifecycle. It also adds
+separate native approval/denial tests: four cases each in the pinned VS Code
+and Claude Code builds, with synthetic model responses. Native macOS dialogs,
+workspace/server trust, inline chat/Agent Host and live providers remain unverified.
+
 Install-time trust scoring catches most poisoned servers before they ship. But what about **rug-pulls** — a server that changes its tool definitions after you've already approved them? Or **prompt-injection in tool responses** — adversarial text embedded in a Slack message, web page, or calendar invite that the agent reads through your trusted MCP server?
 
 `mcpm guard` adds a runtime inspection layer. It wraps every installed MCP server with a stdio relay, scans tool descriptions / responses / arguments for OWASP MCP Top 10 attack patterns, pins each tool's schema at install time, and blocks calls when the live response drifts from the pin (rug-pull defense).

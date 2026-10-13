@@ -2,6 +2,8 @@
 
 Repository tooling added in v0.47.2. Its reproducible published mcpm baseline
 remains 0.47.1; a release does not silently repin the native measurements.
+The v0.47.3 additions include explicit candidate/configuration validation and
+separate default-consent cases; the reference-peer baseline also stays 0.47.0.
 
 This repository harness exercises installed VS Code and Claude Code inside
 separate disposable macOS VM clones. It uses the actual user-global configuration
