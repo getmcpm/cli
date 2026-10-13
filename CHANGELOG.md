@@ -18,6 +18,13 @@ published section (it happened to #170).
 
 ### Added
 
+- Separate native default-consent validation for VS Code and Claude Code:
+  one-shot approval, denial/Escape before dispatch, exact-tool persistence and
+  guard blocking after client approval. Uses actual native UI with synthetic
+  tools/model responses in disposable macOS VMs. Reviewed measurements pass
+  four cases per client. VS Code uses custom in-app dialogs; live providers,
+  native macOS dialogs, workspace/server trust and inline chat/Agent Host
+  remain outside its scope.
 - Explicit candidate-artifact native validation, with archive integrity and
   complete executable file-set hashes, plus realistic JSONC/input/environment-variable fixtures.
   The default published baseline remains 0.47.1; live model and normal approval
