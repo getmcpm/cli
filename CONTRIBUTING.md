@@ -70,6 +70,9 @@ self-checks run with `node --test scripts/native-client/self-check.mjs`; native
 VM runs require the separately pinned public client/runtime payload.
 Candidate changes must use the explicit candidate mode and a fresh packed CLI;
 a passing published-baseline run does not validate changed production code.
+Use the separate `--approvals` native suite for default tool consent; the
+ordinary lifecycle suite preapproves fixture tools and cannot establish that
+permission behavior.
 
 ## Ground rules
 
