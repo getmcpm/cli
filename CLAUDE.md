@@ -1,7 +1,7 @@
 # MCP Registry — Project Context
 
 > This file is automatically read by Claude Code on every session.
-> Keep it updated as decisions are made. Last updated: 2026-10-08.
+> Keep it updated as decisions are made. Last updated: 2026-10-13.
 
 ---
 
@@ -12,23 +12,93 @@ An open-source, CLI-first MCP package manager — **"npm for MCP servers"**.
 A registry where developers can search, install, audit, publish, and update MCP servers
 across all major clients (Claude Desktop, Claude Code, Cursor, VS Code, Windsurf, Gemini CLI) from a single tool.
 
-**Current release:** `@getmcpm/cli@0.47.0` (2026-10-09), tag commit `472755e`.
-PR #247 merged as `9d10830`, byte-identical to Astra-reviewed `7465a61`. Modern
-MCP discovery and embedded input requests reach existing scanners and declaration
-pins; unsupported scan shapes emit explicit coverage warnings. All eight PR
-checks and release-main CI/CodeQL/Scorecard passed. Publish run `37936520627`
-passed every job, including pre-publish package checks on Node 22/24/26 and the
-registry listing. npm and MCP registry latest are 0.47.0.
+**Current release:** `@getmcpm/cli@0.47.3` (2026-10-13), tag commit `45380a6`.
+PATCH: VS Code user-global JSONC preservation from PR #260 plus native
+consent/configuration validation tooling from PR #261. Microsoft jsonc-parser
+3.3.1 is the sole new production dependency since 0.47.2. No new CLI command,
+guard signature, SDK upgrade or protocol-conformance claim. PR #261 merged
+as `e69ea0e`, byte-identical to reviewed `3466e03`, after all nine checks.
+Documentation-only release preparation #262 merged as `45380a6` after all nine
+checks. Exact release-main CI/CodeQL/Scorecard passed before the annotated tag,
+on the maintainer's explicit "merge #261, release" instruction during the freeze.
 
-Downloaded tarball integrity and npm provenance bind to the expected tag/commit
-and GitHub Actions signer; the SBOM signature verifies and tampering is rejected.
-The actual published CLI passes release smoke, all 97 public fixtures and 11
-modern guarded-process cases, including legacy initialization and pin/event
-persistence. The reviewed full suite passed 3,569 tests; typecheck/build passed.
+Publish run `38370428882` passed all five jobs, including Node 22/24/26 package
+gates and official registry listing. GitHub release is published/immutable;
+npm and MCP registry exact/latest are 0.47.3. Downloaded tarball integrity and
+verified npm provenance bind to release commit `45380a6` and the exact tagged
+GitHub Actions workflow identity. The SBOM signature verifies; altered bytes
+are rejected. These establish build/artifact identity, not code safety.
 
-No SDK upgrade, HTTP relay, or full protocol-conformance claim. Installed-client
-interoperability and usage-skill behavior remain unmeasured; Jev/Clef stays
-deferred for user subscription/access. See `docs/GUARD.md` and `CHANGELOG.md`.
+The actual verified 0.47.3 tarball passes clean-install release smoke, all
+97 public fixtures and 11 modern guarded-process cases, with legacy
+initialization and pin/event persistence. Public CLI checks in a synthetic home
+also verify JSONC toggle/removal, unrelated comments/bytes and original backup,
+ambiguous-path refusal before writes, and strict JSON in Cursor. These adapter
+checks do not launch a native application. A throwaway reference-peer harness
+repinned to actual 0.47.3 passes 40 comparisons, zero failures, two expected
+unsupported combinations and seven self-checks; its lock and executed CLI hash
+match the verified published artifact. Committed baselines remain unchanged.
+There was no new native VM run of npm 0.47.3; candidate/native measurements and
+remaining live-provider/client-path limits are described separately below.
+
+**Phase 2B (included in v0.47.3):** VS Code user-global configuration reads JSONC and edits
+only the selected server while preserving unrelated bytes/comments and the raw
+backup. Invalid/duplicate server paths fail before writes; other clients remain
+strict JSON. Microsoft `jsonc-parser` 3.3.1 is the sole new production dependency.
+The explicit native candidate mode binds archive/lock/package/complete dist-file
+identity and exercises actual client input/environment expansion. Independent
+final candidate and default published-baseline runs both pass 8/8 VS Code and
+7/7 Claude Code, with matching hashes, raw preservation and cleanup. Source
+checks: 3,588 tests, typecheck/build and 13 harness self-checks pass. Astra fixed
+inherited-key removal, incomplete chunk binding and a pre-wire cancellation
+fixture race; cancellation requires the current matching request before firing.
+User-global paths are unchanged; portable/Agent Host routes and
+provider/model/usage-skill behavior remain unverified. Normal tool consent is
+measured separately in Phase 2C below.
+
+**Phase 2C (included in v0.47.3):** Native default-mode consent passes 4/4 cases in each of
+VS Code 1.141.0 and Claude Code 2.1.296: one-shot re-prompting in one session,
+deny/Escape before dispatch, exact echo grants surviving restart while warn
+still prompts, and guard blocking after client approval with echo recovery.
+The reviewed macOS 26.6.2/arm64 run has matching host/guest hashes and clean
+clone cleanup. The unchanged published-baseline suite also passes 8/8 VS Code
+and 7/7 Claude Code; 22 harness checks pass on Node 22/24/26. VS Code uses custom
+in-app Tool API dialogs and the normal profile approval manager; native macOS
+dialog rendering, workspace/server trust integration, inline chat and Agent
+Host remain unverified. Claude uses a real interactive PTY and synthetic
+loopback model/title responses. No live provider/model/usage-skill evidence.
+Review fixed native UI selectors, pointer/input timing, discovery readiness,
+startup retry and evidence gaps. An independent candidate repeat exposed a
+CDP shutdown error event recorded as an empty decision; the focused fix
+preserves fatal diagnostics and passes a candidate repeat with strict checks.
+See `docs/NATIVE-CLIENT-VALIDATION.md`.
+
+Independent final candidate validation repeats 4/4 cases per client against
+clean reviewed `ed02ef2`. The fresh pnpm archive SHA-256 is
+`d1e6f4ac327ec85fc34561010950149612e1e5857b91befa5d3bbf299655a9de`; all 134
+package/distribution files and native host/guest evidence match. Parent
+verification also passes 22 harness checks, typecheck/build and 3,588 source
+tests, and checks the reviewed 8/8 + 7/7 ordinary baseline receipts. This is
+local candidate proof, not a new release or signed build provenance.
+
+**Released native validation baseline (v0.47.2):** `scripts/native-client/` retains published mcpm
+0.47.1 as its fixed baseline. VS Code 1.141.0 passed 8/8 and Claude Code 2.1.296
+passed 7/7 in separate disposable macOS 26.6.2/arm64 VMs, independently repeated
+against the final reviewed harness with matching host/guest hashes and cleanup.
+Actual traffic identifies VS Code legacy `2025-11-25` and Claude Code modern
+`2026-07-28`. Registry, package-launch and model inputs are test doubles; the
+native apps, global adapters and guard processes are real. Astra fixed timeout
+false passes, evidence correlation/bounds, VM/filter assertions and interruption
+cleanup. Eleven account/VM-free self-checks pass on Node 22/24/26; the source
+suite passed 3,569 tests, typecheck/build. See `docs/NATIVE-CLIENT-VALIDATION.md`.
+
+The separate reference-peer harness retains published mcpm 0.47.0: 40 passes,
+two expected unsupported combinations on Linux/arm64 and Linux/amd64, plus seven
+self-checks and a launcher regression. See `docs/PROTOCOL-VALIDATION.md`.
+
+No SDK upgrade, HTTP relay or full protocol-conformance claim. Live provider,
+model/usage-skill behavior, approval paths beyond the named Phase 2C suite
+and other client/platform combinations remain unverified. Jev/Clef stays deferred for subscription/access.
 
 **Previous release context (historical):**
 
