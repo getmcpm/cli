@@ -12,18 +12,34 @@ An open-source, CLI-first MCP package manager — **"npm for MCP servers"**.
 A registry where developers can search, install, audit, publish, and update MCP servers
 across all major clients (Claude Desktop, Claude Code, Cursor, VS Code, Windsurf, Gemini CLI) from a single tool.
 
-**Release prepared:** `@getmcpm/cli@0.47.3` (2026-10-13).
-PATCH: VS Code user-global JSONC preservation from PR #260 plus the native
-consent suite from PR #261. Microsoft `jsonc-parser` 3.3.1 is the sole new
-production dependency since 0.47.2. No new CLI command, guard signature, SDK
-upgrade or protocol-conformance claim. PR #261 merged as `e69ea0e`, with its
-tree byte-identical to reviewed `3466e03` after all nine checks passed.
+**Current release:** `@getmcpm/cli@0.47.3` (2026-10-13), tag commit `45380a6`.
+PATCH: VS Code user-global JSONC preservation from PR #260 plus native
+consent/configuration validation tooling from PR #261. Microsoft jsonc-parser
+3.3.1 is the sole new production dependency since 0.47.2. No new CLI command,
+guard signature, SDK upgrade or protocol-conformance claim. PR #261 merged
+as `e69ea0e`, byte-identical to reviewed `3466e03`, after all nine checks.
+Documentation-only release preparation #262 merged as `45380a6` after all nine
+checks. Exact release-main CI/CodeQL/Scorecard passed before the annotated tag,
+on the maintainer's explicit "merge #261, release" instruction during the freeze.
 
-The maintainer explicitly requested "merge #261, release" during the recorded
-release freeze. This documentation-only preparation retains the reviewed
-production source, dependencies, harness and workflow. Published version is
-still 0.47.2 until the tag workflow completes; npm/registry publication,
-provenance/SBOM and actual published-binary verification remain pending.
+Publish run `38370428882` passed all five jobs, including Node 22/24/26 package
+gates and official registry listing. GitHub release is published/immutable;
+npm and MCP registry exact/latest are 0.47.3. Downloaded tarball integrity and
+verified npm provenance bind to release commit `45380a6` and the exact tagged
+GitHub Actions workflow identity. The SBOM signature verifies; altered bytes
+are rejected. These establish build/artifact identity, not code safety.
+
+The actual verified 0.47.3 tarball passes clean-install release smoke, all
+97 public fixtures and 11 modern guarded-process cases, with legacy
+initialization and pin/event persistence. Public CLI checks in a synthetic home
+also verify JSONC toggle/removal, unrelated comments/bytes and original backup,
+ambiguous-path refusal before writes, and strict JSON in Cursor. These adapter
+checks do not launch a native application. A throwaway reference-peer harness
+repinned to actual 0.47.3 passes 40 comparisons, zero failures, two expected
+unsupported combinations and seven self-checks; its lock and executed CLI hash
+match the verified published artifact. Committed baselines remain unchanged.
+There was no new native VM run of npm 0.47.3; candidate/native measurements and
+remaining live-provider/client-path limits are described separately below.
 
 **Phase 2B (included in v0.47.3):** VS Code user-global configuration reads JSONC and edits
 only the selected server while preserving unrelated bytes/comments and the raw
