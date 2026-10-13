@@ -32,7 +32,7 @@ createInterface({ input: process.stdin }).on('line', line => {
   if (r.method === 'tools/list') {
     const properties = { text: { type: 'string' } };
     if (existsSync(path.join(work, 'drift'))) properties.changed = { type: 'boolean' };
-    return send(r, { tools: ['echo', 'attack', 'warn', 'slow'].map(name => ({ name, description: 'Synthetic compatibility fixture.', inputSchema: { type: 'object', properties } })) });
+    return send(r, { tools: ['echo', 'attack', 'warn', 'slow'].map(name => ({ name, description: 'native-fixture: Synthetic compatibility fixture.', inputSchema: { type: 'object', properties } })) });
   }
   if (r.method === 'tools/call') {
     const name = r.params.name;

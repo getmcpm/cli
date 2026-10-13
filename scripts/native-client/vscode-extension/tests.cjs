@@ -52,8 +52,42 @@ exports.run = async () => {
       assert.equal(match.length, 1, `expected one native ${name} tool, got ${JSON.stringify(receipt.tools)}`);
       return match[0].name;
     };
-    const invoke = (name, token) => vscode.lm.invokeTool(tool(name), { toolInvocationToken: undefined, input: { text: request.text } }, token);
-    if (request.case === 'cancel') {
+    const invoke = (name, token, text = request.text) => vscode.lm.invokeTool(tool(name), { toolInvocationToken: undefined, input: { text } }, token);
+    if (request.consent) {
+      const intentFile = path.join(root, 'work/consent-intent.json');
+      const intent = { ...request.consent, text: request.text };
+      if (request.case === 'one-shot') {
+        for (let i = 1; i <= 2; i++) {
+          const text = `${request.text}-${i}`;
+          fs.writeFileSync(intentFile, JSON.stringify({ ...intent, text }));
+          receipt.results.push(await invoke('echo', undefined, text));
+        }
+      } else {
+      fs.writeFileSync(intentFile, JSON.stringify(intent));
+      if (intent.action === 'always') {
+        await vscode.commands.executeCommand('workbench.action.chat.editToolApproval', 'profile');
+        const ackFile = path.join(root, 'work/consent-ack.json');
+        let ack;
+        for (let i = 0; i < 100; i++) {
+          if (fs.existsSync(ackFile)) { ack = JSON.parse(fs.readFileSync(ackFile)); if (ack.text === request.text) break; }
+          await new Promise(resolve => setTimeout(resolve, 100));
+        }
+        assert.deepEqual(ack, intent, 'fixture profile grant was not made through the UI');
+        await vscode.commands.executeCommand('workbench.action.closeQuickOpen');
+        fs.writeFileSync(intentFile, JSON.stringify({ ...intent, action: 'persisted' }));
+      }
+      let result, error;
+      try { result = await invoke(intent.tool); } catch (e) { error = e.message; }
+      if (['deny', 'cancel'].includes(intent.action)) {
+        assert.ok(error, 'refused invocation must reject'); receipt.refusal = error;
+      } else if (request.case === 'block') {
+        assert.match(error || JSON.stringify(result), /BLOCKED by mcpm-guard/);
+        receipt.blockError = error; if (result) receipt.results.push(result);
+        fs.writeFileSync(intentFile, JSON.stringify({ action: 'persisted', tool: 'echo', text: request.text }));
+        receipt.results.push(await invoke('echo'));
+      } else { assert.equal(error, undefined, error); receipt.results.push(result); }
+      }
+    } else if (request.case === 'cancel') {
       const wireFile = path.join(root, 'work/wire.jsonl');
       const readWire = () => fs.existsSync(wireFile) ? fs.readFileSync(wireFile, 'utf8').split('\n').slice(0, -1).map(line => JSON.parse(line)) : [];
       const offset = readWire().length;
