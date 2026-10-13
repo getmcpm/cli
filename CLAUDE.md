@@ -66,6 +66,14 @@ CDP shutdown error event recorded as an empty decision; the focused fix
 preserves fatal diagnostics and passes a candidate repeat with strict checks.
 See `docs/NATIVE-CLIENT-VALIDATION.md`.
 
+Independent final candidate validation repeats 4/4 cases per client against
+clean reviewed `ed02ef2`. The fresh pnpm archive SHA-256 is
+`d1e6f4ac327ec85fc34561010950149612e1e5857b91befa5d3bbf299655a9de`; all 134
+package/distribution files and native host/guest evidence match. Parent
+verification also passes 22 harness checks, typecheck/build and 3,588 source
+tests, and checks the reviewed 8/8 + 7/7 ordinary baseline receipts. This is
+local candidate proof, not a new release or signed build provenance.
+
 **Released native validation baseline (v0.47.2):** `scripts/native-client/` retains published mcpm
 0.47.1 as its fixed baseline. VS Code 1.141.0 passed 8/8 and Claude Code 2.1.296
 passed 7/7 in separate disposable macOS 26.6.2/arm64 VMs, independently repeated

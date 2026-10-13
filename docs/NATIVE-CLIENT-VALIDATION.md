@@ -175,6 +175,19 @@ was then repeated against the same harness: **8/8 VS Code and 7/7 Claude Code**
 passed, with matching hashes and cleanup. All 22 account/VM-free harness checks
 pass on Node 22, 24 and 26; mocks remain separate from the native evidence.
 
+Independent final candidate validation on 2026-10-13 repeated **4/4 VS Code
+and 4/4 Claude Code**, with seven observations each, normal exits and clean
+clone teardown. The fresh pnpm-packed archive from clean Astra-reviewed
+`ed02ef22380d5f6c919050bb82ccd476e4f737bf` has SHA-256
+`d1e6f4ac327ec85fc34561010950149612e1e5857b91befa5d3bbf299655a9de`. The candidate uses
+the repository placeholder version 0.15.0; it is not the published npm version.
+All 134 installed package/distribution files, host/stage/guest harness hashes,
+raw approval/refusal receipts, restart peer IDs and guard block/recovery
+observations match. Parent checks also pass all 22 harness regressions,
+typecheck/build and 3,588 source tests; the reviewed 8/8 + 7/7 ordinary baseline
+receipts were independently checked. Source/archive records identify this
+local build, not signed provenance. Raw native evidence stays local.
+
 Review corrected native dialog title ordering/capitalization, approval-tree
 pointer interaction and accessible labels, terminal input/redraw timing,
 interactive startup racing MCP discovery, and the separate synthetic title
