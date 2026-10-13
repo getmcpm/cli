@@ -8,6 +8,13 @@ _Add entries here, never under a stamped version_ — a release commit renames t
 heading, and a branch that wrote beneath it merges without conflict straight into a
 published section (it happened to #170).
 
+## [0.47.3] - 2026-10-13
+
+PATCH by content: fixes VS Code JSONC configuration preservation and adds
+native-client validation tooling. No new CLI command, signature or protocol
+claim. Tagged during the 2026-09-15 → 10-15 release freeze on the maintainer's
+explicit "merge #261, release" instruction.
+
 ### Fixed
 
 - VS Code user-global `mcp.json` accepts comments and trailing commas. Install,
