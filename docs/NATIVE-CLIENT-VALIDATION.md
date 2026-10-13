@@ -30,6 +30,23 @@ The runner refuses existing VM storage without its ownership marker. A prepared
 payload may be reused only with matching pins. Provisioning downloads public
 artifacts; native execution is offline except for guest loopback communication.
 
+A slow cold download can exceed the runner's 30-minute clone deadline. Prewarm
+only the pinned public image in fresh task-owned storage before running tests:
+
+```sh
+NATIVE_VM_STORAGE="$(mktemp -d /tmp/mcpm-native-vms.XXXXXX)"
+printf 'mcpm-native-client-validation\n' > "$NATIVE_VM_STORAGE/.mcpm-native-owner"
+NATIVE_IMAGE="$(node -p "JSON.parse(require('node:fs').readFileSync('scripts/native-client/pins.json')).image")"
+TART_HOME="$NATIVE_VM_STORAGE" TART_NO_AUTO_PRUNE=1 /path/to/tart clone "$NATIVE_IMAGE" mcpm-native-prewarm
+TART_HOME="$NATIVE_VM_STORAGE" TART_NO_AUTO_PRUNE=1 /path/to/tart delete mcpm-native-prewarm
+node scripts/native-client/run-vm.mjs /path/to/tart \
+  "$NATIVE_VM_STORAGE" /tmp/mcpm-native-payload /tmp/mcpm-native-evidence
+```
+
+Wait for the clone to finish successfully before deleting its temporary local
+name or running the suite. The pinned image cache remains in that task storage;
+no VM is booted during prewarm. Guest and test deadlines remain unchanged.
+
 The private npm manifest/lockfile pins published mcpm 0.47.1 and Claude Code
 2.1.296, including transitive dependencies. VS Code 1.141.0 (commit
 `2a59476c9bfcb90b3ddc372c36762471b7dfad1c`), Node 26.11.1, Tart and the public
@@ -113,9 +130,14 @@ and `--realistic-config` are separate suites. The default baseline and existing
 lifecycle cases retain their original behavior and pins.
 
 The consent suite disables VS Code global auto-approval and uses native Tool
-API confirmation dialogs. An exact echo grant is made through the normal
+API confirmation dialogs with the supported guest-only `window.dialogStyle: custom`
+setting, so VS Code renders the prompt in its window. This changes dialog
+rendering without granting tool permission; native macOS dialog rendering is
+outside this suite. An exact echo grant is made through the normal
 **Manage Tool Approval** UI at profile scope. It does not edit the approval
-database. Inline chat and Agent Host permission flows remain separate.
+database. The fixture extension trusts the known server startup and disables
+VS Code workspace trust in the guest; workspace/server trust integration,
+inline chat and Agent Host permission flows remain unverified.
 
 Claude Code runs its interactive terminal UI with `--permission-mode default`,
 without print mode, permission bypass flags, or seeded tool grants. The guest's
@@ -124,7 +146,11 @@ the current rendered screen, including Unicode, cursor movement and erasure.
 Only the exact synthetic fixture choices are selected. Workspace trust and
 the synthetic loopback API-key prompt are recorded separately. The native
 client writes its exact-tool grant to local settings; the harness only reads it.
-The Messages gateway supplies deterministic responses without a live provider.
+The driver waits for the same peer's completed `tools/list` and an idle terminal
+prompt before typing the exact fixture request. Launch arguments, discovery
+readiness and the typed request are recorded. The Messages gateway supplies
+deterministic tool rounds and the separately identified session-title response
+without a live provider; a main request missing the fixture tool still fails.
 
 | Case | Required observation |
 | --- | --- |
@@ -139,8 +165,22 @@ case reports fail validation. Negative Claude decisions can stop the turn
 without returning a tool result to the gateway. They require a usable native
 prompt and orderly exit, rather than an invented denial response.
 
-Native Phase 2C measurements are pending. Mock PTY and harness self-checks do
-not establish installed-client compatibility.
+Reviewed local measurement on 2026-10-13 passed **4/4 VS Code and 4/4 Claude
+Code approval cases** using published mcpm 0.47.1, with seven exported
+observations per client, on macOS
+26.6.2/arm64 with Node 26.11.1 and the pinned client versions. Both clients
+finished normally without deadline kills. Host/guest fixture hashes match,
+and both clones were stopped/deleted. The original published-baseline suite
+was then repeated against the same harness: **8/8 VS Code and 7/7 Claude Code**
+passed, with matching hashes and cleanup. All 21 account/VM-free harness checks
+pass on Node 22, 24 and 26; mocks remain separate from the native evidence.
+
+Review corrected native dialog title ordering/capitalization, approval-tree
+pointer interaction and accessible labels, terminal input/redraw timing,
+interactive startup racing MCP discovery, and the separate synthetic title
+request. Validation now requires the actual Claude launch/prompt readiness,
+the VS Code checkbox transition, and a refusal receipt. Earlier exploratory
+failures and one interrupted attempt are superseded; none count as passes.
 
 The runner clones the immutable image independently for **VS Code first, then
 Claude Code**, using the base image's synthetic `admin` account. Each clone is
@@ -236,8 +276,8 @@ evidence local; publish scoped results rather than entire client transcripts.
 
 ## Remaining verification
 
-Live providers and actual model/usage-skill behavior, interactive chat/default
-approval workflows, other clients/platforms, additional configuration variants,
+Live providers and actual model/usage-skill behavior, interactive chat and
+approval paths beyond the measured suite, other clients/platforms, additional configuration variants,
 and complete protocol conformance remain unverified. Native client versions
 and observed wire protocol must be recorded rather than inferred from package
 versions. Updating pins requires repeating the native matrix. SIGKILL, host

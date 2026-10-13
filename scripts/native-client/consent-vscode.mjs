@@ -4,13 +4,25 @@ import { readFile, writeFile } from 'node:fs/promises';
 export function consentButton(dialog, intent) {
   if (/sign.?in|account|oauth|authentication|global auto approve/i.test(dialog.text)) return;
   if (!dialog.text.includes('native-fixture: Synthetic compatibility fixture.') ||
-      !new RegExp('^Run `?' + intent.tool + '`?(?:\\n|$)').test(dialog.text)) return;
+      !new RegExp('^Run `?' + intent.tool + '`?(?:\\n|$)', 'm').test(dialog.text)) return;
   if (intent.action === 'allow') return dialog.buttons.find(b => /^(Yes|Allow|Continue)$/.test(b));
   if (['deny', 'cancel'].includes(intent.action)) return dialog.buttons.find(b => b === 'Cancel');
 }
 
-export async function consentDialogs(work, log, signal) {
-  const handled = new Set(), grants = new Map();
+export function fixtureGrantTarget(tool) {
+  const w=Array.from(document.querySelectorAll('.quick-input-widget')).find(w=>w.offsetWidth>0&&w.querySelector('input')?.placeholder==='Configure global tool approvals');if(!w)return;
+  const rows=Array.from(w.querySelectorAll('.monaco-list-row')), start=rows.findIndex(r=>r.getAttribute('aria-level')==='1'&&r.innerText.trim().split('\n')[0]==='native-fixture');if(start<0)return;
+  const end=rows.findIndex((r,i)=>i>start&&r.getAttribute('aria-level')==='1');
+  const row=rows.slice(start+1,end<0?undefined:end).find(r=>r.getAttribute('aria-level')==='2'&&r.getAttribute('aria-label')?.split(',')[0].trim()===tool);
+  const point=e=>{const r=e.getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2};};
+  if(!row){const t=rows[start].querySelector('.monaco-tl-twistie');if(t?.classList.contains('collapsed'))return {state:'expand',point:point(t)};return;}
+  const c=row.querySelector('[role="checkbox"]');if(!c)return;const checked=c.getAttribute('aria-checked');
+  if(checked==='false')return {state:'clicked',text:w.innerText,tool:row.getAttribute('aria-label').split(',')[0].trim(),label:row.getAttribute('aria-label'),checked,point:point(c)};
+  if(checked==='true')return {state:'checked',text:w.innerText,tool:row.getAttribute('aria-label').split(',')[0].trim(),label:row.getAttribute('aria-label'),checked};
+}
+
+export async function consentDialogs(work, log, signal, diagnostic = {}) {
+  const handled = new Set(), expanded = new Set(), grants = new Map();
   while (!signal.aborted) {
     let ws;
     try {
@@ -31,6 +43,11 @@ export async function consentDialogs(work, log, signal) {
         const listener = e => { const r = JSON.parse(e.data); if (r.id !== id) return; clearTimeout(timer); ws.removeEventListener('message', listener); if (r.result?.exceptionDetails) reject(Error('consent UI evaluation failed')); else resolve(r.result?.result?.value); };
         ws.addEventListener('message', listener); ws.send(JSON.stringify({ id, method: 'Runtime.evaluate', params: { expression, returnByValue: true } }));
       });
+      diagnostic.screen = await evaluate("document.body.innerText.slice(0, 32768)");
+      diagnostic.quickInputs = await evaluate(`Array.from(document.querySelectorAll('.quick-input-widget')).filter(w=>w.offsetWidth>0).map(w=>({
+        inputs:Array.from(w.querySelectorAll('input')).map(i=>({placeholder:i.placeholder,type:i.type})),
+        rows:Array.from(w.querySelectorAll('.monaco-list-row')).map(r=>({text:r.innerText,role:r.getAttribute('role'),level:r.getAttribute('aria-level'),label:r.getAttribute('aria-label'),twistie:r.querySelector('.monaco-tl-twistie')?.className,checks:Array.from(r.querySelectorAll('[role="checkbox"]')).map(c=>({checked:c.getAttribute('aria-checked'),label:c.getAttribute('aria-label')}))}))
+      }))`);
       const dialogs = await evaluate("Array.from(document.querySelectorAll('.monaco-dialog-box')).map(d=>({text:d.innerText,buttons:Array.from(d.querySelectorAll('.monaco-button')).map(b=>b.innerText)}))");
       for (const dialog of dialogs || []) {
         const button = consentButton(dialog, intent); if (!button) continue;
@@ -45,16 +62,11 @@ export async function consentDialogs(work, log, signal) {
         log.push({ ...intent, dialog, button: intent.action === 'cancel' ? 'Escape' : button, callsBeforeDecision: calls.length }); handled.add(intent.text);
       }
       if (intent.action === 'always') {
-        const selected = await evaluate(`(()=>{
-          const w=Array.from(document.querySelectorAll('.quick-input-widget')).find(w=>w.offsetWidth>0&&w.querySelector('input')?.placeholder==='Configure global tool approvals');if(!w)return;
-          const rows=Array.from(w.querySelectorAll('.monaco-list-row')), start=rows.findIndex(r=>r.getAttribute('aria-level')==='1'&&r.innerText.includes('native-fixture'));if(start<0)return;
-          const end=rows.findIndex((r,i)=>i>start&&r.getAttribute('aria-level')==='1');
-          const row=rows.slice(start+1,end<0?undefined:end).find(r=>r.getAttribute('aria-level')==='2'&&r.innerText.trim().split('\\n')[0]===${JSON.stringify(intent.tool)});
-          if(!row){rows[start].querySelector('.monaco-tl-twistie')?.click();return;}
-          const c=row.querySelector('[role="checkbox"]');if(!c)return;const checked=c.getAttribute('aria-checked');
-          if(checked==='false'){c.click();return {state:'clicked',text:w.innerText,tool:row.innerText,checked};}
-          if(checked==='true')return {state:'checked',text:w.innerText,tool:row.innerText,checked};
-        })()`);
+        const selected = await evaluate(`(${fixtureGrantTarget.toString()})(${JSON.stringify(intent.tool)})`);
+        if (selected?.point && (selected.state === 'expand' ? !expanded.has(intent.text) : !grants.has(intent.text))) {
+          for (const type of ['mousePressed', 'mouseReleased']) ws.send(JSON.stringify({ id: ++serial, method: 'Input.dispatchMouseEvent', params: { type, ...selected.point, button: 'left', clickCount: 1 } }));
+          if (selected.state === 'expand') expanded.add(intent.text);
+        }
         if (selected?.state === 'clicked') grants.set(intent.text, selected);
         if (selected?.state === 'checked' && grants.has(intent.text)) {
           log.push({ ...intent, selection: { before: grants.get(intent.text), after: selected } }); handled.add(intent.text);
@@ -63,7 +75,7 @@ export async function consentDialogs(work, log, signal) {
       }
     } catch (e) {
       if (signal.aborted) return;
-      if (e.code !== 'ENOENT' && !/fetch failed|deadline|ECONNREFUSED/.test(e.message)) { log.push({ error: e.stack }); throw e; }
+      if (e.code !== 'ENOENT' && e.name !== 'TimeoutError' && !/fetch failed|deadline|ECONNREFUSED/.test(e.message)) { log.push({ error: e.stack }); throw e; }
     } finally { ws?.close(); }
     await new Promise(r => setTimeout(r, 100));
   }

@@ -101,11 +101,29 @@ export function assertConsentObservation(obs, client, action, tool) {
   for (const [i, decision] of decisions.entries()) {
     assert.equal(decision.action, action); assert.equal(decision.tool, tool); assert.equal(decision.text, nonces[i]);
     if (client === 'claude-code' || action !== 'always') assert.equal(decision.callsBeforeDecision, 0, 'tool dispatched before permission');
+    else {
+      assert.ok(decision.selection?.before && decision.selection?.after, 'missing exact-tool grant UI evidence');
+      assert.equal(decision.selection.before.checked, 'false', 'grant must start unchecked');
+      assert.equal(decision.selection.after.checked, 'true', 'grant must finish checked');
+      for (const state of [decision.selection.before, decision.selection.after]) assert.equal(state.tool.trim().split('\n')[0], tool, 'grant must target the exact tool');
+    }
   }
-  if (client === 'vscode') { assert.equal(obs.clientSettings['chat.tools.global.autoApprove'], false); assert.equal(obs.clientSettings['chat.permissions.default'], 'default'); }
-  else { assert.equal(obs.receipt.permissionMode, 'default'); assert.equal(obs.execution.ptyVerified, true); assert.equal(obs.execution.exiting, true); }
+  if (client === 'vscode') { assert.equal(obs.clientSettings['chat.tools.global.autoApprove'], false); assert.equal(obs.clientSettings['chat.permissions.default'], 'default'); assert.equal(obs.clientSettings['window.dialogStyle'], 'custom'); }
+  else {
+    assert.equal(obs.receipt.permissionMode, 'default'); assert.equal(obs.execution.ptyVerified, true); assert.equal(obs.execution.exiting, true);
+    assert.equal(obs.execution.command, '/opt/mcpm-native/node_modules/.bin/claude', 'unexpected Claude launch');
+    assert.deepEqual(obs.execution.args, ['--permission-mode', 'default'], 'Claude launch must use interactive default mode');
+    const submitted = obs.execution.submission;
+    assert.equal(submitted?.prompt, `Run the native fixture ${obs.request.case} check with text ${obs.request.text}.`, 'missing exact interactive prompt');
+    assert.equal(submitted.confirmed, true, 'interactive prompt was not submitted');
+    const listing = obs.wire.find(w => w.direction === 'to-server' && w.pid === submitted.peerPid && w.message.id === submitted.toolsListId && w.message.method === 'tools/list');
+    assert.ok(listing && obs.wire.some(w => w.direction === 'from-server' && w.pid === submitted.peerPid && w.message.id === submitted.toolsListId && w.message.result?.tools?.some(t => t.name === tool)), 'prompt requires completed native tool discovery');
+  }
   const calls = obs.wire.filter(w => w.direction === 'to-server' && w.message.method === 'tools/call');
-  if (['deny', 'cancel'].includes(action)) assert.equal(calls.length, 0, 'refused tool reached server');
+  if (['deny', 'cancel'].includes(action)) {
+    assert.equal(calls.length, 0, 'refused tool reached server');
+    if (client === 'vscode') assert.ok(typeof obs.receipt.refusal === 'string' && obs.receipt.refusal.length, 'missing native refusal');
+  }
   else {
     assert.deepEqual(calls.map(w => w.message.params.name), obs.request.case === 'block' ? ['attack', 'echo'] : nonces.map(() => tool));
     assert.deepEqual(calls.map(w => w.message.params.arguments?.text), obs.request.case === 'block' ? [obs.request.text, obs.request.text] : nonces, 'wrong consent arguments reached server');

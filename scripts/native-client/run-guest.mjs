@@ -56,7 +56,7 @@ let currentCase;
 let observationNumber = 0;
 const report = { schemaVersion: 1, boundary, client, suite: approvals ? 'approvals' : realistic ? 'realistic-config' : 'baseline', cliArtifact: await cliArtifact(root, candidate), platform: process.platform, arch: process.arch, node: process.version,
   configPath, syntheticRegistryAndLauncher: true, syntheticModelGateway: client === 'claude-code', cases: [],
-  notTested: ['Live registry/npm service behavior', 'Real provider/model or usage-skill behavior', ...(approvals ? ['VS Code inline chat and Agent Host approvals'] : ['Interactive chat/approval UI']), 'All protocol features or other platforms/clients'] };
+  notTested: ['Live registry/npm service behavior', 'Real provider/model or usage-skill behavior', ...(approvals ? ['VS Code native macOS dialog rendering, inline chat and Agent Host approvals'] : ['Interactive chat/approval UI']), 'All protocol features or other platforms/clients'] };
 async function json(file, fallback) {
   try {
     const raw = await readFile(file, 'utf8');
@@ -96,22 +96,23 @@ async function native(caseName, version, consent) {
   await writeFile(`${work}/request.json`, JSON.stringify(request));
   let execution, receipt;
   if (client === 'vscode') {
-    const approvalLog = [], controller = new AbortController();
+    const approvalLog = [], approvalUI = {}, controller = new AbortController();
     let approvalError;
-    const approval = (approvals ? consentDialogs(work, approvalLog, controller.signal) : approveFixtureDialogs(9222, approvalLog, controller.signal)).catch(e => { approvalError = e.stack; });
+    const approval = (approvals ? consentDialogs(work, approvalLog, controller.signal, approvalUI) : approveFixtureDialogs(9222, approvalLog, controller.signal)).catch(e => { approvalError = e.stack; });
     try {
       execution = await execute('/Applications/Visual Studio Code.app/Contents/MacOS/Code', [root, '--user-data-dir', `${homedir()}/Library/Application Support/Code`,
         '--extensions-dir', `${root}/extensions`, '--extensionDevelopmentPath', `${root}/vscode-extension`, '--remote-debugging-port=9222',
         '--skip-welcome', '--skip-release-notes', '--disable-workspace-trust', '--disable-updates', '--disable-telemetry']);
     } finally { controller.abort(); await approval; }
-    receipt = await json(`${work}/receipt.json`, null);
+    receipt = await json(`${work}/receipt.json`, approvals ? { status: 'fail', error: 'missing native extension receipt' } : null);
+    if (approvals) receipt.fixtureApprovalUI = approvalUI;
     if (receipt) { receipt.fixtureApprovals = approvalLog; if (approvalError) receipt.approvalError = approvalError; }
   } else {
     const model = await gateway(work, request);
     try {
       const extraEnv = { ANTHROPIC_BASE_URL: model.url, ANTHROPIC_API_KEY: 'synthetic-native-fixture-key' };
       execution = approvals
-        ? await interactiveClaude(`${root}/node_modules/.bin/claude`, ['--permission-mode', 'default', `Run the native fixture ${caseName} check with text ${request.text}.`], { ...env, ...extraEnv }, root, work, request, model)
+        ? await interactiveClaude(`${root}/node_modules/.bin/claude`, ['--permission-mode', 'default'], { ...env, ...extraEnv }, root, work, request, model)
         : await execute(`${root}/node_modules/.bin/claude`, ['-p', `Run the native fixture ${caseName} check.`, '--output-format', 'stream-json', '--verbose', '--max-turns', '4', '--dangerously-skip-permissions'], extraEnv, caseName === 'cancel');
       receipt = { client, case: caseName, status: execution.status === 0 && !execution.failure && !model.observations.some(o => o.error) ? 'pass' : 'fail', responses: model.results, gateway: model.observations,
         ...(approvals ? { permissionMode: 'default', fixtureApprovals: execution.decisions } : {}) };
@@ -155,7 +156,7 @@ report.cliVersion = JSON.parse(await readFile(`${root}/node_modules/@getmcpm/cli
 report.hashes = {};
 for (const file of [...(await readdir(root)).filter(f => /\.(mjs|json|tgz|tcl)$/.test(f)), 'vscode-extension/package.json', 'vscode-extension/tests.cjs']) report.hashes[file] = createHash('sha256').update(await readFile(`${root}/${file}`)).digest('hex');
 await mkdir(path.dirname(configPath), { recursive: true }); await writeFile(configPath, seedText);
-if (client === 'vscode') await writeFile(`${homedir()}/Library/Application Support/Code/User/settings.json`, JSON.stringify({ 'chat.tools.global.autoApprove': !approvals, ...(approvals ? { 'chat.permissions.default': 'default' } : {}), 'telemetry.telemetryLevel': 'off', 'update.mode': 'none', 'extensions.autoUpdate': false, 'chat.mcp.discovery.enabled': {} }));
+if (client === 'vscode') await writeFile(`${homedir()}/Library/Application Support/Code/User/settings.json`, JSON.stringify({ 'chat.tools.global.autoApprove': !approvals, ...(approvals ? { 'chat.permissions.default': 'default', 'window.dialogStyle': 'custom' } : {}), 'telemetry.telemetryLevel': 'off', 'update.mode': 'none', 'extensions.autoUpdate': false, 'chat.mcp.discovery.enabled': {} }));
 // Simulate npm's launcher only for the named, dependency-free fixture package.
 await chmod(`${root}/launcher.mjs`, 0o755);
 await symlink(`${root}/launcher.mjs`, `${root}/bin/npx`);

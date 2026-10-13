@@ -18,20 +18,25 @@ export async function gateway(work, request) {
       appendFileSync(`${work}/gateway.jsonl`, JSON.stringify(row) + '\n');
       if (req.url?.startsWith('/v1/messages/count_tokens')) { res.writeHead(200, { 'content-type': 'application/json' }); res.end('{"input_tokens":100}'); return; }
       if (!req.url?.startsWith('/v1/messages')) { res.writeHead(404); res.end('{}'); return; }
+      const title = data.tools?.length === 0 && data.messages?.some(m => m.content?.some?.(c => c.type === 'text' && c.text.startsWith(`<session>\nRun the native fixture ${request.case} check with text ${request.text}.\n</session>`) && c.text.includes('Write the title in the predominant language of the session')));
+      let content, done;
+      if (title) { row.kind = 'synthetic-session-title'; done = true; content = { type: 'text', text: 'Native fixture check' }; }
+      else {
       const completed = (data.messages || []).flatMap(m => Array.isArray(m.content) ? m.content : []).filter(c => c.type === 'tool_result');
       assert.ok(completed.length <= issued.length, 'unissued tool result');
       assert.deepEqual(completed.map(c => c.tool_use_id), issued.slice(0, completed.length).map(c => c.id), 'uncorrelated or duplicate tool result');
       results = completed;
       const step = completed.length;
-      const done = step >= (['block', 'one-shot'].includes(request.case) ? 2 : 1);
+      done = step >= (['block', 'one-shot'].includes(request.case) ? 2 : 1);
       const desired = request.case === 'block' ? (step ? 'echo' : 'attack') : request.case === 'cancel' ? 'slow' : ['attack', 'warn'].includes(request.case) ? request.case : 'echo';
       const tool = (data.tools || []).find(t => t.name?.endsWith('__' + desired));
       if (!done && !tool) throw Error(`Native ${desired} tool missing from Claude request`);
-      const content = done ? { type: 'text', text: 'Synthetic gateway observed the native tool result.' }
+      content = done ? { type: 'text', text: 'Synthetic gateway observed the native tool result.' }
         : { type: 'tool_use', id: `native-${step}`, name: tool.name, input: { text: request.case === 'one-shot' ? `${request.text}-${step + 1}` : request.text } };
       if (!done) {
         if (issued[step]) assert.deepEqual(content, issued[step], 'changed tool-use retry');
         else issued.push(content);
+      }
       }
       const message = { id: 'msg_native_fixture', type: 'message', role: 'assistant', model: data.model, content: [content],
         stop_reason: done ? 'end_turn' : 'tool_use', stop_sequence: null, usage: { input_tokens: 10, output_tokens: 10 } };

@@ -1,7 +1,7 @@
 # MCP Registry — Project Context
 
 > This file is automatically read by Claude Code on every session.
-> Keep it updated as decisions are made. Last updated: 2026-10-12.
+> Keep it updated as decisions are made. Last updated: 2026-10-13.
 
 ---
 
@@ -45,8 +45,23 @@ final candidate and default published-baseline runs both pass 8/8 VS Code and
 checks: 3,588 tests, typecheck/build and 13 harness self-checks pass. Astra fixed
 inherited-key removal, incomplete chunk binding and a pre-wire cancellation
 fixture race; cancellation requires the current matching request before firing.
-User-global paths are unchanged; portable/Agent Host routes and normal approval,
-provider/model/usage-skill behavior remain unverified.
+User-global paths are unchanged; portable/Agent Host routes and
+provider/model/usage-skill behavior remain unverified. Normal tool consent is
+measured separately in Phase 2C below.
+
+**Unreleased Phase 2C:** Native default-mode consent passes 4/4 cases in each of
+VS Code 1.141.0 and Claude Code 2.1.296: one-shot re-prompting in one session,
+deny/Escape before dispatch, exact echo grants surviving restart while warn
+still prompts, and guard blocking after client approval with echo recovery.
+The reviewed macOS 26.6.2/arm64 run has matching host/guest hashes and clean
+clone cleanup. The unchanged published-baseline suite also passes 8/8 VS Code
+and 7/7 Claude Code; 21 harness checks pass on Node 22/24/26. VS Code uses custom
+in-app Tool API dialogs and the normal profile approval manager; native macOS
+dialog rendering, workspace/server trust integration, inline chat and Agent
+Host remain unverified. Claude uses a real interactive PTY and synthetic
+loopback model/title responses. No live provider/model/usage-skill evidence.
+Review fixed native UI selectors, pointer/input timing, discovery readiness,
+startup retry and evidence gaps. See `docs/NATIVE-CLIENT-VALIDATION.md`.
 
 **Released native validation baseline (v0.47.2):** `scripts/native-client/` retains published mcpm
 0.47.1 as its fixed baseline. VS Code 1.141.0 passed 8/8 and Claude Code 2.1.296
@@ -64,8 +79,8 @@ two expected unsupported combinations on Linux/arm64 and Linux/amd64, plus seven
 self-checks and a launcher regression. See `docs/PROTOCOL-VALIDATION.md`.
 
 No SDK upgrade, HTTP relay or full protocol-conformance claim. Live provider,
-model/usage-skill behavior, ordinary approval flows and other client/platform
-combinations remain unverified. Jev/Clef stays deferred for subscription/access.
+model/usage-skill behavior, approval paths beyond the named Phase 2C suite
+and other client/platform combinations remain unverified. Jev/Clef stays deferred for subscription/access.
 
 **Previous release context (historical):**
 
