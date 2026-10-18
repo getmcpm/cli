@@ -18,6 +18,12 @@ pnpm test               # vitest
 pnpm run test:coverage  # with coverage
 ```
 
+CI uses `pnpm install --frozen-lockfile`. `package.json` carries `pnpm.overrides`;
+Dependabot's regenerated `pnpm-lock.yaml` drops that block, so npm bump PRs fail
+with `ERR_PNPM_LOCKFILE_CONFIG_MISMATCH` before tests run. Refresh the lockfile
+locally with `pnpm update <pkg>` (not frozen) so the overrides survive, rather than
+merging Dependabot's lockfile. GitHub Actions bumps are unaffected.
+
 `@types/node` is pinned to the engines floor (22), so a local `typecheck` only proves
 the code compiles against Node 22's API. CI re-runs it per matrix leg against that
 leg's own typings. To reproduce a `Typecheck against @types/node <major>` failure:
