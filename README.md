@@ -396,6 +396,10 @@ mcpm baseline remains 0.47.1. It exercises
 actual global configurations and MCP calls with synthetic inputs; live models,
 interactive chat and other client/platform combinations require separate tests.
 
+v0.47.4 refreshes dependency locks and pinned build/security Actions, preserving
+all nine security overrides. Application source and compatibility claims are
+unchanged; native/reference test baselines remain explicitly pinned.
+
 v0.47.3 fixes VS Code user-global JSONC configuration edits so unrelated
 comments/settings and the raw backup survive the MCP lifecycle. It also adds
 separate native approval/denial tests: four cases each in the pinned VS Code

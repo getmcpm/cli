@@ -8,12 +8,30 @@ _Add entries here, never under a stamped version_ — a release commit renames t
 heading, and a branch that wrote beneath it merges without conflict straight into a
 published section (it happened to #170).
 
+## [0.47.4] - 2026-10-18
+
+PATCH maintenance release: dependency and build-workflow updates. Application
+source, CLI commands, guard signatures and supported protocol claims are unchanged.
+
 ### Changed
 
 - Locked `zod` 4.6.5 → 4.6.7 and `vitest` / `@vitest/coverage-v8` 5.0.3 → 5.0.5,
   with the `pnpm.overrides` block preserved. Dependabot's #264 and #265 drop that
   block and fail `pnpm install --frozen-lockfile` (`ERR_PNPM_LOCKFILE_CONFIG_MISMATCH`);
   same #204/#244 precedent. `package.json` ranges are unchanged.
+- Includes the previously merged MCP SDK 1.31.0 → 1.32.1, Inquirer prompts
+  8.7.2 → 8.7.3 and Node typings 22.20.4 → 22.20.5 updates. Security overrides
+  and the isolated protocol/native test baselines remain unchanged.
+- Refresh pinned SBOM, Node setup, artifact upload and Scorecard GitHub Actions.
+
+### Validation
+
+- Fresh Astra review of #267 found no actionable issues. Independent frozen
+  installs, typecheck/build, all 3,588 source tests, coverage thresholds and
+  22 native harness self-checks pass. Packed-artifact install smoke and real
+  stdio tool discovery, valid calls and invalid-argument rejection also pass.
+- These checks do not add fresh native VM, live provider/model or universal
+  protocol-conformance evidence.
 
 ## [0.47.3] - 2026-10-13
 

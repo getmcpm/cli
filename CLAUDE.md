@@ -1,7 +1,7 @@
 # MCP Registry — Project Context
 
 > This file is automatically read by Claude Code on every session.
-> Keep it updated as decisions are made. Last updated: 2026-10-13.
+> Keep it updated as decisions are made. Last updated: 2026-10-18.
 
 ---
 
@@ -12,7 +12,25 @@ An open-source, CLI-first MCP package manager — **"npm for MCP servers"**.
 A registry where developers can search, install, audit, publish, and update MCP servers
 across all major clients (Claude Desktop, Claude Code, Cursor, VS Code, Windsurf, Gemini CLI) from a single tool.
 
-**Current release:** `@getmcpm/cli@0.47.3` (2026-10-13), tag commit `45380a6`.
+**Release preparation:** `@getmcpm/cli@0.47.4` (2026-10-18), authorized by the
+maintainer's "Get Astra to review and fix any issue found, then merge and release".
+PR #267 merged as `0cdea48`, byte-identical to reviewed `cfade875`, after all nine
+hosted checks. Fresh Astra review found no actionable issues; no fixes were needed.
+Independent frozen pnpm 10.30.0 installs, typecheck/build, 3,588 source tests,
+coverage and its negative threshold probe, and 22 native harness self-checks pass.
+Parent packed-install smoke and public stdio discovery/call/schema-refusal checks
+also pass. One parent Node 26 internal assertion did not recur on repeat or base;
+Astra's build/test overlap failed once, then its sequential validation passed.
+
+PATCH maintenance: Zod 4.6.7 and Vitest/coverage 5.0.5 with all nine overrides;
+also includes already merged SDK 1.32.1, prompts 8.7.3, Node typings and pinned
+GitHub Actions updates since v0.47.3. `src/`, `package.json`, scripts and skills
+are unchanged from that release. No new native VM/provider/model evidence or
+compatibility claim; committed reference/native baselines stay 0.47.0/0.47.1.
+Publication and authenticated artifact verification are pending; the latest
+verified published release is still v0.47.3 until those checks complete.
+
+**Previous verified release:** `@getmcpm/cli@0.47.3` (2026-10-13), tag commit `45380a6`.
 PATCH: VS Code user-global JSONC preservation from PR #260 plus native
 consent/configuration validation tooling from PR #261. Microsoft jsonc-parser
 3.3.1 is the sole new production dependency since 0.47.2. No new CLI command,
