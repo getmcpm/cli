@@ -8,6 +8,13 @@ _Add entries here, never under a stamped version_ — a release commit renames t
 heading, and a branch that wrote beneath it merges without conflict straight into a
 published section (it happened to #170).
 
+### Changed
+
+- Locked `zod` 4.6.5 → 4.6.7 and `vitest` / `@vitest/coverage-v8` 5.0.3 → 5.0.5,
+  with the `pnpm.overrides` block preserved. Dependabot's #264 and #265 drop that
+  block and fail `pnpm install --frozen-lockfile` (`ERR_PNPM_LOCKFILE_CONFIG_MISMATCH`);
+  same #204/#244 precedent. `package.json` ranges are unchanged.
+
 ## [0.47.3] - 2026-10-13
 
 PATCH by content: fixes VS Code JSONC configuration preservation and adds
