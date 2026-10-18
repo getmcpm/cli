@@ -12,23 +12,38 @@ An open-source, CLI-first MCP package manager — **"npm for MCP servers"**.
 A registry where developers can search, install, audit, publish, and update MCP servers
 across all major clients (Claude Desktop, Claude Code, Cursor, VS Code, Windsurf, Gemini CLI) from a single tool.
 
-**Release preparation:** `@getmcpm/cli@0.47.4` (2026-10-18), authorized by the
-maintainer's "Get Astra to review and fix any issue found, then merge and release".
-PR #267 merged as `0cdea48`, byte-identical to reviewed `cfade875`, after all nine
-hosted checks. Fresh Astra review found no actionable issues; no fixes were needed.
-Independent frozen pnpm 10.30.0 installs, typecheck/build, 3,588 source tests,
-coverage and its negative threshold probe, and 22 native harness self-checks pass.
-Parent packed-install smoke and public stdio discovery/call/schema-refusal checks
-also pass. One parent Node 26 internal assertion did not recur on repeat or base;
-Astra's build/test overlap failed once, then its sequential validation passed.
-
+**Current release:** `@getmcpm/cli@0.47.4` (2026-10-18), tag commit `e9a123b`.
 PATCH maintenance: Zod 4.6.7 and Vitest/coverage 5.0.5 with all nine overrides;
-also includes already merged SDK 1.32.1, prompts 8.7.3, Node typings and pinned
-GitHub Actions updates since v0.47.3. `src/`, `package.json`, scripts and skills
-are unchanged from that release. No new native VM/provider/model evidence or
-compatibility claim; committed reference/native baselines stay 0.47.0/0.47.1.
-Publication and authenticated artifact verification are pending; the latest
-verified published release is still v0.47.3 until those checks complete.
+also includes SDK 1.32.1, prompts 8.7.3, Node typings and pinned GitHub Actions
+updates since v0.47.3. Application source, package ranges, scripts and skills
+are unchanged. Fixed reference/native baselines remain 0.47.0/0.47.1.
+
+Fresh Astra review of #267 at `cfade875` found no actionable issues; no fixes
+were needed. All 32 changed package records match npm metadata and all 473 lock
+dependency edges resolve. Independent frozen pnpm 10.30.0 installs,
+typecheck/build, 3,588 source tests, coverage/negative threshold gate and 22
+native harness self-checks pass. #267 merged as `0cdea48`, byte-identical to the
+reviewed head; docs-only release prep #268 merged as `e9a123b`. All nine checks
+passed on each PR. Exact release-main CI `39131641755`, CodeQL `39131641616`
+and Scorecard `39131641750` passed before annotated tag `ee700477` was pushed
+on the maintainer's explicit Astra-review/merge/release instruction.
+
+Publish run `39131790697` passed all five jobs, including Node 22/24/26 artifact
+gates and official MCP registry listing. npm and MCP registry exact/latest are
+0.47.4; the GitHub release includes both SBOM assets. Downloaded tarball SRI
+and cryptographic SLSA provenance bind to the release commit and exact
+`publish.yml@refs/tags/v0.47.4` GitHub Actions signer. The upgraded SBOM action
+succeeded; its signature verifies and altered bytes are rejected. These prove
+artifact identity, not code safety.
+
+The actual verified tarball passes clean-install smoke, 97 public fixture
+verdicts and 11 modern guarded-process cases, including legacy initialization
+and pin/event persistence. A throwaway reference matrix pinned to actual
+0.47.4 passes 40 comparisons, zero failures and two expected unsupported
+combinations, plus seven self-checks. Lock, executed CLI and harness hashes
+match; committed baselines are unchanged. No fresh native VM, live provider,
+model/skill or additional client/platform evidence and no broader protocol
+claim. Evidence: `/private/tmp/mcpm-v0474-release` (temporary local files).
 
 **Previous verified release:** `@getmcpm/cli@0.47.3` (2026-10-13), tag commit `45380a6`.
 PATCH: VS Code user-global JSONC preservation from PR #260 plus native
