@@ -3,6 +3,57 @@ const fs = require('node:fs');
 const path = require('node:path');
 const assert = require('node:assert/strict');
 const root = path.dirname(__dirname);
+const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
+const wire = () => {
+  const file = path.join(root, 'work/wire.jsonl');
+  return fs.existsSync(file) ? fs.readFileSync(file, 'utf8').split('\n').filter(Boolean).map(line => JSON.parse(line)) : [];
+};
+const acknowledgements = () => {
+  const file = path.join(root, 'work/trust-ack.jsonl');
+  return fs.existsSync(file) ? fs.readFileSync(file, 'utf8').split('\n').filter(Boolean).map(line => JSON.parse(line)) : [];
+};
+async function runTrust(request, receipt) {
+  const expectedWorkspaceDecision = request.trust.workspace === 'persisted' ? 0 : 1;
+  if (request.trust.workspace !== 'persisted') receipt.workspaceTrustResult = await vscode.workspace.requestWorkspaceTrust();
+  for (let i = 0; i < 100 && acknowledgements().filter(row => row.phase === 'workspace').length < expectedWorkspaceDecision; i++) await wait(100);
+  assert.equal(acknowledgements().filter(row => row.phase === 'workspace').length, expectedWorkspaceDecision, 'missing or unexpected workspace trust decision');
+  receipt.workspaceTrusted = vscode.workspace.isTrusted;
+  receipt.workspace = vscode.workspace.workspaceFolders?.map(folder => folder.uri.fsPath) ?? [];
+  if (request.trust.workspace === 'deny') {
+    assert.equal(receipt.workspaceTrusted, false); await wait(1000);
+    assert.equal(wire().length, 0, 'untrusted workspace started the project server');
+    assert.ok(!vscode.lm.tools.some(tool => /(?:^|_)echo$/.test(tool.name)));
+    receipt.status = 'pass'; return;
+  }
+  assert.equal(receipt.workspaceTrusted, true, 'workspace trust was not granted or persisted');
+  await wait(2000);
+  let startupError;
+  try { await vscode.commands.executeCommand('workbench.mcp.startServer', '*', { autoTrustChanges: false, waitForLiveTools: true }); }
+  catch (error) { startupError = error.message; }
+  receipt.startupError = startupError;
+  const expectedServerDecision = request.trust.server === 'persisted' ? 0 : 1;
+  for (let i = 0; i < 100 && acknowledgements().filter(row => row.phase === 'server').length < expectedServerDecision; i++) await wait(100);
+  assert.equal(acknowledgements().filter(row => row.phase === 'server').length, expectedServerDecision, 'missing or unexpected server trust decision');
+  if (request.trust.server === 'deny') {
+    await wait(500); assert.equal(wire().length, 0, 'distrusted server process started');
+    receipt.cachedTools = vscode.lm.tools.map(tool => tool.name);
+    receipt.status = 'pass'; return;
+  }
+  let tools = vscode.lm.tools;
+  for (let i = 0; i < 30 && !tools.some(tool => /(?:^|_)echo$/.test(tool.name)); i++) {
+    await vscode.commands.executeCommand('workbench.mcp.startServer', '*', { autoTrustChanges: false, waitForLiveTools: true });
+    await wait(250); tools = vscode.lm.tools;
+  }
+  const matches = tools.filter(tool => tool.name.endsWith('_echo') || tool.name === 'echo');
+  assert.equal(matches.length, 1, `expected trusted native echo tool, got ${JSON.stringify(tools.map(tool => tool.name))}`);
+  const invocation = vscode.lm.invokeTool(matches[0].name, { toolInvocationToken: undefined, input: { text: request.text } });
+  if (request.case === 'trust-server-allow') {
+    for (let i = 0; i < 100 && !acknowledgements().some(row => row.phase === 'tool-policy'); i++) await wait(100);
+    assert.equal(acknowledgements().filter(row => row.phase === 'tool-policy').length, 1, 'missing tool-policy setup decision');
+  }
+  receipt.results.push(await invocation);
+  receipt.tools = tools.map(tool => tool.name); receipt.status = 'pass';
+}
 exports.activate = () => {
   void exports.run().catch(e => console.error('Native smoke failed:', e.message)).finally(() => vscode.commands.executeCommand('workbench.action.quit'));
 };
@@ -11,6 +62,7 @@ exports.run = async () => {
   const receipt = { client: 'vscode', version: vscode.version, case: request.case, status: 'fail', results: [] };
   const timer = setTimeout(() => { throw Error('native VS Code deadline exceeded'); }, 45000);
   try {
+    if (request.trust) { await runTrust(request, receipt); return; }
     await vscode.commands.executeCommand('workbench.mcp.openUserMcpJson');
     receipt.configPath = vscode.window.activeTextEditor?.document.uri.fsPath;
     assert.equal(receipt.configPath, '/Users/admin/Library/Application Support/Code/User/mcp.json');

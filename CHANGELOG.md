@@ -8,6 +8,18 @@ _Add entries here, never under a stamped version_ — a release commit renames t
 heading, and a branch that wrote beneath it merges without conflict straight into a
 published section (it happened to #170).
 
+### Added
+
+- Separate candidate-only native workspace/server trust validation for pinned
+  VS Code 1.141.0 and Claude Code 2.1.296 in disposable macOS VMs. Four cases
+  per client cover workspace refusal, server refusal, restart persistence and
+  changed definitions with exact UI decisions and peer traffic. VS Code's
+  nonce trust is exercised through its explicitly enabled `cursor-workspace`
+  import path; native `.vscode/mcp.json` remains governed by Workspace Trust.
+  Claude Code persists the approved project server name and does not re-prompt
+  when that definition changes. Production code, dependencies and fixed
+  published baselines are unchanged.
+
 ## [0.47.4] - 2026-10-18
 
 PATCH maintenance release: dependency and build-workflow updates. Application

@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { fixtureMetadata, serverName } from './fixture-registry.mjs';
-import { assertEcho, assertNativeWire, assertGuestBoundary, assertConsentObservation, checkPayload, cliArtifact, evidenceFiles, validateReport } from './checks.mjs';
+import { assertEcho, assertNativeWire, assertGuestBoundary, assertConsentObservation, assertTrustObservation, trustCases, checkPayload, cliArtifact, evidenceFiles, validateReport } from './checks.mjs';
 import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { mkdir, mkdtemp, readFile, rm, symlink, truncate, writeFile } from 'node:fs/promises';
@@ -16,6 +16,8 @@ import { readFileSync } from 'node:fs';
 import { consentButton, consentDialogs, fixtureGrantTarget } from './consent-vscode.mjs';
 import { TerminalScreen } from './terminal.mjs';
 import { claudeConsent, claudeStartup, interactiveClaude, terminalChoices } from './consent-claude.mjs';
+import { vscodeTrustButton } from './trust-vscode.mjs';
+import { claudeProjectTrust, interactiveClaudeTrust } from './trust-claude.mjs';
 
 test('macOS PTY driver uses the visible choice and exits after success or pre-dispatch refusal', { skip: process.platform !== 'darwin', timeout: 30000 }, async () => {
   const work = await mkdtemp(tmpdir() + '/mcpm-consent-pty-');
@@ -47,6 +49,30 @@ test('PTY bridge reports signal termination as failure', { skip: process.platfor
   assert.equal(result.status, 125); assert.match(result.stdout, /native-fixture PTY verified/);
 });
 
+test('trust PTY driver selects numbered server refusal before confirming', { skip: process.platform !== 'darwin', timeout: 10000 }, async () => {
+  const work = await mkdtemp(tmpdir() + '/mcpm-trust-pty-');
+  try {
+    const script = `${work}/mock.mjs`;
+    await writeFile(script, `#!${process.execPath}
+process.stdin.setRawMode(true); let input = '', denied = false;
+process.stdout.write('\\x1b[2J\\x1b[HNew MCP server found in this project:\\r\\nio.github.getmcpm/native-fixture\\r\\n❯ 1. Use this MCP server\\r\\n  2. Use this and all future MCP servers in this project\\r\\n  3. Continue without using this MCP server\\r\\n');
+process.stdin.on('data', bytes => {
+  input += bytes.toString();
+  if (!denied && input.includes('\\r')) {
+    if (input !== '3\\r') throw Error('wrong server trust choice: ' + JSON.stringify(input));
+    denied = true; input = ''; process.stdout.write('\\x1b[2J\\x1b[H❯ \\r\\n');
+  } else if (denied && input === '/exit') process.stdout.write('\\x1b[2J\\x1b[H❯ /exit\\r\\n');
+  else if (denied && input === '/exit\\r') process.exit(0);
+});`, { mode: 0o755 });
+    const result = await interactiveClaudeTrust(script,
+      { PATH: process.env.PATH, HOME: work, ANTHROPIC_BASE_URL: 'http://127.0.0.1:1', ANTHROPIC_API_KEY: 'synthetic-native-fixture-key' }, work, work, work,
+      { trust: { workspace: 'persisted', server: 'deny' } }, { results: [] });
+    assert.equal(result.status, 0, result.stdout + result.stderr + (result.failure ?? ''));
+    assert.equal(result.exiting, true); assert.equal(result.trustDecisions[0].key, '3');
+    assert.deepEqual(result.toolDecisions, []);
+  } finally { await rm(work, { recursive: true, force: true }); }
+});
+
 test('native consent selectors accept only the current fixture and explicit narrow decision', () => {
   const dialog = { text: 'Run `echo`\nnative-fixture: Synthetic compatibility fixture.', buttons: ['Yes', 'Cancel'] };
   assert.equal(consentButton(dialog, { action: 'allow', tool: 'echo' }), 'Yes');
@@ -76,6 +102,29 @@ test('native consent selectors accept only the current fixture and explicit narr
   assert.equal(claudeStartup(startup, '/elsewhere'), undefined);
   assert.equal(claudeStartup('Detected a custom API key in your environment\nANTHROPIC_API_KEY: synthetic\nDo you want to use this API key?\n  Yes\n❯ No (recommended)', '/opt/mcpm-native').key, '\x1b[A');
   assert.deepEqual(terminalChoices('❯ 1. Yes, and don\'t ask again\n       for this exact tool\n  2. No'), [{ key: '1', label: "Yes, and don't ask again for this exact tool" }, { key: '2', label: 'No' }]);
+});
+
+test('native trust selectors target only project workspace and fixture-server decisions', () => {
+  const workspace = '/opt/mcpm-native/trust-vscode-approved';
+  const author = { text: 'Do you trust the authors of the files in this folder?', buttons: ["No, I don't trust the authors", 'Trust Folder & Continue'] };
+  assert.equal(vscodeTrustButton(author, { workspace: 'allow' }, workspace), 'Trust Folder & Continue');
+  assert.equal(vscodeTrustButton(author, { workspace: 'deny' }, workspace), "No, I don't trust the authors");
+  assert.equal(vscodeTrustButton({ ...author, buttons: ['Manage', 'Cancel'] }, { workspace: 'deny' }, workspace), 'Cancel');
+  assert.equal(vscodeTrustButton({ text: 'Enable global auto approve?', buttons: ['Disable', 'Enable'] }, {}, workspace), 'Enable');
+  const server = { text: 'Trust and run MCP server native-fixture?\nThis MCP server definition is defined in your workspace files.', buttons: ['Do not trust', 'Trust'] };
+  assert.equal(vscodeTrustButton(server, { server: 'allow' }, workspace), 'Trust');
+  assert.equal(vscodeTrustButton(server, { server: 'deny' }, workspace), 'Do not trust');
+  assert.throws(() => vscodeTrustButton(server, { server: 'persisted' }, workspace), /prompted again/);
+  assert.equal(vscodeTrustButton({ text: 'Sign in to account', buttons: ['Continue'] }, { workspace: 'allow' }, workspace), undefined);
+  const claudeWorkspace = `Accessing workspace:\n${workspace}\nQuick safety check:\n❯ No, exit\n  Yes, I trust this folder`;
+  assert.equal(claudeProjectTrust(claudeWorkspace, { trust: { workspace: 'allow' } }, workspace).label, 'Yes, I trust this folder');
+  assert.equal(claudeProjectTrust(claudeWorkspace, { trust: { workspace: 'deny' } }, workspace).label, 'No, exit');
+  const claudeServer = `New MCP server found in this project:\n${serverName}\n❯ 1. Use this MCP server\n  2. Use this and all future MCP servers in this project\n  3. Continue without using this MCP server`;
+  assert.equal(claudeProjectTrust(claudeServer, { trust: { server: 'allow' } }, workspace).label, 'Use this MCP server');
+  assert.equal(claudeProjectTrust(claudeServer, { trust: { server: 'deny' } }, workspace).label, 'Continue without using this MCP server');
+  assert.throws(() => claudeProjectTrust(claudeServer, { trust: { server: 'persisted' } }, workspace), /prompted again/);
+  const apiKey = 'Detected a custom API key in your environment\nANTHROPIC_API_KEY: synthetic\nDo you want to use this API key?\n  Yes\n❯ No (recommended)';
+  assert.equal(claudeProjectTrust(apiKey, { trust: { workspace: 'persisted' } }, workspace).phase, 'api-key');
 });
 
 test('VS Code grant target expands only its exact server and selects only the echo child', () => {
@@ -171,6 +220,77 @@ test('consent proof rejects dispatch before permission, silent bypass, mismatche
   assert.throws(() => assertConsentObservation(claude, 'claude-code', 'allow', 'echo'), /launch/);
   const wrong = structuredClone(obs); wrong.wire[1].message.params.arguments.text = 'other';
   assert.throws(() => assertConsentObservation(wrong, 'vscode', 'allow', 'echo'), /wrong consent arguments/);
+});
+
+test('trust proof rejects launch before trust and requires persisted restart evidence', () => {
+  let pid = 10;
+  const observation = (caseName, workspaceDecision, serverDecision, marker = 'retained') => {
+    const workspace = `/opt/mcpm-native/trust-vscode-${['trust-workspace-deny', 'trust-server-deny'].includes(caseName) ? caseName.slice(6) : 'approved'}`;
+    const configPath = caseName === 'trust-workspace-deny' ? `${workspace}/.vscode/mcp.json` : `${workspace}/.cursor/mcp.json`;
+    const denied = workspaceDecision === 'deny' || serverDecision === 'deny';
+    const decisions = [
+      ...(workspaceDecision === 'persisted' ? [] : [{ phase: 'workspace', button: workspaceDecision === 'allow' ? 'Trust Folder & Continue' : "No, I don't trust the authors" }]),
+      ...(workspaceDecision === 'deny' || serverDecision === 'persisted' ? [] : [{ phase: 'server', button: serverDecision === 'deny' ? 'Do not trust' : 'Trust' }]),
+    ];
+    const text = `native-${caseName}`, currentPid = pid++;
+    const config = { [caseName === 'trust-workspace-deny' ? 'servers' : 'mcpServers']: { [serverName]: {
+      ...(caseName === 'trust-workspace-deny' ? { type: 'stdio' } : {}), command: '/opt/mcpm-native/bin/npx',
+      args: ['-y', '@mcpm/native-fixture@1.0.0', '--native-marker', marker],
+    } } };
+    return { request: { case: caseName, text, version: '1.0.0', trust: { workspace: workspaceDecision, server: serverDecision, workspacePath: workspace, configPath } },
+      execution: { status: 0, timedOut: false }, receipt: { status: 'pass', workspaceTrusted: workspaceDecision !== 'deny', workspace: [workspace], fixtureTrust: decisions, results: denied ? [] : [{ content: [{ type: 'text', text: JSON.stringify({ text, version: '1.0.0', marker, pid: currentPid }) }] }] },
+      configPath, config, configText: JSON.stringify(config), clientSettings: { 'chat.tools.global.autoApprove': true, 'chat.mcp.autostart': 'never', 'chat.mcp.discovery.enabled': { 'cursor-workspace': true } },
+      wire: denied ? [] : [{ direction: 'to-server', message: { method: 'initialize', params: { clientInfo: { name: 'Visual Studio Code' } } } },
+        { direction: 'to-server', message: { method: 'tools/call', params: { name: 'echo', arguments: { text } } } }] };
+  };
+  const observations = [observation('trust-workspace-deny', 'deny', 'deny'), observation('trust-server-deny', 'allow', 'deny'),
+    observation('trust-server-allow', 'allow', 'allow'), observation('trust-server-persisted', 'persisted', 'persisted'),
+    observation('trust-definition-deny', 'persisted', 'deny', 'changed'), observation('trust-definition-allow', 'persisted', 'allow', 'changed')];
+  observations[0].receipt.fixtureTrust.push({ phase: 'tool-policy', button: 'Enable' });
+  observations.forEach(obs => assertTrustObservation(obs, 'vscode'));
+  const premature = structuredClone(observations[1]); premature.wire.push({ direction: 'to-server', message: { method: 'initialize', params: { clientInfo: { name: 'Visual Studio Code' } } } });
+  assert.throws(() => assertTrustObservation(premature, 'vscode'), /untrusted project server started/);
+  for (const mutate of [
+    obs => { obs.request.trust.workspace = 'deny'; },
+    obs => { obs.config = {}; obs.configText = '{}'; },
+    obs => { obs.request.trust.workspacePath += '-different'; },
+    obs => { obs.receipt.workspaceTrusted = false; },
+    obs => { obs.receipt.fixtureTrust[0].button = "No, I don't trust the authors"; },
+    obs => { obs.clientSettings['chat.mcp.discovery.enabled'] = {}; },
+  ]) {
+    const wrong = structuredClone(observations[1]); mutate(wrong);
+    assert.throws(() => assertTrustObservation(wrong, 'vscode'));
+  }
+  const files = Object.fromEntries(observations.map((obs, i) => [`trust-${i}.json`, obs]));
+  const groups = [[0], [1], [2, 3], [4, 5]];
+  const pins = { vscode: { version: '1.141.0' }, claudeCode: '2.1.296', mcpm: '0.47.1', node: { version: '26.11.1' } }, hashes = { 'fixture.mjs': 'sha256-fixture' };
+  const report = { schemaVersion: 1, suite: 'trust', client: 'vscode', clientVersion: pins.vscode.version, cliVersion: pins.mcpm, node: 'v' + pins.node.version,
+    platform: 'darwin', arch: 'arm64', hashes, boundary: { model: 'VirtualMac2,1', mounts: '', pfStatus: 'Status: Enabled', pfRules: 'block drop all' },
+    cases: trustCases.map((id, i) => ({ id, status: 'pass', evidence: groups[i].map(n => `trust-${n}.json`) })), counts: { pass: 4, fail: 0 } };
+  validateReport(report, 'vscode', pins, hashes, files);
+  files['trust-3.json'].receipt.fixtureTrust.push({ phase: 'server', button: 'Trust' });
+  assert.throws(() => validateReport(report, 'vscode', pins, hashes, files), /persisted|unexpected/);
+  const claude = structuredClone(observations[2]);
+  const workspace = '/opt/mcpm-native/trust-claude-code-approved';
+  claude.request.trust.workspacePath = workspace;
+  claude.configPath = claude.request.trust.configPath = `${workspace}/.mcp.json`;
+  claude.receipt.permissionMode = 'default'; claude.receipt.responses = claude.receipt.results;
+  claude.receipt.fixtureApprovals = [{ label: 'Yes' }];
+  claude.clientSettings = { enabledMcpjsonServers: [serverName] };
+  Object.assign(claude.execution, { ptyVerified: true, exiting: true, command: '/opt/mcpm-native/node_modules/.bin/claude', args: ['--permission-mode', 'default'], cwd: workspace,
+    submission: { prompt: `Run the native fixture ${claude.request.case} check with text ${claude.request.text}.`, confirmed: true, peerPid: 10, toolsListId: 1 } });
+  claude.wire[0].message.params.clientInfo.name = 'claude-code';
+  claude.wire.push({ direction: 'to-server', pid: 10, message: { id: 1, method: 'tools/list' } });
+  assertTrustObservation(claude, 'claude-code');
+  for (const mutate of [
+    obs => { obs.clientSettings.enableAllProjectMcpServers = true; },
+    obs => { obs.clientSettings.enabledMcpjsonServers.push('unrelated'); },
+    obs => { obs.receipt.fixtureApprovals[0].label = "Yes, and don't ask again"; },
+    obs => { obs.execution.ptyVerified = false; },
+  ]) {
+    const wrong = structuredClone(claude); mutate(wrong);
+    assert.throws(() => assertTrustObservation(wrong, 'claude-code'));
+  }
 });
 
 test('fixture registry keeps exact and latest versions distinct and denies external requests', () => {

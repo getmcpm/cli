@@ -10,11 +10,11 @@ import { command } from './command.mjs';
 const here = path.dirname(fileURLToPath(import.meta.url));
 const repo = path.resolve(here, '../..');
 const [tart, storageArg, payloadArg, outputArg, ...flags] = process.argv.slice(2);
-if (!outputArg) throw Error('Usage: node run-vm.mjs TART_BINARY TASK_VM_STORAGE PAYLOAD_DIRECTORY OUTPUT_DIRECTORY [--candidate] [--realistic-config | --approvals]');
-assert.ok(flags.every(f => ['--candidate', '--realistic-config', '--approvals'].includes(f)) && new Set(flags).size === flags.length, 'invalid runner flags');
-const candidate = flags.includes('--candidate'), realistic = flags.includes('--realistic-config'), approvals = flags.includes('--approvals');
-assert.ok(!realistic || !approvals, 'configuration and approval suites run separately');
-assert.ok(!realistic || candidate, 'realistic configuration tests require an explicit candidate');
+if (!outputArg) throw Error('Usage: node run-vm.mjs TART_BINARY TASK_VM_STORAGE PAYLOAD_DIRECTORY OUTPUT_DIRECTORY [--candidate] [--realistic-config | --approvals | --trust]');
+assert.ok(flags.every(f => ['--candidate', '--realistic-config', '--approvals', '--trust'].includes(f)) && new Set(flags).size === flags.length, 'invalid runner flags');
+const candidate = flags.includes('--candidate'), realistic = flags.includes('--realistic-config'), approvals = flags.includes('--approvals'), trust = flags.includes('--trust');
+assert.ok([realistic, approvals, trust].filter(Boolean).length <= 1, 'configuration, approval and trust suites run separately');
+assert.ok((!realistic && !trust) || candidate, 'configuration and trust tests require an explicit candidate');
 assert.equal(process.platform, 'darwin'); assert.equal(process.arch, 'arm64');
 const storage = path.resolve(storageArg), payload = path.resolve(payloadArg), output = path.resolve(outputArg);
 await mkdir(output, { recursive: true }); assert.equal((await readdir(output)).length, 0, 'evidence directory must be empty');
@@ -48,7 +48,7 @@ const stage = `${output}/stage`; await mkdir(stage);
 // Whitelist public artifacts; never archive a checkout, home or host profile.
 for (const file of ['package.json', 'package-lock.json', 'pins.json', 'node.tar.gz', 'vscode.zip', ...(candidate ? ['candidate.tgz'] : [])]) await copyFile(`${payload}/${file}`, `${stage}/${file}`);
 await cp(`${payload}/node_modules`, `${stage}/node_modules`, { recursive: true, verbatimSymlinks: true });
-for (const file of ['peer.mjs', 'launcher.mjs', 'fixture-registry.mjs', 'checks.mjs', 'gateway.mjs', 'approval.mjs', 'consent-vscode.mjs', 'consent-claude.mjs', 'terminal.mjs', 'pty.tcl', 'run-guest.mjs']) await copyFile(`${here}/${file}`, `${stage}/${file}`);
+for (const file of ['peer.mjs', 'launcher.mjs', 'fixture-registry.mjs', 'checks.mjs', 'gateway.mjs', 'approval.mjs', 'consent-vscode.mjs', 'consent-claude.mjs', 'trust-vscode.mjs', 'trust-claude.mjs', 'terminal.mjs', 'pty.tcl', 'run-guest.mjs']) await copyFile(`${here}/${file}`, `${stage}/${file}`);
 await cp(`${here}/vscode-extension`, `${stage}/vscode-extension`, { recursive: true });
 await copyFile(`${repo}/src/guard/__tests__/fixtures/mcptox/warn/quoted-attack-phrase-near-non-rgi-flag.json`, `${stage}/warn.json`);
 const archive = `${output}/payload.tar`;
@@ -59,7 +59,7 @@ for (const file of [...(await readdir(stage)).filter(f => /\.(mjs|json|tgz|tcl)$
 }
 const hostHashes = {};
 for (const file of (await readdir(here)).filter(f => /\.(mjs|json|tcl)$/.test(f))) hostHashes[file] = createHash('sha256').update(await readFile(`${here}/${file}`)).digest('hex');
-const report = { schemaVersion: 1, pins, cliArtifact: artifact, suite: approvals ? 'approvals' : realistic ? 'realistic-config' : 'baseline', hashes, hostHashes, payloadBudget, runFlags: ['--no-graphics', '--no-audio', '--no-usb-accessories', '--no-clipboard', '--net-host'], clients: [] };
+const report = { schemaVersion: 1, pins, cliArtifact: artifact, suite: trust ? 'trust' : approvals ? 'approvals' : realistic ? 'realistic-config' : 'baseline', hashes, hostHashes, payloadBudget, runFlags: ['--no-graphics', '--no-audio', '--no-usb-accessories', '--no-clipboard', '--net-host'], clients: [] };
 await writeFile(`${output}/manifest.json`, JSON.stringify(report, null, 2));
 for (const client of ['vscode', 'claude-code']) {
   const name = `mcpm-native-${client}-${randomBytes(4).toString('hex')}`;
@@ -103,7 +103,7 @@ sw_vers
 id
 `;
     row.provision = await call(['exec', name, '/bin/bash', '-c', provision], { timeout: 180000 });
-    const result = await command(tart, ['exec', name, '/opt/mcpm-native/node/bin/node', '/opt/mcpm-native/run-guest.mjs', client, ...(candidate ? ['candidate'] : []), ...(realistic ? ['realistic'] : []), ...(approvals ? ['approvals'] : [])], { env, timeout: 900000, signal: controller.signal });
+    const result = await command(tart, ['exec', name, '/opt/mcpm-native/node/bin/node', '/opt/mcpm-native/run-guest.mjs', client, ...(candidate ? ['candidate'] : []), ...(realistic ? ['realistic'] : []), ...(approvals ? ['approvals'] : []), ...(trust ? ['trust'] : [])], { env, timeout: 900000, signal: controller.signal });
     await writeFile(`${output}/${client}-execution.json`, JSON.stringify({ status: result.status, signal: result.signal, error: result.error, stdout: result.stdout, stderr: result.stderr }, null, 2));
     const exporter = "const fs=require('node:fs');const d='/opt/mcpm-native/evidence';const out={};const names=fs.readdirSync(d);if(names.length>32)throw Error('Evidence file count');let total=0;for(const n of names){const stat=fs.lstatSync(d+'/'+n);if(!/^[a-z0-9.-]+\\.json$/.test(n)||!stat.isFile())throw Error('Invalid evidence file');total+=stat.size;if(stat.size>4*1024*1024||total>16*1024*1024)throw Error('Evidence budget');out[n]=JSON.parse(fs.readFileSync(d+'/'+n,'utf8'));}process.stdout.write(JSON.stringify(out));";
     const exported = JSON.parse(await call(['exec', name, '/opt/mcpm-native/node/bin/node', '-e', exporter], { maxBuffer: 16 * 1024 * 1024 }));

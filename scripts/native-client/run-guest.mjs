@@ -12,15 +12,17 @@ import { gateway } from './gateway.mjs';
 import { approveFixtureDialogs, fixtureInputPrompt, fixtureInputValue } from './approval.mjs';
 import { consentDialogs } from './consent-vscode.mjs';
 import { interactiveClaude } from './consent-claude.mjs';
+import { vscodeTrustDialogs } from './trust-vscode.mjs';
+import { interactiveClaudeTrust } from './trust-claude.mjs';
 import { approvalCases, assertConsentObservation } from './checks.mjs';
 
 const root = path.dirname(fileURLToPath(import.meta.url));
 const client = process.argv[2];
 const flags = process.argv.slice(3);
-assert.ok(flags.every(f => ['candidate', 'realistic', 'approvals'].includes(f)) && new Set(flags).size === flags.length);
-const candidate = flags.includes('candidate'), realistic = flags.includes('realistic'), approvals = flags.includes('approvals');
-assert.ok(!realistic || !approvals);
-assert.ok(!realistic || candidate);
+assert.ok(flags.every(f => ['candidate', 'realistic', 'approvals', 'trust'].includes(f)) && new Set(flags).size === flags.length);
+const candidate = flags.includes('candidate'), realistic = flags.includes('realistic'), approvals = flags.includes('approvals'), trust = flags.includes('trust');
+assert.ok([realistic, approvals, trust].filter(Boolean).length <= 1);
+assert.ok((!realistic && !trust) || candidate);
 assert.ok(['vscode', 'claude-code'].includes(client));
 assert.equal(process.platform, 'darwin', 'native test requires macOS guest');
 assert.equal(root, '/opt/mcpm-native', 'native test must run inside the prepared guest');
@@ -54,9 +56,9 @@ function assertEcho(content, expected) {
 }
 let currentCase;
 let observationNumber = 0;
-const report = { schemaVersion: 1, boundary, client, suite: approvals ? 'approvals' : realistic ? 'realistic-config' : 'baseline', cliArtifact: await cliArtifact(root, candidate), platform: process.platform, arch: process.arch, node: process.version,
+const report = { schemaVersion: 1, boundary, client, suite: trust ? 'trust' : approvals ? 'approvals' : realistic ? 'realistic-config' : 'baseline', cliArtifact: await cliArtifact(root, candidate), platform: process.platform, arch: process.arch, node: process.version,
   configPath, syntheticRegistryAndLauncher: true, syntheticModelGateway: client === 'claude-code', cases: [],
-  notTested: ['Live registry/npm service behavior', 'Real provider/model or usage-skill behavior', ...(approvals ? ['VS Code native macOS dialog rendering, inline chat and Agent Host approvals'] : ['Interactive chat/approval UI']), 'All protocol features or other platforms/clients'] };
+  notTested: ['Live registry/npm service behavior', 'Real provider/model or usage-skill behavior', ...(trust ? ['Inline chat, Agent Host, portable VS Code profiles and non-project server scopes'] : approvals ? ['VS Code native macOS dialog rendering, inline chat and Agent Host approvals'] : ['Interactive chat/approval UI']), 'All protocol features or other platforms/clients'] };
 async function json(file, fallback) {
   try {
     const raw = await readFile(file, 'utf8');
@@ -89,42 +91,52 @@ async function execute(command, args, extraEnv = {}, interrupt) {
     return { ...result, timedOut, interrupted };
   } finally { clearTimeout(timeout); clearInterval(poll); }
 }
-async function native(caseName, version, consent) {
+async function native(caseName, version, consent, trustIntent) {
   const eventOffset = (await lines(`${homedir()}/.mcpm/guard-events.jsonl`)).length;
-  const request = { case: caseName, text: `native-${caseName}${approvals ? '-' + (observationNumber + 1) : ''}`, version, ...(consent ? { consent } : {}) };
-  for (const name of ['wire.jsonl', 'gateway.jsonl', 'receipt.json', 'reload.json', 'consent-intent.json', 'consent-ack.json']) await rm(`${work}/${name}`, { force: true });
+  const request = { case: caseName, text: `native-${caseName}${approvals || trust ? '-' + (observationNumber + 1) : ''}`, version, ...(consent ? { consent } : {}), ...(trustIntent ? { trust: trustIntent } : {}) };
+  for (const name of ['wire.jsonl', 'gateway.jsonl', 'receipt.json', 'reload.json', 'consent-intent.json', 'consent-ack.json', 'trust-intent.json', 'trust-ack.jsonl', 'trust-ui.jsonl']) await rm(`${work}/${name}`, { force: true });
   await writeFile(`${work}/request.json`, JSON.stringify(request));
+  if (trustIntent) await writeFile(`${work}/trust-intent.json`, JSON.stringify(trustIntent));
   let execution, receipt;
   if (client === 'vscode') {
     const approvalLog = [], approvalUI = {}, controller = new AbortController();
     let approvalError;
-    const approval = (approvals ? consentDialogs(work, approvalLog, controller.signal, approvalUI) : approveFixtureDialogs(9222, approvalLog, controller.signal)).catch(e => { approvalError = String(e?.stack ?? e?.message ?? e); });
+    const approval = (trust ? vscodeTrustDialogs(9222, work, approvalLog, controller.signal)
+      : approvals ? consentDialogs(work, approvalLog, controller.signal, approvalUI)
+      : approveFixtureDialogs(9222, approvalLog, controller.signal)).catch(e => { approvalError = String(e?.stack ?? e?.message ?? e); });
     try {
-      execution = await execute('/Applications/Visual Studio Code.app/Contents/MacOS/Code', [root, '--user-data-dir', `${homedir()}/Library/Application Support/Code`,
+      execution = await execute('/Applications/Visual Studio Code.app/Contents/MacOS/Code', [trustIntent?.workspacePath ?? root, '--user-data-dir', `${homedir()}/Library/Application Support/Code`,
         '--extensions-dir', `${root}/extensions`, '--extensionDevelopmentPath', `${root}/vscode-extension`, '--remote-debugging-port=9222',
-        '--skip-welcome', '--skip-release-notes', '--disable-workspace-trust', '--disable-updates', '--disable-telemetry']);
+        ...(trust ? ['--enable-proposed-api', 'mcpm-test.mcpm-native-smoke'] : []),
+        '--skip-welcome', '--skip-release-notes', ...(!trust ? ['--disable-workspace-trust'] : []), '--disable-updates', '--disable-telemetry']);
     } finally { controller.abort(); await approval; }
-    receipt = await json(`${work}/receipt.json`, approvals ? { status: 'fail', error: 'missing native extension receipt' } : null);
+    receipt = await json(`${work}/receipt.json`, approvals || trust ? { status: 'fail', error: 'missing native extension receipt' } : null);
     if (approvals) receipt.fixtureApprovalUI = approvalUI;
-    if (receipt) { receipt.fixtureApprovals = approvalLog; if (approvalError) receipt.approvalError = approvalError; }
+    if (receipt) { receipt[trust ? 'fixtureTrust' : 'fixtureApprovals'] = approvalLog; if (approvalError) receipt.approvalError = approvalError; }
   } else {
     const model = await gateway(work, request);
     try {
       const extraEnv = { ANTHROPIC_BASE_URL: model.url, ANTHROPIC_API_KEY: 'synthetic-native-fixture-key' };
-      execution = approvals
-        ? await interactiveClaude(`${root}/node_modules/.bin/claude`, ['--permission-mode', 'default'], { ...env, ...extraEnv }, root, work, request, model)
+      execution = trust
+        ? await interactiveClaudeTrust(`${root}/node_modules/.bin/claude`, { ...env, ...extraEnv }, root, trustIntent.workspacePath, work, request, model)
+        : approvals ? await interactiveClaude(`${root}/node_modules/.bin/claude`, ['--permission-mode', 'default'], { ...env, ...extraEnv }, root, work, request, model)
         : await execute(`${root}/node_modules/.bin/claude`, ['-p', `Run the native fixture ${caseName} check.`, '--output-format', 'stream-json', '--verbose', '--max-turns', '4', '--dangerously-skip-permissions'], extraEnv, caseName === 'cancel');
-      receipt = { client, case: caseName, status: execution.status === 0 && !execution.failure && !model.observations.some(o => o.error) ? 'pass' : 'fail', responses: model.results, gateway: model.observations,
-        ...(approvals ? { permissionMode: 'default', fixtureApprovals: execution.decisions } : {}) };
+      const expectedExit = trust && trustIntent.workspace === 'deny' ? execution.status === 1 : execution.status === 0;
+      receipt = { client, case: caseName, status: expectedExit && !execution.failure && !model.observations.some(o => o.error) ? 'pass' : 'fail', responses: model.results, gateway: model.observations,
+        ...(trust ? { permissionMode: 'default', fixtureTrust: execution.trustDecisions, fixtureApprovals: execution.toolDecisions }
+          : approvals ? { permissionMode: 'default', fixtureApprovals: execution.decisions } : {}) };
     } finally { await model.close(); }
   }
   const wire = await lines(`${work}/wire.jsonl`);
   const events = (await lines(`${homedir()}/.mcpm/guard-events.jsonl`)).slice(eventOffset);
-  const observation = { request, execution, receipt, wire, events, config: await json(configPath),
-    configText: await readFile(configPath, 'utf8'),
-    backupText: await readFile(configPath + '.bak', 'utf8').catch(e => { if (e.code !== 'ENOENT') throw e; return null; }),
+  const observedConfigPath = trustIntent?.configPath ?? configPath;
+  const observation = { request, execution, receipt, wire, events, configPath: observedConfigPath, config: await json(observedConfigPath),
+    configText: await readFile(observedConfigPath, 'utf8'),
+    backupText: await readFile(observedConfigPath + '.bak', 'utf8').catch(e => { if (e.code !== 'ENOENT') throw e; return null; }),
     pins: await json(`${homedir()}/.mcpm/pins.json`, null),
-    ...(approvals ? { clientSettings: await json(client === 'vscode' ? `${homedir()}/Library/Application Support/Code/User/settings.json` : `${root}/.claude/settings.local.json`, null) } : {}) };
+    ...(trust && client === 'vscode' ? { trustUI: await lines(`${work}/trust-ui.jsonl`) } : {}),
+    ...(approvals || trust ? { clientSettings: await json(client === 'vscode' ? `${homedir()}/Library/Application Support/Code/User/settings.json`
+      : trust ? `${trustIntent.workspacePath}/.claude/settings.local.json` : `${root}/.claude/settings.local.json`, null) } : {}) };
   const filename = `${++observationNumber}-${caseName}-${version}.json`;
   await writeFile(`${evidence}/${filename}`, JSON.stringify(observation, null, 2), { flag: 'wx' });
   currentCase.evidence.push(filename);
@@ -143,7 +155,7 @@ async function run(id, fn) {
   const row = { id, status: 'fail', evidence: [] };
   currentCase = row;
   try {
-    assert.ok(!approvals || report.cases.every(c => c.status === 'pass'), 'earlier consent case failed; stop dependent cases');
+    assert.ok(!(approvals || trust) || report.cases.every(c => c.status === 'pass'), 'earlier dependent case failed; stop remaining cases');
     await fn(); row.status = 'pass';
   } catch (e) { row.reason = e.stack; }
   report.cases.push(row); console.log(`${row.status}: ${client}/${id}${row.reason ? ': ' + row.reason.split('\n')[0] : ''}`);
@@ -156,12 +168,58 @@ report.cliVersion = JSON.parse(await readFile(`${root}/node_modules/@getmcpm/cli
 report.hashes = {};
 for (const file of [...(await readdir(root)).filter(f => /\.(mjs|json|tgz|tcl)$/.test(f)), 'vscode-extension/package.json', 'vscode-extension/tests.cjs']) report.hashes[file] = createHash('sha256').update(await readFile(`${root}/${file}`)).digest('hex');
 await mkdir(path.dirname(configPath), { recursive: true }); await writeFile(configPath, seedText);
-if (client === 'vscode') await writeFile(`${homedir()}/Library/Application Support/Code/User/settings.json`, JSON.stringify({ 'chat.tools.global.autoApprove': !approvals, ...(approvals ? { 'chat.permissions.default': 'default', 'window.dialogStyle': 'custom' } : {}), 'telemetry.telemetryLevel': 'off', 'update.mode': 'none', 'extensions.autoUpdate': false, 'chat.mcp.discovery.enabled': {} }));
+if (client === 'vscode') await writeFile(`${homedir()}/Library/Application Support/Code/User/settings.json`, JSON.stringify({ 'chat.tools.global.autoApprove': !approvals, ...(approvals ? { 'chat.permissions.default': 'default', 'window.dialogStyle': 'custom' } : {}), ...(trust ? { 'chat.mcp.autostart': 'never' } : {}), 'telemetry.telemetryLevel': 'off', 'update.mode': 'none', 'extensions.autoUpdate': false, 'chat.mcp.discovery.enabled': trust ? { 'cursor-workspace': true } : {} }));
 // Simulate npm's launcher only for the named, dependency-free fixture package.
 await chmod(`${root}/launcher.mjs`, 0o755);
 await symlink(`${root}/launcher.mjs`, `${root}/bin/npx`);
 
-if (approvals) {
+if (trust) {
+  const workspace = async (name, marker = 'retained') => {
+    const workspacePath = `${root}/trust-${client}-${name}`;
+    const projectConfig = client === 'vscode' ? `${workspacePath}/${name === 'workspace-deny' ? '.vscode/mcp.json' : '.cursor/mcp.json'}` : `${workspacePath}/.mcp.json`;
+    await mkdir(workspacePath, { recursive: true });
+    await mkdir(path.dirname(projectConfig), { recursive: true });
+    const entry = { command: `${root}/bin/npx`, args: ['-y', '@mcpm/native-fixture@1.0.0', '--native-marker', marker] };
+    await writeFile(projectConfig, JSON.stringify(client === 'vscode' && name === 'workspace-deny' ? { servers: { [serverName]: { type: 'stdio', ...entry } } } : { mcpServers: { [serverName]: entry } }, null, 2));
+    return { workspacePath, configPath: projectConfig };
+  };
+  const observe = async (caseName, location, workspaceDecision, serverDecision) => {
+    const obs = await native(caseName, '1.0.0', undefined, { ...location, workspace: workspaceDecision, server: serverDecision });
+    assert.equal(obs.execution.timedOut, false, 'native trust execution deadline exceeded');
+    assert.equal(obs.execution.status, workspaceDecision === 'deny' && client === 'claude-code' ? 1 : 0, obs.execution.stderr + obs.execution.stdout);
+    assert.equal(obs.receipt?.status, 'pass'); return obs;
+  };
+  await run('untrusted-workspace-blocks-project-server', async () => {
+    const location = await workspace('workspace-deny');
+    const obs = await observe('trust-workspace-deny', location, 'deny', 'deny');
+    assert.equal(obs.wire.length, 0); assert.equal(obs.receipt.workspaceTrusted ?? false, false);
+  });
+  await run('trusted-workspace-server-denial-blocks-launch', async () => {
+    const location = await workspace('server-deny');
+    const obs = await observe('trust-server-deny', location, 'allow', 'deny');
+    assert.equal(obs.wire.length, 0);
+  });
+  let approvedLocation;
+  await run('exact-server-trust-persists-across-restart', async () => {
+    approvedLocation = await workspace('approved');
+    const first = await observe('trust-server-allow', approvedLocation, 'allow', 'allow');
+    const restarted = await observe('trust-server-persisted', approvedLocation, 'persisted', 'persisted');
+    const a = assertEcho(results(first).at(-1).content, { text: first.request.text, version: '1.0.0' });
+    const b = assertEcho(results(restarted).at(-1).content, { text: restarted.request.text, version: '1.0.0' });
+    assert.equal(a.marker, 'retained'); assert.equal(b.marker, 'retained'); assert.notEqual(a.pid, b.pid);
+  });
+  await run('changed-definition-trust-boundary', async () => {
+    const changed = await workspace('approved', 'changed');
+    if (client === 'vscode') {
+      const denied = await observe('trust-definition-deny', changed, 'persisted', 'deny'); assert.equal(denied.wire.length, 0);
+      const allowed = await observe('trust-definition-allow', changed, 'persisted', 'allow');
+      assertEcho(results(allowed).at(-1).content, { text: allowed.request.text, version: '1.0.0', marker: 'changed' });
+    } else {
+      const observed = await observe('trust-definition-change', changed, 'persisted', 'persisted');
+      assertEcho(results(observed).at(-1).content, { text: observed.request.text, version: '1.0.0', marker: 'changed' });
+    }
+  });
+} else if (approvals) {
   product(['install', serverName, '--client', client, '--yes', '--skip-health-check', '--json']);
   const config = await json(configPath); config[key][serverName].args.push('--native-marker', 'retained');
   await writeFile(configPath, JSON.stringify(config, null, 2));

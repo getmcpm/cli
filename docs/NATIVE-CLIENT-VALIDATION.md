@@ -204,6 +204,62 @@ zero-decision requirement after restart is unchanged. The same candidate
 then passed all four cases in both clients. The unchanged published baseline
 also passed 8/8 VS Code and 7/7 Claude Code again after this fix.
 
+### Workspace and server trust suite (Phase 2D)
+
+Run the separate candidate trust suite with a fresh evidence directory:
+
+```sh
+node scripts/native-client/run-vm.mjs /path/to/tart \
+  /tmp/mcpm-native-vms /tmp/mcpm-candidate-payload /tmp/mcpm-trust-evidence \
+  --candidate --trust
+```
+
+`--trust`, `--approvals` and `--realistic-config` are separate suites. Trust
+validation requires an explicit candidate; the fixed published 0.47.1 baseline
+is not repinned. The runner still executes VS Code first and Claude Code second
+in independent clones.
+
+| Case | Required observation |
+| --- | --- |
+| Untrusted workspace | Refuse the native workspace prompt; the project server sends no fixture traffic. |
+| Server denial | Trust the workspace, refuse the exact server prompt and observe no fixture traffic. |
+| Restart persistence | Trust the exact server, call echo, restart the client and call a new nonce without another trust prompt or reused peer PID. Tool consent remains separate. |
+| Changed definition | Replace only the synthetic launch marker and record the pinned client's actual trust boundary before the changed peer can answer. |
+
+VS Code's native `.vscode/mcp.json` is governed by Workspace Trust and is
+trusted once the workspace is trusted. Its separate nonce-based server prompt
+applies to imported external configurations, so the server cases use a
+synthetic workspace `.cursor/mcp.json` and enable only the pinned
+`cursor-workspace` discovery source. Autostart is disabled in the disposable
+profile; the fixture explicitly starts the server. The native prompt is denied
+or approved through the UI. The changed definition prompts again, denial sends
+no wire traffic, and approval launches the changed marker. VS can retain cached
+echo metadata after denial; that metadata is recorded, while the enforced
+claim is that no fixture protocol traffic was observed. The one-time
+guest global tool-policy confirmation is recorded separately from trust.
+
+Claude Code uses project `.mcp.json` with interactive default permission mode.
+Workspace and project-server decisions are recorded separately from the
+one-shot echo approval. “Use this MCP server” persists only the exact server
+name in `.claude/settings.local.json`. It survives a fresh client and peer PID,
+but pinned 2.1.296 does not re-prompt when that name's launch marker argument changes;
+the changed marker launches after a separate tool approval. This measured
+name-based boundary is a compatibility result, not a safety guarantee.
+
+Final candidate measurement on 2026-10-22 passed **4/4 VS Code and 4/4 Claude
+Code trust cases**, exporting six and five observations respectively. The run
+used macOS 26.6.2/arm64, Node 26.11.1, VS Code 1.141.0 and Claude Code 2.1.296.
+Host/stage/guest hashes and the complete candidate artifact identity matched;
+both clones stopped and deleted with status 0. All 3,588 source tests,
+typecheck/build and 25 account/VM-free harness checks passed. Cold image clone
+timeouts and earlier exploratory selector/scope runs are superseded and do not
+count as evidence.
+
+Fresh Astra review corrected Claude numbered-menu key dispatch and tightened
+the host validator around exact case intent, workspace/config continuity,
+native trust state, scoped Claude grants and one-shot tool consent. The final
+reviewed evidence is `/private/tmp/mcpm-phase2d/trust-run-16` (temporary).
+
 The runner clones the immutable image independently for **VS Code first, then
 Claude Code**, using the base image's synthetic `admin` account. Each clone is
 stopped/deleted after its client completes, fails, or the runner receives

@@ -3,6 +3,7 @@ import { lstat, readFile, readdir, realpath } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import path from 'node:path';
+import { serverName } from './fixture-registry.mjs';
 
 export async function checkPayload(root, candidate = false) {
   root = await realpath(root);
@@ -68,7 +69,7 @@ export function assertEcho(content, expected) {
   const result = JSON.parse(text);
   assert.equal(result.text, expected.text);
   assert.equal(result.version, expected.version);
-  assert.equal(result.marker, 'retained');
+  assert.equal(result.marker, expected.marker ?? 'retained');
   assert.ok(Number.isInteger(result.pid) && result.pid > 0);
   return result;
 }
@@ -88,6 +89,81 @@ export function assertGuestBoundary(boundary) {
 }
 
 export const approvalCases = ['one-shot-reprompts', 'deny-and-cancel-before-dispatch', 'persistent-exact-tool-permission', 'guard-block-after-approval'];
+export const trustCases = ['untrusted-workspace-blocks-project-server', 'trusted-workspace-server-denial-blocks-launch', 'exact-server-trust-persists-across-restart', 'changed-definition-trust-boundary'];
+
+export function assertTrustObservation(obs, client) {
+  const plan = {
+    'trust-workspace-deny': ['deny', 'deny', 'workspace-deny'],
+    'trust-server-deny': ['allow', 'deny', 'server-deny'],
+    'trust-server-allow': ['allow', 'allow', 'approved'],
+    'trust-server-persisted': ['persisted', 'persisted', 'approved'],
+    'trust-definition-deny': ['persisted', 'deny', 'approved'],
+    'trust-definition-allow': ['persisted', 'allow', 'approved'],
+    'trust-definition-change': ['persisted', 'persisted', 'approved'],
+  }[obs.request.case];
+  assert.ok(plan, 'unexpected trust case');
+  assert.deepEqual([obs.request.trust.workspace, obs.request.trust.server], plan.slice(0, 2), 'wrong trust decisions for case');
+  assert.equal(obs.execution.timedOut, false, 'trust deadline is not a result');
+  assert.equal(obs.execution.status, obs.request.trust.workspace === 'deny' && client === 'claude-code' ? 1 : 0, obs.execution.stderr + obs.execution.stdout);
+  assert.equal(obs.execution.failure, undefined); assert.equal(obs.receipt?.status, 'pass'); assert.equal(obs.receipt.approvalError, undefined);
+  const intent = obs.request.trust, workspace = intent.workspacePath;
+  assert.equal(workspace, `/opt/mcpm-native/trust-${client}-${plan[2]}`, 'wrong trust workspace');
+  const expectedConfig = client === 'vscode'
+    ? obs.request.case === 'trust-workspace-deny' ? `${workspace}/.vscode/mcp.json` : `${workspace}/.cursor/mcp.json`
+    : `${workspace}/.mcp.json`;
+  assert.equal(intent.configPath, expectedConfig);
+  assert.equal(obs.configPath, intent.configPath);
+  const nativeVscodeConfig = client === 'vscode' && obs.request.case === 'trust-workspace-deny';
+  const marker = obs.request.case.includes('definition') ? 'changed' : 'retained';
+  assert.equal(obs.request.version, '1.0.0');
+  assert.deepEqual(obs.config, { [nativeVscodeConfig ? 'servers' : 'mcpServers']: { [serverName]: {
+    ...(nativeVscodeConfig ? { type: 'stdio' } : {}), command: '/opt/mcpm-native/bin/npx',
+    args: ['-y', '@mcpm/native-fixture@1.0.0', '--native-marker', marker],
+  } } }, 'wrong project server definition');
+  assert.deepEqual(JSON.parse(obs.configText), obs.config, 'project config readback differs');
+  const decisions = obs.receipt.fixtureTrust;
+  assert.ok(Array.isArray(decisions) && decisions.every(d => ['workspace', 'server', 'tool-policy'].includes(d.phase)));
+  const workspaceDecisions = decisions.filter(d => d.phase === 'workspace'), serverDecisions = decisions.filter(d => d.phase === 'server'), toolPolicy = decisions.filter(d => d.phase === 'tool-policy');
+  assert.ok(toolPolicy.length <= 1 && toolPolicy.every(d => d.button === 'Enable'), 'unexpected tool-policy setup decision');
+  assert.equal(workspaceDecisions.length, intent.workspace === 'persisted' ? 0 : 1, 'missing, repeated or unexpected workspace decision');
+  assert.equal(serverDecisions.length, intent.workspace === 'deny' || intent.server === 'persisted' ? 0 : 1, 'missing, repeated or unexpected server decision');
+  for (const decision of workspaceDecisions) assert.match(decision.button ?? decision.label, intent.workspace === 'allow' ? /^(?:Trust (?:Folder|Workspace)(?: & Continue)?|Yes, I trust.*)$/i : /^(?:No, .*|Cancel|.*restricted mode.*)$/i);
+  for (const decision of serverDecisions) assert.match(decision.button ?? decision.label, intent.server === 'deny' ? /Do not trust|Continue without using/ : /^Trust$|^Use this MCP server$/);
+  const denied = intent.workspace === 'deny' || intent.server === 'deny';
+  if (client === 'vscode') {
+    assert.equal(obs.receipt.workspaceTrusted, intent.workspace !== 'deny', 'wrong native workspace trust state');
+    assert.deepEqual(obs.receipt.workspace, [workspace]);
+    assert.equal(obs.clientSettings['chat.tools.global.autoApprove'], true, 'tool consent must stay separate from server trust');
+    assert.equal(obs.clientSettings['chat.mcp.autostart'], 'never', 'trust prompt must precede explicit server start');
+    assert.deepEqual(obs.clientSettings['chat.mcp.discovery.enabled'], { 'cursor-workspace': true }, 'only the named external workspace discovery source may be enabled');
+  } else {
+    assert.equal(obs.receipt.permissionMode, 'default'); assert.equal(obs.execution.ptyVerified, true);
+    assert.equal(obs.execution.exiting, intent.workspace !== 'deny');
+    assert.equal(obs.execution.command, '/opt/mcpm-native/node_modules/.bin/claude');
+    assert.deepEqual(obs.execution.args, ['--permission-mode', 'default']); assert.equal(obs.execution.cwd, workspace);
+    assert.deepEqual(obs.clientSettings, intent.workspace === 'deny' ? null : {
+      [intent.server === 'deny' ? 'disabledMcpjsonServers' : 'enabledMcpjsonServers']: [serverName],
+    }, 'project server trust must be scoped to the exact name');
+  }
+  if (denied) {
+    assert.deepEqual(obs.wire, [], 'untrusted project server started');
+    assert.equal(obs.receipt.fixtureApprovals?.length ?? 0, 0, 'tool approval occurred for an untrusted server');
+    return;
+  }
+  assertNativeWire(obs.wire, client, 'echo');
+  const calls = obs.wire.filter(w => w.direction === 'to-server' && w.message.method === 'tools/call');
+  assert.deepEqual(calls.map(w => [w.message.params.name, w.message.params.arguments?.text]), [['echo', obs.request.text]]);
+  const result = client === 'vscode' ? obs.receipt.results.at(-1) : obs.receipt.responses.at(-1);
+  assertEcho(typeof result.content === 'string' ? [{ type: 'text', text: result.content }] : result.content,
+    { text: obs.request.text, version: obs.request.version, marker });
+  if (client === 'claude-code') {
+    assert.equal(obs.receipt.fixtureApprovals.length, 1, 'trusted server tool call requires its own one-shot approval');
+    assert.match(obs.receipt.fixtureApprovals[0].label, /^Yes(?:$|\s*\()/, 'tool approval must be one-shot');
+    const submitted = obs.execution.submission;
+    assert.equal(submitted?.prompt, `Run the native fixture ${obs.request.case} check with text ${obs.request.text}.`); assert.equal(submitted.confirmed, true);
+    assert.ok(obs.wire.some(w => w.direction === 'to-server' && w.pid === submitted.peerPid && w.message.id === submitted.toolsListId && w.message.method === 'tools/list'));
+  }
+}
 
 export function assertConsentObservation(obs, client, action, tool) {
   assert.equal(obs.execution.timedOut, false, 'consent deadline is not a result');
@@ -142,7 +218,7 @@ export function assertConsentObservation(obs, client, action, tool) {
 }
 
 export function validateReport(report, client, pins, hashes, evidence, artifact) {
-  const expected = report.suite === 'approvals' ? approvalCases : ['install-and-native-echo', 'enable-and-native-block-recovery', 'warn-and-forward', 'cancel-and-recover',
+  const expected = report.suite === 'trust' ? trustCases : report.suite === 'approvals' ? approvalCases : ['install-and-native-echo', 'enable-and-native-block-recovery', 'warn-and-forward', 'cancel-and-recover',
     ...(client === 'vscode' ? ['restart-without-cached-result'] : []), 'update-preserves-wrap-and-settings', 'schema-drift-and-recovery', 'disable-restores-launch-and-remove-preserves-settings'];
   assert.equal(report.schemaVersion, 1);
   assert.equal(report.client, client); assert.equal(report.clientVersion, client === 'vscode' ? pins.vscode.version : pins.claudeCode);
@@ -156,7 +232,28 @@ export function validateReport(report, client, pins, hashes, evidence, artifact)
   const references = report.cases.flatMap(c => { assert.ok(Array.isArray(c.evidence) && c.evidence.length > 0, 'missing case evidence'); return c.evidence; });
   assert.equal(new Set(references).size, references.length, 'case evidence was overwritten');
   assert.deepEqual(references.sort(), Object.keys(evidence).filter(f => f !== 'report.json').sort(), 'incomplete case evidence export');
-  if (report.suite === 'approvals') {
+  if (report.suite === 'trust') {
+    const plans = client === 'vscode'
+      ? [['trust-workspace-deny'], ['trust-server-deny'], ['trust-server-allow', 'trust-server-persisted'], ['trust-definition-deny', 'trust-definition-allow']]
+      : [['trust-workspace-deny'], ['trust-server-deny'], ['trust-server-allow', 'trust-server-persisted'], ['trust-definition-change']];
+    const nonces = new Set();
+    report.cases.forEach((row, i) => {
+      assert.equal(row.evidence.length, plans[i].length, 'incomplete trust observations');
+      row.evidence.forEach((file, j) => {
+        const obs = evidence[file]; assert.equal(obs.request.case, plans[i][j]); assertTrustObservation(obs, client);
+        assert.ok(obs.request.text && !nonces.has(obs.request.text), 'reused trust arguments'); nonces.add(obs.request.text);
+      });
+    });
+    const persisted = evidence[report.cases[2].evidence[1]];
+    assert.deepEqual(persisted.receipt.fixtureTrust, [], 'persisted trust prompted again');
+    if (client === 'vscode') assert.equal(report.cases.flatMap(row => row.evidence).flatMap(file => evidence[file].receipt.fixtureTrust).filter(d => d.phase === 'tool-policy').length, 1, 'global tool policy must be confirmed exactly once and recorded separately');
+    const first = evidence[report.cases[2].evidence[0]];
+    const values = [first, persisted].map(obs => {
+      const result = client === 'vscode' ? obs.receipt.results.at(-1) : obs.receipt.responses.at(-1);
+      return assertEcho(typeof result.content === 'string' ? [{ type: 'text', text: result.content }] : result.content, { text: obs.request.text, version: obs.request.version });
+    });
+    assert.notEqual(values[0].pid, values[1].pid, 'restart reused peer process');
+  } else if (report.suite === 'approvals') {
     const plans = [[['allow', 'echo']], [['deny', 'echo'], ['cancel', 'echo']],
       [['always', 'echo'], ['persisted', 'echo'], ['deny', 'warn']], [['allow', 'attack']]];
     const nonces = new Set();

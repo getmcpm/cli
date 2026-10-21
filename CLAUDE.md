@@ -1,7 +1,7 @@
 # MCP Registry — Project Context
 
 > This file is automatically read by Claude Code on every session.
-> Keep it updated as decisions are made. Last updated: 2026-10-18.
+> Keep it updated as decisions are made. Last updated: 2026-10-22.
 
 ---
 
@@ -105,6 +105,25 @@ startup retry and evidence gaps. An independent candidate repeat exposed a
 CDP shutdown error event recorded as an empty decision; the focused fix
 preserves fatal diagnostics and passes a candidate repeat with strict checks.
 See `docs/NATIVE-CLIENT-VALIDATION.md`.
+
+**Phase 2D (unreleased test tooling):** A fresh candidate passes 4/4 trust cases
+in VS Code 1.141.0 and 4/4 in Claude Code 2.1.296 on separate disposable macOS
+26.6.2/arm64 clones. VS native `.vscode/mcp.json` is blocked by Workspace Trust;
+its independent nonce-based server prompt is exercised through the explicitly
+enabled `cursor-workspace` import source. Denial sends no fixture traffic,
+unchanged trust survives a new client/peer PID, and a changed definition prompts
+again before launch. Cached VS tool metadata can remain visible after denial,
+but no fixture protocol traffic is observed. Claude project `.mcp.json`
+refusal also sends no traffic; “Use this MCP server” writes only
+`enabledMcpjsonServers`, survives restart, and does not re-prompt when the same
+server name's launch marker argument changes. Claude still requires a separate one-shot echo
+approval each run. The final run exported six VS and five Claude observations,
+matched host/guest hashes, and stopped/deleted both clones. Source checks pass
+3,588 tests, typecheck/build and 25 harness self-checks. No live provider,
+subscription, inline chat/Agent Host, other client/platform or universal
+protocol claim. Fresh Astra review fixed Claude numbered-menu dispatch and
+strengthened case/config/trust-state evidence validation. Evidence:
+`/private/tmp/mcpm-phase2d/trust-run-16` (temporary).
 
 Independent final candidate validation repeats 4/4 cases per client against
 clean reviewed `ed02ef2`. The fresh pnpm archive SHA-256 is

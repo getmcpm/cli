@@ -403,8 +403,11 @@ unchanged; native/reference test baselines remain explicitly pinned.
 v0.47.3 fixes VS Code user-global JSONC configuration edits so unrelated
 comments/settings and the raw backup survive the MCP lifecycle. It also adds
 separate native approval/denial tests: four cases each in the pinned VS Code
-and Claude Code builds, with synthetic model responses. Native macOS dialogs,
-workspace/server trust, inline chat/Agent Host and live providers remain unverified.
+and Claude Code builds, with synthetic model responses. A later candidate-only
+Phase 2D suite validates workspace/server trust in both pinned clients: VS Code
+re-prompts when an imported server definition changes, while Claude Code 2.1.296
+persists approval by project server name and does not. Inline chat/Agent Host,
+native macOS dialogs and live providers remain unverified.
 
 Install-time trust scoring catches most poisoned servers before they ship. But what about **rug-pulls** — a server that changes its tool definitions after you've already approved them? Or **prompt-injection in tool responses** — adversarial text embedded in a Slack message, web page, or calendar invite that the agent reads through your trusted MCP server?
 
