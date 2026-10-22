@@ -3,6 +3,8 @@
   "publisher": "mcpm-test",
   "version": "0.0.0",
   "engines": { "vscode": "1.141.0" },
+  "capabilities": { "untrustedWorkspaces": { "supported": true } },
+  "enabledApiProposals": ["workspaceTrust"],
   "main": "./tests.cjs",
   "activationEvents": ["*"]
 }
