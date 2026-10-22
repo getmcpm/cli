@@ -65,4 +65,3 @@ export async function vscodeTrustDialogs(port, work, log, signal) {
     await new Promise(resolve => setTimeout(resolve, 200));
   }
 }
-
