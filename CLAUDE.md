@@ -12,13 +12,23 @@ An open-source, CLI-first MCP package manager — **"npm for MCP servers"**.
 A registry where developers can search, install, audit, publish, and update MCP servers
 across all major clients (Claude Desktop, Claude Code, Cursor, VS Code, Windsurf, Gemini CLI) from a single tool.
 
-**Release preparation:** `@getmcpm/cli@0.47.6` (2026-10-24 Bangkok).
+**Current release:** `@getmcpm/cli@0.47.6` (published 2026-10-24 Bangkok).
 PR #276 merged as `d969bbc`, matching Astra-reviewed `fb772d5`, after all nine
 checks passed. This patch adds Cursor CLI validation tooling and documentation.
 The measured result is six passes and one explicit limitation: Cursor CLI
 `list-tools` launches servers despite mcpm's generic `disabled: true` flag.
 Product source, dependencies and fixed published baselines are unchanged.
-Publication and artifact verification are pending; published latest is 0.47.5.
+Release preparation #277 merged as tag commit `1fbca4f`; annotated tag object
+`3d87798`. Exact release-main CI `40003503096`, CodeQL `40003502341` and
+Scorecard `40003503079` passed. Publish run `40003798385` passed all five jobs;
+npm latest and the official MCP registry latest are verified as 0.47.6.
+The downloaded npm tarball matches its SHA-512 integrity and authenticated
+SLSA subject, source commit and exact tagged GitHub Actions signer. The SBOM
+signature verifies and altered bytes are rejected. The actual verified tarball
+passes clean-install smoke with version 0.47.6. Evidence:
+`/private/tmp/mcpm-v0476-release` (temporary). Cursor evidence remains the
+previous candidate run; this release does not imply editor/account execution
+or a fresh published-release Cursor measurement.
 
 **Previous verified release:** `@getmcpm/cli@0.47.5` (published 2026-10-24 Bangkok). PR #273 merged as
 `a225acb`, matching reviewed `501adb2`; exact-main CI, CodeQL and Scorecard
