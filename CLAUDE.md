@@ -31,6 +31,17 @@ Evidence: `/private/tmp/mcpm-v0475-release` (temporary). Native candidate
 measurements remain the previously recorded pinned runs; no new published
 release VM, live-provider or additional-client result is implied.
 
+Phase 2E Cursor validation is bounded by `scripts/cursor-client/run.mjs` and
+[`docs/CURSOR-CLIENT-VALIDATION.md`](docs/CURSOR-CLIENT-VALIDATION.md). Its
+account-free offline run against the pinned Cursor Agent CLI exercises seven
+config/lifecycle/discovery cases (install, guard wrap, update, unwrap,
+disable/enable and remove) while preserving an unrelated entry. Six pass;
+Cursor CLI `list-tools` ignores `disabled: true`, so the disable-discovery
+case is a recorded limitation and the harness exits with partial status. It proves
+Cursor's `initialize`/`tools/list` path through an `mcpm`-managed config; it
+does not claim editor trust prompts, account-authenticated execution, client
+approval state, non-stdio transports or broader protocol coverage.
+
 **Previous verified release:** `@getmcpm/cli@0.47.4` (2026-10-18), tag commit `e9a123b`.
 PATCH maintenance: Zod 4.6.7 and Vitest/coverage 5.0.5 with all nine overrides;
 also includes SDK 1.32.1, prompts 8.7.3, Node typings and pinned GitHub Actions

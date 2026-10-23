@@ -135,6 +135,7 @@ mcpm/
 │   ├── demo.sh                     — asciinema demo recording script
 │   ├── dogfood-confine.sh          — hermetic end-to-end `--confine` dogfood (real macOS Seatbelt enforcement)
 │   ├── dogfood-release.sh          — pack → clean-install → smoke-run the real binary; gates `pnpm publish`
+│   ├── cursor-client/run.mjs       — isolated real Cursor CLI config/lifecycle/discovery harness
 │   └── launch-checklist.md         — pre/post-launch checklist
 ├── .github/workflows/
 │   ├── ci.yml                      — build + test on push/PR (Node 22, 24, 26) + the `confine-macos` Seatbelt dogfood leg
