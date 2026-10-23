@@ -8,6 +8,11 @@ _Add entries here, never under a stamped version_ — a release commit renames t
 heading, and a branch that wrote beneath it merges without conflict straight into a
 published section (it happened to #170).
 
+## [0.47.5] - 2026-10-23
+
+PATCH: native workspace/server trust validation tooling and documentation.
+Application source and dependencies are unchanged from v0.47.4.
+
 ### Added
 
 - Separate candidate-only native workspace/server trust validation for pinned
