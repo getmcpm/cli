@@ -12,7 +12,15 @@ An open-source, CLI-first MCP package manager — **"npm for MCP servers"**.
 A registry where developers can search, install, audit, publish, and update MCP servers
 across all major clients (Claude Desktop, Claude Code, Cursor, VS Code, Windsurf, Gemini CLI) from a single tool.
 
-**Current release:** `@getmcpm/cli@0.47.5` (published 2026-10-24 Bangkok). PR #273 merged as
+**Release preparation:** `@getmcpm/cli@0.47.6` (2026-10-24 Bangkok).
+PR #276 merged as `d969bbc`, matching Astra-reviewed `fb772d5`, after all nine
+checks passed. This patch adds Cursor CLI validation tooling and documentation.
+The measured result is six passes and one explicit limitation: Cursor CLI
+`list-tools` launches servers despite mcpm's generic `disabled: true` flag.
+Product source, dependencies and fixed published baselines are unchanged.
+Publication and artifact verification are pending; published latest is 0.47.5.
+
+**Previous verified release:** `@getmcpm/cli@0.47.5` (published 2026-10-24 Bangkok). PR #273 merged as
 `a225acb`, matching reviewed `501adb2`; exact-main CI, CodeQL and Scorecard
 passed. This patch adds native workspace/server trust tooling and docs only;
 source/dependencies and fixed baselines remain unchanged. Both pinned clients
