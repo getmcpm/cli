@@ -396,6 +396,10 @@ mcpm baseline remains 0.47.1. It exercises
 actual global configurations and MCP calls with synthetic inputs; live models,
 interactive chat and other client/platform combinations require separate tests.
 
+v0.47.5 adds candidate-only native workspace/server trust validation: four cases
+each in pinned VS Code and Claude Code, with Astra-reviewed evidence checks.
+Application source and dependencies are unchanged from v0.47.4.
+
 v0.47.4 refreshes dependency locks and pinned build/security Actions, preserving
 all nine security overrides. Application source and compatibility claims are
 unchanged; native/reference test baselines remain explicitly pinned.
