@@ -12,12 +12,24 @@ An open-source, CLI-first MCP package manager — **"npm for MCP servers"**.
 A registry where developers can search, install, audit, publish, and update MCP servers
 across all major clients (Claude Desktop, Claude Code, Cursor, VS Code, Windsurf, Gemini CLI) from a single tool.
 
-**Release preparation:** `@getmcpm/cli@0.47.5` (2026-10-23). PR #273 merged as
+**Current release:** `@getmcpm/cli@0.47.5` (published 2026-10-24 Bangkok). PR #273 merged as
 `a225acb`, matching reviewed `501adb2`; exact-main CI, CodeQL and Scorecard
 passed. This patch adds native workspace/server trust tooling and docs only;
 source/dependencies and fixed baselines remain unchanged. Both pinned clients
-pass 4/4 trust cases, 25 harness checks and 3,588 source tests pass. Publication
-and signed artifact verification remain pending.
+pass 4/4 trust cases, 25 harness checks and 3,588 source tests pass.
+
+Release prep #274 merged as tag commit `2662dab`; CI `39991910203`, CodeQL
+`39991910093` and Scorecard `39991910208` passed before annotated tag
+`a1fcdcb`. Publish run `39992330361` passed all five jobs, including the
+Node 22/24/26 package gates and official registry listing. The downloaded npm
+tarball matches its SHA-512 integrity and authenticated SLSA subject, exact
+source commit and `publish.yml@refs/tags/v0.47.5` GitHub Actions signer.
+The SBOM signature verifies and altered bytes are rejected. The actual verified
+tarball passes clean-install smoke with version 0.47.5. npm initially returned
+404/ETARGET during propagation; later direct artifact retrieval succeeded.
+Evidence: `/private/tmp/mcpm-v0475-release` (temporary). Native candidate
+measurements remain the previously recorded pinned runs; no new published
+release VM, live-provider or additional-client result is implied.
 
 **Previous verified release:** `@getmcpm/cli@0.47.4` (2026-10-18), tag commit `e9a123b`.
 PATCH maintenance: Zod 4.6.7 and Vitest/coverage 5.0.5 with all nine overrides;
