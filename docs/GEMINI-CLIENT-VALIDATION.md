@@ -92,3 +92,12 @@ with actual container isolation settings in `reviewed-containers.json`.
 Astra hardened the target-specific disable status and fresh control-wire
 assertions. Final source validation and harness-check results are recorded in
 the [Cursor candidate record](CURSOR-CLIENT-VALIDATION.md#reviewed-candidate--2026-10-26).
+
+
+## Published and verified — v0.47.7 (2026-10-26)
+
+[Release v0.47.7](https://github.com/getmcpm/cli/releases/tag/v0.47.7) includes Cursor disable fix PR #282 (merge `26e2c27`) and release preparation #288, tag source `372c281386de985d9c8d623593dc3ecc8fc04db3`. [Publish run 40362946189](https://github.com/getmcpm/cli/actions/runs/40362946189) passed all five jobs, including Node 22/24/26 clean-package gates and official registry listing. npm latest and the official MCP registry latest both report 0.47.7.
+
+The actual npm tarball matches SHA-512 integrity and the cryptographically verified SLSA subject, exact source commit, GitHub Actions issuer and `publish.yml@refs/tags/v0.47.7` signer. Its signed SBOM verifies and tampering is rejected; the verified tarball passes clean-install release dogfood. Temporary proof: `/private/tmp/mcpm-v0477-release`.
+
+Cursor's eight-pass and Gemini's seven-pass/three-limitation native receipts remain the reviewed candidate measurements. This publication check does not rerun the clients or prove Cursor editor, provider/model, tool execution or OAuth compatibility. Gemini toggle limitations remain open.

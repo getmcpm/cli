@@ -7,7 +7,7 @@
 
 ## What We're Building
 
-**v0.47.7 release preparation (2026-10-26):** Cursor parks disabled global
+**Released v0.47.7 (2026-10-26):** Cursor parks disabled global
 definitions in `_mcpmDisabledServers` outside active `mcpServers`; force
 replacement and guard changes retain that state. Existing active legacy
 `disabled:true` reads as effectively enabled, so rerunning disable repairs it.
@@ -22,12 +22,14 @@ An open-source, CLI-first MCP package manager — **"npm for MCP servers"**.
 A registry where developers can search, install, audit, publish, and update MCP servers
 across all major clients (Claude Desktop, Claude Code, Cursor, VS Code, Windsurf, Gemini CLI) from a single tool.
 
-PR #282 merged as `26e2c27`, matching reviewed `85805a9`. The target is patch
-release v0.47.7; publication is not yet verified. Candidate checks: 3,603 source
-tests pass (three skipped), typecheck/build/coverage pass; Cursor 8/8, Gemini
-7 pass and 3 limitations. Native harness/peer checks pass 28/28 with loopback.
+**Current release:** `@getmcpm/cli@0.47.7`, verified on npm and the official MCP registry.
+PR #282 merged as `26e2c27`; preparation #288 yielded `372c281`.
+Publish run `40362946189` passed all five jobs. Actual tarball SRI/SLSA
+source and signer, signed SBOM/tamper rejection, and clean-install dogfood pass.
+Evidence: `/private/tmp/mcpm-v0477-release`. Native receipts remain candidate
+measurements; Gemini toggle limitations remain unresolved.
 
-**Current release:** `@getmcpm/cli@0.47.6` (published 2026-10-24 Bangkok).
+**Previous verified release:** `@getmcpm/cli@0.47.6` (published 2026-10-24 Bangkok).
 PR #276 merged as `d969bbc`, matching Astra-reviewed `fb772d5`, after all nine
 checks passed. This patch adds Cursor CLI validation tooling and documentation.
 The measured result is six passes and one explicit limitation: Cursor CLI
