@@ -2,7 +2,7 @@
  * `mcpm enable <name>` command handler.
  *
  * Re-enables a previously disabled MCP server across all (or a specific)
- * client config files by removing the `"disabled": true` flag.
+ * client config files using the adapter's enabled representation.
  */
 
 import { Command } from "commander";

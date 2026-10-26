@@ -1,7 +1,7 @@
 /**
  * Shared handler for `mcpm disable` and `mcpm enable`.
  *
- * Both commands toggle the `disabled` flag on server entries across client
+ * Both commands toggle the adapter's logical disabled state across client
  * configs. This module eliminates the duplication between them by
  * parameterising the toggle direction.
  */

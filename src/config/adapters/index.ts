@@ -58,7 +58,7 @@ export interface ConfigAdapter {
   /** Remove a server entry. Throws if the server name is not found. */
   removeServer(configPath: string, name: string): Promise<void>;
 
-  /** Set or clear the disabled flag on a server entry. Throws if not found. */
+  /** Set logical disabled state (Cursor parks the entry). Throws if not found. */
   setServerDisabled(configPath: string, name: string, disabled: boolean): Promise<void>;
 
   /**

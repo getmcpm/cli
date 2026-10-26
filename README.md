@@ -178,6 +178,15 @@ No critical issues found.
 
 The plaintext-secret scan reports the key name and label only — never the value — and skips values already stored as `mcpm:keychain:` placeholders. It's advisory (never fails `doctor`).
 
+### Client lifecycle compatibility
+
+Cursor enable/disable retains the definition in an mcpm-owned parking map in
+the same global config file; rerun disable to repair older ignored flags.
+This affects future discovery and does not stop running peers or override
+project-local definitions. See [Cursor validation](docs/CURSOR-CLIENT-VALIDATION.md).
+Gemini's generic disabled flag and native toggle commands have measured
+limitations; see [Gemini validation](docs/GEMINI-CLIENT-VALIDATION.md).
+
 ### Stack files: docker-compose for MCP
 
 Declare your project's MCP servers in `mcpm.yaml`, lock versions with trust snapshots, and let every team member replicate the setup with one command.

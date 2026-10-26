@@ -2,8 +2,8 @@
  * `mcpm disable <name>` command handler.
  *
  * Disables a named MCP server across all (or a specific) client config files
- * by setting `"disabled": true` on the entry. The server remains in config
- * but will not be loaded by the client.
+ * using the adapter's disabled representation. Cursor parks the definition
+ * outside its active server map; other adapters write the generic flag.
  */
 
 import { Command } from "commander";

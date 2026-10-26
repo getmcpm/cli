@@ -26,7 +26,7 @@ createInterface({ input: process.stdin }).on('line', line => {
   const r = JSON.parse(line); log('to-server', r);
   if (r.method === 'notifications/cancelled') { clearTimeout(pending.get(r.params.requestId)); pending.delete(r.params.requestId); return; }
   if (!('id' in r)) return;
-  if (r.method === 'initialize') return send(r, { protocolVersion: '2025-11-25', capabilities: { tools: {} }, serverInfo: { name: 'native-fixture', version } });
+  if (r.method === 'initialize') return send(r, { protocolVersion: ['2025-06-18', '2025-11-25'].includes(r.params?.protocolVersion) ? r.params.protocolVersion : '2025-11-25', capabilities: { tools: {} }, serverInfo: { name: 'native-fixture', version } });
   if (r.method === 'server/discover') return send(r, { supportedVersions: ['2026-07-28', '2025-11-25'], capabilities: { tools: {} } });
   if (r.method === 'ping') return send(r, {});
   if (r.method === 'tools/list') {

@@ -8,6 +8,19 @@ _Add entries here, never under a stamped version_ — a release commit renames t
 heading, and a branch that wrote beneath it merges without conflict straight into a
 published section (it happened to #170).
 
+### Fixed
+
+- Cursor disable parks the global definition outside `mcpServers` and restores
+  it on enable. Force replacement, guard changes and removal retain disabled
+  state; rerunning disable repairs old flags. No approval state is changed.
+
+### Added
+
+- Bounded real Gemini CLI lifecycle/connection validation with synthetic state,
+  untrusted-folder refusal, explicit fixture trust and native toggle controls.
+  Its ignored mcpm disabled flag is an explicit limitation, not a pass.
+- Native peer negotiation checks for `2025-06-18` and `2025-11-25`.
+
 ## [0.47.5] - 2026-10-23
 
 PATCH: native workspace/server trust validation tooling and documentation.

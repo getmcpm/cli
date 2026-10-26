@@ -7,6 +7,16 @@
 
 ## What We're Building
 
+**Unreleased Cursor/Gemini work (2026-10-26):** Cursor parks disabled global
+definitions in `_mcpmDisabledServers` outside active `mcpServers`; force
+replacement and guard changes retain that state. Existing active legacy
+`disabled:true` reads as effectively enabled, so rerunning disable repairs it.
+No native approvals are edited and running processes are not stopped. The
+Gemini account-free connection harness uses actual `mcp list` and synthetic
+trust; it exercises initialization/ping only, not tools/model execution.
+Ignored entry flags and native toggle refusals remain explicit limitations.
+See `docs/CURSOR-CLIENT-VALIDATION.md` and `docs/GEMINI-CLIENT-VALIDATION.md`.
+
 An open-source, CLI-first MCP package manager — **"npm for MCP servers"**.
 
 A registry where developers can search, install, audit, publish, and update MCP servers
