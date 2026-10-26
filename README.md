@@ -405,6 +405,11 @@ mcpm baseline remains 0.47.1. It exercises
 actual global configurations and MCP calls with synthetic inputs; live models,
 interactive chat and other client/platform combinations require separate tests.
 
+v0.47.7 fixes Cursor global disable by parking definitions outside the active
+server map. Rerun disable to repair old ignored flags. The reviewed candidate
+passes eight Cursor CLI cases; Gemini connection validation records seven passes
+and three explicit toggle limitations. Publication verification is pending.
+
 v0.47.5 adds candidate-only native workspace/server trust validation: four cases
 each in pinned VS Code and Claude Code, with Astra-reviewed evidence checks.
 Application source and dependencies are unchanged from v0.47.4.

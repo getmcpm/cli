@@ -8,6 +8,10 @@ _Add entries here, never under a stamped version_ — a release commit renames t
 heading, and a branch that wrote beneath it merges without conflict straight into a
 published section (it happened to #170).
 
+## [0.47.7] - 2026-10-26
+
+PATCH: effective Cursor global disable and bounded Gemini CLI validation.
+
 ### Fixed
 
 - Cursor disable parks the global definition outside `mcpServers` and restores
