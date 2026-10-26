@@ -11,6 +11,9 @@ published section (it happened to #170).
 ## [0.47.7] - 2026-10-26
 
 PATCH: effective Cursor global disable and bounded Gemini CLI validation.
+Publication verified: npm/official registry latest 0.47.7; actual tarball
+integrity/provenance, signed SBOM/tamper rejection and clean-install dogfood pass.
+[Publish run](https://github.com/getmcpm/cli/actions/runs/40362946189).
 
 ### Fixed
 
