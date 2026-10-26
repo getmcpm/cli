@@ -136,6 +136,7 @@ mcpm/
 │   ├── dogfood-confine.sh          — hermetic end-to-end `--confine` dogfood (real macOS Seatbelt enforcement)
 │   ├── dogfood-release.sh          — pack → clean-install → smoke-run the real binary; gates `pnpm publish`
 │   ├── cursor-client/run.mjs       — isolated real Cursor CLI config/lifecycle/discovery harness
+│   ├── gemini-client/run.mjs       — isolated real Gemini CLI lifecycle/connection harness
 │   └── launch-checklist.md         — pre/post-launch checklist
 ├── .github/workflows/
 │   ├── ci.yml                      — build + test on push/PR (Node 22, 24, 26) + the `confine-macos` Seatbelt dogfood leg
@@ -428,6 +429,12 @@ Plus, when `mcpm guard enable` runs, each touched client config gets a
 | Gemini CLI | `~/.gemini/settings.json` |
 
 Linux and Windows paths are also supported. Config key: `mcpServers` (Claude Desktop, Claude Code, Cursor, Windsurf, Gemini CLI) or `servers` (VS Code).
+
+Cursor parks disabled definitions in `_mcpmDisabledServers` outside the active
+map and retains logical inventory for mcpm. It does not edit approval state or
+stop existing processes. Gemini's generic disabled flag remains ineffective in
+the measured connection probe. See [Cursor validation](CURSOR-CLIENT-VALIDATION.md)
+and [Gemini validation](GEMINI-CLIENT-VALIDATION.md) for exact scope.
 
 All config writes use atomic file operations (write to `.tmp`, then `fs.rename`). Files are written with `mode: 0o600` and directories with `mode: 0o700` to restrict access.
 

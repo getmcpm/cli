@@ -2,6 +2,7 @@
 
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import { chmod, mkdir, mkdtemp, readFile, readdir, writeFile } from "node:fs/promises";
 import os from "node:os";
@@ -93,9 +94,9 @@ function wireLines() {
   return text.trim() ? text.trim().split("\n").map(JSON.parse) : [];
 }
 
-function assertDiscovery(result, label) {
+function assertDiscovery(result, label, name = serverName) {
   assert.equal(result.status, 0, `${label} Cursor discovery failed:\n${result.stderr}\n${result.stdout}`);
-  assert.ok(result.stdout.includes(`Tools for ${serverName} (4):`), `${label}: unexpected discovery header`);
+  assert.ok(result.stdout.includes(`Tools for ${name} (4):`), `${label}: unexpected discovery header`);
   for (const tool of ["attack", "echo", "slow", "warn"]) assert.match(result.stdout, new RegExp(`- ${tool} \\(text\\)`));
 }
 
@@ -118,7 +119,7 @@ function assertWire(wire, previousWire, version, label) {
 
 const seed = {
   mcpServers: {
-    retained: { command: process.execPath, args: ["-e", "process.exit(0)"] },
+    retained: { command: process.execPath, args: [peer, "1.0.0"], env: { MCPM_NATIVE_WORK: work } },
   },
 };
 await writeFile(configPath, `${JSON.stringify(seed, null, 2)}\n`);
@@ -139,11 +140,13 @@ const report = {
   notTested: [
     "Cursor desktop/editor UI and workspace trust prompts",
     "Cursor account-authenticated model or MCP tool execution",
-    "Cursor MCP approval prompts and persistent mcp enable/disable state",
+    "Cursor MCP approval prompts and Cursor's project-local native toggle state",
     "Non-stdio URL/HTTP transport",
     "Protocol methods beyond initialize, initialized, and tools/list",
   ],
 };
+report.candidateDist = Object.fromEntries((await readdir(path.join(root, "dist"))).filter(name => name.endsWith(".js")).sort()
+  .map(name => [name, createHash("sha256").update(readFileSync(path.join(root, "dist", name))).digest("hex")]));
 
 async function observe(id, expected) {
   const beforeWire = wireLines();
@@ -179,24 +182,35 @@ mcpm(["disable", serverName, "--client", "cursor"]);
 const beforeDisabledWire = wireLines();
 const disabled = run(cursor, ["mcp", "list-tools", serverName]);
 assert.equal(disabled.error, undefined, "disabled discovery did not complete");
-assert.equal(readConfig().mcpServers[serverName].disabled, true, "disable did not set config flag");
 assert.deepEqual(readConfig().mcpServers.retained, seed.mcpServers.retained, "disable changed unrelated config");
 const disabledWire = wireLines().slice(beforeDisabledWire.length);
-if (disabled.status === 0) {
-  assertDiscovery(disabled, "client-disable");
-  assertWire(disabledWire, beforeDisabledWire, "2.0.0", "client-disable");
-} else {
-  assert.equal(disabled.signal, null, "disabled discovery was interrupted");
-  assert.match(`${disabled.stdout}\n${disabled.stderr}`, /disabled|not found|unknown/i);
-  assert.equal(disabledWire.length, 0, "disabled server unexpectedly started");
-}
+assert.equal(Object.hasOwn(readConfig().mcpServers, serverName), false, "disabled entry remains active");
+assert.ok(readConfig()._mcpmDisabledServers[serverName], "disabled entry was not preserved");
+assert.notEqual(disabled.status, 0, "disabled server remained discoverable");
+assert.equal(disabled.signal, null, "disabled discovery was interrupted");
+assert.match(`${disabled.stdout}\n${disabled.stderr}`, /not found|unknown|not configured/i);
+assert.equal(disabledWire.length, 0, "disabled server unexpectedly started");
 report.cases.push({
   id: "client-disable-blocks-discovery",
-  status: disabled.status === 0 ? "limitation" : "pass",
-  ...(disabled.status === 0 ? { limitation: "Cursor CLI list-tools ignores mcpm's generic disabled:true config flag" } : {}),
+  status: "pass",
   cursor: { status: disabled.status, stdout: disabled.stdout.trim(), stderr: disabled.stderr.trim() },
   config: readConfig(), wire: disabledWire,
 });
+
+const beforeControlWire = wireLines();
+const control = run(cursor, ["mcp", "list-tools", "retained"]);
+assertDiscovery(control, "disabled-entry-active-control", "retained");
+const controlWire = wireLines().slice(beforeControlWire.length);
+assertWire(controlWire, beforeControlWire, "1.0.0", "disabled-entry-active-control");
+report.cases.push({ id: "disabled-entry-active-control", status: "pass", cursor: { status: control.status, stdout: control.stdout.trim() }, wire: controlWire });
+
+// Force reconciliation and guard changes must never reactivate a parked entry.
+mcpm(["install", serverName, "--client", "cursor", "--force", "--yes", "--skip-health-check", "--json"], "2.0.0");
+mcpm(["guard", "enable", "--client", "cursor", "--server", serverName]);
+assert.equal(Object.hasOwn(readConfig().mcpServers, serverName), false);
+assert.ok(readConfig()._mcpmDisabledServers[serverName].args.includes("--inner"));
+mcpm(["guard", "disable", "--client", "cursor", "--server", serverName]);
+assert.equal(Object.hasOwn(readConfig().mcpServers, serverName), false);
 
 mcpm(["enable", serverName, "--client", "cursor"]);
 await observe("client-enable-clears-flag-and-discovers", { present: true, wrapped: false, version: "2.0.0" });

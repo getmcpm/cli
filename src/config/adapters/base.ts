@@ -47,7 +47,7 @@ export abstract class BaseAdapter implements ConfigAdapter {
    * Returns an empty object `{}` when the file does not exist (ENOENT).
    * Re-throws for all other errors (EACCES, malformed JSON, etc.).
    */
-  private async readRaw(configPath: string): Promise<Record<string, unknown>> {
+  protected async readRaw(configPath: string): Promise<Record<string, unknown>> {
     // #26: refuse to traverse a symlinked config path. We check before the
     // read so an attacker who points <config> at a sensitive file can neither
     // have its bytes echoed into the .bak nor have our write land on the
@@ -110,7 +110,7 @@ export abstract class BaseAdapter implements ConfigAdapter {
    *
    * Creates parent directories if they do not exist.
    */
-  private async writeAtomic(
+  protected async writeAtomic(
     configPath: string,
     data: Record<string, unknown>,
     serverName: string,
