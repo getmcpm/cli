@@ -16,7 +16,7 @@ test('launcher stops a timed-out container before export and preserves failure s
     await writeFile(`${root}/bin/docker`, `#!/bin/sh
 printf '%s\\n' "$*" >> "$DOCKER_LOG"
 case "$1" in
-  build) echo image ;;
+  build) echo image > "$3" ;;
   create) echo container ;;
   inspect) if [ "$3" = '{{.State.Running}}' ]; then echo "$RUNNING"; else echo '{}'; fi ;;
   image) echo '{}' ;;

@@ -1,12 +1,12 @@
 /**
  * MCP server for mcpm — exposes search, install, audit, and setup as tools.
  *
- * Uses @modelcontextprotocol/sdk with stdio transport.
+ * Uses the v2 SDK dual-era stdio entry point.
  * All logic delegates to handlers.ts which wraps existing mcpm functions.
  */
 
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+import { McpServer } from "@modelcontextprotocol/server";
+import { serveStdio } from "@modelcontextprotocol/server/stdio";
 import {
   NoArgsInput,
   SearchInput,
@@ -168,16 +168,13 @@ export function registerTools(
 export async function startServer(): Promise<void> {
   const deps = await createDeps();
 
-  const server = new McpServer({
-    name: "mcpm",
-    // Issue #22: advertise the real package version (injected by tsup at build),
-    // not a hardcoded stale "0.1.0".
-    version: __PKG_VERSION__,
-  });
-
-  registerTools(server, deps);
-
-  // Start stdio transport
-  const transport = new StdioServerTransport();
-  await server.connect(transport);
+  serveStdio(() => {
+    const server = new McpServer({
+      name: "mcpm",
+      // Advertise the actual package version injected by tsup.
+      version: __PKG_VERSION__,
+    });
+    registerTools(server, deps);
+    return server;
+  }, { legacy: "serve" });
 }

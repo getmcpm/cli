@@ -5,7 +5,8 @@ import { spawnSync } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { networkInterfaces } from 'node:os';
-import { equivalent, exchange, assertEcho, assertUnsupported } from './harness.mjs';
+import { createRequire } from 'node:module';
+import { equivalent, exchange, assertEcho, assertUnsupported, assertUnknownArgument } from './harness.mjs';
 
 const app = path.dirname(fileURLToPath(import.meta.url));
 const cli = path.join(app, 'node_modules/@getmcpm/cli/dist/index.js');
@@ -13,7 +14,8 @@ const peer = path.join(app, 'peer.mjs');
 const output = '/evidence';
 const modernVersion = '2026-07-28';
 const meta = { 'io.modelcontextprotocol/protocolVersion': modernVersion, 'io.modelcontextprotocol/clientCapabilities': {} };
-const report = { schemaVersion: 1, scope: 'stdio relay and named serve operations; synthetic peers',
+const candidate = await optionalJson(path.join(app, 'candidate.json'), null);
+const report = { schemaVersion: 1, artifactKind: candidate ? 'candidate' : 'published-reference', scope: 'stdio relay and named serve operations; synthetic peers',
   environment: { os: process.platform, arch: process.arch, node: process.version }, packages: {}, cases: [],
   exclusions: ['Installed native clients and configuration adapters', 'Model/skill behavior', 'HTTP/OAuth', 'Universal protocol conformance'],
 };
@@ -34,6 +36,17 @@ report.specifications = [
 const lock = JSON.parse(await readFile(path.join(app, 'package-lock.json')));
 report.artifact = lock.packages['node_modules/@getmcpm/cli'];
 
+if (candidate) {
+  assert.equal(report.packages['@getmcpm/cli'], candidate.version);
+  assert.equal(report.artifact.integrity, 'sha512-' + createHash('sha512').update(await readFile(path.join(app, 'candidate.tgz'))).digest('base64'));
+  const dist = path.dirname(cli);
+  const hashes = Object.fromEntries(await Promise.all((await readdir(dist)).filter(f => f.endsWith('.js')).sort().map(async f => [f, createHash('sha256').update(await readFile(path.join(dist, f))).digest('hex')])));
+  assert.deepEqual(hashes, candidate.filesSha256, 'candidate runtime files differ from the packed build');
+  const candidateRequire = createRequire(cli);
+  report.candidate = { ...candidate, serverSdkVersion: JSON.parse(await readFile(path.join(path.dirname(candidateRequire.resolve('@modelcontextprotocol/server')), '../package.json'), 'utf8')).version };
+  await writeFile(`${output}/dependency-lock.json`, await readFile(path.join(app, 'package-lock.json')));
+}
+
 async function optionalJson(file, fallback) {
   try { return JSON.parse(await readFile(file, 'utf8')); } catch (e) { if (e.code === 'ENOENT') return fallback; throw e; }
 }
@@ -47,10 +60,14 @@ const signatures = obs => obs.events.flatMap(e => e.findings || []).map(f => f.s
 async function location(id, guarded) {
   const home = `/work/state/${id}/${guarded ? 'guarded' : 'direct'}`;
   await mkdir(home, { recursive: true });
+  if (candidate) {
+    await mkdir(`${home}/.cursor`);
+    await writeFile(`${home}/.cursor/mcp.json`, JSON.stringify({ mcpServers: {} }));
+  }
   return { home, env: { PATH: process.env.PATH, HOME: home, TMPDIR: home, WIRE: `${home}/peer.jsonl` } };
 }
 function launch(server, guarded, wirePath) {
-  const args = server === 'serve' ? [cli, 'serve'] : [peer, server, ...(wirePath ? [wirePath] : [])];
+  const args = server === 'serve' ? (candidate ? [peer, 'serve', wirePath, cli] : [cli, 'serve']) : [peer, server, ...(wirePath ? [wirePath] : [])];
   return { command: process.execPath, args: guarded ? [cli, 'guard', 'run', '--inner', '--server-name', 'sandbox', '--', process.execPath, ...args] : args };
 }
 async function stateFiles(home) {
@@ -102,7 +119,7 @@ async function sdkRun(clientKind, serverKind, mode, action, guarded, loc) {
   const callbacks = [];
   const client = new Client({ name: 'sandbox-client', version: '1' }, {
     capabilities: { sampling: { tools: {} }, elicitation: { form: {} }, roots: {} },
-    ...(v2 ? { versionNegotiation: { mode, probe: { timeoutMs: 1000 } } } : {}),
+    ...(v2 ? { versionNegotiation: { mode, probe: { timeoutMs: candidate ? 3000 : 1000 } } } : {}),
   });
   const set = (method, schema, fn) => client.setRequestHandler(v2 ? method : types[schema], fn);
   set('sampling/createMessage', 'CreateMessageRequestSchema', async () => {
@@ -120,11 +137,11 @@ async function sdkRun(clientKind, serverKind, mode, action, guarded, loc) {
   let version;
   try {
     if (action === 'unsupported') {
-      await assert.rejects(client.connect(transport, { timeout: 3000 }), e => {
+      await assert.rejects(client.connect(transport, { timeout: candidate ? 5000 : 3000 }), e => {
         value = { code: e.code, message: e.message }; return true;
       });
     } else {
-      await client.connect(transport, { timeout: 3000 });
+      await client.connect(transport, { timeout: candidate ? 5000 : 3000 });
       if (action === 'ordinary') {
         value = { tools: await client.listTools(), resources: await client.listResources(),
           resource: await client.readResource({ uri: 'test://hello' }), prompts: await client.listPrompts(),
@@ -137,6 +154,14 @@ async function sdkRun(clientKind, serverKind, mode, action, guarded, loc) {
         assert.deepEqual(value.prompt.messages, [{ role: 'user', content: { type: 'text', text: 'Hello.' } }]);
       } else if (action === 'serve') {
         value = await client.listTools(); assert.ok(value.tools.some(t => t.name === 'mcpm_search'));
+        if (candidate) {
+          assert.equal(value.tools.length, 9);
+          assert.ok(value.tools.every(t => t.inputSchema.additionalProperties === false));
+          const result = await call('mcpm_list');
+          assert.notEqual(result.isError, true);
+          assert.deepEqual(JSON.parse(result.content[0].text), { servers: [] });
+          value = { tools: value, result };
+        }
       } else if (action === 'attack' || action === 'input-attack') {
         const target = action === 'attack' ? 'attack' : 'interactive';
         if (guarded) {
@@ -240,7 +265,23 @@ for (const [id, client, server, mode, code] of [
     for (const obs of [a, b]) assertUnsupported(obs, code ? 'initialize' : 'server/discover', code ?? -32601, code ?? 'ERA_NEGOTIATION_FAILED');
   }, 'unsupported');
 }
-for (const client of ['v1', 'v2']) await pair(`${client}-mcpm-serve`, (g, l) => sdkRun(client, 'serve', 'auto', 'serve', g, l));
+for (const client of ['v1', 'v2']) await pair(`${client}-mcpm-serve`, (g, l) => sdkRun(client, 'serve', 'auto', 'serve', g, l), (a, b) => {
+  equivalent(a.value, b.value);
+  if (candidate) for (const obs of [a, b]) {
+    assert.equal(obs.version, client === 'v1' ? '2025-11-25' : modernVersion);
+    assert.ok(obs.wire.some(w => w.message.method === (client === 'v1' ? 'initialize' : 'server/discover')));
+  }
+});
+
+if (candidate) await pair('modern-pinned-mcpm-serve-call', (g, l) => sdkRun('v2', 'serve', { pin: modernVersion }, 'serve', g, l), (a, b) => {
+  equivalent(a.value, b.value);
+  for (const obs of [a, b]) {
+    assert.equal(obs.version, modernVersion);
+    assert.ok(obs.wire.some(w => w.message.method === 'server/discover'));
+    assert.ok(!obs.wire.some(w => w.message.method === 'initialize'));
+    assert.ok(obs.wire.some(w => w.message.result?.resultType === 'complete'));
+  }
+});
 
 async function rawRun(guarded, loc, exercise, server = 'raw') {
   const { command, args } = launch(server, guarded, loc.env.WIRE);
@@ -248,6 +289,21 @@ async function rawRun(guarded, loc, exercise, server = 'raw') {
   let value;
   try { value = await exercise(session); } finally { await session.close(); }
   return { value, wire: session.wire, stderr: session.stderr, ...await stateFiles(loc.home) };
+}
+
+if (candidate) {
+  await pair('mcpm-serve-unsupported-version', (g, l) => rawRun(g, l, s => s.request('tools/list', {
+    _meta: { ...meta, 'io.modelcontextprotocol/protocolVersion': '1900-01-01' },
+  }), 'serve'), (a, b) => { equivalent(a.value, b.value); assert.equal(a.value.error.code, -32022); });
+  await pair('mcpm-serve-strict-input-and-recovery', (g, l) => rawRun(g, l, async s => {
+    const rejected = await s.request('tools/call', { name: 'mcpm_install', arguments: { name: 'io.github.mcpm/fixture', extra: true }, _meta: meta });
+    assertUnknownArgument(rejected.result, 'extra');
+    const valid = await s.request('tools/call', { name: 'mcpm_list', arguments: {}, _meta: meta });
+    assert.equal(valid.result.resultType, 'complete');
+    assert.deepEqual(JSON.parse(valid.result.content[0].text), { servers: [] });
+    return { rejected, valid };
+  }, 'serve'));
+
 }
 for (const name of (await readdir(path.join(app, 'fixtures'))).sort()) {
   const fixturePath = path.join(app, 'fixtures', name);

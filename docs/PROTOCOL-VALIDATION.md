@@ -107,7 +107,10 @@ VMs, using synthetic dependencies. Other native clients/platforms, model/skill
 behavior, HTTP/OAuth, and universal protocol conformance remain **not tested**.
 This matrix does not cover every method, extension, subscription or repeated
 MRTR depth; it does not claim complete schema validation or detection coverage.
-It neither upgrades `mcpm serve` nor translates protocols in the guard.
+The fixed published baseline does not establish modern `mcpm serve` support
+and does not translate protocols in the guard. The separately identified
+[candidate serve suite](SERVE-PROTOCOL-VALIDATION.md) now tests modern and legacy
+serve calls without changing this historical reference baseline.
 
 Native results are separate from this reference-peer matrix. Isolated-profile
 connection tests alone do not establish adapter compatibility. Expand to other

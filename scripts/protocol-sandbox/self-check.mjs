@@ -1,6 +1,14 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { equivalent, exchange, assertEcho, assertUnsupported } from './harness.mjs';
+import { equivalent, exchange, assertEcho, assertUnsupported, assertUnknownArgument } from './harness.mjs';
+
+test('strict-input evidence requires validation, not an unrelated handler failure', () => {
+  const failure = text => ({ isError: true, content: [{ type: 'text', text }] });
+  assertUnknownArgument(failure('Unrecognized key: "extra"'), 'extra');
+  assert.throws(() => assertUnknownArgument(failure('Registry unavailable'), 'extra'));
+  assert.throws(() => assertUnknownArgument(failure('Unrecognized key: "other"'), 'extra'));
+  assert.throws(() => assertUnknownArgument({ isError: false }, 'extra'));
+});
 
 test('comparison refuses changed results and missing observations', () => {
   assert.throws(() => equivalent({ content: ['a'] }, { content: ['b'] }));

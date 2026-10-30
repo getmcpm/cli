@@ -7,6 +7,12 @@
 
 ## What We're Building
 
+**Unreleased modern serve (2026-10-30):** `mcpm serve` uses the v2.4 server
+SDK's explicit dual-era stdio factory. Same nine tools, handlers, strict schemas,
+trust gates and text/structured outputs; v1 SDK remains for guard framing/types.
+Candidate sandbox mode uses the packed build, separately from the fixed published
+reference. See `docs/SERVE-PROTOCOL-VALIDATION.md` for evidence and boundaries.
+
 **Released v0.47.8 (2026-10-30):** Gemini now shares Cursor's
 `ParkedServersAdapter`: global definitions move to `_mcpmDisabledServers` outside
 active `mcpServers`. Force install/update/guard retain disabled state; enable
