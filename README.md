@@ -594,6 +594,10 @@ Independent 2026 evidence for each thing the guard does, so you can check the pr
 
 mcpm can run as an MCP server itself, letting AI agents search, install, and audit MCP servers programmatically.
 
+The stdio entry supports modern `2026-07-28` discovery and legacy initialization
+with the same nine tools and trust gates. See [serve validation](docs/SERVE-PROTOCOL-VALIDATION.md)
+for the named peer matrix and limits.
+
 ```json
 {
   "mcpServers": {

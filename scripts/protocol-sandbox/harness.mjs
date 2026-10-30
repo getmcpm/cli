@@ -14,6 +14,13 @@ export function assertEcho(result, expected) {
   assert.deepEqual(result.content, [{ type: 'text', text: JSON.stringify(expected) }]);
 }
 
+export function assertUnknownArgument(result, key) {
+  assert.equal(result.isError, true, 'unknown argument was accepted');
+  const text = result.content?.filter(c => c.type === 'text').map(c => c.text).join('\n') ?? '';
+  assert.match(text, /unrecognized_keys|Unrecognized key|additional properties/i);
+  assert.ok(text.includes(key), 'validation error does not identify the unknown argument');
+}
+
 export function assertUnsupported(observation, method, wireCode, clientCode) {
   assert.equal(observation.value.code, clientCode);
   const request = observation.wire.find(w => w.direction === 'to-server' && w.message.method === method)?.message;

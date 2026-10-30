@@ -73,6 +73,7 @@
   "dependencies": {
     "@inquirer/prompts": "^8.7.2",
     "@modelcontextprotocol/sdk": "^1.30.0",
+    "@modelcontextprotocol/server": "^2.4.0",
     "@sigstore/bundle": "^5.0.0",
     "@sigstore/protobuf-specs": "^0.5.2",
     "@sigstore/verify": "^4.1.2",
@@ -88,6 +89,7 @@
     "zod": "^4.6.5"
   },
   "devDependencies": {
+    "@modelcontextprotocol/client": "^2.4.0",
     "@types/node": "^22.20.3",
     "@types/semver": "^7.8.0",
     "@vitest/coverage-v8": "^5.0.1",

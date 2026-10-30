@@ -8,6 +8,14 @@ _Add entries here, never under a stamped version_ — a release commit renames t
 heading, and a branch that wrote beneath it merges without conflict straight into a
 published section (it happened to #170).
 
+### Added
+
+- Explicit modern and legacy stdio support for `mcpm serve` through the official
+  v2 server SDK, preserving all nine tools, strict input schemas and trust gates.
+- Separately identified packed-candidate protocol sandbox checks alongside the
+  unchanged published baseline, including real modern/legacy calls, version
+  rejection, strict validation and the existing guard attack/recovery matrix.
+
 ## [0.47.8] - 2026-10-30
 
 PATCH: effective Gemini user-global disable.
