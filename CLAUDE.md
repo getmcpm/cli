@@ -7,7 +7,7 @@
 
 ## What We're Building
 
-**v0.48.0 release preparation (2026-10-30; publication pending):** `mcpm serve` uses the v2.4 server
+**Released v0.48.0 (2026-10-30):** `mcpm serve` uses the v2.4 server
 SDK's explicit dual-era stdio factory. Same nine tools, handlers, strict schemas,
 trust gates and text/structured outputs; v1 SDK remains for guard framing/types.
 Candidate sandbox mode uses the packed build, separately from the fixed published
@@ -38,7 +38,15 @@ An open-source, CLI-first MCP package manager — **"npm for MCP servers"**.
 A registry where developers can search, install, audit, publish, and update MCP servers
 across all major clients (Claude Desktop, Claude Code, Cursor, VS Code, Windsurf, Gemini CLI) from a single tool.
 
-**Current release:** `@getmcpm/cli@0.47.8`.
+**Current release:** `@getmcpm/cli@0.48.0`.
+PR #293 merged as `4a2da15`; source `4ae38783` is tagged v0.48.0.
+[Publish workflow](https://github.com/getmcpm/cli/actions/runs/41021055043) passed all five jobs. npm/MCP registry latest,
+actual tarball integrity and authenticated source/workflow identity, signed SBOM,
+tamper rejection and clean-install smoke are verified. The actual published
+archive passes 43 protocol comparisons with zero failures and two expected
+unsupported reference-peer combinations. No HTTP/provider/native-editor claim.
+
+**Previous verified release:** `@getmcpm/cli@0.47.8`.
 PR #290 merged as `999380d`; release source is `d50183d`.
 [Publish run](https://github.com/getmcpm/cli/actions/runs/41003684259) passed
 all five jobs. npm and the official MCP registry report latest `0.47.8`.
