@@ -406,11 +406,13 @@ mcpm baseline remains 0.47.1. It exercises
 actual global configurations and MCP calls with synthetic inputs; live models,
 interactive chat and other client/platform combinations require separate tests.
 
-v0.47.8 release preparation: Gemini now shares Cursor's parking behavior for
+v0.47.8 fixes Gemini effective disable: Gemini now shares Cursor's parking behavior for
 user-global disable. The reviewed candidate passes 11 real Gemini lifecycle
 checks; two native-command limitations remain separate. Rerun disable for older
 ignored flags. See [Gemini validation](docs/GEMINI-CLIENT-VALIDATION.md).
-Publication verification is pending.
+[v0.47.8 publication](https://github.com/getmcpm/cli/releases/tag/v0.47.8)
+is verified on npm and the official registry, with actual tarball integrity,
+provenance, signed SBOM and clean-install checks.
 
 v0.47.7 fixes Cursor global disable by parking definitions outside the active
 server map. Rerun disable to repair old ignored flags. The reviewed candidate
