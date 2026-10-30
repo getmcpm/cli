@@ -46,7 +46,7 @@ A registry where developers can search, install, audit, publish, and update MCP 
 across all major clients (Claude Desktop, Claude Code, Cursor, VS Code, Windsurf, Gemini CLI) from a single tool.
 
 **Current release:** `@getmcpm/cli@0.48.1`.
-v0.48.1 is published and verified. PR #299 merged as `ae59d9b`; release source is `c7082dd735817cb67c0d413172f5d5fb2ce53dbf`. [Publish workflow](https://github.com/getmcpm/cli/actions/runs/41099484146) passed the three package gates and npm publish job. The registry job log records successful publication and cleanup, but GitHub still reports it in progress; job APIs/views also return 502, so final workflow completion remains unconfirmed. npm and the official MCP registry report latest `0.48.1`. Actual tarball integrity, authenticated SLSA source/workflow identity, signed SBOM/tamper rejection and clean-install smoke pass. The exact published archive passes 75 protocol comparisons (including 32 Skills comparisons), zero failures, two expected unsupported reference-peer combinations and four exclusions.
+v0.48.1 is published and verified. PR #299 merged as `ae59d9b`; release source is `c7082dd735817cb67c0d413172f5d5fb2ce53dbf`. [Publish workflow](https://github.com/getmcpm/cli/actions/runs/41099484146) passed all five jobs. npm and the official MCP registry report latest `0.48.1`. Actual tarball integrity, authenticated SLSA source/workflow identity, signed SBOM/tamper rejection and clean-install smoke pass. The exact published archive passes 75 protocol comparisons (including 32 Skills comparisons), zero failures, two expected unsupported reference-peer combinations and four exclusions.
 No fresh host activation, native-editor/provider/model or HTTP claim.
 
 **Previous verified release:** `@getmcpm/cli@0.48.0`.
