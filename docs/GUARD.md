@@ -41,7 +41,7 @@ Detection is layered:
 The stdio relay inspects message content; it does not negotiate versions or
 translate protocols. Legacy and modern peers must still be compatible with each
 other. The base modern coverage shipped in v0.47.0; the Skills discovery row
-below is unreleased. This matrix uses
+below is prepared for v0.48.1; publication is pending. This matrix uses
 using the [MCP 2026-07-28 changes](https://modelcontextprotocol.io/specification/2026-07-28/changelog),
 [discovery](https://modelcontextprotocol.io/specification/2026-07-28/server/discover),
 and [MRTR contract](https://modelcontextprotocol.io/specification/2026-07-28/basic/patterns/mrtr).
@@ -55,7 +55,7 @@ and [MRTR contract](https://modelcontextprotocol.io/specification/2026-07-28/bas
 | Unknown/malformed `inputRequests` | Emits `guard-unsupported-input-request` (`high`, default `warn`). Coverage is incomplete; the frame is forwarded and logged. Supported siblings are still inspected and can block. Local policy overrides apply normally. |
 | `roots/list` input requests | No model/user prompt content to scan. Forwarded; directory authorization remains the client's responsibility. |
 | `requestState` and retries | Opaque retry state is preserved without decoding or inspecting it. Retry correlation and the authorization of returned input are responsibilities of the client/server. |
-| Skills and resource discovery metadata (unreleased) | `skills/list` entries and `skills/get` entry frontmatter/`_meta`, plus resource listing name/title/description/annotations/`_meta`, reach the shared metadata patterns and concealment/budget checks under `discovery_metadata`. Critical instruction matches block; ordinary `resources/read` file text stays warn-and-forward. Directory reads and `resources/list` share a reply shape, so both resource listing surfaces are inspected regardless of URI scheme. |
+| Skills and resource discovery metadata (v0.48.1 preparation) | `skills/list` entries and `skills/get` entry frontmatter/`_meta`, plus resource listing name/title/description/annotations/`_meta`, reach the shared metadata patterns and concealment/budget checks under `discovery_metadata`. Critical instruction matches block; ordinary `resources/read` file text stays warn-and-forward. Directory reads and `resources/list` share a reply shape, so both resource listing surfaces are inspected regardless of URI scheme. |
 | Ordinary tool/resource/prompt results | Existing field-scoped detectors and retrieved-data warn clamp remain unchanged, including results that omit `resultType`. |
 | External schema references, skill archives, binary media | No external `$ref` resolution, archive fetching/extraction, image/audio understanding, or complete extension validation. Existing in-frame string scanning does not establish coverage of these contents. |
 | HTTP transports | No runtime relay inspection. Existing deny-by-default/explicit unguarded consent behavior remains. |

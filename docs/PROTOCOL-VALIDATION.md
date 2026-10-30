@@ -119,7 +119,7 @@ clients/platforms only with named versions and observed results; real provider
 or agent behavior may need dedicated test-account access.
 
 
-## Skills carrier candidate checks (unreleased)
+## Skills carrier candidate checks (v0.48.1 preparation)
 
 The explicit candidate-archive mode additionally resolves the candidate's actual
 SDK server dependency to serve the Skills extension, without changing the fixed
