@@ -1,13 +1,13 @@
 # MCP Registry — Project Context
 
 > This file is automatically read by Claude Code on every session.
-> Keep it updated as decisions are made. Last updated: 2026-10-26.
+> Keep it updated as decisions are made. Last updated: 2026-10-30.
 
 ---
 
 ## What We're Building
 
-**Unreleased Gemini disable fix (2026-10-30):** Gemini now shares Cursor's
+**v0.47.8 release preparation (2026-10-30; publication pending):** Gemini now shares Cursor's
 `ParkedServersAdapter`: global definitions move to `_mcpmDisabledServers` outside
 active `mcpServers`. Force install/update/guard retain disabled state; enable
 restores the definition. Rerun disable for legacy ignored flags. This affects
