@@ -137,3 +137,10 @@ the [Cursor candidate record](CURSOR-CLIENT-VALIDATION.md#reviewed-candidate--20
 The actual npm tarball matches SHA-512 integrity and the cryptographically verified SLSA subject, exact source commit, GitHub Actions issuer and `publish.yml@refs/tags/v0.47.7` signer. Its signed SBOM verifies and tampering is rejected; the verified tarball passes clean-install release dogfood. Temporary proof: `/private/tmp/mcpm-v0477-release`.
 
 Cursor's eight-pass and Gemini's seven-pass/three-limitation native receipts remain the reviewed candidate measurements. This publication check does not rerun the clients or prove Cursor editor, provider/model, tool execution or OAuth compatibility. Gemini toggle limitations remain open.
+
+## v0.47.8 release preparation — 2026-10-30
+
+PR #290 merged as `999380d`, byte-identical to reviewed `505bd594` after all
+nine checks passed. v0.47.8 prepares this fix for publication; published artifact
+verification is pending. The 11-pass/two-limitation native evidence above remains
+a candidate measurement, not a fresh published-client run.
