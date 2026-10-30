@@ -138,9 +138,12 @@ The actual npm tarball matches SHA-512 integrity and the cryptographically verif
 
 Cursor's eight-pass and Gemini's seven-pass/three-limitation native receipts remain the reviewed candidate measurements. This publication check does not rerun the clients or prove Cursor editor, provider/model, tool execution or OAuth compatibility. Gemini toggle limitations remain open.
 
-## v0.47.8 release preparation — 2026-10-30
+## v0.47.8 publication — 2026-10-30
 
 PR #290 merged as `999380d`, byte-identical to reviewed `505bd594` after all
-nine checks passed. v0.47.8 prepares this fix for publication; published artifact
-verification is pending. The 11-pass/two-limitation native evidence above remains
-a candidate measurement, not a fresh published-client run.
+nine checks passed. v0.47.8 publishes this fix. Actual tarball integrity and
+provenance, signed SBOM/tamper rejection, npm/MCP registry latest and clean-install
+smoke pass. The 11-pass/two-limitation native evidence above remains a candidate
+measurement, not a fresh published-client run.
+
+Release source `d50183d99fce3db22d76aec7c21e9b30a4561228`; [publication workflow](https://github.com/getmcpm/cli/actions/runs/41003684259).

@@ -7,7 +7,7 @@
 
 ## What We're Building
 
-**v0.47.8 release preparation (2026-10-30; publication pending):** Gemini now shares Cursor's
+**Released v0.47.8 (2026-10-30):** Gemini now shares Cursor's
 `ParkedServersAdapter`: global definitions move to `_mcpmDisabledServers` outside
 active `mcpServers`. Force install/update/guard retain disabled state; enable
 restores the definition. Rerun disable for legacy ignored flags. This affects
@@ -32,7 +32,16 @@ An open-source, CLI-first MCP package manager — **"npm for MCP servers"**.
 A registry where developers can search, install, audit, publish, and update MCP servers
 across all major clients (Claude Desktop, Claude Code, Cursor, VS Code, Windsurf, Gemini CLI) from a single tool.
 
-**Current release:** `@getmcpm/cli@0.47.7`, verified on npm and the official MCP registry.
+**Current release:** `@getmcpm/cli@0.47.8`.
+PR #290 merged as `999380d`; release source is `d50183d`.
+[Publish run](https://github.com/getmcpm/cli/actions/runs/41003684259) passed
+all five jobs. npm and the official MCP registry report latest `0.47.8`.
+Actual tarball integrity, authenticated SLSA source/workflow identity, signed
+SBOM/tamper rejection and clean-install dogfood pass. Native Gemini evidence
+remains the reviewed candidate: 11 passes and two native-command limitations.
+No fresh editor, provider/model or HTTP run.
+
+**Previous verified release:** `@getmcpm/cli@0.47.7`, verified on npm and the official MCP registry.
 PR #282 merged as `26e2c27`; preparation #288 yielded `372c281`.
 Publish run `40362946189` passed all five jobs. Actual tarball SRI/SLSA
 source and signer, signed SBOM/tamper rejection, and clean-install dogfood pass.

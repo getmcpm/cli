@@ -11,6 +11,9 @@ published section (it happened to #170).
 ## [0.47.8] - 2026-10-30
 
 PATCH: effective Gemini user-global disable.
+Publication verified: npm/official registry latest 0.47.8; actual tarball
+integrity/provenance, signed SBOM/tamper rejection and clean-install dogfood pass.
+[Publish run](https://github.com/getmcpm/cli/actions/runs/41003684259).
 
 ### Fixed
 
