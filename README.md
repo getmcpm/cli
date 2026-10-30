@@ -594,9 +594,12 @@ Independent 2026 evidence for each thing the guard does, so you can check the pr
 
 mcpm can run as an MCP server itself, letting AI agents search, install, and audit MCP servers programmatically.
 
-v0.48.0 release preparation: the stdio entry supports modern `2026-07-28` discovery and legacy initialization
+v0.48.0: the stdio entry supports modern `2026-07-28` discovery and legacy initialization
 with the same nine tools and trust gates. See [serve validation](docs/SERVE-PROTOCOL-VALIDATION.md)
-for the named peer matrix and limits. Publication verification is pending.
+for the named peer matrix and limits. [Publication](https://github.com/getmcpm/cli/releases/tag/v0.48.0) is verified
+on npm and the MCP registry; the exact published archive passes 43 protocol
+comparisons (two expected unsupported combinations), signed-artifact verification
+and clean-install smoke.
 
 ```json
 {

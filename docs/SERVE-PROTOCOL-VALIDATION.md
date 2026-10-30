@@ -104,8 +104,22 @@ existing offline synthetic wheel-launch test; unchanged focused and full checks
 pass with the required child-process permissions. Failed initial container and
 fixture attempts are retained separately and do not count toward final passes.
 
-## v0.48.0 release preparation — 2026-10-30
+## v0.48.0 publication — 2026-10-30
 
 PR #293 merged after all nine hosted checks passed. The merged source matches
-reviewed `6777b35`. Publication verification is pending. The 43-pass candidate
-and 40-pass reference results above remain named candidate/reference evidence.
+reviewed `6777b35`. Publication is verified on npm and the official MCP registry.
+The exact downloaded archive passed integrity, authenticated source/workflow
+provenance, signed SBOM/tamper checks and clean-install smoke.
+
+The published v0.48.0 archive was independently matched to a fresh build of the
+tagged source with its release version injected, then passed the full protocol
+sandbox: **43 passes, zero failures, two expected unsupported reference-peer
+combinations**. Runtime is Linux/arm64, Node 26.11.1; actual server SDK 2.4.0.
+The harness labels its explicit-archive execution mode `candidate`; in this run
+that input is the verified published tarball, not a locally substituted package.
+Archive SRI, every runtime JavaScript hash, raw lock and harness hashes bind the
+receipt. Temporary evidence: `/private/tmp/mcpm-v0480-release/published-protocol`.
+The earlier 43-pass candidate and 40-pass reference results remain separate
+historical measurements. No fresh native-editor/provider/model or HTTP run.
+
+Release source `4ae38783df7885dbb8d4c4bf1aaf4a75c89cc4f4`; [publication workflow](https://github.com/getmcpm/cli/actions/runs/41021055043).

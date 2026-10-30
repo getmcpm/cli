@@ -11,6 +11,10 @@ published section (it happened to #170).
 ## [0.48.0] - 2026-10-30
 
 MINOR: modern MCP serve with legacy stdio compatibility.
+Publication verified: npm/MCP registry latest 0.48.0; actual tarball integrity,
+authenticated source/workflow provenance, signed SBOM/tamper rejection and clean
+install pass. Exact published archive: 43 protocol passes, zero failures, two
+expected unsupported reference-peer combinations. [Publish workflow](https://github.com/getmcpm/cli/actions/runs/41021055043).
 
 ### Added
 
