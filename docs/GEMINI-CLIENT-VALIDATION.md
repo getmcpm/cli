@@ -54,7 +54,44 @@ pinned client requests `2025-06-18`. This is not proof of tool execution,
 interactive trust/consent UI, model behavior, HTTP/SSE/OAuth, other platforms or
 client versions, or full protocol conformance.
 
-## Known limitation
+## Effective global disable — candidate 2026-10-30
+
+Gemini now shares Cursor's parking adapter: `mcpm disable` moves the managed
+user-global definition from `mcpServers` to `_mcpmDisabledServers` in the same
+settings file. `mcpm enable` restores it. `mcpm list` still shows it as disabled.
+Rerun disable to repair older entries with the ineffective `disabled:true` flag.
+Force install, guarded update and guard on/off keep the entry parked. Removal
+clears a parked definition. Malformed maps and active/parked collisions are
+refused before writes; raw write-once backups and unrelated settings survive.
+
+This controls future discovery of the **managed user-global definition**. It
+does not stop running peers or suppress independently supplied project/extension
+servers. Gemini's `mcp.excluded`, allowed lists, policies and native
+`mcp-server-enablement.json` remain independent; enable does not override them.
+Concurrent config writers retain the inherited read-modify-write race.
+
+Final Astra-reviewed sandbox candidate: **11 passes, two native-command limitations, zero
+unexpected failures**. Each parked-state discovery produces no target traffic
+and a fresh control handshake; restored fixture `2.0.0` connects after enable.
+The parking key produces no warning in the pinned client's measured listing.
+The suite remains `partial`/exit 1 because the separate native enable/disable
+commands still report the exact known “not found” refusal while exiting zero.
+This does not invalidate the mcpm disable checks. Unexpected failures assert.
+
+Evidence: `/private/tmp/mcpm-gemini-disable/reviewed-run/report.json`, container
+settings in `reviewed-container.json`. Gemini `0.65.0`, Linux/arm64, Node `26.12.1`, immutable
+image `node@sha256:a98e6fda54fdbb22d4238054cca9a2a113bcd1191c09193a535aae22f400aa8e`.
+The report binds all 66 candidate dist JavaScript files. Native exclusion settings and unrelated enablement-file bytes are checked after
+each discovery. This is not a released-package claim.
+
+Astra reviewed the shared adapter and its callers and tightened inventory checks
+to require exactly the matching Gemini target with disabled state. Parent
+rebuilt and repeated the native suite after that fix. Final source validation:
+3,621 tests pass, three skipped, plus typecheck and build. Native/peer harness
+self-checks pass 28/28 with loopback access; restricted execution aborted inside
+Node callback bookkeeping and is retained separately, not counted as a pass.
+
+## Previous baseline limitations — v0.47.7
 
 Gemini CLI `0.65.0` warns that mcpm's entry-level `disabled:true` is an
 unrecognized key, yet `mcp list` still connects. That case is a limitation and causes overall `partial` status and
@@ -66,16 +103,15 @@ both report the listed fixture as not found and exit zero in the pinned client.
 The harness matches that refusal exactly and verifies the same target still
 connects on fresh peers alongside the control. Both are additional limitations;
 exit zero alone is not success. Other failures are not accepted as this known
-result. Native enablement integration remains unimplemented. Do not treat
-`mcpm disable --client gemini-cli` as launch prevention. Cursor's parking fix
-is Cursor-specific. No upstream issue has been filed as part of this work.
+result. Native enablement integration remains unimplemented. In v0.47.7, `mcpm disable --client gemini-cli` did not prevent launch. Cursor's parking fix
+was Cursor-specific in v0.47.7. No upstream issue has been filed as part of this work.
 
 The official [Gemini MCP commands](https://geminicli.com/docs/tools/mcp-server/)
 and bundled client source guided the fixture. Assertions use observed traffic
 and native output. CI runs account-free peer checks; native suites require
 separately supplied artifacts and do not repin the published reference matrix.
 
-## Reviewed candidate — 2026-10-26
+## Previous reviewed candidate — 2026-10-26
 
 The final pinned client run completes ten cases: **seven pass, three limitations,
 zero unexpected failures**, with `partial` status and exit 1. The limitations

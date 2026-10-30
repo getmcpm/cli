@@ -20,6 +20,9 @@ const controlWork = path.join(evidence, 'control');
 for (const dir of [home, work, bin, controlWork, path.join(home, '.gemini')]) await mkdir(dir, { recursive: true, mode: 0o700 });
 const configPath = path.join(home, '.gemini', 'settings.json');
 const trustPath = path.join(home, '.gemini', 'trustedFolders.json');
+const enablementPath = path.join(home, '.gemini', 'mcp-server-enablement.json');
+const enablement = JSON.stringify({ 'native-disabled': { enabled: false } });
+await writeFile(enablementPath, enablement);
 const peer = path.join(root, 'scripts/native-client/peer.mjs');
 const registry = path.join(root, 'scripts/native-client/fixture-registry.mjs');
 const cli = path.join(root, 'dist/index.js');
@@ -53,7 +56,7 @@ const child=spawn(process.execPath,[${JSON.stringify(peer)},spec.split('@').at(-
 child.on('error',()=>process.exit(1));child.on('exit',(code,signal)=>process.exit(code??(signal?1:0)));
 `);
 await chmod(path.join(bin, 'npx'), 0o755);
-const seed = { telemetry: { enabled: false }, ui: { theme: 'Default' }, mcpServers: {
+const seed = { mcp: { excluded: ['native-disabled'] }, telemetry: { enabled: false }, ui: { theme: 'Default' }, mcpServers: {
   retained: { command: process.execPath, args: [peer, '1.0.0'], env: { MCPM_NATIVE_WORK: controlWork } },
 } };
 await writeFile(configPath, JSON.stringify(seed));
@@ -74,7 +77,8 @@ async function identity(dir) {
 report.artifacts = { candidateDist: await identity(path.join(root, 'dist')), geminiBundle: await identity(path.dirname(gemini)) };
 function preserve() {
   const raw = config();
-  for (const key of ['telemetry', 'ui']) assert.deepEqual(raw[key], seed[key], `unrelated ${key} changed`);
+  assert.equal(text(enablementPath), enablement, 'native enablement file changed');
+  for (const key of ['mcp', 'telemetry', 'ui']) assert.deepEqual(raw[key], seed[key], `unrelated ${key} changed`);
   assert.deepEqual(raw.mcpServers.retained, seed.mcpServers.retained, 'unrelated server changed');
 }
 function connected(r) {
@@ -113,25 +117,44 @@ await writeFile(trustPath, JSON.stringify({ [work]: 'TRUST_FOLDER' }));
 observe('install-and-connect', '1.0.0', false);
 mcpm(['guard', 'enable', '--client', 'gemini-cli', '--server', server]);
 observe('guard-enable-and-connect', '1.0.0', true);
-mcpm(['update', '--yes', '--json'], '2.0.0');
-observe('update-and-connect', '2.0.0', true);
 mcpm(['guard', 'disable', '--client', 'gemini-cli', '--server', server]);
-observe('guard-disable-and-connect', '2.0.0', false);
-mcpm(['disable', server, '--client', 'gemini-cli']);
-const beforeDisabled = wire(), beforeDisabledControl = wireAt(controlWork), disabled = native(['mcp', 'list']);
-assert.equal(disabled.status, 0); preserve();
-assert.equal(config().mcpServers[server].disabled, true);
-const rows = wire().slice(beforeDisabled.length);
-if (rows.length) { connected(disabled); traffic(rows, beforeDisabled, '2.0.0'); }
-else {
-  const line = (disabled.stdout + disabled.stderr).split('\n').find(line => line.includes(`${server}:`));
-  assert.match(line ?? '', / - (Disabled|Blocked)$/);
-  assert.match(disabled.stdout + disabled.stderr, /retained:.* - Connected/);
-  traffic(wireAt(controlWork).slice(beforeDisabledControl.length), beforeDisabledControl, '1.0.0');
+observe('guard-disable-and-connect', '1.0.0', false);
+function observeAbsent(id, parked) {
+  const before = wire(), beforeControl = wireAt(controlWork), listed = native(['mcp', 'list']);
+  assert.equal(listed.status, 0, listed.stderr); preserve();
+  assert.equal(Object.hasOwn(config().mcpServers, server), false, 'target remains active');
+  assert.equal(Object.hasOwn(config()._mcpmDisabledServers ?? {}, server), parked, 'parking state mismatch');
+  assert.equal(wire().length, before.length, 'absent target launched');
+  assert.equal((listed.stdout + listed.stderr).includes(server), false, 'absent target still listed');
+  assert.match(listed.stdout + listed.stderr, /retained:.* - Connected/);
+  const controlRows = wireAt(controlWork).slice(beforeControl.length);
+  traffic(controlRows, beforeControl, '1.0.0');
+  report.cases.push({ id, status: 'pass', native: listed, config: config(), wire: [], controlWire: controlRows });
 }
-report.cases.push({ id: 'mcpm-disable-blocks-launch', status: rows.length ? 'limitation' : 'pass', native: disabled, wire: rows,
-  ...(rows.length ? { limitation: 'Gemini CLI mcp list ignores the generic disabled:true entry flag' } : {}) });
+// Repair an older mcpm disabled flag rather than trusting Gemini to enforce it.
+const legacy = config(); legacy.mcpServers[server].disabled = true;
+await writeFile(configPath, JSON.stringify(legacy));
+mcpm(['disable', server, '--client', 'gemini-cli']);
+observeAbsent('mcpm-disable-repairs-legacy-flag', true);
+const inventory = run(process.execPath, [cli, 'list', '--client', 'gemini-cli', '--json']);
+assert.equal(inventory.status, 0, inventory.stderr);
+const listedTarget = JSON.parse(inventory.stdout).filter(row => row.client === 'gemini-cli' && row.serverName === server);
+assert.equal(listedTarget.length, 1, 'disabled target missing or duplicated in inventory');
+assert.equal(listedTarget[0].entry.disabled, true, 'target inventory is not disabled');
+mcpm(['guard', 'enable', '--client', 'gemini-cli', '--server', server]);
+assert.ok(config()._mcpmDisabledServers[server].args.includes('--inner'));
+observeAbsent('guard-enable-stays-disabled', true);
+mcpm(['update', '--yes', '--json'], '2.0.0');
+assert.equal(config()._mcpmDisabledServers[server].args.at(-1), '@mcpm/native-fixture@2.0.0');
+observeAbsent('guarded-update-stays-disabled', true);
+mcpm(['guard', 'disable', '--client', 'gemini-cli', '--server', server]);
+assert.equal(config()._mcpmDisabledServers[server].args.includes('--inner'), false);
+observeAbsent('guard-disable-stays-disabled', true);
+mcpm(['install', server, '--client', 'gemini-cli', '--force', '--yes', '--skip-health-check', '--json'], '2.0.0');
+assert.ok(config()._mcpmDisabledServers[server].args.includes('@mcpm/native-fixture@2.0.0'));
+observeAbsent('force-install-stays-disabled', true);
 mcpm(['enable', server, '--client', 'gemini-cli']);
+assert.equal(Object.hasOwn(config()._mcpmDisabledServers ?? {}, server), false);
 observe('mcpm-enable-and-connect', '2.0.0', false);
 for (const action of ['disable', 'enable']) {
   const toggle = native(['mcp', action, server]);
@@ -154,13 +177,10 @@ for (const action of ['disable', 'enable']) {
   report.cases.push({ id: `native-${action}-command`, status: refused ? 'limitation' : 'pass', native: toggle, listing: listed, wire: rows, controlWire: controlRows,
     ...(refused ? { limitation: `Native Gemini ${action} reports the listed server as not found while exiting zero` } : {}) });
 }
+mcpm(['disable', server, '--client', 'gemini-cli']);
 mcpm(['remove', server, '--client', 'gemini-cli', '--yes']);
-const beforeRemoved = wire(), removed = native(['mcp', 'list']);
-assert.equal(removed.status, 0); preserve();
-assert.equal(Object.hasOwn(config().mcpServers, server), false);
-assert.equal(wire().length, beforeRemoved.length);
-assert.equal((removed.stdout + removed.stderr).includes(server), false);
-report.cases.push({ id: 'remove-preserves-unrelated-config', status: 'pass', native: removed, wire: [] });
+observeAbsent('remove-parked-preserves-unrelated-config', false);
+assert.deepEqual(JSON.parse(text(configPath + '.bak')), seed, 'original backup changed');
 report.counts = { pass: report.cases.filter(row => row.status === 'pass').length, limitation: report.cases.filter(row => row.status === 'limitation').length, fail: 0 };
 report.status = report.counts.limitation ? 'partial' : 'pass';
 await writeFile(path.join(evidence, 'report.json'), JSON.stringify(report, null, 2) + '\n');

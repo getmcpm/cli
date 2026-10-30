@@ -7,6 +7,16 @@
 
 ## What We're Building
 
+**Unreleased Gemini disable fix (2026-10-30):** Gemini now shares Cursor's
+`ParkedServersAdapter`: global definitions move to `_mcpmDisabledServers` outside
+active `mcpServers`. Force install/update/guard retain disabled state; enable
+restores the definition. Rerun disable for legacy ignored flags. This affects
+future discovery of the managed global definition only; project/extension
+servers, running peers and native enablement/exclusions remain independent.
+Reviewed candidate: 11 real Gemini lifecycle passes, two separate native-command
+limitations; 3,621 source tests pass, three skipped. Astra review/fix and final
+rebuilt sandbox proof complete. See `docs/GEMINI-CLIENT-VALIDATION.md`.
+
 **Released v0.47.7 (2026-10-26):** Cursor parks disabled global
 definitions in `_mcpmDisabledServers` outside active `mcpServers`; force
 replacement and guard changes retain that state. Existing active legacy

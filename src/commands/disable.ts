@@ -2,7 +2,7 @@
  * `mcpm disable <name>` command handler.
  *
  * Disables a named MCP server across all (or a specific) client config files
- * using the adapter's disabled representation. Cursor parks the definition
+ * using the adapter's disabled representation. Cursor and Gemini park the definition
  * outside its active server map; other adapters write the generic flag.
  */
 
