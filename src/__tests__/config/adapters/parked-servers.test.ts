@@ -2,28 +2,28 @@ import { afterEach, describe, expect, it } from "vitest";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { GeminiCliAdapter } from "../../../config/adapters/gemini-cli.js";
 import { CursorAdapter } from "../../../config/adapters/cursor.js";
 import { handleToggleServer } from "../../../commands/toggle.js";
 
-const adapter = new CursorAdapter();
 const folders: string[] = [];
 const original = { command: "npx", args: ["-y", "fixture@1"], env: { FIXTURE: "synthetic" }, custom: { retained: true } };
 async function seed(extra: Record<string, unknown> = {}) {
   const dir = await mkdtemp(path.join(os.tmpdir(), "cursor-disabled-"));
   folders.push(dir);
   const file = path.join(dir, "mcp.json");
-  await writeFile(file, JSON.stringify({ preferences: { retained: true }, mcpServers: { fixture: original, retained: { command: "node" } }, ...extra }));
+  await writeFile(file, JSON.stringify({ preferences: { retained: true }, mcp: { excluded: ["native-disabled"], allowed: ["fixture"] }, mcpServers: { fixture: original, retained: { command: "node" } }, ...extra }));
   return file;
 }
 const raw = async (file: string) => JSON.parse(await readFile(file, "utf8"));
 afterEach(async () => { await Promise.all(folders.splice(0).map(dir => rm(dir, { recursive: true, force: true }))); });
 
-describe("Cursor effective disabled storage", () => {
+describe.each([new CursorAdapter(), new GeminiCliAdapter()])("$clientId effective disabled storage", (adapter) => {
   it.each([null, [], "invalid", 42, { mcpServers: null }, { mcpServers: [] }, { mcpServers: "invalid" }].map(value => ({ value })))("refuses malformed roots or active maps without rewriting them: $value", async ({ value }) => {
     const file = await seed();
     await writeFile(file, JSON.stringify(value));
     const before = await readFile(file, "utf8");
-    await expect(adapter.addServer(file, "fixture", original, { force: true })).rejects.toThrow(/Cursor/);
+    await expect(adapter.addServer(file, "fixture", original, { force: true })).rejects.toThrow(/configuration|server/i);
     expect(await readFile(file, "utf8")).toBe(before);
   });
 
@@ -43,8 +43,8 @@ describe("Cursor effective disabled storage", () => {
   it("rerunning disable repairs the legacy ineffective flag through the real toggle handler", async () => {
     const file = await seed({ mcpServers: { fixture: { ...original, disabled: true } } });
     expect((await adapter.read(file)).fixture.disabled).toBeUndefined();
-    await handleToggleServer("fixture", true, { client: "cursor" }, {
-      detectClients: async () => ["cursor"], getAdapter: () => adapter,
+    await handleToggleServer("fixture", true, { client: adapter.clientId }, {
+      detectClients: async () => [adapter.clientId], getAdapter: () => adapter,
       getConfigPath: () => file, output: () => {},
     });
     expect((await raw(file)).mcpServers).not.toHaveProperty("fixture");
@@ -97,7 +97,7 @@ describe("Cursor effective disabled storage", () => {
   it.each([null, [], "invalid", { fixture: "invalid" }, { fixture: original }].map(parked => ({ parked })))("refuses malformed or conflicting parked state: $parked", async ({ parked }) => {
     const file = await seed({ _mcpmDisabledServers: parked });
     const before = await readFile(file, "utf8");
-    await expect(adapter.setServerDisabled(file, "fixture", true)).rejects.toThrow(/Cursor/);
+    await expect(adapter.setServerDisabled(file, "fixture", true)).rejects.toThrow(/configuration|server/i);
     expect(await readFile(file, "utf8")).toBe(before);
   });
 

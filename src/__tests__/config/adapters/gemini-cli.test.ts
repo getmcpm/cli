@@ -1,15 +1,8 @@
 /**
  * Tests for src/config/adapters/gemini-cli.ts
  *
- * GeminiCliAdapter is a rootKey-only subclass of BaseAdapter (identical I/O to
- * ClaudeDesktopAdapter, which is exhaustively covered in claude-desktop.test.ts).
- * We assert only what is specific to this adapter: its clientId, and the one
- * behavior that matters most for `~/.gemini/settings.json` — that a write into the
- * `mcpServers` map leaves every unrelated Gemini CLI setting (theme, auth, tool
- * config, …) untouched. settings.json holds a lot of unrelated state, so a naive
- * rewrite that dropped sibling keys would be data loss.
- * ponytail: no full I/O suite — BaseAdapter is already covered; this pins the
- * subclass + the sibling-preservation invariant unique to this file.
+ * Shared parking behavior is covered in parked-servers.test.ts.
+ * These tests pin Gemini identity and unrelated settings preservation.
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";

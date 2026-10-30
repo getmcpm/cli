@@ -8,6 +8,16 @@ _Add entries here, never under a stamped version_ — a release commit renames t
 heading, and a branch that wrote beneath it merges without conflict straight into a
 published section (it happened to #170).
 
+### Fixed
+
+- Gemini global disable now parks definitions outside active `mcpServers`, sharing
+  Cursor's adapter behavior. Rerun disable to repair older ignored `disabled:true`
+  flags. Force install, update and guard replacement preserve parked state;
+  explicit enable restores it. Native exclusions and enablement state stay intact.
+- Extend the real offline Gemini lifecycle harness with zero-target-traffic and
+  fresh active-control checks while disabled, including guarded update, force
+  install and parked removal. Native toggle incompatibility remains separate.
+
 ## [0.47.7] - 2026-10-26
 
 PATCH: effective Cursor global disable and bounded Gemini CLI validation.

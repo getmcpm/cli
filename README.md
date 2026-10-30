@@ -180,11 +180,12 @@ The plaintext-secret scan reports the key name and label only — never the valu
 
 ### Client lifecycle compatibility
 
-Cursor enable/disable retains the definition in an mcpm-owned parking map in
+Cursor and Gemini enable/disable retain the definition in an mcpm-owned parking map in
 the same global config file; rerun disable to repair older ignored flags.
 This affects future discovery and does not stop running peers or override
 project-local definitions. See [Cursor validation](docs/CURSOR-CLIENT-VALIDATION.md).
-Gemini's generic disabled flag and native toggle commands have measured
+Gemini enable restores only the managed definition; native exclusions and
+enablement state still apply. Its native toggle commands have separate measured
 limitations; see [Gemini validation](docs/GEMINI-CLIENT-VALIDATION.md).
 
 ### Stack files: docker-compose for MCP
