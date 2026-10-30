@@ -103,3 +103,9 @@ and launcher self-checks pass **9/9**. Restricted execution timed out in the
 existing offline synthetic wheel-launch test; unchanged focused and full checks
 pass with the required child-process permissions. Failed initial container and
 fixture attempts are retained separately and do not count toward final passes.
+
+## v0.48.0 release preparation — 2026-10-30
+
+PR #293 merged after all nine hosted checks passed. The merged source matches
+reviewed `6777b35`. Publication verification is pending. The 43-pass candidate
+and 40-pass reference results above remain named candidate/reference evidence.

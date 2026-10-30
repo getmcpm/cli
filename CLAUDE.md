@@ -7,7 +7,7 @@
 
 ## What We're Building
 
-**Unreleased modern serve (2026-10-30):** `mcpm serve` uses the v2.4 server
+**v0.48.0 release preparation (2026-10-30; publication pending):** `mcpm serve` uses the v2.4 server
 SDK's explicit dual-era stdio factory. Same nine tools, handlers, strict schemas,
 trust gates and text/structured outputs; v1 SDK remains for guard framing/types.
 Candidate sandbox mode uses the packed build, separately from the fixed published
