@@ -7,7 +7,7 @@
 
 ## What We're Building
 
-**Unreleased Skills guard coverage (2026-10-31):** `discovery_metadata` inspects
+**v0.48.1 release preparation (2026-10-31; publication pending):** `discovery_metadata` inspects
 Skills list/get frontmatter and resource discovery metadata with shared metadata
 patterns. Critical matches block; ordinary skill resource text remains warn-only.
 The candidate-only SDK2.4 fixture exercises modern and legacy wire paths; fixed

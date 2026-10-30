@@ -448,7 +448,7 @@ The guard sits inline on the stdio channel between your AI client and each MCP s
 
 - **The request your agent sends** — the tool name and arguments, checked for sensitive-path exfil and injection smuggled into call parameters.
 - **The response the server returns** — checked for instruction injection hidden in the tool's output (the Slack message, web page, or calendar invite your agent is about to read).
-- **Skills discovery metadata (unreleased)** — skill list/get frontmatter and resource listing metadata use the same injection/concealment checks. Critical metadata matches block; file text remains warn-and-forward. See [Skills guard validation](docs/SKILLS-GUARD-VALIDATION.md) for measured scope and host-approval limits.
+- **Skills discovery metadata (v0.48.1 release preparation)** — skill list/get frontmatter and resource listing metadata use the same injection/concealment checks. Critical metadata matches block; file text remains warn-and-forward. See [Skills guard validation](docs/SKILLS-GUARD-VALIDATION.md) for measured scope and host-approval limits.
 - **The tool's own definition** — `tools/list` descriptions, schemas, and annotations, checked against the schema pinned at approval time, so a server can't quietly rewrite a tool you already trusted.
 
 When a frame trips a signature, drift check, or policy rule, the guard **drops it and hands your agent a JSON-RPC error in its place** — carrying the signature id and a `remediation` string — so the poisoned content never reaches your model. Clean calls pass straight through (p99 ~0.065 ms on small frames). Server-initiated `sampling` / `elicitation` requests are inspected the same way, with the error routed back to the server rather than to your agent.

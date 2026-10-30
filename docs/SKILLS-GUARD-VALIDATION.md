@@ -1,6 +1,7 @@
 # Skills-over-MCP guard validation
 
-Unreleased candidate, measured 2026-10-31 (Asia/Hong_Kong).
+v0.48.1 release preparation; publication pending. Candidate measurements from
+2026-10-31 (Asia/Hong_Kong) remain distinct from published-artifact evidence.
 
 ## Contract and scope
 
@@ -97,3 +98,9 @@ prompt injection. Binary blobs and external content remain outside this slice.
 The SDK also supports these handlers on legacy transports; that measurement is
 separate from the stable extension's modern base-protocol requirement. Two
 unsupported reference combinations remain legacy→modern-only and modern-pinned→legacy.
+
+
+## v0.48.1 release preparation
+
+PR #299 merged as `ae59d9b`, byte-identical to reviewed `d08eb1e`, after all nine
+checks passed. Release publication and actual-package validation are pending.
