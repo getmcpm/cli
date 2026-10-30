@@ -121,6 +121,18 @@ const TOOL_METADATA_INJECTION_PATTERNS: readonly RegExp[] = [
 
 export const OWASP_MCP_TOP_10: readonly Signature[] = [
   {
+    id: "discovery-metadata-injection",
+    category: "OWASP-MCP-1",
+    severity: "critical",
+    description: "Instruction-shaped text in skill frontmatter or resource discovery metadata",
+    target: "discovery_metadata",
+    patterns: TOOL_METADATA_INJECTION_PATTERNS,
+    remediation:
+      "Skill or resource discovery metadata contained injection-shaped text. " +
+      "Review the source before allowing this context. A manifest digest does not " +
+      "authenticate the publisher or authorize skill activation.",
+  },
+  {
     id: "owasp-mcp-2-instruction-injection-in-response",
     category: "OWASP-MCP-2",
     severity: "critical",

@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { appendFileSync, readFileSync } from 'node:fs';
 import { createInterface } from 'node:readline';
 import { spawn } from 'node:child_process';
+import { createRequire } from 'node:module';
 
 const kind = process.argv[2];
 const wirePath = process.argv[3];
@@ -22,6 +23,26 @@ if (kind === 'serve') {
   child.on('error', error => { console.error(error.message); process.exit(1); });
   child.on('exit', code => process.exit(code ?? 1));
   process.on('SIGTERM', () => child.kill('SIGTERM'));
+} else if (kind.startsWith('skills')) {
+  // Use the candidate's actual server dependency; fixed reference SDKs stay pinned.
+  const require = createRequire(process.argv[4]);
+  const { McpServer } = await import(require.resolve('@modelcontextprotocol/server'));
+  const { SkillsExtension, memorySkillFiles } = await import(require.resolve('@modelcontextprotocol/server/ext/skills'));
+  const { serveStdio, StdioServerTransport } = await import(require.resolve('@modelcontextprotocol/server/stdio'));
+  let content = readFileSync(new URL('./mcpm-SKILL.md', import.meta.url), 'utf8');
+  if (kind === 'skills-metadata') content = content.replace(/^description:.*$/m, 'description: ' + attack);
+  if (kind === 'skills-body') content += '\n' + attack + '\n';
+  const catalog = await SkillsExtension.load(memorySkillFiles({ 'mcpm/SKILL.md': content }));
+  const server = new McpServer({ name: 'sandbox', version: '1' });
+  if (kind === 'skills-directory') {
+    const entry = catalog.entries[0];
+    new SkillsExtension({ source: {
+      list: async () => ({ skills: [entry] }), get: async uri => uri === entry.uri ? entry : undefined,
+      read: async uri => uri === entry.uri ? { text: content, mimeType: 'text/markdown' } : undefined,
+      readDirectory: async uri => uri === 'skill://mcpm' ? { resources: [{ uri: entry.uri, name: 'mcpm', description: attack }] } : undefined,
+    } }).attach(server);
+  } else catalog.attach(server);
+  await serveStdio(() => server, { transport: observe(new StdioServerTransport()), legacy: 'serve' });
 } else if (kind === 'raw') {
   createInterface({ input: process.stdin }).on('line', line => {
     const r = JSON.parse(line);
@@ -89,6 +110,12 @@ if (kind === 'serve') {
     } };
   });
   const transport = new stdio.StdioServerTransport();
+  observe(transport);
+  if (modern) stdio.serveStdio(() => server, { transport, legacy: kind === 'v2-only' ? 'reject' : 'serve' });
+  else await server.connect(transport);
+}
+
+function observe(transport) {
   const send = transport.send.bind(transport);
   transport.send = async message => {
     if (wirePath) appendFileSync(wirePath, JSON.stringify({ direction: 'from-server', message }) + '\n');
@@ -100,6 +127,5 @@ if (kind === 'serve') {
       return handler?.(message);
     };
   }, get() { return this._observedHandler; } });
-  if (modern) stdio.serveStdio(() => server, { transport, legacy: kind === 'v2-only' ? 'reject' : 'serve' });
-  else await server.connect(transport);
+  return transport;
 }

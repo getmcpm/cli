@@ -154,6 +154,14 @@ function targetSubtree(msg: JSONRPCMessage, target: SignatureTarget): unknown {
       }
       return null;
     }
+    case "discovery_metadata": {
+      if (!("result" in msg) || msg.result === null || typeof msg.result !== "object") return null;
+      const result = msg.result;
+      const skills = [...objectElements(result.skills), ...objectElements([result.skill])];
+      // Directory reads and resources/list share this shape; responses have no method.
+      return [skills.map((s) => [s.frontmatter ?? null, s._meta ?? null]),
+        objectElements(result.resources).map((r) => [r.name, r.title, r.description, r.annotations, r._meta])];
+    }
     case "resource_content": {
       // resources/read response → result.contents[*].text. Text-only for the first
       // slice: base64 `blob` decoding is deferred (binary blobs are noise + an FP /
@@ -653,6 +661,7 @@ function inspectAgainstSignatures(
  * an FP generator. Explicit allowlist so the scope can't silently expand.
  */
 const HIDDEN_CHAR_TARGETS: ReadonlySet<SignatureTarget> = new Set<SignatureTarget>([
+  "discovery_metadata",
   "tool_description",
   "tool_annotations",
   // initialize.instructions is block-capable PRE-INVOCATION context (H1). An
@@ -1413,6 +1422,7 @@ export function inspectMessage(
   signatures: readonly Signature[],
 ): InspectResult {
   const targets: readonly SignatureTarget[] = [
+    "discovery_metadata",
     "tool_response",
     "tool_call_args",
     "tool_description",

@@ -1,11 +1,18 @@
 # MCP Registry — Project Context
 
 > This file is automatically read by Claude Code on every session.
-> Keep it updated as decisions are made. Last updated: 2026-10-30.
+> Keep it updated as decisions are made. Last updated: 2026-10-31.
 
 ---
 
 ## What We're Building
+
+**Unreleased Skills guard coverage (2026-10-31):** `discovery_metadata` inspects
+Skills list/get frontmatter and resource discovery metadata with shared metadata
+patterns. Critical matches block; ordinary skill resource text remains warn-only.
+The candidate-only SDK2.4 fixture exercises modern and legacy wire paths; fixed
+reference SDKs/releases remain pinned. No host activation, approval, publisher
+identity or complete manifest validation claim. See `docs/SKILLS-GUARD-VALIDATION.md`.
 
 **Released v0.48.0 (2026-10-30):** `mcpm serve` uses the v2.4 server
 SDK's explicit dual-era stdio factory. Same nine tools, handlers, strict schemas,

@@ -13,6 +13,7 @@ export type SignatureTarget =
   | "tool_call_args"
   | "tool_description"
   | "tool_annotations"
+  | "discovery_metadata"
   | "resource_content"
   | "prompt_content"
   | "initialize_instructions"

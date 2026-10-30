@@ -29,6 +29,13 @@ export function assertUnsupported(observation, method, wireCode, clientCode) {
   assert.equal(response?.error?.code, wireCode);
 }
 
+export function assertInspectionEvents(events, expected) {
+  assert.deepEqual(events.map(e => ({
+    action: e.action,
+    findings: (e.findings || []).map(f => [f.signature_id, f.target]),
+  })), expected, 'inspection events differ from the ordered requests');
+}
+
 export function record(wire, direction, message) {
   const json = JSON.stringify(message);
   assert.ok(wire.length < 256, 'wire message budget exceeded');
