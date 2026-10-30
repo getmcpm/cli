@@ -30,7 +30,8 @@ or release baseline, change its exact version in the isolated package manifest,
 regenerate that lockfile with npm, rerun the matrix, and update the measured scope
 here. Do not infer compatibility from the package's major version alone.
 
-Only the harness and existing public `modern-*.json` fixtures enter the Docker
+Only the harness, the public `skills/mcpm/SKILL.md` usage skill, and existing
+public `modern-*.json` fixtures enter the Docker
 build context. No host home, client configuration, credentials, SSH agent, Docker
 socket, or host directory is mounted. Dependencies install with scripts disabled.
 At execution the container uses UID 1000, a read-only root, no network, no Linux
@@ -116,3 +117,14 @@ Native results are separate from this reference-peer matrix. Isolated-profile
 connection tests alone do not establish adapter compatibility. Expand to other
 clients/platforms only with named versions and observed results; real provider
 or agent behavior may need dedicated test-account access.
+
+
+## Skills carrier candidate checks (unreleased)
+
+The explicit candidate-archive mode additionally resolves the candidate's actual
+SDK server dependency to serve the Skills extension, without changing the fixed
+2.3.1 reference peers or 0.47.0 baseline. It copies the repository usage skill into
+memory and applies separate metadata/body/directory poison variants. The copied
+skill is included in `harnessSha256`. See [Skills guard validation](SKILLS-GUARD-VALIDATION.md)
+for the named comparisons and security limits. These calls test transport and
+guard decisions; they do not activate a skill in a host or measure agent behavior.

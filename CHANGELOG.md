@@ -8,6 +8,14 @@ _Add entries here, never under a stamped version_ — a release commit renames t
 heading, and a branch that wrote beneath it merges without conflict straight into a
 published section (it happened to #170).
 
+### Added
+
+- Guard inspection of Skills frontmatter and resource discovery metadata, including
+  directory listings, using existing injection and concealment checks. Critical
+  metadata matches block; skill resource text retains warn-and-forward semantics.
+- Offline real-SDK Skills fixtures compare benign and poisoned discovery/get/read
+  paths over modern and legacy stdio, separately from the pinned reference matrix.
+
 ## [0.48.0] - 2026-10-30
 
 MINOR: modern MCP serve with legacy stdio compatibility.

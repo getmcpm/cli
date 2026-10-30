@@ -40,7 +40,8 @@ Detection is layered:
 
 The stdio relay inspects message content; it does not negotiate versions or
 translate protocols. Legacy and modern peers must still be compatible with each
-other. The following coverage is available in v0.47.0,
+other. The base modern coverage shipped in v0.47.0; the Skills discovery row
+below is unreleased. This matrix uses
 using the [MCP 2026-07-28 changes](https://modelcontextprotocol.io/specification/2026-07-28/changelog),
 [discovery](https://modelcontextprotocol.io/specification/2026-07-28/server/discover),
 and [MRTR contract](https://modelcontextprotocol.io/specification/2026-07-28/basic/patterns/mrtr).
@@ -54,6 +55,7 @@ and [MRTR contract](https://modelcontextprotocol.io/specification/2026-07-28/bas
 | Unknown/malformed `inputRequests` | Emits `guard-unsupported-input-request` (`high`, default `warn`). Coverage is incomplete; the frame is forwarded and logged. Supported siblings are still inspected and can block. Local policy overrides apply normally. |
 | `roots/list` input requests | No model/user prompt content to scan. Forwarded; directory authorization remains the client's responsibility. |
 | `requestState` and retries | Opaque retry state is preserved without decoding or inspecting it. Retry correlation and the authorization of returned input are responsibilities of the client/server. |
+| Skills and resource discovery metadata (unreleased) | `skills/list` entries and `skills/get` entry frontmatter/`_meta`, plus resource listing name/title/description/annotations/`_meta`, reach the shared metadata patterns and concealment/budget checks under `discovery_metadata`. Critical instruction matches block; ordinary `resources/read` file text stays warn-and-forward. Directory reads and `resources/list` share a reply shape, so both resource listing surfaces are inspected regardless of URI scheme. |
 | Ordinary tool/resource/prompt results | Existing field-scoped detectors and retrieved-data warn clamp remain unchanged, including results that omit `resultType`. |
 | External schema references, skill archives, binary media | No external `$ref` resolution, archive fetching/extraction, image/audio understanding, or complete extension validation. Existing in-frame string scanning does not establish coverage of these contents. |
 | HTTP transports | No runtime relay inspection. Existing deny-by-default/explicit unguarded consent behavior remains. |
@@ -73,8 +75,14 @@ instructions remain outside drift hashes, as with legacy initialize.
 The authored modern fixtures run through `guard inspect` and a real guarded
 subprocess, alongside the existing legacy regression suite. These checks do not
 measure adoption or interoperability in installed IDE clients, and do not certify
-all 2026-07-28 protocol behavior. `mcpm serve` still uses the existing SDK; no SDK
-upgrade or negotiation behavior is included in this change.
+all 2026-07-28 protocol behavior. Dual-era `mcpm serve` support shipped separately
+in v0.48.0; see [serve validation](SERVE-PROTOCOL-VALIDATION.md).
+
+[Skills guard validation](SKILLS-GUARD-VALIDATION.md) records the real SDK fixture
+and direct/guarded comparisons. These are heuristic injection findings, not a
+Skills schema validator, publisher authentication, manifest/content verification,
+host consent or activation enforcement. Metadata patterns include `<important>`
+and `<system>` and can flag legitimate instructions; local policy overrides apply.
 
 The separate [sandbox compatibility harness](PROTOCOL-VALIDATION.md) compares
 the pinned published release with official SDK v1/v2 peers and Inspector over

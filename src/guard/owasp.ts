@@ -90,6 +90,7 @@ export const _SIGNATURE_OWASP_TABLE: Readonly<Record<string, PinState>> = Object
 
   // ── MCP03 — Tool Poisoning ─────────────────────────────────────────────────
   "owasp-mcp-1-tool-description-injection": "MCP03",
+  "discovery-metadata-injection": "MCP03",
   "owasp-mcp-2-instruction-injection-in-response": "MCP03",
   "hidden-chars-in-metadata": "MCP03",
   "unicode-tag-concealment": "MCP03",

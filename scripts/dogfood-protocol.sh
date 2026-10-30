@@ -36,6 +36,7 @@ const dockerfile = `${context}/Dockerfile`;
 fs.writeFileSync(dockerfile, fs.readFileSync(dockerfile, 'utf8').replace('COPY package.json package-lock.json ./', 'COPY package.json package-lock.json candidate.tgz candidate.json ./').replace('RUN npm ci', 'RUN npm install --package-lock-only --ignore-scripts --no-audit --no-fund && npm ci'));
 NODE
 fi
+cp "$ROOT/skills/mcpm/SKILL.md" "$CONTEXT/mcpm-SKILL.md"
 mkdir "$CONTEXT/fixtures"
 for group in benign warn attacks; do
   cp "$ROOT/src/guard/__tests__/fixtures/mcptox/$group"/modern-*.json "$CONTEXT/fixtures/"

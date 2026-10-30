@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { equivalent, exchange, assertEcho, assertUnsupported, assertUnknownArgument } from './harness.mjs';
+import { equivalent, exchange, assertEcho, assertUnsupported, assertUnknownArgument, assertInspectionEvents } from './harness.mjs';
 
 test('strict-input evidence requires validation, not an unrelated handler failure', () => {
   const failure = text => ({ isError: true, content: [{ type: 'text', text }] });
@@ -74,4 +74,16 @@ test('output without a newline cannot grow the reader without a bound', async ()
   const session = exchange(process.execPath, ['-e', "process.stdout.write(Buffer.alloc(17*1024*1024, 120));setInterval(()=>{},1000)"]);
   try { await assert.rejects(session.request('test'), /wire byte budget exceeded/); }
   finally { await session.close(); }
+});
+
+
+test('inspection evidence requires every ordered action, signature and carrier', () => {
+  const finding = { signature_id: 'resource-injection', target: 'resource_content' };
+  const warning = { action: 'warn', findings: [finding] };
+  const expected = Array.from({ length: 2 }, () => ({ action: 'warn', findings: [['resource-injection', 'resource_content']] }));
+  assertInspectionEvents([warning, warning], expected);
+  assert.throws(() => assertInspectionEvents([warning], expected));
+  assert.throws(() => assertInspectionEvents([warning, { ...warning, action: 'block' }], expected));
+  assert.throws(() => assertInspectionEvents([warning, { ...warning, findings: [{ ...finding, target: 'tool_response' }] }], expected));
+  assert.throws(() => assertInspectionEvents([warning, { ...warning, findings: [{ ...finding, signature_id: 'unrelated' }] }], expected));
 });
