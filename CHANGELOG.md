@@ -11,6 +11,10 @@ published section (it happened to #170).
 ## [0.48.1] - 2026-10-31
 
 PATCH: close Skills and resource discovery metadata inspection gaps.
+Publication verified: npm/MCP latest0.48.1; exact archive integrity and authenticated
+source/workflow provenance, signed SBOM/tamper rejection and clean install pass.
+Exact published archive:75 protocol passes, zero failures, two expected unsupported
+reference combinations and four exclusions. [Publish workflow](https://github.com/getmcpm/cli/actions/runs/41099484146).
 
 ### Added
 

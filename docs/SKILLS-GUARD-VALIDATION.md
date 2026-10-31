@@ -1,6 +1,6 @@
 # Skills-over-MCP guard validation
 
-v0.48.1 release preparation; publication pending. Candidate measurements from
+Released v0.48.1. Candidate measurements from
 2026-10-31 (Asia/Hong_Kong) remain distinct from published-artifact evidence.
 
 ## Contract and scope
@@ -64,7 +64,7 @@ not as a guard guarantee.
 
 Candidate sandbox: **75 passes, zero failures, two expected unsupported
 reference-peer combinations**, four explicit exclusions. Linux arm64 / Node26.11.1;
-Skills server SDK2.4.0. The extra32 comparisons are additional to the existing43
+Skills server SDK 2.4.0. The extra32 comparisons are additional to the existing43
 candidate comparisons. Temporary receipts: `/private/tmp/mcpm-skills-guard/reviewed-candidate`.
 The same harness against the independently verified published v0.48.0 archive
 reproduces exactly six missing blocks: modern/legacy skill list/get and poisoned
@@ -100,7 +100,20 @@ separate from the stable extension's modern base-protocol requirement. Two
 unsupported reference combinations remain legacy→modern-only and modern-pinned→legacy.
 
 
-## v0.48.1 release preparation
+## v0.48.1 publication
 
 PR #299 merged as `ae59d9b`, byte-identical to reviewed `d08eb1e`, after all nine
-checks passed. Release publication and actual-package validation are pending.
+checks passed. Publication and actual-package validation are verified.
+
+
+v0.48.1 is published and verified. PR #299 merged as `ae59d9b`; release source is `c7082dd735817cb67c0d413172f5d5fb2ce53dbf`. [Publish workflow](https://github.com/getmcpm/cli/actions/runs/41099484146) passed all five jobs. npm and the official MCP registry report latest `0.48.1`. Actual tarball integrity, authenticated SLSA source/workflow identity, signed SBOM/tamper rejection and clean-install smoke pass. The exact published archive passes 75 protocol comparisons (including 32 Skills comparisons), zero failures, two expected unsupported reference-peer combinations and four exclusions.
+
+The exact downloaded archive was independently matched to a fresh release-version
+build of the tagged source, then run in the same offline Linux/arm64, Node 26.11.1
+sandbox with actual SDK 2.4.0. All runtime JavaScript, archive SRI, raw lock and
+harness hashes bind the receipt; actual UID1000/read-only/network-none/capability
+boundary verified. The explicit-archive harness labels this mode `candidate`; its
+input here is the verified published archive. Prior candidate and fixed-reference
+measurements remain separate historical evidence. No host activation or real
+provider/model/native-editor/HTTP run. Evidence (temporary):
+`/private/tmp/mcpm-v0481-release/published-protocol`.
