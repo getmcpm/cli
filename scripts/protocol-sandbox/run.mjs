@@ -1,12 +1,12 @@
 import assert from 'node:assert/strict';
-import { readFile, writeFile, mkdir, readdir, access } from 'node:fs/promises';
+import { readFile, writeFile, mkdir, readdir, access, chmod } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { networkInterfaces } from 'node:os';
 import { createRequire } from 'node:module';
-import { equivalent, exchange, assertEcho, assertUnsupported, assertUnknownArgument, assertInspectionEvents } from './harness.mjs';
+import { equivalent, exchange, assertEcho, assertUnsupported, assertUnknownArgument, assertInspectionEvents, assertDoctorResult } from './harness.mjs';
 
 const app = path.dirname(fileURLToPath(import.meta.url));
 const cli = path.join(app, 'node_modules/@getmcpm/cli/dist/index.js');
@@ -112,6 +112,19 @@ try {
 }
 
 async function sdkRun(clientKind, serverKind, mode, action, guarded, loc) {
+  const doctorScenario = action.startsWith('doctor-') ? action.slice(7) : null;
+  const cursorFile = `${loc.home}/.cursor/mcp.json`;
+  const secret = 'synthetic-doctor-token-not-for-logging';
+  if (doctorScenario === 'issues') {
+    await writeFile(cursorFile, JSON.stringify({ mcpServers: {
+      shared: { command: 'uvx', args: ['one'] }, 'unreadable-entry': 42,
+      credentials: { command: 'npx', env: { API_TOKEN: secret } },
+    } }));
+    await mkdir(`${loc.home}/.codeium/windsurf`, { recursive: true });
+    await writeFile(`${loc.home}/.codeium/windsurf/mcp_config.json`, JSON.stringify({ mcpServers: { shared: { command: 'uvx', args: ['two'] } } }));
+  }
+  if (doctorScenario === 'malformed') await writeFile(cursorFile, '{broken');
+  if (doctorScenario === 'denied') await chmod(`${loc.home}/.cursor`, 0o000);
   const v2 = clientKind === 'v2';
   const { Client } = v2 ? await import('@modelcontextprotocol/client') : await import('@modelcontextprotocol/sdk/client/index.js');
   const { StdioClientTransport } = v2 ? await import('@modelcontextprotocol/client/stdio') : await import('@modelcontextprotocol/sdk/client/stdio.js');
@@ -142,7 +155,43 @@ async function sdkRun(clientKind, serverKind, mode, action, guarded, loc) {
       });
     } else {
       await client.connect(transport, { timeout: candidate ? 5000 : 3000 });
-      if (action === 'ordinary') {
+      if (doctorScenario) {
+        const tools = await client.listTools();
+        const doctor = tools.tools.find(t => t.name === 'mcpm_doctor');
+        assert.equal(doctor.outputSchema.properties.schemaVersion.const, 1);
+        const result = await call('mcpm_doctor');
+        if (doctorScenario === 'denied') {
+          assert.equal(result.isError, true, 'denied config became clean success');
+          assert.equal(result.structuredContent, undefined);
+          assert.match(result.content[0].text, /EACCES|permission denied/i);
+          await chmod(`${loc.home}/.cursor`, 0o700);
+          const recovery = await call('mcpm_doctor');
+          assert.equal(assertDoctorResult(recovery).ok, true);
+          value = { result, recovery };
+        } else {
+          const data = assertDoctorResult(result);
+          assert.equal(data.clients.length, 6); assert.equal(data.runtimes.length, 3);
+          assert.equal(data.clients.find(c => c.id === 'claude-desktop').exists, false);
+          if (doctorScenario === 'empty') {
+            assert.equal(data.ok, true); assert.equal(data.crossClient, null);
+            assert.deepEqual(data.issues, []); assert.deepEqual(data.secrets, []);
+          } else if (doctorScenario === 'malformed') {
+            assert.equal(data.ok, false);
+            assert.equal(data.clients.find(c => c.id === 'cursor').malformed, true);
+            assert.ok(data.issues.some(i => i.kind === 'malformed-config'));
+          } else {
+            assert.equal(data.ok, false);
+            assert.ok(data.issues.some(i => i.kind === 'missing-runtime' && i.message.includes('uvx')));
+            assert.ok(data.issues.some(i => i.kind === 'malformed-config' && i.message.includes('unreadable-entry')));
+            assert.equal(data.crossClient.consistent, false);
+            assert.ok(data.crossClient.drift.some(d => d.name === 'shared' && d.kind === 'conflict' && d.fields.includes('args')));
+            assert.ok(data.crossClient.drift.some(d => d.name === 'unreadable-entry' && d.kind === 'unreadable' && d.malformed.includes('cursor')));
+            assert.ok(data.secrets.some(f => f.client === 'cursor' && f.server === 'credentials' && f.field === 'env' && f.key === 'API_TOKEN'));
+            assert.ok(!JSON.stringify(result).includes(secret));
+          }
+          value = { result };
+        }
+      } else if (action === 'ordinary') {
         value = { tools: await client.listTools(), resources: await client.listResources(),
           resource: await client.readResource({ uri: 'test://hello' }), prompts: await client.listPrompts(),
           prompt: await client.getPrompt({ name: 'hello' }),
@@ -282,6 +331,21 @@ if (candidate) await pair('modern-pinned-mcpm-serve-call', (g, l) => sdkRun('v2'
     assert.ok(obs.wire.some(w => w.message.result?.resultType === 'complete'));
   }
 });
+
+if (candidate) for (const [label, client, mode] of [
+  ['legacy', 'v1', 'legacy'], ['auto', 'v2', 'auto'], ['modern', 'v2', { pin: modernVersion }],
+]) for (const scenario of ['empty', 'issues', 'malformed', 'denied']) {
+  await pair(`${label}-mcpm-doctor-${scenario}`, (g, l) => sdkRun(client, 'serve', mode, `doctor-${scenario}`, g, l), (a, b) => {
+    if (scenario === 'denied') {
+      // The error names each isolated profile; compare the rest without rewriting wire receipts.
+      const normalize = value => JSON.parse(JSON.stringify(value).replaceAll('/direct/', '/profile/').replaceAll('/guarded/', '/profile/'));
+      equivalent(normalize(a.value), normalize(b.value));
+    } else equivalent(a.value, b.value);
+    equivalent(a.version, b.version);
+    assert.equal(a.version, client === 'v1' ? '2025-11-25' : modernVersion);
+    for (const obs of [a, b]) assert.ok(obs.wire.some(w => w.message.method === (client === 'v1' ? 'initialize' : 'server/discover')));
+  });
+}
 
 async function rawRun(guarded, loc, exercise, server = 'raw') {
   const { command, args } = launch(server, guarded, loc.env.WIRE);
