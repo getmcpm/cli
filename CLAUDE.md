@@ -7,6 +7,14 @@
 
 ## What We're Building
 
+**Unreleased structured doctor (2026-10-31):** `mcpm_doctor` advertises DoctorOutput
+and returns the existing schemaVersion1 model in structuredContent and JSON text.
+No new summary or model transformation. Missing/unreadable/skipped/runtime issues,
+nullable advisory comparison and value-free secret findings retain their semantics.
+Non-missing config-existence errors propagate instead of becoming clean missing
+configs; the shared CLI helper inherits this correction. See `docs/CONTRACTS.md`
+and `docs/DOCTOR-EVIDENCE-VALIDATION.md` for wire proof and limits.
+
 **Released v0.48.1 (2026-10-31):** `discovery_metadata` inspects
 Skills list/get frontmatter and resource discovery metadata with shared metadata
 patterns. Critical matches block; ordinary skill resource text remains warn-only.

@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { equivalent, exchange, assertEcho, assertUnsupported, assertUnknownArgument, assertInspectionEvents } from './harness.mjs';
+import { equivalent, exchange, assertEcho, assertUnsupported, assertUnknownArgument, assertInspectionEvents, assertDoctorResult } from './harness.mjs';
 
 test('strict-input evidence requires validation, not an unrelated handler failure', () => {
   const failure = text => ({ isError: true, content: [{ type: 'text', text }] });
@@ -86,4 +86,16 @@ test('inspection evidence requires every ordered action, signature and carrier',
   assert.throws(() => assertInspectionEvents([warning, { ...warning, action: 'block' }], expected));
   assert.throws(() => assertInspectionEvents([warning, { ...warning, findings: [{ ...finding, target: 'tool_response' }] }], expected));
   assert.throws(() => assertInspectionEvents([warning, { ...warning, findings: [{ ...finding, signature_id: 'unrelated' }] }], expected));
+});
+
+
+test('doctor consumer rejects missing/unknown/error/mismatched success evidence', () => {
+  const data = { schemaVersion: 1, clients: [], runtimes: [], crossClient: null, secrets: [], issues: [], ok: true };
+  const result = value => ({ structuredContent: value, content: [{ type: 'text', text: JSON.stringify(value) }] });
+  assert.deepEqual(assertDoctorResult(result(data)), data);
+  assert.throws(() => assertDoctorResult({ ...result(data), isError: true }));
+  assert.throws(() => assertDoctorResult({ content: result(data).content }));
+  assert.throws(() => assertDoctorResult(result({ ...data, schemaVersion: 2 })));
+  assert.throws(() => assertDoctorResult({ ...result(data), content: [{ type: 'text', text: '{}' }] }));
+  assert.throws(() => assertDoctorResult(result({ ...data, issues: [{ kind: 'malformed-config' }] })));
 });

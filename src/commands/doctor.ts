@@ -537,8 +537,11 @@ export function makeCheckConfigExists(
     try {
       await access(getConfigPathFn(clientId));
       return true;
-    } catch {
-      return false;
+    } catch (error) {
+      // An inaccessible config is unknown, not evidence that it is missing.
+      const code = (error as NodeJS.ErrnoException | null)?.code;
+      if (code === "ENOENT" || code === "ENOTDIR") return false;
+      throw error;
     }
   };
 }

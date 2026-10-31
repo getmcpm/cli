@@ -17,7 +17,7 @@ import { extractRegistryMeta } from "../utils/format-trust.js";
 import { formatMcpEntryCommand } from "../utils/format-entry.js";
 import { resolveInstallEntry } from "../commands/install.js";
 import { assertPublication } from "../registry/package-coordinate.js";
-import { buildDoctorModel, makeCheckConfigExists, execCheckDefault } from "../commands/doctor.js";
+import { buildDoctorModel, makeCheckConfigExists, execCheckDefault, type DoctorModel } from "../commands/doctor.js";
 import { fetchNpmIntegrity as _fetchNpmIntegrity } from "../registry/npm-integrity.js";
 import { fetchNpmProvenance as _fetchNpmProvenance } from "../registry/npm-provenance.js";
 import { readPins as _readPins } from "../guard/pins.js";
@@ -488,7 +488,7 @@ export async function handleAudit(deps: ServerDeps): Promise<object> {
   return skipped.length > 0 ? { results, skipped } : { results };
 }
 
-export async function handleDoctor(deps: ServerDeps): Promise<object> {
+export async function handleDoctor(deps: ServerDeps): Promise<DoctorModel> {
   // Reuse the CLI's structured model so this tool reports real issues instead of
   // the formerly-hardcoded `issues: []` (D7). Honors the injected getConfigPath.
   return buildDoctorModel({

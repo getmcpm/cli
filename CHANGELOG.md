@@ -8,6 +8,19 @@ _Add entries here, never under a stamped version_ — a release commit renames t
 heading, and a branch that wrote beneath it merges without conflict straight into a
 published section (it happened to #170).
 
+### Added
+
+- `mcpm_doctor` now advertises its existing schemaVersion1 health model via an
+  output schema and structuredContent alongside unchanged JSON text. Read errors,
+  skipped entries, nullable advisory comparison and secret-finding metadata stay visible.
+- Packed-candidate doctor evidence cases cover legacy, auto and pinned-modern SDK
+  clients with synthetic missing/malformed/skipped/denied configs and recovery.
+
+### Fixed
+
+- Doctor config-existence checks no longer report permission or I/O failures as
+  missing files and clean health; non-ENOENT/ENOTDIR errors propagate in MCP and CLI.
+
 ## [0.48.1] - 2026-10-31
 
 PATCH: close Skills and resource discovery metadata inspection gaps.
