@@ -245,3 +245,44 @@ export const InfoOutput = z.object({
   registryStatus,
   assessment,
 }).passthrough();
+
+export const DoctorOutput = z.object({
+  schemaVersion: z.literal(1),
+  clients: z.array(z.object({
+    id: clientId,
+    label: z.string(),
+    exists: z.boolean(),
+    malformed: z.boolean(),
+    serverCount: z.number().int().nonnegative(),
+    guardedCount: z.number().int().nonnegative(),
+  }).passthrough()),
+  runtimes: z.array(z.object({
+    name: z.enum(["npx", "uvx", "docker"]),
+    available: z.boolean(),
+  }).passthrough()),
+  crossClient: z.object({
+    consistent: z.boolean(),
+    clientCount: z.number().int().nonnegative(),
+    serverCount: z.number().int().nonnegative(),
+    drift: z.array(z.object({
+      name: z.string(),
+      kind: z.enum(["conflict", "absent", "unreadable"]),
+      present: z.array(z.string()),
+      absent: z.array(z.string()),
+      fields: z.array(z.string()).optional(),
+      malformed: z.array(z.string()).optional(),
+    }).passthrough()),
+  }).passthrough().nullable(),
+  secrets: z.array(z.object({
+    client: clientId,
+    server: z.string(),
+    field: z.enum(["env", "header"]),
+    key: z.string(),
+    label: z.string(),
+  }).passthrough()),
+  issues: z.array(z.object({
+    kind: z.enum(["malformed-config", "missing-runtime"]),
+    message: z.string(),
+  }).passthrough()),
+  ok: z.boolean(),
+}).passthrough();

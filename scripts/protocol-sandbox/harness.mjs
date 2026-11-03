@@ -14,6 +14,18 @@ export function assertEcho(result, expected) {
   assert.deepEqual(result.content, [{ type: 'text', text: JSON.stringify(expected) }]);
 }
 
+export function assertDoctorResult(result) {
+  assert.notEqual(result.isError, true, 'doctor returned a tool error');
+  const data = result.structuredContent;
+  assert.ok(data && typeof data === 'object', 'missing doctor structured evidence');
+  assert.equal(data.schemaVersion, 1, 'unknown doctor schema version');
+  assert.deepEqual(JSON.parse(result.content[0].text), data, 'doctor text/structured mismatch');
+  for (const key of ['clients', 'runtimes', 'issues', 'secrets']) assert.ok(Array.isArray(data[key]), `missing doctor ${key}`);
+  assert.equal(data.ok, data.issues.length === 0, 'doctor ok hides critical issues');
+  assert.ok(data.crossClient === null || typeof data.crossClient === 'object', 'missing cross-client assessment');
+  return data;
+}
+
 export function assertUnknownArgument(result, key) {
   assert.equal(result.isError, true, 'unknown argument was accepted');
   const text = result.content?.filter(c => c.type === 'text').map(c => c.text).join('\n') ?? '';

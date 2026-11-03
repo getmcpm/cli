@@ -2,8 +2,8 @@
 name: mcpm
 description: Discover, assess, verify and manage MCP servers with the @getmcpm/cli package. Use when working with mcpm evidence, project locks or AI client MCP configuration.
 metadata:
-  version: "1.0.0"
-  evidence-contract: "mcpm_search, mcpm_info and verify --json schemaVersion 1"
+  version: "1.1.0"
+  evidence-contract: "mcpm_search, mcpm_info, advertised mcpm_doctor and verify --json schemaVersion 1"
 ---
 
 # mcpm
@@ -24,6 +24,12 @@ CLI evidence and state the limitation; do not invent fields or upgrade silently.
 - Verify an existing project lock with `mcpm verify --json`. No lock is a
   failure, not permission to create one. If the user wants a new stack, creating
   and locking it belongs to that authorized setup task.
+- Diagnose setup with `mcpm_doctor` when it advertises a version-1 output schema.
+  Prefer structuredContent, fall back to JSON text, and inspect clients/issues,
+  nullable crossClient and advisory secrets together. Missing/unreadable configs
+  are not clean evidence; ok only means no critical issues. Stop on isError or an
+  unknown schema version. Doctor structured output is unreleased; older servers
+  still provide JSON text without this advertised contract.
 - Inspect installed configuration with `mcpm list --json`, `mcpm doctor --json`
   and `mcpm sync --check --json`. Those JSON shapes, except sync, are version
   dependent. An unreadable configuration is unknown, not an empty clean client.

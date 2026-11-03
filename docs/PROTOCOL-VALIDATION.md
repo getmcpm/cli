@@ -128,3 +128,14 @@ memory and applies separate metadata/body/directory poison variants. The copied
 skill is included in `harnessSha256`. See [Skills guard validation](SKILLS-GUARD-VALIDATION.md)
 for the named comparisons and security limits. These calls test transport and
 guard decisions; they do not activate a skill in a host or measure agent behavior.
+
+
+## Doctor evidence candidate checks (unreleased)
+
+The explicit candidate-archive mode adds twelve doctor comparisons: missing,
+malformed, mixed issues/skipped entries/advisory drift/secrets, and actual access
+denial followed by recovery, across the v1 legacy client, v2 auto-negotiated client
+and v2 pinned-modern client. The container supplies synthetic configs only. Schema
+advertisement, text/structured identity, unknown coverage and error separation are
+asserted independently of SDK validation. Fixed reference inputs remain unchanged.
+See [doctor validation](DOCTOR-EVIDENCE-VALIDATION.md).

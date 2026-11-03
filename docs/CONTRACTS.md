@@ -56,7 +56,11 @@ published-record checks: these are not `npm ci` enforcement of downloaded bytes.
 Both return `schemaVersion: 1`, advertise an MCP `outputSchema`, and return the
 same object in `structuredContent` and the existing JSON text block. Existing
 fields retain their types: search's `trustScore` is a number; info's `trustScore`
-is the full score/breakdown object. Other tools remain **unstable in `0.x`**.
+is the full score/breakdown object.
+
+**Unreleased: `mcpm_doctor` exposes its existing schema-version-1 model through
+the same `outputSchema` / `structuredContent` / JSON text contract.** Remaining
+tools are **unstable in `0.x`**.
 
 Within schema version 1, the documented fields and meanings below are stable.
 Consumers must accept additive fields and new finding/reason codes. A breaking
@@ -96,6 +100,39 @@ On a handler failure, the MCP result has `isError: true` and no structured
 success evidence; JSON-RPC argument/protocol failures may instead reject the
 call. Diagnostic text is not a stable error code. An empty successful search
 is `{schemaVersion: 1, servers: []}`. Neither error nor no match is a clean scan.
+
+### Doctor evidence (unreleased)
+
+The consuming workflow is an agent answering “what is wrong with my MCP setup?”
+using the existing read-only `mcpm_doctor` tool. Prefer `structuredContent` when
+its output schema is advertised; otherwise parse the existing JSON text. Require
+`schemaVersion: 1` and stop on `isError` or an unknown version. No new tool input
+or CLI JSON format is introduced; the CLI `--json` surface retains its separate
+compatibility policy below.
+
+| Field | Meaning |
+| --- | --- |
+| `schemaVersion` | `1` |
+| `clients[]` | `id`, `label`, `exists`, `malformed`, `serverCount`, `guardedCount` for every known client. Missing configs stay `exists:false`; zero servers is not evidence that the config was read. `malformed` also covers adapter/read failures; its message is not a precise errno classification. |
+| `runtimes[]` | `name` and PATH `available` for `npx`, `uvx`, `docker`. Availability does not prove a server starts or a provider works. |
+| `crossClient` | Advisory `{consistent,clientCount,serverCount,drift[]}`, or `null` when fewer than two configs were readable. `null` means no cross-client comparison, not consistency. |
+| `crossClient.drift[]` | `name`, `kind` (`conflict`, `absent`, `unreadable`), `present`, `absent`, optional `fields` / `malformed`. Skipped entries retain their unreadable identity instead of becoming absent. |
+| `secrets[]` | Advisory `client`, `server`, `field` (`env` or `header`), `key`, `label`; no detected value. This is not a comprehensive redaction of arbitrary config-controlled names or messages. |
+| `issues[]` | Critical `kind` (`malformed-config`, `missing-runtime`) and diagnostic `message`. |
+| `ok` | Exactly whether `issues` is empty. Missing configs, unavailable unused runtimes and advisory findings can coexist with `ok:true`. It does not certify safety or complete coverage. |
+
+Inspect `clients`, `issues`, `crossClient` and `secrets` together; an agent must
+not reduce the model to `ok` or an empty issue list. Root and nested output objects
+allow additive fields; consumers must tolerate them and future reason codes.
+Config-existence failures other than `ENOENT`/`ENOTDIR` now propagate. For example,
+access denial can return `isError:true` without structured success evidence;
+it is never silently converted to a missing config and clean health. If existence
+was established but an adapter read fails, the existing model instead reports
+`malformed:true`, a critical issue and `ok:false`. The shared helper also makes
+uncertain existence checks fail the CLI invocation rather than claim missing.
+
+[Doctor validation](DOCTOR-EVIDENCE-VALIDATION.md) separates synthetic SDK wire
+and packed-candidate proof from installed native-client or provider behavior.
 
 **Added in 0.42.0, both additive (#92):**
 

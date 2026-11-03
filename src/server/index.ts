@@ -18,6 +18,7 @@ import {
   UpInput,
   SearchOutput,
   InfoOutput,
+  DoctorOutput,
 } from "./tools.js";
 import {
   handleSearch,
@@ -139,11 +140,12 @@ export function registerTools(
 
   server.registerTool("mcpm_doctor", {
     inputSchema: NoArgsInput,
+    outputSchema: DoctorOutput,
     description: "Check MCP setup health",
     annotations: { readOnlyHint: true },
   }, async () => {
     const result = await handleDoctor(deps);
-    return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+    return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }], structuredContent: { ...result } };
   });
 
   server.registerTool("mcpm_setup", {
