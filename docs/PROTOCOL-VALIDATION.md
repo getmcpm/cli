@@ -130,7 +130,7 @@ for the named comparisons and security limits. These calls test transport and
 guard decisions; they do not activate a skill in a host or measure agent behavior.
 
 
-## Doctor evidence candidate checks (unreleased)
+## Doctor evidence candidate checks (v0.49.0)
 
 The explicit candidate-archive mode adds twelve doctor comparisons: missing,
 malformed, mixed issues/skipped entries/advisory drift/secrets, and actual access

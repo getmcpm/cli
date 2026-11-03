@@ -595,10 +595,10 @@ Independent 2026 evidence for each thing the guard does, so you can check the pr
 
 mcpm can run as an MCP server itself, letting AI agents search, install, and audit MCP servers programmatically.
 
-Unreleased: `mcpm_doctor` advertises its existing version-1 health model as
+Since v0.49.0, `mcpm_doctor` advertises its existing version-1 health model as
 structured results alongside the unchanged JSON text. Agents can inspect missing
 configs, critical issues and advisory drift/secrets without discarding unknown
-coverage. See [doctor contract](docs/CONTRACTS.md#doctor-evidence-unreleased) and
+coverage. See [doctor contract](docs/CONTRACTS.md#doctor-evidence) and
 [validation](docs/DOCTOR-EVIDENCE-VALIDATION.md).
 
 v0.48.0: the stdio entry supports modern `2026-07-28` discovery and legacy initialization

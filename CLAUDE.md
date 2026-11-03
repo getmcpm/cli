@@ -7,7 +7,7 @@
 
 ## What We're Building
 
-**Unreleased structured doctor (2026-10-31):** `mcpm_doctor` advertises DoctorOutput
+**Structured doctor (v0.49.0):** `mcpm_doctor` advertises DoctorOutput
 and returns the existing schemaVersion1 model in structuredContent and JSON text.
 No new summary or model transformation. Missing/unreadable/skipped/runtime issues,
 nullable advisory comparison and value-free secret findings retain their semantics.
