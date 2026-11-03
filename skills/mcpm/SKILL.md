@@ -28,7 +28,7 @@ CLI evidence and state the limitation; do not invent fields or upgrade silently.
   Prefer structuredContent, fall back to JSON text, and inspect clients/issues,
   nullable crossClient and advisory secrets together. Missing/unreadable configs
   are not clean evidence; ok only means no critical issues. Stop on isError or an
-  unknown schema version. Doctor structured output is unreleased; older servers
+  unknown schema version. Doctor structured output starts in v0.49.0; older servers
   still provide JSON text without this advertised contract.
 - Inspect installed configuration with `mcpm list --json`, `mcpm doctor --json`
   and `mcpm sync --check --json`. Those JSON shapes, except sync, are version

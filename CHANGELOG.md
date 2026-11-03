@@ -8,6 +8,8 @@ _Add entries here, never under a stamped version_ — a release commit renames t
 heading, and a branch that wrote beneath it merges without conflict straight into a
 published section (it happened to #170).
 
+## [0.49.0] - 2026-11-03
+
 ### Added
 
 - `mcpm_doctor` now advertises its existing schemaVersion1 health model via an

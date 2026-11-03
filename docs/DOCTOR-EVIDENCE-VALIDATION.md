@@ -1,6 +1,6 @@
 # Structured doctor evidence validation
 
-Unreleased candidate, measured 2026-10-31 (Asia/Hong_Kong).
+v0.49.0 feature candidate, measured 2026-10-31 (Asia/Hong_Kong).
 
 ## Outcome and boundary
 
@@ -8,7 +8,7 @@ Unreleased candidate, measured 2026-10-31 (Asia/Hong_Kong).
 an advertised `outputSchema` and `structuredContent`. JSON text uses the same
 model and formatting. The tool keeps zero arguments and read-only annotations;
 there is no second summary, synthetic health score, new dependency or provider call.
-[The contract](CONTRACTS.md#doctor-evidence-unreleased) defines the consumer workflow.
+[The contract](CONTRACTS.md#doctor-evidence) defines the consumer workflow.
 
 The baseline wire regressions failed for both modern and legacy peers: output
 schema/structured evidence was missing, and mocked access denial was converted

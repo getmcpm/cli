@@ -58,7 +58,7 @@ same object in `structuredContent` and the existing JSON text block. Existing
 fields retain their types: search's `trustScore` is a number; info's `trustScore`
 is the full score/breakdown object.
 
-**Unreleased: `mcpm_doctor` exposes its existing schema-version-1 model through
+**Since v0.49.0, `mcpm_doctor` exposes its existing schema-version-1 model through
 the same `outputSchema` / `structuredContent` / JSON text contract.** Remaining
 tools are **unstable in `0.x`**.
 
@@ -101,7 +101,7 @@ success evidence; JSON-RPC argument/protocol failures may instead reject the
 call. Diagnostic text is not a stable error code. An empty successful search
 is `{schemaVersion: 1, servers: []}`. Neither error nor no match is a clean scan.
 
-### Doctor evidence (unreleased)
+### Doctor evidence
 
 The consuming workflow is an agent answering “what is wrong with my MCP setup?”
 using the existing read-only `mcpm_doctor` tool. Prefer `structuredContent` when
