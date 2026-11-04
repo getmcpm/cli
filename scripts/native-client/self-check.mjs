@@ -373,7 +373,7 @@ test('complete reports require matching versions, all named cases and independen
   const hashes = { 'fixture.mjs': 'sha256-fixture' };
   const ids = ['install-and-native-echo', 'enable-and-native-block-recovery', 'warn-and-forward', 'cancel-and-recover',
     'restart-without-cached-result', 'update-preserves-wrap-and-settings', 'schema-drift-and-recovery', 'disable-restores-launch-and-remove-preserves-settings'];
-  const report = { schemaVersion: 1, client: 'vscode', clientVersion: pins.vscode.version, cliVersion: pins.mcpm, node: 'v' + pins.node.version,
+  const report = { schemaVersion: 1, suite: 'baseline', client: 'vscode', clientVersion: pins.vscode.version, cliVersion: pins.mcpm, node: 'v' + pins.node.version,
     platform: 'darwin', arch: 'arm64', hashes, boundary: { model: 'VirtualMac2,1', mounts: '', pfStatus: 'Status: Enabled', pfRules: 'block drop all' },
     cases: ids.map((id, i) => ({ id, status: 'pass', evidence: [`${i}.json`] })), counts: { pass: 8, fail: 0 } };
   const evidence = Object.fromEntries(report.cases.map(c => [c.evidence[0], {}]));

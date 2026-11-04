@@ -1,11 +1,21 @@
 # MCP Registry — Project Context
 
 > This file is automatically read by Claude Code on every session.
-> Keep it updated as decisions are made. Last updated: 2026-10-31.
+> Keep it updated as decisions are made. Last updated: 2026-11-05.
 
 ---
 
 ## What We're Building
+
+**Native doctor tooling (unreleased):** The separate `--candidate --doctor` VM
+suite invokes real `mcpm serve` through installed VS Code, then Claude Code.
+It separates native-visible JSON/error evidence from structured/text wire proof;
+direct/guarded healthy, malformed, denied and recovery fixtures use isolated
+homes. Published v0.49.0 passed 8/8 VS Code 1.141.0 legacy and 8/8 Claude Code
+2.1.296 modern cases in fresh offline macOS VMs; 34 local harness checks pass.
+See `docs/NATIVE-CLIENT-VALIDATION.md` for reproduction, native API error-state
+limits and the separate baseline measurements. Real models and default approvals
+remain outside this measurement.
 
 **Structured doctor (v0.49.0):** `mcpm_doctor` advertises DoctorOutput
 and returns the existing schemaVersion1 model in structuredContent and JSON text.

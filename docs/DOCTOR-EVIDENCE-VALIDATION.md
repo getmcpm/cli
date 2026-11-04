@@ -72,6 +72,16 @@ npm's SHA-512 integrity value. The sandbox ran against that archive and passed
 expected unsupported reference combinations and four exclusions. The run used
 synthetic configs and the public skill from the release source.
 
+## Native validation tooling
+
+The separate [native doctor suite](NATIVE-CLIENT-VALIDATION.md#validate-native-doctor-results)
+uses installed VS Code and Claude Code in offline macOS VMs, with real serve
+processes and direct/guarded wire capture. The corrected 2026-11-05 run against
+published v0.49.0 passed 8/8 VS Code and 8/8 Claude Code cases. VS Code used legacy
+initialization and Claude used modern discovery. Client-visible JSON/error text
+and MCP structured/error envelopes were checked separately; see the native suite
+for exact versions and exclusions.
+
 ## Limits
 
 Missing configs and unavailable unused runtimes can coexist with ok:true; advisory
@@ -81,7 +91,8 @@ Secret finding values are omitted, but arbitrary server names or diagnostic text
 are not a general public-report redaction. Fatal operations yield no success
 contract, not an empty clean model. Diagnostic strings are not stable error codes.
 
-These are named SDK stdio clients and synthetic config operations, not installed
-editor UI, host activation, a real provider/model, launch/liveness or universal
-MCP conformance proof. The fixed CLI 0.47.0 reference matrix stays independent;
+The SDK results are named stdio clients and synthetic config operations. The
+separate native run covers only the two pinned clients and doctor cases. Neither
+establishes real host activation, provider/model behavior, server liveness or
+universal MCP conformance. The fixed CLI 0.47.0 reference matrix stays independent;
 production dependencies and both root/reference lockfiles are unchanged.

@@ -77,8 +77,9 @@ exports.run = async () => {
       else await startup;
     }
     catch (e) { startupError = e.message; if (request.case !== 'drift') throw e; }
+    const desiredTool = request.case.startsWith('doctor-') ? 'mcpm_doctor' : 'echo';
     let tools = vscode.lm.tools;
-    for (let i = 0; i < 20 && !tools.some(t => /(?:^|_)echo$/.test(t.name)) && !['absent', 'drift'].includes(request.case); i++) {
+    for (let i = 0; i < 20 && !tools.some(t => t.name === desiredTool || t.name.endsWith('_' + desiredTool)) && !['absent', 'drift'].includes(request.case); i++) {
       await vscode.commands.executeCommand('workbench.mcp.startServer', '*', { autoTrustChanges: true, waitForLiveTools: true });
       await new Promise(resolve => setTimeout(resolve, 250)); tools = vscode.lm.tools;
     }
@@ -105,7 +106,10 @@ exports.run = async () => {
       return match[0].name;
     };
     const invoke = (name, token, text = request.text) => vscode.lm.invokeTool(tool(name), { toolInvocationToken: undefined, input: { text } }, token);
-    if (request.consent) {
+    if (request.case.startsWith('doctor-')) {
+      try { receipt.results.push(await vscode.lm.invokeTool(tool('mcpm_doctor'), { toolInvocationToken: undefined, input: {} })); }
+      catch (error) { receipt.doctorError = error.message; if (request.case !== 'doctor-denied') throw error; }
+    } else if (request.consent) {
       const intentFile = path.join(root, 'work/consent-intent.json');
       const intent = { ...request.consent, text: request.text };
       if (request.case === 'one-shot') {

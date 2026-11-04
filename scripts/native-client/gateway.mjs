@@ -28,11 +28,11 @@ export async function gateway(work, request) {
       results = completed;
       const step = completed.length;
       done = step >= (['block', 'one-shot'].includes(request.case) ? 2 : 1);
-      const desired = request.case === 'block' ? (step ? 'echo' : 'attack') : request.case === 'cancel' ? 'slow' : ['attack', 'warn'].includes(request.case) ? request.case : 'echo';
+      const desired = request.case.startsWith('doctor-') ? 'mcpm_doctor' : request.case === 'block' ? (step ? 'echo' : 'attack') : request.case === 'cancel' ? 'slow' : ['attack', 'warn'].includes(request.case) ? request.case : 'echo';
       const tool = (data.tools || []).find(t => t.name?.endsWith('__' + desired));
       if (!done && !tool) throw Error(`Native ${desired} tool missing from Claude request`);
       content = done ? { type: 'text', text: 'Synthetic gateway observed the native tool result.' }
-        : { type: 'tool_use', id: `native-${step}`, name: tool.name, input: { text: request.case === 'one-shot' ? `${request.text}-${step + 1}` : request.text } };
+        : { type: 'tool_use', id: `native-${step}`, name: tool.name, input: request.case.startsWith('doctor-') ? {} : { text: request.case === 'one-shot' ? `${request.text}-${step + 1}` : request.text } };
       if (!done) {
         if (issued[step]) assert.deepEqual(content, issued[step], 'changed tool-use retry');
         else issued.push(content);
