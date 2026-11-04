@@ -10,6 +10,10 @@ published section (it happened to #170).
 
 ## [0.49.0] - 2026-11-03
 
+Publication verified on npm and the official MCP Registry. The published archive
+matched npm integrity and passed 87 SDK sandbox checks with zero failures.
+See [doctor validation](docs/DOCTOR-EVIDENCE-VALIDATION.md#published-v0490).
+
 ### Added
 
 - `mcpm_doctor` now advertises its existing schemaVersion1 health model via an

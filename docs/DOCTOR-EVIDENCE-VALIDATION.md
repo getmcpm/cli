@@ -1,6 +1,6 @@
 # Structured doctor evidence validation
 
-v0.49.0 feature candidate, measured 2026-10-31 (Asia/Hong_Kong).
+Feature candidate measured 2026-10-31; npm release verified 2026-11-03 (Asia/Hong_Kong).
 
 ## Outcome and boundary
 
@@ -61,6 +61,16 @@ rerun after review. The fixed reference passed 40 comparisons, zero failures and
 two expected unsupported combinations. Independent checks verified every runtime
 JavaScript hash, archive SRI, raw dependency lock and harness hashes, and the actual
 offline container boundary for both receipts.
+
+## Published v0.49.0
+
+The [publish workflow](https://github.com/getmcpm/cli/actions/runs/41577977615)
+passed all five jobs. npm served `@getmcpm/cli@0.49.0`, and the official MCP
+Registry marked it latest at verification time. The downloaded archive matched
+npm's SHA-512 integrity value. The sandbox ran against that archive and passed
+87 checks, including all twelve doctor comparisons, with zero failures, two
+expected unsupported reference combinations and four exclusions. The run used
+synthetic configs and the public skill from the release source.
 
 ## Limits
 
