@@ -594,6 +594,9 @@ Independent 2026 evidence for each thing the guard does, so you can check the pr
 - `docs/owasp-mcp-mapping.md` — every mcpm mechanism mapped to an OWASP MCP Top 10 (beta) category, with an honest gap list for what's not covered
 - `docs/VISION.md` — where the project is going (thesis, horizons, doctrine)
 
+- [Active trust and DevX backlog](docs/BACKLOG.md) — selected existing work and demand-gated proposals
+- [Agent trust direction research, 2026-11-05](docs/RESEARCH-2026-11-05.md) — primary sources, scope and decision gates
+
 ## Agent mode
 
 mcpm can run as an MCP server itself, letting AI agents search, install, and audit MCP servers programmatically.
