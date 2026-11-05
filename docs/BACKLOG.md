@@ -1,4 +1,4 @@
-# Active trust and DevX backlog — 2026-11-05
+# Active trust and DevX backlog — 2026-11-06
 
 This is the current, deliberately selected queue, aligned with the project
 Obsidian backlog. **#IDs are project backlog IDs, not GitHub issue numbers.** It
@@ -17,12 +17,11 @@ used the published v0.49.0 archive.
 
 | Order | ID | Scope/status | Dependency |
 | --- | --- | --- | --- |
-| 1 | #141 | Merged #315; v0.50.0 release preparation | Honest wrapper/unknown states; explicit project roots |
-| 2 | #122 | Existing: managed-policy-aware setup | #155; one pinned host/native policy fixture set |
-| 3 | #156 | New: local skill/plugin change-review receipt; experiment | #141; one consumer; fixed file/host scope |
-| 4 | #157 | New: pinned external-report ingestion; conditional | #156 or a concrete multi-tool support case |
-| 5 | #140 | Existing: remaining Skills manifest/byte verification | Actual consumer; pinned beta revision |
-| 6 | #158 | New: native artifact activation/drift measurement; conditional | #156 demand; disposable profile/host access |
+| 1 | #122 | Existing: managed-policy-aware setup | #155; one pinned host/native policy fixture set |
+| 2 | #156 | New: local skill/plugin change-review receipt; experiment | #141; one consumer; fixed file/host scope |
+| 3 | #157 | New: pinned external-report ingestion; conditional | #156 or a concrete multi-tool support case |
+| 4 | #140 | Existing: remaining Skills manifest/byte verification | Actual consumer; pinned beta revision |
+| 5 | #158 | New: native artifact activation/drift measurement; conditional | #156 demand; disposable profile/host access |
 | Later | #159 | New: offline ACP v1 evidence spike; demand-gated | One real trace consumer; stable interpretation |
 | Later | #95 | Existing: hook confinement GO/NO-GO experiment | Measured cohort and restrictive policy |
 
@@ -50,7 +49,7 @@ attestation. **Effort:** 3–6 days, revised after the compatibility inventory.
 
 ## #141 — Project exposure and scope inventory
 
-**Status:** #315 merged the `mcpm scope <project-root> [--json]` implementation for the bounded Claude Code inventory. See [scope documentation](PROJECT-SCOPE.md); v0.50.0 release preparation remains separate from publication. **User/problem:** global-only evidence
+**Status:** the bounded Claude Code `mcpm scope <project-root> [--json]` slice shipped in [v0.50.0](RELEASE-2026-11-06-v0.50.0.md) after #315 and Astra review/fixes. Seven actual published CLI scope cases and 87 protocol comparisons passed. The broader #141 item remains open: additional host dialects remain unimplemented/unmeasured. See [scope documentation](PROJECT-SCOPE.md). **User/problem:** global-only evidence
 can miss project configuration and precedence. **MVP:** explicit project root,
 one host profile first, read-only project MCP entries and applicable instruction
 files; identify origin, scope, shadowing and unreadable/unsupported coverage.
