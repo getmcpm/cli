@@ -2,7 +2,7 @@
 name: mcpm
 description: Discover, assess, verify and manage MCP servers with the @getmcpm/cli package. Use when working with mcpm evidence, project locks or AI client MCP configuration.
 metadata:
-  version: "1.1.1"
+  version: "1.2.0"
   evidence-contract: "mcpm_search, mcpm_info, advertised mcpm_doctor and verify --json schemaVersion 1"
 ---
 
@@ -30,6 +30,13 @@ CLI evidence and state the limitation; do not invent fields or upgrade silently.
   are not clean evidence; ok only means no critical issues. Stop on isError or an
   unknown schema version. Doctor structured output starts in v0.49.0; older servers
   still provide JSON text without this advertised contract.
+- For a user-selected project root, check `mcpm scope --help` for availability,
+  then use `mcpm scope <project-root> --json` when supported. This CLI-only,
+  read-only Claude Code inventory is separate from doctor and MCP tools. Check
+  `schemaVersion`, exit status, `inventoryComplete`, source states and coverage.
+  A complete fixed-source inventory does not establish complete host coverage,
+  effective selection, loading or enforcement. Do not run clients or servers to
+  fill unknown fields without authorization.
 - Inspect installed configuration with `mcpm list --json`, `mcpm doctor --json`
   and `mcpm sync --check --json`. Those JSON shapes, except sync, are version
   dependent. An unreadable configuration is unknown, not an empty clean client.

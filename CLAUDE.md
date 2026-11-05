@@ -7,6 +7,14 @@
 
 ## What We're Building
 
+**Project/scope inventory (unreleased #141 candidate):**
+`mcpm scope <project-root> [--json]` inventories fixed Claude Code MCP sources
+and instruction-file candidates without running commands/clients or changing
+config. It omits values and instruction contents, reports uncertain coverage,
+and keeps host version/effective selection/loading/enforcement unknown.
+This is a separate CLI model, not a DoctorModel or MCP-tool expansion.
+See `docs/PROJECT-SCOPE.md`; current release remains v0.49.2.
+
 **Wrapper recognition (v0.49.2):** guard enable/disable,
 status, doctor and update distinguish plain servers, recognized wrapper forms and
 ambiguous wrappers. Server-owned marker-looking arguments remain enrollable;

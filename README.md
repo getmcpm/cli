@@ -283,6 +283,7 @@ Those 20 points **inform the score but cannot clear a safety floor.** The MCP se
 | `mcpm publish scaffold` | Create a .mcpm-publish.yaml manifest interactively |
 | `mcpm publish check` | Dry-run: show trust score and what would be submitted (`--json` emits the exact request body) |
 | `mcpm publish` | Submit to the official MCP registry (requires `GITHUB_TOKEN`/`MCPM_TOKEN`, or `--github-oidc` in GitHub Actions with `id-token: write`) |
+| `mcpm scope <project-root>` | Read-only Claude Code source/scope and instruction-file inventory (`--json`); [coverage and unknown states](docs/PROJECT-SCOPE.md) |
 | `mcpm doctor` | Check MCP setup health and report issues (`--json` structured model, `--report` redacted paste-for-bug-reports snapshot) |
 | `mcpm init` | Scaffold a starter `mcpm.yaml` stack file in the current directory |
 | `mcpm disable <name>` | Disable an MCP server without removing it from config |
