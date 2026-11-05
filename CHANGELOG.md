@@ -4,6 +4,10 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+
+- Read-only `mcpm scope <project-root> [--json]` for bounded Claude Code MCP declarations and instruction-file metadata, with possible scope shadowing and explicit unreadable/unsupported coverage; effective loading and enforcement remain unknown.
+
 _Add entries here, never under a stamped version_ — a release commit renames this
 heading, and a branch that wrote beneath it merges without conflict straight into a
 published section (it happened to #170).

@@ -31,6 +31,7 @@ import { registerPublishCommand } from "./publish/index.js";
 import { registerOutdatedCommand } from "./outdated.js";
 import { registerGuardCommand } from "./guard.js";
 import { registerSecretsCommand } from "./secrets.js";
+import { registerScopeCommand } from "./scope.js";
 import { registerWhyCommand } from "./why.js";
 
 export { registerSearch } from "./search.js";
@@ -77,6 +78,7 @@ export {
   handleSecretsRemove,
 } from "./secrets.js";
 export type { SecretsDeps } from "./secrets.js";
+export { registerScopeCommand } from "./scope.js";
 export { registerWhyCommand, handleWhy } from "./why.js";
 export type { WhyDeps, WhyOptions } from "./why.js";
 
@@ -107,4 +109,5 @@ export function registerCommands(program: Command): void {
   registerGuardCommand(program);
   registerSecretsCommand(program);
   registerWhyCommand(program);
+  registerScopeCommand(program);
 }

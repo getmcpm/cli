@@ -17,7 +17,7 @@ used the published v0.49.0 archive.
 
 | Order | ID | Scope/status | Dependency |
 | --- | --- | --- | --- |
-| 1 | #141 | Existing: read-only project/scope visibility | Honest wrapper/unknown states; explicit project roots |
+| 1 | #141 | Implemented candidate in review; not released | Honest wrapper/unknown states; explicit project roots |
 | 2 | #122 | Existing: managed-policy-aware setup | #155; one pinned host/native policy fixture set |
 | 3 | #156 | New: local skill/plugin change-review receipt; experiment | #141; one consumer; fixed file/host scope |
 | 4 | #157 | New: pinned external-report ingestion; conditional | #156 or a concrete multi-tool support case |
@@ -50,7 +50,7 @@ attestation. **Effort:** 3–6 days, revised after the compatibility inventory.
 
 ## #141 — Project exposure and scope inventory
 
-**Status:** existing item, newly bounded. **User/problem:** global-only evidence
+**Status:** an unreleased `mcpm scope <project-root> [--json]` candidate implements the bounded Claude Code inventory. See [scope documentation](PROJECT-SCOPE.md); review/validation remains separate from publication. **User/problem:** global-only evidence
 can miss project configuration and precedence. **MVP:** explicit project root,
 one host profile first, read-only project MCP entries and applicable instruction
 files; identify origin, scope, shadowing and unreadable/unsupported coverage.

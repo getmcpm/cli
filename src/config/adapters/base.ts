@@ -24,7 +24,7 @@ import { sanitizeForTerminal } from "../../guard/sanitize.js";
 // array elements. z.looseObject preserves any extra fields a client writes on
 // an entry (matches the pre-existing spread-copy behavior for well-formed
 // entries); only entries that fail the known-field shapes are dropped.
-const McpServerEntrySchema = z.looseObject({
+export const McpServerEntrySchema = z.looseObject({
   command: z.string().optional(),
   args: z.array(z.string()).optional(),
   env: z.record(z.string(), z.string()).optional(),
