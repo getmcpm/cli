@@ -17,7 +17,7 @@
 import { copyFile } from "node:fs/promises";
 import type { ClientId } from "../config/paths.js";
 import type { ConfigAdapter, McpServerEntry } from "../config/adapters/index.js";
-import { wrapEntry, unwrapEntry, isWrapped, type WrapContext, type ConfineMarker } from "./wrap.js";
+import { wrapEntry, unwrapEntry, isWrapped, classifyWrap, WRAP_REPAIR_MESSAGE, type WrapContext, type ConfineMarker } from "./wrap.js";
 
 export interface ClientReport {
   readonly clientId: ClientId;
@@ -189,6 +189,7 @@ export interface StatusReport {
       // dropped it) — surfaced here rather than silently missing from the
       // wrapped/unwrapped counts (H9: coverage gaps must be visible).
       malformed: boolean;
+      wrapError?: string;
     }>;
     readonly error?: string;
   }[];
@@ -207,14 +208,18 @@ export async function statusAcrossClients(deps: OrchestratorDeps): Promise<Statu
           malformedNames.push(name);
         });
         const servers = [
-          ...Object.entries(entries).map(([name, entry]) => ({
-            name,
-            wrapped: isWrapped(entry),
-            // A non-stdio (url-transport) entry has no command — it cannot be
-            // wrapped, so even when "not wrapped" it is specifically UNGUARDED.
-            unguarded: !isWrapped(entry) && !entry.command,
-            malformed: false,
-          })),
+          ...Object.entries(entries).map(([name, entry]) => {
+            const state = classifyWrap(entry);
+            return {
+              name,
+              wrapped: state === "recognized",
+              // A non-stdio (url-transport) entry has no command — it cannot be
+              // wrapped, so even when "not wrapped" it is specifically UNGUARDED.
+              unguarded: state !== "recognized" && !entry.command,
+              malformed: state === "ambiguous",
+              ...(state === "ambiguous" ? { wrapError: WRAP_REPAIR_MESSAGE } : {}),
+            };
+          }),
           ...malformedNames.map((name) => ({
             name,
             wrapped: false,
@@ -320,6 +325,10 @@ async function planForClient(
 
   for (const [name, entry] of Object.entries(entries)) {
     if (serverFilter !== undefined && name !== serverFilter) continue;
+    if (classifyWrap(entry) === "ambiguous") {
+      skipped.push({ name, reason: WRAP_REPAIR_MESSAGE });
+      continue;
+    }
     if (action === "enable") {
       if (isWrapped(entry)) {
         skipped.push({ name, reason: "already wrapped" });

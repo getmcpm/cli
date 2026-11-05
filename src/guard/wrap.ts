@@ -38,7 +38,8 @@
 
 import { CHILD_ENV_FIELD, wrapChildEnv, readChildEnv } from "./child-env.js";
 import { createHash } from "node:crypto";
-import { isAbsolute } from "node:path";
+import { isAbsolute, dirname, join, win32 } from "node:path";
+import { readFileSync, realpathSync } from "node:fs";
 import type { McpServerEntry } from "../config/adapters/index.js";
 
 export const WRAP_MARKER_ARGS = ["guard", "run", "--inner"] as const;
@@ -208,14 +209,51 @@ export function wrapEntry(
   };
 }
 
-/**
- * Returns true if the entry args look like a guard wrap. Detection is
- * based on the WRAP_MARKER_ARGS sequence — not the command field — so
- * entries wrapped via the absolute-path binary still detect correctly.
- */
+/** Static launcher recognition, not authentication of the installed binary. */
+function launcherMarkerIndex(entry: McpServerEntry): number {
+  const command = entry.command;
+  if (!command) return -1;
+  const base = win32.basename(command);
+  if (/^mcpm(?:\.cmd|\.exe)?$/i.test(base)) return 0;
+  if (!/^node(?:\.exe)?$/i.test(base)) return -1;
+  const script = entry.args?.[0];
+  if (typeof script !== "string" || !(isAbsolute(script) || win32.isAbsolute(script))) return -1;
+  try {
+    const resolved = realpathSync(script);
+    const root = dirname(dirname(resolved));
+    const pkg = JSON.parse(readFileSync(join(root, "package.json"), "utf8"));
+    if (pkg.name === "@getmcpm/cli" && pkg.bin?.mcpm === "./dist/index.js" &&
+        resolved === realpathSync(join(root, pkg.bin.mcpm))) return 1;
+  } catch { /* Missing/moved launchers require explicit repair. */ }
+  return -1;
+}
+
+export type WrapState = "plain" | "recognized" | "ambiguous";
+export const WRAP_REPAIR_MESSAGE = "Ambiguous guard wrapper; refusing to rewrite it. Restore the original server from a trusted client-config backup, then run mcpm guard enable again.";
+
+export function classifyWrap(entry: McpServerEntry): WrapState {
+  if (!entry.args) return "plain";
+  const stringArgs = entry.args.every((arg) => typeof arg === "string");
+  if ((!stringArgs || !entry.command) && findMarkerIndex(entry.args) !== -1) return "ambiguous";
+  const index = launcherMarkerIndex(entry);
+  const base = win32.basename(entry.command ?? "");
+  const script = typeof entry.args[0] === "string" ? entry.args[0].replaceAll("\\", "/") : undefined;
+  const plausibleLauncher = /^mcpm(?:\.cmd|\.exe)?$/i.test(base) ||
+    (/^node(?:\.exe)?$/i.test(base) && script?.endsWith("/dist/index.js"));
+  const prefix = index >= 0 ? index : /^node(?:\.exe)?$/i.test(base) ? 1 : 0;
+  if (findMarkerIndex(entry.args) === -1 &&
+      !((index >= 0 || plausibleLauncher) && entry.args[prefix] === "guard" && entry.args[prefix + 1] === "run")) return "plain";
+  if (index < 0 && !plausibleLauncher) return "plain";
+  if (!stringArgs || index < 0 || !WRAP_MARKER_ARGS.every((arg, i) => entry.args![index + i] === arg)) return "ambiguous";
+  return unwrapEntry(entry) === null ? "ambiguous" : "recognized";
+}
+
+export function assertUnambiguousWrap(entry: McpServerEntry): void {
+  if (classifyWrap(entry) === "ambiguous") throw new Error(WRAP_REPAIR_MESSAGE);
+}
+
 export function isWrapped(entry: McpServerEntry): boolean {
-  if (!entry.args) return false;
-  return findMarkerIndex(entry.args) !== -1;
+  return classifyWrap(entry) === "recognized";
 }
 
 function findMarkerIndex(args: readonly string[]): number {
@@ -257,7 +295,7 @@ function parseMarker(args: readonly string[]): ParsedMarker | null {
   // Required: --server-name <name>
   if (args[i] !== WRAP_SERVER_NAME_FLAG) return null;
   const serverName = args[i + 1];
-  if (serverName === undefined) return null;
+  if (!serverName || serverName.startsWith("--")) return null;
   i += 2;
 
   let declaredEnvKeys: string[] = [];
@@ -265,10 +303,13 @@ function parseMarker(args: readonly string[]): ParsedMarker | null {
   let confineProfileHash: string | null = null;
   let confineRequired = false;
 
+  const seen = new Set<string>();
   // Optional named flags, in any order, until the `--` separator.
   while (i < args.length && args[i] !== WRAP_ARG_SEPARATOR) {
     const flag = args[i];
     const value = args[i + 1];
+    if (seen.has(flag!) || (flag !== WRAP_CONFINE_REQUIRED_FLAG && (value === undefined || value.startsWith("--")))) return null;
+    seen.add(flag!);
     if (flag === WRAP_DECLARED_ENV_FLAG && value !== undefined) {
       declaredEnvKeys = value.length > 0 ? value.split(",") : [];
       i += 2;
@@ -292,6 +333,7 @@ function parseMarker(args: readonly string[]): ParsedMarker | null {
     }
   }
 
+  if (confineRequired && !confineProfileHash) return null;
   if (args[i] !== WRAP_ARG_SEPARATOR) return null; // no separator found
   return {
     serverName,
@@ -312,11 +354,13 @@ function parseMarker(args: readonly string[]): ParsedMarker | null {
  */
 export function unwrapEntry(entry: McpServerEntry): McpServerEntry | null {
   if (!entry.args) return null;
+  const index = launcherMarkerIndex(entry);
+  if (index < 0 || !WRAP_MARKER_ARGS.every((arg, i) => entry.args![index + i] === arg)) return null;
   const marker = parseMarker(entry.args);
   if (marker === null) return null;
 
   const origCommand = entry.args[marker.origStartIdx];
-  if (origCommand === undefined) return null;
+  if (!origCommand) return null;
   const origArgs = entry.args.slice(marker.origStartIdx + 1);
 
   // Issue #29: verify the integrity hash before trusting reconstructed args.

@@ -10,7 +10,7 @@ import { InstalledServerNotFoundError } from "../../store/servers.js";
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { mkdtemp, rm, readFile } from "node:fs/promises";
+import { mkdtemp, mkdir, writeFile, rm, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { GeminiCliAdapter } from "../../config/adapters/gemini-cli.js";
@@ -266,13 +266,16 @@ describe("handleUpdate — preserves launch protections and client settings (#11
       disabled: true, cwd: "/user/data", timeout: 1234, includeTools: ["read_file"], type: "stdio",
     };
     const profileHash = "a".repeat(64);
-    const wrapper = { mcpmBinary: "/user/node", scriptPath: "/user/mcpm/dist/index.js" };
+    const wrapper = { mcpmBinary: "/user/node", scriptPath: path.join(dir, "dist/index.js") };
     const getServer = vi.fn(async (_name: string, version?: string) => {
       const entry = makeOciEntry(name, version ?? "2.0.0");
       entry.server.packages[0].runtimeArguments = [version ? "--old-default" : "--new-default"];
       return entry;
     });
     try {
+      await mkdir(path.join(dir, "dist"));
+      await writeFile(path.join(dir, "package.json"), JSON.stringify({ name: "@getmcpm/cli", bin: { mcpm: "./dist/index.js" } }));
+      await writeFile(wrapper.scriptPath, "throw new Error('must not execute')");
       await adapter.addServer(configPath, name, wrapEntry(name, original, wrapper, { profileHash, required: true }));
       const deps = makeDeps({
         getInstalledServers: vi.fn().mockResolvedValue([makeInstalledServer({ name, clients: [adapter.clientId] })]),

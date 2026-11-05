@@ -2,8 +2,13 @@
  * Tests for wrap.ts — entry transformation + detection (Next Step 5).
  */
 
-import { describe, expect, test } from "vitest";
+import { afterAll, describe, expect, test } from "vitest";
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync, symlinkSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import {
+  classifyWrap,
+  assertUnambiguousWrap,
   wrapEntry,
   unwrapEntry,
   isWrapped,
@@ -18,7 +23,12 @@ import {
   type WrapContext,
 } from "../wrap.js";
 
-const ctx: WrapContext = { mcpmBinary: "/abs/path/to/node", scriptPath: "/abs/path/to/dist/index.js" };
+const packageRoot = mkdtempSync(join(tmpdir(), "mcpm-wrap-package-"));
+mkdirSync(join(packageRoot, "dist"));
+writeFileSync(join(packageRoot, "package.json"), JSON.stringify({ name: "@getmcpm/cli", bin: { mcpm: "./dist/index.js" } }));
+writeFileSync(join(packageRoot, "dist/index.js"), "throw new Error('must not execute')");
+afterAll(() => rmSync(packageRoot, { recursive: true, force: true }));
+const ctx: WrapContext = { mcpmBinary: "/abs/path/to/node", scriptPath: join(packageRoot, "dist/index.js") };
 
 describe("wrapEntry", () => {
   test("wraps a stdio server preserving env + adding wrap marker", () => {
@@ -30,7 +40,7 @@ describe("wrapEntry", () => {
     const wrapped = wrapEntry("fs-mcp", orig, ctx);
     expect(wrapped.command).toBe("/abs/path/to/node");
     expect(wrapped.args).toEqual([
-      "/abs/path/to/dist/index.js",
+      ctx.scriptPath!,
       "guard", "run", "--inner",
       "--server-name", "fs-mcp",
       "--declared-env", "FOO",
@@ -44,7 +54,7 @@ describe("wrapEntry", () => {
   test("wraps a server with no args", () => {
     const wrapped = wrapEntry("bare", { command: "my-server" }, ctx);
     expect(wrapped.args).toEqual([
-      "/abs/path/to/dist/index.js",
+      ctx.scriptPath!,
       "guard", "run", "--inner",
       "--server-name", "bare",
       "--orig-hash", hashOriginalEntry("my-server", [], []),
@@ -168,7 +178,7 @@ describe("unwrapEntry integrity verification (issue #29)", () => {
       ...wrapped,
       args: wrapped.args!.map((a, i) => (i === sepIdx + 1 ? "rm" : a)),
     };
-    expect(isWrapped(tampered)).toBe(true); // marker still detected
+    expect(isWrapped(tampered)).toBe(false); // invalid integrity is not recognized
     expect(unwrapEntry(tampered)).toBeNull(); // but hash mismatch → refuse
   });
 
@@ -217,7 +227,7 @@ describe("unwrapEntry integrity verification (issue #29)", () => {
       ...wrapped,
       args: [...wrapped.args!.slice(0, hashIdx), ...wrapped.args!.slice(hashIdx + 2)],
     };
-    expect(isWrapped(stripped)).toBe(true); // marker still detected
+    expect(isWrapped(stripped)).toBe(false); // missing integrity is not recognized
     expect(unwrapEntry(stripped)).toBeNull(); // but no hash → refuse
   });
 });
@@ -308,5 +318,76 @@ describe("confine marker NEUTRALITY (orig-hash + unwrap unaffected)", () => {
     const good = wrapEntry("fs", orig, ctx, { profileHash: HEX64, required: false });
     const tampered = { ...good, args: good.args!.map((a) => (a === HEX64 ? "deadbeef" : a)) };
     expect(unwrapEntry(tampered)).toBeNull();
+  });
+});
+
+
+describe("wrapper launcher identity (#155)", () => {
+  test("registry marker arguments cannot impersonate a guard", () => {
+    const lookalike = { command: "npx", args: ["-y", "evil", "guard", "run", "--inner", "--server-name", "evil", "--", "echo"] };
+    expect(isWrapped(lookalike)).toBe(false);
+    expect(unwrapEntry(lookalike)).toBeNull();
+  });
+  test("an arbitrary node script cannot impersonate a guard", () => {
+    const entry = wrapEntry("x", { command: "echo" }, { mcpmBinary: "node", scriptPath: "/tmp/dist/index.js" });
+    expect(isWrapped(entry)).toBe(false);
+    expect(unwrapEntry(entry)).toBeNull();
+  });
+});
+
+
+describe("wrapper compatibility (#155)", () => {
+  test.each(["mcpm", "/usr/local/bin/mcpm", "C:\\tools\\mcpm.cmd", "C:\\tools\\mcpm.exe"])("recognizes legacy direct launcher %s", (command) => {
+    expect(classifyWrap(wrapEntry("x", { command: "server", env: { SECRET: "retained" }, disabled: true }, { mcpmBinary: command }))).toBe("recognized");
+  });
+  test("recognizes npm/npx/dev package paths and old Node without executing either", () => {
+    const root = mkdtempSync(join(tmpdir(), "mcpm-155-package-"));
+    try {
+      mkdirSync(join(root, "dist"));
+      writeFileSync(join(root, "package.json"), JSON.stringify({ name: "@getmcpm/cli", bin: { mcpm: "./dist/index.js" } }));
+      const script = join(root, "dist/index.js");
+      writeFileSync(script, "throw new Error('must not execute')");
+      const alias = join(root, "mcpm-link"); symlinkSync(script, alias);
+      const original = { command: "server", args: ["guard", "run", "--inner"], env: { SECRET: "retained" }, disabled: true };
+      const wrapped = wrapEntry("x", original, { mcpmBinary: "/old/nvm/bin/node", scriptPath: alias });
+      expect(classifyWrap(wrapped)).toBe("recognized");
+      expect(unwrapEntry(wrapped)).toEqual(original);
+      // The symlink need not be named dist/index.js, even when its marker is damaged.
+      const missingInner = wrapEntry("x", { command: "server" }, { mcpmBinary: "/old/nvm/bin/node", scriptPath: alias });
+      missingInner.args!.splice(3, 1);
+      expect(classifyWrap(missingInner)).toBe("ambiguous");
+      wrapped.args![0] = script;
+      rmSync(script);
+      expect(classifyWrap(wrapped)).toBe("ambiguous");
+      expect(() => assertUnambiguousWrap(wrapped)).toThrow(/trusted.*backup/);
+    } finally { rmSync(root, { recursive: true, force: true }); }
+  });
+  test.each([
+    ["--orig-hash", "0".repeat(64)],
+    ["--declared-env", "OTHER"],
+    ["--server-name", "other"],
+    ["--confine-required"],
+  ])("refuses duplicate or invalid marker option %j", (...extra) => {
+    const wrapped = wrapEntry("x", { command: "server", env: { TOKEN: "preserved" } }, { mcpmBinary: "mcpm" });
+    const at = wrapped.args!.indexOf("--");
+    wrapped.args!.splice(at, 0, ...extra);
+    expect(classifyWrap(wrapped)).toBe("ambiguous");
+    expect(unwrapEntry(wrapped)).toBeNull();
+  });
+  test("arbitrary node scripts with marker arguments remain enrollable", () => {
+    const entry = { command: "node", args: ["/tmp/server.js", "guard", "run", "--inner"] };
+    expect(classifyWrap(entry)).toBe("plain");
+    expect(unwrapEntry(wrapEntry("x", entry, { mcpmBinary: "mcpm" }))).toEqual(entry);
+  });
+  test.each(["--inner-typo", undefined])("refuses damaged direct launcher marker %s", (inner) => {
+    const wrapped = wrapEntry("x", { command: "server" }, { mcpmBinary: "mcpm" });
+    wrapped.args!.splice(2, 1, ...(inner ? [inner] : []));
+    expect(classifyWrap(wrapped)).toBe("ambiguous");
+    expect(unwrapEntry(wrapped)).toBeNull();
+  });
+  test("malformed raw wrapper arguments fail closed without throwing", () => {
+    expect(classifyWrap({ command: "node", args: [42, "guard", "run", "--inner"] as unknown as string[] })).toBe("ambiguous");
+    expect(classifyWrap({ args: ["guard", "run", "--inner"] })).toBe("ambiguous");
+    expect(classifyWrap({ command: "npx", args: [42] as unknown as string[] })).toBe("plain");
   });
 });

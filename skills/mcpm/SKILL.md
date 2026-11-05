@@ -2,7 +2,7 @@
 name: mcpm
 description: Discover, assess, verify and manage MCP servers with the @getmcpm/cli package. Use when working with mcpm evidence, project locks or AI client MCP configuration.
 metadata:
-  version: "1.1.0"
+  version: "1.1.1"
   evidence-contract: "mcpm_search, mcpm_info, advertised mcpm_doctor and verify --json schemaVersion 1"
 ---
 
@@ -66,6 +66,11 @@ ask for the missing authorization. For an existing stack, `mcpm diff --json` and
 nothing. Preserve user arguments, credentials, disabled state, native settings
 and guard/confinement wrappers. Confirm the resulting configuration and tell the
 user when their client must restart to launch it.
+
+If the installed CLI reports an ambiguous wrapper, preserve the entry and report
+its repair guidance. Do not strip markers, double-wrap it or report it guarded.
+Marker-looking server arguments alone do not prove protection. Static launcher
+recognition does not authenticate binary bytes or establish native activation.
 
 Do not lower trust thresholds, use `--allow-fresh`/`--allow-unguarded`, disable
 protection or re-lock unexpected drift just to finish. A transient fetch error

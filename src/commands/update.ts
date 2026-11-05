@@ -28,7 +28,7 @@ import { stdoutOutput } from "../utils/output.js";
 import { sanitizeForTerminal } from "../guard/sanitize.js";
 import { describeRegistryError } from "../registry/errors.js";
 import { assessServerStatus } from "../scanner/registry-status.js";
-import { isWrapped, unwrapEntry, rewrapEntry } from "../guard/wrap.js";
+import { isWrapped, unwrapEntry, rewrapEntry, assertUnambiguousWrap, classifyWrap } from "../guard/wrap.js";
 import { assertPublication } from "../registry/package-coordinate.js";
 
 // ---------------------------------------------------------------------------
@@ -109,7 +109,10 @@ async function readExistingEntry(
     }
     recovered = {};
     const rawArgs = (raw as { args?: unknown } | null | undefined)?.args;
-    if (Array.isArray(rawArgs) && isWrapped({ args: rawArgs })) {
+    const rawCommand = (raw as { command?: unknown } | null | undefined)?.command;
+    if (Array.isArray(rawArgs) && classifyWrap({
+      command: typeof rawCommand === "string" ? rawCommand : undefined, args: rawArgs,
+    }) !== "plain") {
       malformedGuard = true;
       return;
     }
@@ -405,6 +408,7 @@ export async function handleUpdate(
             neighbours.set(JSON.stringify([cid, skipped]), { name: skipped, clientId: cid })
         );
         if (!configured) throw new Error("Server is missing from this client config; update will not reinstall it");
+        assertUnambiguousWrap(configured);
         const wrapped = isWrapped(configured);
         const existing = wrapped ? unwrapEntry(configured) : configured;
         if (!existing) throw new Error("Guard wrap is malformed or has an integrity mismatch; refusing to update it");

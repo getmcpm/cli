@@ -233,6 +233,10 @@ Read-only. Reports OS-backend availability (platform + presence of `/usr/bin/san
 ### `mcpm guard status`
 Prints what's wrapped and the pin state per server (unprotected / first-session-pin pending / fully protected).
 
+Wrapper recognition checks the launcher and complete marker, including its original-entry hash. Bare/absolute `mcpm` (`mcpm.cmd`/`mcpm.exe` on Windows) launchers and Node scripts resolved to an installed `@getmcpm/cli` package's declared `dist/index.js` bin are supported, including npm/npx caches, global installs, development checkouts and older Node paths. Runtime arguments of another server are not proof of a guard wrapper and remain enrollable.
+
+Malformed markers, missing package paths and pre-hash legacy wrappers are ambiguous: status/doctor report them without counting them guarded, and enable/disable/update refuse to rewrite them. Restore the original server from a trusted client-config backup, then enable again. Recognition is static configuration evidence: it does not authenticate binary bytes or forged package metadata, prove an old Node still exists, or prove the client loaded the wrapper. A moved script with an arbitrary alias may need manual recovery because its former identity cannot be inferred.
+
 ### `mcpm guard demo`
 Runs the in-process `prompt-injection` scenario. The output is byte-identical to what the production relay emits, so screenshotting the demo accurately represents what a real block looks like. Additional scenarios (path-exfil, rug-pull) are planned but not yet shipped.
 
