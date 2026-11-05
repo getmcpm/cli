@@ -57,6 +57,16 @@ archive hashes and installs npm dependencies with lifecycle scripts disabled.
 Claude Code's reviewed, pinned native-binary installer runs inside the offline
 guest to connect its preloaded platform binary to the CLI entry point.
 
+### Native fixture dependency refresh — 2026-11-06
+
+The isolated lock updates fast-uri **3.1.9**, ip-address **10.7.6**, zod **4.6.7**,
+body-parser **2.4.0** and qs **6.17.1**. The manifest, published mcpm **0.47.1**,
+Claude Code **2.1.296** and all native runtime/image pins remain unchanged.
+A clean `npm ci --ignore-scripts` install, zero-advisory audit and **45 native/
+protocol harness self-checks** passed; all locked Node engine declarations accept
+the pinned **26.11.1** runtime. Previous native VM receipts identify their original
+locks and do not prove this refreshed lock. This maintenance run did not boot a VM.
+
 ### Validate native doctor results
 
 This tooling merged in #307 and is included in v0.49.1. It was measured on
