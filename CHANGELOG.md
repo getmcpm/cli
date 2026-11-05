@@ -4,13 +4,22 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+_Add entries here, never under a stamped version_ — a release commit renames this
+heading, and a branch that wrote beneath it merges without conflict straight into a
+published section (it happened to #170).
+
+## [0.50.0] - 2026-11-06
+
 ### Added
 
 - Read-only `mcpm scope <project-root> [--json]` for bounded Claude Code MCP declarations and instruction-file metadata, with possible scope shadowing and explicit unreadable/unsupported coverage; effective loading and enforcement remain unknown.
 
-_Add entries here, never under a stamped version_ — a release commit renames this
-heading, and a branch that wrote beneath it merges without conflict straight into a
-published section (it happened to #170).
+### Changed
+
+- Refresh CLI dependencies and migrate build/test tooling to tsup 9 and Vite 8, preserving all nine dependency overrides and the supported Node floors.
+- Refresh the isolated protocol fixture to Inspector 2.11.0 and patched transitive dependencies; keep the published CLI 0.47.0 and SDK reference versions pinned.
+
+
 
 ## [0.49.2] - 2026-11-05
 
