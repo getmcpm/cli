@@ -17,13 +17,12 @@ used the published v0.49.0 archive.
 
 | Order | ID | Scope/status | Dependency |
 | --- | --- | --- | --- |
-| 1 | #155 | Wrapper recognition merged; v0.49.2 release preparation | Reproduced install-to-orchestration case and legacy matrix |
-| 2 | #141 | Existing: read-only project/scope visibility | Honest wrapper/unknown states; explicit project roots |
-| 3 | #122 | Existing: managed-policy-aware setup | #155; one pinned host/native policy fixture set |
-| 4 | #156 | New: local skill/plugin change-review receipt; experiment | #141; one consumer; fixed file/host scope |
-| 5 | #157 | New: pinned external-report ingestion; conditional | #156 or a concrete multi-tool support case |
-| 6 | #140 | Existing: remaining Skills manifest/byte verification | Actual consumer; pinned beta revision |
-| 7 | #158 | New: native artifact activation/drift measurement; conditional | #156 demand; disposable profile/host access |
+| 1 | #141 | Existing: read-only project/scope visibility | Honest wrapper/unknown states; explicit project roots |
+| 2 | #122 | Existing: managed-policy-aware setup | #155; one pinned host/native policy fixture set |
+| 3 | #156 | New: local skill/plugin change-review receipt; experiment | #141; one consumer; fixed file/host scope |
+| 4 | #157 | New: pinned external-report ingestion; conditional | #156 or a concrete multi-tool support case |
+| 5 | #140 | Existing: remaining Skills manifest/byte verification | Actual consumer; pinned beta revision |
+| 6 | #158 | New: native artifact activation/drift measurement; conditional | #156 demand; disposable profile/host access |
 | Later | #159 | New: offline ACP v1 evidence spike; demand-gated | One real trace consumer; stable interpretation |
 | Later | #95 | Existing: hook confinement GO/NO-GO experiment | Measured cohort and restrictive policy |
 
@@ -33,7 +32,9 @@ are excluded. Do not implement the whole queue in parallel.
 
 ## #155 — Honest wrapper identity and protection status
 
-**Status:** confirmed P1, not fixed by #308; PR #312 merged the fix with launcher/marker recognition and explicit ambiguity with repair guidance. [Validation](WRAPPER-IDENTITY-VALIDATION.md) records Sol implementation, Astra review/fixes and packed/native checks; v0.49.2 publication verification remains separate. **User/problem:** a plain server can
+**Status:** shipped in [v0.49.2](RELEASE-2026-11-05-v0.49.2.md), after #312 and
+Astra review/fixes. Published-archive SDK and native Linux launcher checks passed.
+Static-recognition/binary-authentication limits remain explicit. **User/problem:** a plain server can
 be misidentified as already guarded, undermining enrollment/status evidence.
 **MVP:** define recognized wrapper, plain entry and ambiguous/invalid states;
 handle original launch forms without silently rewriting or double-wrapping them.

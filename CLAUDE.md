@@ -70,7 +70,15 @@ An open-source, CLI-first MCP package manager — **"npm for MCP servers"**.
 A registry where developers can search, install, audit, publish, and update MCP servers
 across all major clients (Claude Desktop, Claude Code, Cursor, VS Code, Windsurf, Gemini CLI) from a single tool.
 
-**Current release:** `@getmcpm/cli@0.49.1` (2026-11-05).
+**Current release:** `@getmcpm/cli@0.49.2` (2026-11-05).
+Wrapper recognition #155 is released. All five publish jobs passed; npm and the
+official MCP registry marked 0.49.2 latest. Actual archive integrity, authenticated
+provenance/source/workflow, signed SBOM/tamper rejection, clean install, 87 SDK
+comparisons and native Linux Claude Code launcher discovery/restore passed.
+See `docs/RELEASE-2026-11-05-v0.49.2.md`. Static recognition is not binary
+authentication; next selected work is #141 project/scope inventory.
+
+**Previous verified release:** `@getmcpm/cli@0.49.1` (2026-11-05).
 PRs #308 and #309 merged; release source is `cf4ae8c025881f7404a21678262282c2ef482f22`.
 All five [publish jobs](https://github.com/getmcpm/cli/actions/runs/42017777994)
 passed. npm and the official MCP registry marked 0.49.1 latest. The exact archive
@@ -78,7 +86,7 @@ passed integrity, authenticated provenance/source/workflow, signed SBOM/tamper
 rejection, clean-install smoke and 87 SDK sandbox comparisons (zero failures,
 two expected unsupported combinations, four exclusions).
 See `docs/RELEASE-2026-11-05.md`. Native measurements remain the sixteen
-v0.49.0 cases; wrapper identity #155 remains open.
+v0.49.0 cases; wrapper identity #155 remained open at that checkpoint.
 
 **Previous verified release:** `@getmcpm/cli@0.49.0` (2026-11-03).
 The published archive matched npm integrity and passed 87 SDK sandbox checks,
