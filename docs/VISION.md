@@ -1,5 +1,14 @@
 # Vision — what mcpm is becoming
 
+> **Delivery checkpoint, 2026-11-05:** this strategy retains its dated planning
+> assumptions. Current runtime release is v0.49.0; see [CHANGELOG](../CHANGELOG.md).
+> The 38-case, 100% by-construction benchmark paragraph below describes its July
+> launch. The later documented corpus-v5 measurement has 57 cases, including
+> external CVE/Deadbugz-derived cases, and the v0.43.0 row reports 86.5% recall,
+> 0.0% false positives and 100% precision; see [README](../README.md).
+> Those are versioned measurements, not a fresh v0.49.0 benchmark or adoption claim.
+
+
 > Status: **Plan of record** · Set: 2026-07-12 · Baseline: **v0.19.0**
 >
 > This is the strategy layer. The tactical tracks hang off it:

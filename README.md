@@ -10,7 +10,7 @@
 
 **Block prompt injection, tool poisoning, rug-pulls and credential theft in Model Context Protocol (MCP) servers -- at runtime, on your machine.** Your AI agent trusts every MCP server it talks to; mcpm scores each install, verifies its supply chain with Sigstore, pins every tool definition, and inspects every tool call through a local relay -- with an opt-in OS sandbox on macOS. No cloud, no account, no LLM in the enforcement path.
 
-**Everything runs on your machine.** No account, no mcpm backend, no telemetry -- the guard is a local stdio relay, and trust scores are computed locally with no model and no remote verdict (the 40-point static-scan bucket is deterministic regex/structural checks you can read yourself; the rest is a local health check, registry metadata, and an external scanner only if you name one). Commands that resolve, audit or re-verify a server do reach the public MCP registry and npm -- nothing reaches an mcpm server.
+**Everything runs on your machine.** No account, no mcpm backend, no telemetry -- the guard is a local stdio relay, and trust scores are computed locally with no model and no remote verdict (the 40-point static-scan bucket is deterministic regex/structural checks you can read yourself; the rest is a reserved health-check bucket (not run by current commands), registry metadata, and an external scanner only if you name one). Commands that resolve, audit or re-verify a server do reach the public MCP registry and npm -- nothing reaches an mcpm server.
 
 [![npm version](https://img.shields.io/npm/v/@getmcpm/cli)](https://www.npmjs.com/package/@getmcpm/cli)
 [![license](https://img.shields.io/github/license/getmcpm/cli)](./LICENSE)
@@ -248,7 +248,7 @@ What it checks:
 
 | Component | Points | What it measures |
 |---|---|---|
-| Health check | 0-30 | Can the server start and respond to `list_tools`? |
+| Health check | 0-30 | Reserved startup/response check; current commands do not run it and score 15/30 |
 | Static scan | 0-40 | Regex-based detection of hardcoded secrets, prompt injection patterns in tool descriptions, typosquatting in package names, suspicious argument schemas |
 | External scanner | 0-20 | Results from a third-party scanner you have installed, opt-in via `MCPM_EXTERNAL_SCANNER` (off by default) |
 | Registry metadata | 0-10 | Verified publisher, publish date, download count (capped to 0 when critical findings present) |
@@ -449,9 +449,9 @@ The guard sits inline on the stdio channel between your AI client and each MCP s
 - **The request your agent sends** — the tool name and arguments, checked for sensitive-path exfil and injection smuggled into call parameters.
 - **The response the server returns** — checked for instruction injection hidden in the tool's output (the Slack message, web page, or calendar invite your agent is about to read).
 - **Skills discovery metadata (v0.48.1)** — skill list/get frontmatter and resource listing metadata use the same injection/concealment checks. Critical metadata matches block; file text remains warn-and-forward. See [Skills guard validation](docs/SKILLS-GUARD-VALIDATION.md) for measured scope and host-approval limits.
-- **The tool's own definition** — `tools/list` descriptions, schemas, and annotations, checked against the schema pinned at approval time, so a server can't quietly rewrite a tool you already trusted.
+- **The tool's own definition** — `tools/list` descriptions, schemas, and annotations, checked against the schema pinned on first observation (TOFU), so a server can't quietly rewrite a tool you already trusted.
 
-When a frame trips a signature, drift check, or policy rule, the guard **drops it and hands your agent a JSON-RPC error in its place** — carrying the signature id and a `remediation` string — so the poisoned content never reaches your model. Clean calls pass straight through (p99 ~0.065 ms on small frames). Server-initiated `sampling` / `elicitation` requests are inspected the same way, with the error routed back to the server rather than to your agent.
+When a frame receives a block verdict from a signature, drift check, or policy rule, the guard **drops it and hands your agent a JSON-RPC error in its place** — carrying the signature id and a `remediation` string — so the poisoned content never reaches your model. Warnings are logged and forwarded; clean calls pass straight through (p99 ~0.065 ms on small frames). Server-initiated `sampling` / `elicitation` requests are inspected the same way, with the error routed back to the server rather than to your agent.
 
 ### Quick start
 
@@ -566,9 +566,12 @@ jq -s 'group_by(.server_name) | map({server: .[0].server_name, n: length}) | sor
 ### When you're debugging and need to turn it off briefly
 
 ```bash
-mcpm guard pause --for 10m     # disables all inspection for 10 minutes
-mcpm guard pause --off         # cancel an active pause
+mcpm guard pause --for 10m     # new sessions started in this window stay paused
+mcpm guard pause --off         # clear pause for the next session
 ```
+
+Policy is read at server startup. Restart the wrapped server after pause/mute
+changes and to resume inspection after a pause; expiry does not resume an existing session.
 
 ### Why this exists
 
@@ -681,7 +684,7 @@ subgraph registry["Registry API<br/>(Only Remote)"]
 end
 
 subgraph scanning["Local Scanning & Trust<br/>(src/scanner/)"]
-    HEALTH["Health Check<br/>(0-30): spawn +<br/>verify response"]
+    HEALTH["Health Check<br/>(0-30): not run;<br/>15 points"]
     TIER1["Tier 1: Static Patterns<br/>(0-40): secrets, injection,<br/>typosquatting, exfil"]
     TIER2["Tier 2: External Scan<br/>(0-20): opt-in via<br/>MCPM_EXTERNAL_SCANNER"]
     META["Registry Metadata<br/>(0-10): publisher,<br/>age, downloads"]

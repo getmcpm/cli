@@ -352,6 +352,19 @@ describe("compareIntegrity", () => {
   const SHA1_A   = "sha1-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
   const SHA1_B   = "sha1-BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB=";
 
+  it.each([
+    [SHA512_A, `${SHA512_B} ${SHA512_A}`, "differ"],
+    [`${SHA512_B} ${SHA512_A}`, SHA512_A, "differ"],
+    [`${SHA512_A} ${SHA512_B}`, `${SHA512_B} ${SHA512_A}`, "equal"],
+  ])("compares every digest for the strongest common algorithm", (locked, fresh, expected) => {
+    expect(compareIntegrity(locked, fresh)).toBe(expected);
+  });
+
+  it("ignores duplicate tokens, whitespace and unknown algorithms", () => {
+    expect(compareIntegrity(`${SHA512_A} ${SHA512_A} future-X`, `  future-Y  ${SHA512_A} `)).toBe("equal");
+    expect(compareIntegrity("future-X", "future-X")).toBe("format-only");
+  });
+
   it("returns 'equal' for identical sha512 digests", () => {
     expect(compareIntegrity(SHA512_A, SHA512_A)).toBe("equal");
   });

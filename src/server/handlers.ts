@@ -6,6 +6,7 @@
  */
 
 import path from "node:path";
+import { InstalledServerNotFoundError } from "../store/servers.js";
 import type { ClientId } from "../config/paths.js";
 import { CLIENT_IDS } from "../config/paths.js";
 import type { ConfigAdapter, McpServerEntry } from "../config/adapters/index.js";
@@ -419,26 +420,31 @@ export async function handleRemove(
   validateMcpServerName(args.name);
   const clients = await resolveClients(args.client, deps);
   const removedClients: ClientId[] = [];
+  const planned: Array<{ clientId: ClientId; adapter: ConfigAdapter; configPath: string }> = [];
 
+  // Read every config before removing anything; unreadable is not absent.
   for (const clientId of clients) {
     const adapter = deps.getAdapter(clientId);
     const configPath = deps.getConfigPath(clientId);
-    try {
-      await adapter.removeServer(configPath, args.name);
-      removedClients.push(clientId);
-    } catch {
-      // Server not in this client, skip
-    }
+    let sawTarget = false;
+    const servers = await adapter.read(configPath, name => {
+      if (name === args.name) sawTarget = true;
+    });
+    if (Object.hasOwn(servers, args.name) || sawTarget) planned.push({ clientId, adapter, configPath });
   }
 
-  if (removedClients.length === 0) {
+  if (planned.length === 0) {
     throw new Error(`Server "${args.name}" not found in any client config.`);
+  }
+  for (const { clientId, adapter, configPath } of planned) {
+    await adapter.removeServer(configPath, args.name);
+    removedClients.push(clientId);
   }
 
   try {
     await deps.removeFromStore(args.name);
-  } catch {
-    // Not in store, fine
+  } catch (error) {
+    if (!(error instanceof InstalledServerNotFoundError)) throw error;
   }
 
   return { removed: true, name: args.name, clients: removedClients };

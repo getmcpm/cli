@@ -1,3 +1,4 @@
+import { InstalledServerNotFoundError } from "../store/servers.js";
 /**
  * Tests for src/server/handlers.ts
  *
@@ -398,10 +399,32 @@ describe("handleList", () => {
 // ---------------------------------------------------------------------------
 
 describe("handleRemove", () => {
+  it.each(["read", "removeServer"] as const)("does not report success or erase tracking when a client %s fails", async (operation) => {
+    const name = "io.github.test/my-server";
+    const first = { read: vi.fn().mockResolvedValue({ [name]: { command: "node" } }), removeServer: vi.fn().mockResolvedValue(undefined) };
+    const denied = { read: vi.fn().mockResolvedValue({ [name]: { command: "node" } }), removeServer: vi.fn().mockResolvedValue(undefined) };
+    denied[operation].mockRejectedValue(new Error("EACCES: permission denied"));
+    const deps = makeDeps({
+      detectClients: vi.fn().mockResolvedValue(["claude-desktop", "cursor"]),
+      getAdapter: vi.fn().mockImplementation(id => id === "cursor" ? denied : first),
+    });
+    await expect(handleRemove({ name }, deps)).rejects.toThrow(/EACCES/);
+    expect(deps.removeFromStore).not.toHaveBeenCalled();
+    if (operation === "read") expect(first.removeServer).not.toHaveBeenCalled();
+  });
+
+  it("removes malformed entries reported by the adapter", async () => {
+    const name = "io.github.test/my-server";
+    const adapter = { read: vi.fn().mockImplementation(async (_path, onSkip) => { onSkip(name); return {}; }), removeServer: vi.fn().mockResolvedValue(undefined) };
+    const deps = makeDeps({ getAdapter: vi.fn().mockReturnValue(adapter) });
+    await expect(handleRemove({ name }, deps)).resolves.toMatchObject({ removed: true });
+    expect(adapter.removeServer).toHaveBeenCalledWith("/fake/mcp.json", name);
+  });
+
   it("removes server from client config", async () => {
     const adapter = {
       clientId: "cursor",
-      read: vi.fn(),
+      read: vi.fn().mockResolvedValue({ "io.github.test/my-server": { command: "node" } }),
       addServer: vi.fn(),
       removeServer: vi.fn().mockResolvedValue(undefined),
     };
@@ -416,7 +439,7 @@ describe("handleRemove", () => {
   it("throws when server not found in any client", async () => {
     const adapter = {
       clientId: "cursor",
-      read: vi.fn(),
+      read: vi.fn().mockResolvedValue({}),
       addServer: vi.fn(),
       removeServer: vi.fn().mockRejectedValue(new Error("not found")),
     };
@@ -936,5 +959,19 @@ describe("handleInstall — leaves nothing behind on failure", () => {
       expect(adapters.get(id)!.addServer).toHaveBeenCalled();
       expect(adapters.get(id)!.removeServer).not.toHaveBeenCalled();
     }
+  });
+});
+
+
+describe("handleRemove store failures", () => {
+  it.each([false, true])("tolerates only an absent store record (absent=%s)", async absent => {
+    const error = absent ? new InstalledServerNotFoundError("not tracked") : Object.assign(new Error("store denied"), { code: "EACCES" });
+    const deps = makeDeps({
+      getAdapter: vi.fn().mockReturnValue({ clientId: "cursor", read: vi.fn().mockResolvedValue({ "io.github.test/server": { command: "node" } }), removeServer: vi.fn().mockResolvedValue(undefined) }),
+      removeFromStore: vi.fn().mockRejectedValue(error),
+    });
+    const result = handleRemove({ name: "io.github.test/server" }, deps);
+    if (absent) await expect(result).resolves.toMatchObject({ removed: true });
+    else await expect(result).rejects.toBe(error);
   });
 });

@@ -16,7 +16,7 @@
 import { Command } from "commander";
 import chalk from "chalk";
 import ora from "ora";
-import type { InstalledServer } from "../store/servers.js";
+import { InstalledServerNotFoundError, type InstalledServer } from "../store/servers.js";
 import type { ServerEntry } from "../registry/types.js";
 import type { Finding } from "../scanner/tier1.js";
 import type { TrustScore, TrustScoreInput } from "../scanner/trust-score.js";
@@ -453,7 +453,9 @@ export async function handleUpdate(
 
     const updated = written > 0 || originalClients.length === 0;
     if (updated) {
-      try { await removeInstalledServer(r.name); } catch { /* Server may not be in store. */ }
+      try { await removeInstalledServer(r.name); } catch (error) {
+        if (!(error instanceof InstalledServerNotFoundError)) throw error;
+      }
       await addInstalledServer(finalRecord);
     }
 

@@ -10,6 +10,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { computeTrustScore } from "./trust-score.js";
 import {
   SCANNER_ENV_VAR,
   checkScannerAvailable,
@@ -558,5 +559,29 @@ describe("scanTier2 — server name validation", () => {
       scanTier2("owner/repo; rm -rf /", { execImpl })
     ).rejects.toThrow(/malicious/i);
     expect(execImpl).not.toHaveBeenCalled();
+  });
+});
+
+describe("scanTier2 — validates the external JSON boundary", () => {
+  it.each([null, 42, [], { findings: [null] }, { findings: ["critical"] },
+    { findings: [{ severity: 123 }] }, { findings: [{ description: {} }] },
+    { findings: [{ location: [] }] },
+  ])("reports malformed output %j without crashing or crediting a scan", async (output) => {
+    const execImpl = vi.fn().mockResolvedValue({ stdout: JSON.stringify(output), exitCode: 0 });
+    const findings = await scanTier2("io.github.acme/server", { execImpl });
+    expect(findings).toEqual([expect.objectContaining({ type: "scanner-error", source: "external" })]);
+    const trust = computeTrustScore({ findings, healthCheckPassed: null, hasExternalScanner: true, registryMeta: {} });
+    expect(trust.maxPossible).toBe(80);
+    expect(trust.breakdown.externalScan).toBe(0);
+    expect(Number.isFinite(trust.score)).toBe(true);
+  });
+
+  it.each(["constructor", "__proto__"])("fails safe on inherited severity %s", async (severity) => {
+    const execImpl = vi.fn().mockResolvedValue({ stdout: JSON.stringify({ findings: [{ severity }] }), exitCode: 0 });
+    const findings = await scanTier2("io.github.acme/server", { execImpl });
+    expect(findings[0].severity).toBe("high");
+    const trust = computeTrustScore({ findings, healthCheckPassed: null, hasExternalScanner: true, registryMeta: {} });
+    expect(Number.isFinite(trust.score)).toBe(true);
+    expect(trust.breakdown.externalScan).toBe(10);
   });
 });

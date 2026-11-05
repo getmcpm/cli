@@ -63,7 +63,15 @@ An open-source, CLI-first MCP package manager — **"npm for MCP servers"**.
 A registry where developers can search, install, audit, publish, and update MCP servers
 across all major clients (Claude Desktop, Claude Code, Cursor, VS Code, Windsurf, Gemini CLI) from a single tool.
 
-**Current release:** `@getmcpm/cli@0.48.1`.
+**Current release:** `@getmcpm/cli@0.49.0` (2026-11-03).
+The published archive matched npm integrity and passed 87 SDK sandbox checks,
+with zero failures, two expected unsupported combinations and four exclusions.
+Publication evidence is in `docs/DOCTOR-EVIDENCE-VALIDATION.md`. Documentation
+PR #306 merged as `e47cfd69`; native tooling PR #307 merged as `dd80cf78` on
+2026-11-05. That tooling is on main, unreleased; its 16 native cases measured
+the already-published v0.49.0 runtime, not a new package release.
+
+**Previous verified release:** `@getmcpm/cli@0.48.1`.
 v0.48.1 is published and verified. PR #299 merged as `ae59d9b`; release source is `c7082dd735817cb67c0d413172f5d5fb2ce53dbf`. [Publish workflow](https://github.com/getmcpm/cli/actions/runs/41099484146) passed all five jobs. npm and the official MCP registry report latest `0.48.1`. Actual tarball integrity, authenticated SLSA source/workflow identity, signed SBOM/tamper rejection and clean-install smoke pass. The exact published archive passes 75 protocol comparisons (including 32 Skills comparisons), zero failures, two expected unsupported reference-peer combinations and four exclusions.
 No fresh host activation, native-editor/provider/model or HTTP claim.
 

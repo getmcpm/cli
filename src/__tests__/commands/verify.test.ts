@@ -119,6 +119,12 @@ describe("verifyHandler — block matrix", () => {
     expect(d.out()).toMatch(/verification failed: 1 server/);
   });
 
+  it("an added digest cannot hide before the locked digest → BLOCK, exit 1", async () => {
+    const d = deps(lockOf({ a: npmEntry("@test/a", SRI_OLD) }), async () => snap(`${SRI_NEW} ${SRI_OLD}`));
+    expect(await verifyHandler(d.deps)).toBe(1);
+    expect(d.out()).toMatch(/integrity drift/i);
+  });
+
   it("could-not-verify (fetch returns undefined) → BLOCK, exit 1", async () => {
     const d = deps(lockOf({ a: npmEntry("@test/a", SRI_OLD) }), async () => undefined);
     const code = await verifyHandler(d.deps);

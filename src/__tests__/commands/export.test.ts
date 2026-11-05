@@ -259,6 +259,23 @@ describe("handleExport", () => {
 // ---------------------------------------------------------------------------
 
 describe("handleExport — unreadable entries", () => {
+  it("warns that an export is incomplete when a whole client config is unreadable", async () => {
+    const stderr = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+    try {
+      const deps = makeDeps({
+        getAdapter: vi.fn().mockImplementation((client: ClientId) => client === "cursor"
+          ? { read: vi.fn().mockRejectedValue(new Error("private config content")) }
+          : makeAdapter({ retained: { command: "node" } })),
+      });
+      await handleExport({}, deps);
+      const warning = stderr.mock.calls.flat().join("");
+      expect(warning).toMatch(/cursor.*could not be read.*export may be incomplete/i);
+      expect(warning).not.toContain("private config content");
+      const yaml = (deps.output as ReturnType<typeof vi.fn>).mock.calls[0][0];
+      expect(Object.keys(parseYaml(yaml).servers)).toEqual(["retained"]);
+    } finally { stderr.mockRestore(); }
+  });
+
   it("names the entries it could not read on stderr", async () => {
     const errs: string[] = [];
     const spy = vi

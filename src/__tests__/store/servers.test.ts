@@ -1,3 +1,4 @@
+import { InstalledServerNotFoundError } from "../../store/servers.js";
 /**
  * Tests for src/store/servers.ts
  *
@@ -137,7 +138,7 @@ describe("removeInstalledServer", () => {
 
   it("throws if the server is not found", async () => {
     mockReadJson.mockResolvedValue([SAMPLE_SERVER]);
-    await expect(removeInstalledServer("ghost")).rejects.toThrow(/not found/i);
+    await expect(removeInstalledServer("ghost")).rejects.toBeInstanceOf(InstalledServerNotFoundError);
   });
 
   it("writes the updated list (not original reference)", async () => {

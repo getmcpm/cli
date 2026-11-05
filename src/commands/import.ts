@@ -73,7 +73,7 @@ async function readClientServers(
   // first-run "bring my existing setup in" path, so an entry that silently
   // never appears in the pick-list is the worst place to stay quiet.
   unreadable?: string[]
-): Promise<DiscoveredServer[]> {
+): Promise<DiscoveredServer[] | null> {
   try {
     const adapter = deps.getAdapter(clientId);
     const configPath = deps.getConfigPath(clientId);
@@ -86,7 +86,7 @@ async function readClientServers(
       entry: { ...entry },
     }));
   } catch {
-    return [];
+    return null;
   }
 }
 
@@ -229,7 +229,11 @@ export async function handleImport(
   const perClientResults = await Promise.all(
     clientsToScan.map((clientId) => readClientServers(clientId, deps, unreadable))
   );
-  const discovered: DiscoveredServer[] = perClientResults.flat();
+  const discovered: DiscoveredServer[] = perClientResults.flatMap(result => result ?? []);
+  const unreadableClients = clientsToScan.filter((_, i) => perClientResults[i] === null);
+  for (const client of unreadableClients) {
+    output(chalk.yellow(`${client} config could not be read and was not imported. Run \`mcpm doctor\` for details.`));
+  }
 
   // De-duplicate by server name
   const uniqueServers = deduplicateServers(discovered);
@@ -257,9 +261,11 @@ export async function handleImport(
     // just could not read them.
     output(
       chalk.yellow(
-        omitted.length > 0
-          ? "No importable MCP servers found — every entry present failed shape validation."
-          : "No existing MCP servers found in any client config."
+        unreadableClients.length > 0
+          ? "No importable MCP servers found — some client configs could not be read."
+          : omitted.length > 0
+            ? "No importable MCP servers found — every entry present failed shape validation."
+            : "No existing MCP servers found in any client config."
       )
     );
     return;

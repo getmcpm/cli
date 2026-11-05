@@ -34,7 +34,7 @@ Detection is layered:
 | **Schema pinning** | `tools/list` responses | SHA-256 hash of {description, schema, annotations} vs the pin captured at install. Text is folded to Unicode **NFC** first (canonical equivalence only — never NFKC), so a normalization-only change is not drift |
 | **Same-session drift** | 2nd+ `tools/list` in one session | Catches mid-session rug-pull attempts before the pin write commits |
 | **Field-level drift tiering (H4)** | a drifted `tools/list` tool | Per-field hashes split a **description-only** change (cosmetic → warn, forwarded — the parallel description pattern scan still blocks regex-detectable injection) from a **schema / annotations** change (security → block); a pre-H4 pin with no field hashes stays a coarse block. An announced `notifications/tools/list_changed` arms a single-shot re-validation against the pin. `accept-drift` drops the field hashes (reverts that tool to coarse blocking) until the next first-session capture re-derives them. |
-| **Policy overrides** | Every message | `~/.mcpm/guard-policy.yaml` signature overrides (ignore / warn / block / log_only) and global pause state (paused_until) |
+| **Policy overrides** | Startup snapshot applied to messages | `~/.mcpm/guard-policy.yaml` signature overrides (ignore / warn / block / log_only) and global pause state (paused_until) |
 
 ### Protocol and carrier coverage
 
@@ -246,7 +246,7 @@ Re-pin a tool's schema after a legitimate upgrade. **Requires `--yes` (no prompt
 `--tool` scopes to one tool; otherwise applies to all tools on that server.
 
 ### `mcpm guard mute <signature-id> [--for <duration>]`
-Adds an `ignore` override to `~/.mcpm/guard-policy.yaml`. `--for 5m` / `1h` / `24h` / `7d` auto-expires.
+Adds an `ignore` override to `~/.mcpm/guard-policy.yaml`. `--for 5m` / `1h` / `24h` / `7d` expires for subsequent sessions. Restart the wrapped server to load policy changes; an existing session retains its startup overrides.
 
 The signature id must exist in the shipped set — typos are rejected with a list of valid ids (see `mcpm guard list-signatures`).
 
@@ -254,7 +254,7 @@ The signature id must exist in the shipped set — typos are rejected with a lis
 Removes the override.
 
 ### `mcpm guard pause [--for <duration>] [--off]`
-Pauses ALL guard inspection for a window (default 10 min). The relay continues forwarding traffic but skips inspection. `--off` lifts an active pause.
+Sets a pause window (default 10 min) for new guard sessions. A session started within it forwards without inspection for its entire lifetime. Policy is read only at startup: `--off` or expiry affects subsequent sessions, so restart the wrapped server to resume inspection. Pause/mute commands do not change an already-running session.
 
 Use during debugging when guard is in the way and you want to turn it off without unwrapping configs.
 
@@ -410,7 +410,7 @@ If a wrapped server stops working after `enable`, the order of escalation:
 1. **`mcpm guard status`** — is the server in `unprotected (first-session-pin pending)` mode? That's fine; the next session captures the pin.
 2. **`~/.mcpm/guard-events.jsonl`** — is there a block entry for that server? The `remediation` field tells you the exact command to run.
 3. **`mcpm guard mute <id> --for 5m`** — temporary mute while you investigate.
-4. **`mcpm guard pause --for 10m`** — turns off all inspection for 10 minutes.
+4. **`mcpm guard pause --for 10m`** — pauses new sessions started within 10 minutes; restart after clearing pause to resume inspection.
 5. **`mcpm guard disable --server <name>`** — permanently unwraps just that one server while keeping others protected.
 
 If guard itself crashes (e.g. on PATH disruption — the wrapped command points at `mcpm`):
