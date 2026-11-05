@@ -1,19 +1,19 @@
 # MCP Registry — Project Context
 
 > This file is automatically read by Claude Code on every session.
-> Keep it updated as decisions are made. Last updated: 2026-11-05.
+> Keep it updated as decisions are made. Last updated: 2026-11-06.
 
 ---
 
 ## What We're Building
 
-**Project/scope inventory (v0.50.0 release preparation):**
+**Project/scope inventory (v0.50.0):**
 `mcpm scope <project-root> [--json]` inventories fixed Claude Code MCP sources
 and instruction-file candidates without running commands/clients or changing
 config. It omits values and instruction contents, reports uncertain coverage,
 and keeps host version/effective selection/loading/enforcement unknown.
 This is a separate CLI model, not a DoctorModel or MCP-tool expansion.
-See `docs/PROJECT-SCOPE.md`; current release remains v0.49.2.
+See `docs/PROJECT-SCOPE.md` and the published release evidence below.
 
 **Wrapper recognition (v0.49.2):** guard enable/disable,
 status, doctor and update distinguish plain servers, recognized wrapper forms and
@@ -78,13 +78,24 @@ An open-source, CLI-first MCP package manager — **"npm for MCP servers"**.
 A registry where developers can search, install, audit, publish, and update MCP servers
 across all major clients (Claude Desktop, Claude Code, Cursor, VS Code, Windsurf, Gemini CLI) from a single tool.
 
-**Current release:** `@getmcpm/cli@0.49.2` (2026-11-05).
+**Current release:** `@getmcpm/cli@0.50.0` (2026-11-06).
+The bounded Claude Code scope-inventory slice of #141 is released. All five publish jobs passed;
+npm and the official MCP registry marked 0.50.0 latest. The actual archive passed
+integrity/authenticated provenance/source/workflow, signed SBOM/tamper rejection,
+clean install, 87 protocol comparisons and seven read-only scope cases.
+Astra reviewed/fixed all incoming org PR batches. Playground 0.50.0 is deployed
+and its public engine bytes verified; guardbench records a fresh published 0.50.0
+57-case score. See `docs/RELEASE-2026-11-06-v0.50.0.md` for the per-repository
+matrix, PR dispositions and proof limits. Next selected work is #122
+managed-policy-aware setup; broader project/host coverage remains unmeasured.
+
+**Previous verified release:** `@getmcpm/cli@0.49.2` (2026-11-05).
 Wrapper recognition #155 is released. All five publish jobs passed; npm and the
 official MCP registry marked 0.49.2 latest. Actual archive integrity, authenticated
 provenance/source/workflow, signed SBOM/tamper rejection, clean install, 87 SDK
 comparisons and native Linux Claude Code launcher discovery/restore passed.
 See `docs/RELEASE-2026-11-05-v0.49.2.md`. Static recognition is not binary
-authentication; next selected work is #141 project/scope inventory.
+authentication; project/scope inventory #141 was next at that checkpoint.
 
 **Previous verified release:** `@getmcpm/cli@0.49.1` (2026-11-05).
 PRs #308 and #309 merged; release source is `cf4ae8c025881f7404a21678262282c2ef482f22`.

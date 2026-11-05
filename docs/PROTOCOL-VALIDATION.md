@@ -172,3 +172,8 @@ and v2 pinned-modern client. The container supplies synthetic configs only. Sche
 advertisement, text/structured identity, unknown coverage and error separation are
 asserted independently of SDK validation. Fixed reference inputs remain unchanged.
 See [doctor validation](DOCTOR-EVIDENCE-VALIDATION.md).
+
+
+## Published v0.50.0 checkpoint — 2026-11-06
+
+The integrity/provenance-verified npm v0.50.0 archive passed 87 modern/legacy direct/guarded comparisons, zero failures, two expected unsupported combinations and four exclusions. Independent read-back verified the complete runtime JavaScript set, raw lock, harness/public skill and actual offline container isolation. Fixed published reference pins remain unchanged. See [publication and companion evidence](RELEASE-2026-11-06-v0.50.0.md) for hashes, CI/deployment state and limits. Historical candidate receipts above retain their original attribution.

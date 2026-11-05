@@ -118,4 +118,10 @@ permissions, provider/model behavior or other host versions/platforms.
 Temporary receipts/probe remain in `/private/tmp/mcpm-141-reviewed-sandbox-evidence`,
 `/private/tmp/mcpm-141-sandbox` and `/private/tmp/mcpm-141-reviewed-protocol`. The test
 container and volume were removed after isolation/receipt read-back. This remains
-a historical candidate; #315 merged and is included in v0.50.0 release preparation.
+a historical candidate; #315 merged and shipped in v0.50.0. Publication evidence
+is recorded separately below.
+
+
+## Published checkpoint — 2026-11-06
+
+The exact npm v0.50.0 archive passed seven scope CLI cases and 87 protocol comparisons. Independent archive/runtime/lock/harness/skill and actual isolation read-back passed. The separate native reference still executed the synthetic sentinel; it is not scope no-execution or activation proof. See [publication and companion evidence](RELEASE-2026-11-06-v0.50.0.md) for hashes, CI/deployment state and limits. Historical candidate receipts above retain their original attribution.
