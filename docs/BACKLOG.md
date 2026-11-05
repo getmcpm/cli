@@ -6,11 +6,12 @@ does not replace the dated history or claim every older hypothesis was rechecked
 Research proposals are not build/release authorization. Sources and scope are in
 [the research report](RESEARCH-2026-11-05.md).
 
-[PR #308](https://github.com/getmcpm/cli/pull/308) contains tested but unreleased
+[PR #308](https://github.com/getmcpm/cli/pull/308) merged tested
 configuration, removal/store, scanner, SRI, prior-lock and import/export fixes.
-Do not schedule those same defects again, mark them shipped, or close the whole
-#123/#131/#149/#150 group because one slice is fixed. The native doctor suite is
-merged in #307; runtime release remains v0.49.0.
+They are included in the v0.49.1 release preparation. Do not schedule those same
+defects again or close the whole #123/#131/#149/#150 group because one slice is
+fixed. The native doctor suite merged in #307; its recorded native measurements
+used the published v0.49.0 archive.
 
 ## Ordered queue
 

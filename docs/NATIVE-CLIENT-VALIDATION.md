@@ -59,7 +59,8 @@ guest to connect its preloaded platform binary to the CLI entry point.
 
 ### Validate native doctor results
 
-This is unreleased validation tooling, measured on 2026-11-05 against the actual
+This tooling merged in #307 and is included in v0.49.1. It was measured on
+2026-11-05 against the actual
 published v0.49.0 archive. The corrected fresh run passed all sixteen native cases:
 
 | Installed client | Observed opening | Doctor cases |
