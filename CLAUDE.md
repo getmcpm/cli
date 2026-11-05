@@ -63,14 +63,22 @@ An open-source, CLI-first MCP package manager — **"npm for MCP servers"**.
 A registry where developers can search, install, audit, publish, and update MCP servers
 across all major clients (Claude Desktop, Claude Code, Cursor, VS Code, Windsurf, Gemini CLI) from a single tool.
 
-**Current release:** `@getmcpm/cli@0.49.0` (2026-11-03).
+**Current release:** `@getmcpm/cli@0.49.1` (2026-11-05).
+PRs #308 and #309 merged; release source is `cf4ae8c025881f7404a21678262282c2ef482f22`.
+All five [publish jobs](https://github.com/getmcpm/cli/actions/runs/42017777994)
+passed. npm and the official MCP registry marked 0.49.1 latest. The exact archive
+passed integrity, authenticated provenance/source/workflow, signed SBOM/tamper
+rejection, clean-install smoke and 87 SDK sandbox comparisons (zero failures,
+two expected unsupported combinations, four exclusions).
+See `docs/RELEASE-2026-11-05.md`. Native measurements remain the sixteen
+v0.49.0 cases; wrapper identity #155 remains open.
+
+**Previous verified release:** `@getmcpm/cli@0.49.0` (2026-11-03).
 The published archive matched npm integrity and passed 87 SDK sandbox checks,
 with zero failures, two expected unsupported combinations and four exclusions.
-Publication evidence is in `docs/DOCTOR-EVIDENCE-VALIDATION.md`. Documentation
-PR #306 merged as `e47cfd69`; native tooling PR #307 merged as `dd80cf78` on
-2026-11-05. That tooling is included in the v0.49.1 release preparation; its 16
-native cases measured the already-published v0.49.0 runtime. PRs #308 and #309
-merged as `2be612c6` and `94e2e517`; publication proof remains separate.
+Publication evidence is in `docs/DOCTOR-EVIDENCE-VALIDATION.md`. Native tooling
+#307 merged as `dd80cf78` and shipped in v0.49.1; its sixteen native cases
+measured the already-published v0.49.0 runtime.
 
 **Previous verified release:** `@getmcpm/cli@0.48.1`.
 v0.48.1 is published and verified. PR #299 merged as `ae59d9b`; release source is `c7082dd735817cb67c0d413172f5d5fb2ce53dbf`. [Publish workflow](https://github.com/getmcpm/cli/actions/runs/41099484146) passed all five jobs. npm and the official MCP registry report latest `0.48.1`. Actual tarball integrity, authenticated SLSA source/workflow identity, signed SBOM/tamper rejection and clean-install smoke pass. The exact published archive passes 75 protocol comparisons (including 32 Skills comparisons), zero failures, two expected unsupported reference-peer combinations and four exclusions.
