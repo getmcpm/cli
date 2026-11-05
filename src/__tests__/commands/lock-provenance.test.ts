@@ -11,7 +11,7 @@ import type { NpmProvenanceSnapshot } from "../../registry/npm-provenance.js";
 import type { LockFile } from "../../stack/schema.js";
 import type { TrustScore } from "../../scanner/trust-score.js";
 import { parse as parseYaml } from "yaml";
-import { LockFileSchema } from "../../stack/schema.js";
+import { LockFileSchema, parseLockFile } from "../../stack/schema.js";
 import { writeFile, mkdtemp } from "fs/promises";
 import path from "path";
 import os from "os";
@@ -85,6 +85,29 @@ function outputText(deps: LockDeps): string {
 }
 
 describe("handleLock — provenance capture", () => {
+  it("does not replace a provenance baseline when reading it fails", async () => {
+    const error = Object.assign(new Error("EACCES: existing lock cannot be read"), { code: "EACCES" });
+    const deps = makeDeps(entry(), { readExistingLock: vi.fn().mockRejectedValue(error) });
+    await expect(handleLock({ stackFile: await writeTempStack() }, deps)).rejects.toBe(error);
+    expect(deps.fetchNpmProvenance).not.toHaveBeenCalled();
+    expect(deps.writeLockFile).not.toHaveBeenCalled();
+  });
+
+  it("refuses a malformed existing lock instead of replacing it", async () => {
+    const stackFile = await writeTempStack();
+    const lockFile = path.join(path.dirname(stackFile), "mcpm-lock.yaml");
+    await writeFile(lockFile, "lockfileVersion: [");
+    const deps = makeDeps(entry(), { readExistingLock: parseLockFile });
+    await expect(handleLock({ stackFile }, deps)).rejects.toThrow(/Invalid YAML in lock file/);
+    expect(deps.writeLockFile).not.toHaveBeenCalled();
+  });
+
+  it("allows first lock creation when the previous lock is absent", async () => {
+    const deps = makeDeps(entry(), { readExistingLock: parseLockFile });
+    await handleLock({ stackFile: await writeTempStack() }, deps);
+    expect(deps.writeLockFile).toHaveBeenCalledOnce();
+  });
+
   it("captures the provenance snapshot for a concrete npm coordinate", async () => {
     const deps = makeDeps(entry());
     await handleLock({ stackFile: await writeTempStack() }, deps);

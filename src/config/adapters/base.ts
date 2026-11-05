@@ -70,7 +70,15 @@ export abstract class BaseAdapter implements ConfigAdapter {
       return {};
     }
 
-    return this.parseConfig(raw);
+    const config = this.parseConfig(raw);
+    if (config === null || typeof config !== "object" || Array.isArray(config)) {
+      throw new SyntaxError(`Invalid ${this.clientId} configuration; expected an object.`);
+    }
+    const servers = config[this.rootKey];
+    if (servers !== undefined && (servers === null || typeof servers !== "object" || Array.isArray(servers))) {
+      throw new SyntaxError(`Invalid ${this.clientId} server map; expected an object.`);
+    }
+    return config;
   }
 
   private parseConfig(raw: string): Record<string, unknown> {

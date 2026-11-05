@@ -139,8 +139,8 @@ export type IntegrityComparison = "equal" | "differ" | "format-only";
  * Compare two SRI (Subresource Integrity) strings by picking the strongest
  * algorithm present in BOTH. Priority: sha512 > sha384 > sha256 > sha1.
  *
- * - `"equal"` — strongest common algorithm has identical digests
- * - `"differ"` — strongest common algorithm has different digests
+ * - `"equal"` — strongest common algorithm has identical digest sets
+ * - `"differ"` — strongest common algorithm has different digest sets
  * - `"format-only"` — no common algorithm; cannot confirm bytes changed
  *
  * Robust to extra whitespace and ordering of hash entries within each string.
@@ -155,10 +155,12 @@ export function compareIntegrity(
   const ALGO_PRIORITY = ["sha512", "sha384", "sha256", "sha1"] as const;
 
   for (const algo of ALGO_PRIORITY) {
-    const lockedDigest = lockedMap.get(algo);
-    const freshDigest = freshMap.get(algo);
-    if (lockedDigest !== undefined && freshDigest !== undefined) {
-      return lockedDigest === freshDigest ? "equal" : "differ";
+    const lockedDigests = lockedMap.get(algo);
+    const freshDigests = freshMap.get(algo);
+    if (lockedDigests !== undefined && freshDigests !== undefined) {
+      // SRI accepts any digest of its strongest algorithm; last-token-wins hides additions.
+      return lockedDigests.size === freshDigests.size &&
+        [...lockedDigests].every((digest) => freshDigests.has(digest)) ? "equal" : "differ";
     }
   }
 
@@ -166,18 +168,20 @@ export function compareIntegrity(
 }
 
 /**
- * Parse an SRI string into a Map of algorithm → base64-digest.
+ * Parse an SRI string into a Map of algorithm → base64-digest set.
  * SRI may contain multiple space-separated hash entries (e.g. "sha512-X sha1-Y").
  */
-function parseSri(sri: string): Map<string, string> {
-  const result = new Map<string, string>();
+function parseSri(sri: string): Map<string, Set<string>> {
+  const result = new Map<string, Set<string>>();
   for (const token of sri.trim().split(/\s+/)) {
     const dashIdx = token.indexOf("-");
     if (dashIdx < 1) continue;
     const algo = token.slice(0, dashIdx).toLowerCase();
     const digest = token.slice(dashIdx + 1);
     if (algo && digest) {
-      result.set(algo, digest);
+      const digests = result.get(algo) ?? new Set<string>();
+      digests.add(digest);
+      result.set(algo, digests);
     }
   }
   return result;

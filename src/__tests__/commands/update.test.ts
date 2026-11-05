@@ -1,3 +1,4 @@
+import { InstalledServerNotFoundError } from "../../store/servers.js";
 /**
  * Tests for src/commands/update.ts — written FIRST per TDD (Red → Green → Refactor).
  *
@@ -1286,5 +1287,19 @@ describe("handleUpdate — malformed client entry must not silently wipe env", (
     await handleUpdate({ yes: true }, deps);
     const call = (adapter.addServer as ReturnType<typeof vi.fn>).mock.calls[0];
     expect(call[2].env?.NESTED).toBeUndefined();
+  });
+});
+
+
+describe("handleUpdate store removal failures", () => {
+  it.each([false, true])("tolerates only an absent store record (absent=%s)", async absent => {
+    const error = absent ? new InstalledServerNotFoundError("not tracked") : Object.assign(new Error("store denied"), { code: "EACCES" });
+    const deps = makeDeps({
+      getServer: vi.fn(async (name: string, version?: string) => makeServerEntry(name, version ?? "2.0.0")),
+      removeInstalledServer: vi.fn().mockRejectedValue(error),
+    });
+    const result = handleUpdate({ yes: true }, deps);
+    if (absent) await expect(result).resolves.toBeUndefined();
+    else { await expect(result).rejects.toBe(error); expect(deps.addInstalledServer).not.toHaveBeenCalled(); }
   });
 });

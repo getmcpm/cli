@@ -122,7 +122,10 @@ export async function handleExport(
         servers[name] = { entry: { ...entry } };
       }
     } catch {
-      // Skip clients with unreadable configs
+      process.stderr.write(
+        `mcpm: ${clientId} config could not be read; this export may be incomplete. ` +
+          `Run \`mcpm doctor\` for details.\n`
+      );
     }
   }
 

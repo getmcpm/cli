@@ -39,7 +39,8 @@ Upgrade to the latest release before reporting, in case the issue is already fix
 mcpm is a security tool, so we hold our own release pipeline to the controls we ask
 you to expect from upstreams:
 
-- **Signed provenance.** Every release is published with
+- **OIDC Trusted Publishing and signed provenance.** npm publishing uses the
+  GitHub Actions OIDC identity, without a stored npm token. Releases use
   `pnpm publish --provenance`, producing an npm/Sigstore build attestation that ties
   the published tarball to this repository and the GitHub Actions workflow that built
   it. Verify it yourself:
@@ -50,7 +51,19 @@ you to expect from upstreams:
   ```
 
 - **Machine-readable SBOM.** A CycloneDX SBOM (`mcpm.cdx.json`) is generated from the
-  committed `pnpm-lock.yaml` and attached to each [GitHub release](https://github.com/getmcpm/cli/releases).
+  committed `pnpm-lock.yaml`. SBOM generation and keyless signing are best-effort
+  release steps; when successful, the SBOM and `mcpm.cdx.json.sigstore.json` bundle
+  are attached to the [GitHub release](https://github.com/getmcpm/cli/releases).
+  This describes the repository lock, not just production package contents.
+  After downloading both assets, verify their workflow identity:
+
+  ```sh
+  cosign verify-blob --bundle mcpm.cdx.json.sigstore.json mcpm.cdx.json \
+    --certificate-identity-regexp '^https://github.com/getmcpm/cli/\.github/workflows/publish\.yml@refs/tags/v' \
+    --certificate-oidc-issuer https://token.actions.githubusercontent.com
+  ```
+
+  This signature covers the SBOM; npm provenance separately covers the tarball.
 - **Pinned, reviewed CI.** All GitHub Actions are pinned to full commit SHAs;
   `.github/workflows/` changes require review via `CODEOWNERS`. Dependencies are
   installed from a frozen lockfile and tracked by Dependabot.

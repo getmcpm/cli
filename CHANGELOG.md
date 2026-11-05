@@ -14,6 +14,13 @@ published section (it happened to #170).
   real serve discovery/calls, direct and guarded results, malformed/denied config
   evidence and recovery, with native-visible and MCP-wire assertions.
 
+### Fixed
+
+- Reject malformed client configuration containers before reads or writes.
+- Refuse false-success MCP removals and propagate non-absence store failures.
+- Validate external scanner output before scoring and compare full SRI digest sets.
+- Preserve unreadable/malformed prior locks; report skipped import/export clients.
+
 ## [0.49.0] - 2026-11-03
 
 Publication verified on npm and the official MCP Registry. The published archive

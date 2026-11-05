@@ -1,5 +1,15 @@
 # mcpm Roadmap — Developer & Enterprise Adoption
 
+> **2026-11-05 delivery checkpoint:** released v0.49.0; native doctor validation
+> tooling merged in #307 and remains unreleased. Since this plan's older baseline,
+> update/settings preservation shipped in v0.45.0, package-version binding and
+> agent evidence in v0.46.0, modern/legacy serve in v0.48.0, Skills discovery
+> inspection in v0.48.1, and structured doctor in v0.49.0. See [CHANGELOG](../CHANGELOG.md)
+> and [validation boundaries](NATIVE-CLIENT-VALIDATION.md). The dated priorities,
+> estimates and market claims below are historical planning inputs, not a refreshed
+> adoption measurement or a new commitment to the old “next up” sequence.
+
+
 > Status: **Active plan of record** · Current: **v0.42.0** · Baseline drafted at v0.16.0 (2026-07-03)
 >
 > Companion to [`VISION.md`](./VISION.md) (the strategy layer both roadmaps hang off) and

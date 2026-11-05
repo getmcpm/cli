@@ -133,7 +133,7 @@ export async function handleLock(
   // the carry-forward that keeps a known-good provenance snapshot sticky across a
   // transient re-read failure of the same immutable coordinate.
   const prevLock = deps.readExistingLock
-    ? await deps.readExistingLock(lockPath).catch(() => null)
+    ? await deps.readExistingLock(lockPath)
     : null;
   const prevProvenance = buildPrevProvenanceMap(prevLock);
 

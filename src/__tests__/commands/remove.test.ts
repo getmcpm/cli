@@ -61,6 +61,7 @@ function makeDeps(overrides: Partial<RemoveDeps> = {}): RemoveDeps {
 // Import the handler (will fail until implementation exists)
 // ---------------------------------------------------------------------------
 
+import { InstalledServerNotFoundError } from "../../store/servers.js";
 import { removeHandler } from "../../commands/remove.js";
 
 // ---------------------------------------------------------------------------
@@ -326,15 +327,25 @@ describe("removeHandler — --client filter", () => {
   });
 });
 
-describe("removeHandler — removeFromStore failure is non-fatal", () => {
+describe("removeHandler — absent store record is non-fatal", () => {
   it("still outputs success even if store removal throws (server was already gone)", async () => {
     const deps = makeDeps({
       confirm: vi.fn().mockResolvedValue(true),
-      removeFromStore: vi.fn().mockRejectedValue(new Error('Server "my-server" not found')),
+      removeFromStore: vi.fn().mockRejectedValue(new InstalledServerNotFoundError('Server "my-server" not found')),
     });
     // Should not throw
     await expect(removeHandler("my-server", {}, deps)).resolves.not.toThrow();
     const calls = (deps.output as ReturnType<typeof vi.fn>).mock.calls.flat().join(" ");
     expect(calls).toMatch(/my-server/);
+  });
+});
+
+
+describe("removeHandler store failures", () => {
+  it("propagates store I/O failure instead of reporting success", async () => {
+    const error = Object.assign(new Error("store denied"), { code: "EACCES" });
+    const deps = makeDeps({ removeFromStore: vi.fn().mockRejectedValue(error) });
+    await expect(removeHandler("my-server", { yes: true }, deps)).rejects.toBe(error);
+    expect(deps.output).not.toHaveBeenCalled();
   });
 });

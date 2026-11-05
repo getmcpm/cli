@@ -11,7 +11,7 @@ import type { ClientId } from "../config/paths.js";
 import type { ConfigAdapter } from "../config/adapters/index.js";
 import type { detectInstalledClients } from "../config/detector.js";
 import type { getConfigPath } from "../config/paths.js";
-import type { removeInstalledServer } from "../store/servers.js";
+import { InstalledServerNotFoundError, type removeInstalledServer } from "../store/servers.js";
 
 // ---------------------------------------------------------------------------
 // Deps interface
@@ -112,8 +112,8 @@ export async function removeHandler(
   // 7. Remove from store (non-fatal if already absent).
   try {
     await removeFromStore(name);
-  } catch {
-    // Server may not be tracked in the store — this is acceptable.
+  } catch (error) {
+    if (!(error instanceof InstalledServerNotFoundError)) throw error;
   }
 
   // 8. Report success.

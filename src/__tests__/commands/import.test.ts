@@ -491,6 +491,20 @@ describe("handleImport — URL-based servers", () => {
 // ---------------------------------------------------------------------------
 
 describe("handleImport — adapter errors", () => {
+  it("reports an unreadable config instead of claiming it contains no servers", async () => {
+    const deps = makeDeps({
+      detectClients: vi.fn().mockResolvedValue(["cursor"]),
+      getAdapter: vi.fn().mockReturnValue({ read: vi.fn().mockRejectedValue(new Error("private config content")) }),
+    });
+    await handleImport({}, deps);
+    const text = (deps.output as ReturnType<typeof vi.fn>).mock.calls.flat().join("\n");
+    expect(text).toMatch(/cursor.*config could not be read/i);
+    expect(text).toContain("No importable MCP servers found");
+    expect(text).not.toContain("No existing MCP servers found");
+    expect(text).not.toContain("private config content");
+    expect(deps.addToStore).not.toHaveBeenCalled();
+  });
+
   it("continues with other clients if one adapter read fails", async () => {
     const lines: string[] = [];
     const failingAdapter: ConfigAdapter = {

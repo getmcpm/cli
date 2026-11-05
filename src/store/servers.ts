@@ -14,6 +14,8 @@ const FILENAME = "servers.json";
 
 export const SERVERS_SCHEMA_VERSION = 2;
 
+export class InstalledServerNotFoundError extends Error {}
+
 export interface InstalledServer {
   name: string;
   version: string;
@@ -70,7 +72,7 @@ export async function removeInstalledServer(name: string): Promise<void> {
     const index = current.findIndex((s) => s.name === name);
 
     if (index === -1) {
-      throw new Error(`Server "${name}" not found in installed servers list.`);
+      throw new InstalledServerNotFoundError(`Server "${name}" not found in installed servers list.`);
     }
 
     await writeJson(FILENAME, buildFile(current.filter((s) => s.name !== name)));

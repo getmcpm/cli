@@ -26,10 +26,10 @@ signature_overrides: # optional
     expires_at: 2026-06-01T00:00:00Z # optional ISO 8601 — auto-removed on next session
   - id: owasp-mcp-7-path-exfil-in-args
     action: block                    # promote a default-warn to default-block
-paused_until: 2026-05-17T18:00:00Z    # optional ISO 8601 — all inspection passes through until this time
+paused_until: 2026-05-17T18:00:00Z    # optional ISO 8601 — sessions started before this time stay paused until restarted
 ```
 
-Then **you must run `mcpm guard reset-integrity --policy --yes`**, because the integrity sidecar (`~/.mcpm/guard-policy.yaml.integrity`) still holds the SHA-256 of the previous content. The relay refuses to use the policy file if the sidecar mismatches — that's the rug-pull defense for the policy itself (so a malicious `npm postinstall` script can't silently mute signatures).
+Then **you must run `mcpm guard reset-integrity --policy --yes`**, because the integrity sidecar (`~/.mcpm/guard-policy.yaml.integrity`) still holds the SHA-256 of the previous content. The relay refuses to use the policy file if the sidecar mismatches — this detects edits that leave a stale sidecar. The sidecar is an unkeyed hash: a same-user process that can rewrite both files can bypass it.
 
 ## Field reference
 
@@ -41,11 +41,11 @@ An array of per-signature overrides. Each entry:
 |---|---|---|---|
 | `id` | string | yes | Must match a shipped signature id (see `mcpm guard list-signatures`) |
 | `action` | enum | yes | `ignore` (drop the finding entirely) / `warn` / `block` / `log_only` (keep the finding for the event log but treat as pass). `warn` and `block` are set **unconditionally** — `applyPolicy` (`src/guard/run-inner.ts`) assigns the override action outright rather than applying it as a severity-conditioned downgrade/upgrade, so `block` on a `low`-severity signature promotes it, and `warn` on a `high` one that would already warn is a no-op |
-| `expires_at` | ISO 8601 string | no | Override auto-expires on or after this timestamp |
+| `expires_at` | ISO 8601 string | no | Override is removed at session startup on or after this timestamp; running sessions retain their snapshot |
 
 ### `paused_until`
 
-ISO 8601 string. When set + in the future, the relay short-circuits all inspection: every message passes through without scanning. The relay does NOT continuously poll — it reads `paused_until` once at session start. To pause during an active session, restart the wrapped server (e.g. quit + relaunch the IDE).
+ISO 8601 string. If in the future at session startup, the relay short-circuits inspection for that entire session. It does not poll or resume at the timestamp. Pause, unpause, mute and unmute changes require restarting the wrapped server; to resume a paused session, clear the pause (or wait for expiry) and then restart.
 
 ## Validation
 

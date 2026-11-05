@@ -46,6 +46,7 @@
  * contract is the target shape, not something to bend.
  */
 
+import { z } from "zod";
 import type { Finding } from "./tier1.js";
 
 // ---------------------------------------------------------------------------
@@ -214,17 +215,14 @@ export interface Tier2Options {
   onWarn?: (message: string) => void;
 }
 
-/** Shape of a single finding in the external scanner's JSON output. */
-interface ExternalScanFinding {
-  severity?: string;
-  description?: string;
-  location?: string;
-}
-
-/** Shape of the external scanner JSON output we expect. */
-interface ExternalScanOutput {
-  findings?: ExternalScanFinding[];
-}
+/** Validate scanner-owned fields before they reach scoring and human renderers. */
+const ExternalScanOutputSchema = z.object({
+  findings: z.array(z.object({
+    severity: z.string().nullish(),
+    description: z.string().nullish(),
+    location: z.string().nullish(),
+  })),
+});
 
 // ---------------------------------------------------------------------------
 // Default exec implementation (real child process — not used in tests)
@@ -261,12 +259,13 @@ const SEVERITY_MAP: Record<string, Finding["severity"]> = {
   low: "low",
 };
 
-function normaliseSeverity(raw: string | undefined): Finding["severity"] {
+function normaliseSeverity(raw: string | null | undefined): Finding["severity"] {
   // Issue #24: fail safe. An unknown/novel severity from the external scanner
   // (e.g. a new critical category) must NOT be silently downgraded to a
   // non-blocking level. Map anything unrecognised to "high" so the trust gate
   // treats it as blocking rather than letting it pass.
-  return SEVERITY_MAP[raw?.toLowerCase() ?? ""] ?? "high";
+  const key = raw?.toLowerCase() ?? "";
+  return Object.hasOwn(SEVERITY_MAP, key) ? SEVERITY_MAP[key] : "high";
 }
 
 // ---------------------------------------------------------------------------
@@ -429,15 +428,16 @@ export async function scanTier2(serverName: string, options?: Tier2Options): Pro
   }
 
   // Step 5: parse output
-  let parsed: ExternalScanOutput;
+  let parsed: unknown;
   try {
-    parsed = JSON.parse(stdout) as ExternalScanOutput;
+    parsed = JSON.parse(stdout);
   } catch {
     return [scannerErrorFinding("external scanner output could not be parsed as JSON")];
   }
 
-  if (!Array.isArray(parsed.findings)) {
-    return [scannerErrorFinding("external scanner output had no findings array")];
+  const validated = ExternalScanOutputSchema.safeParse(parsed);
+  if (!validated.success) {
+    return [scannerErrorFinding("external scanner output had an invalid findings array")];
   }
 
   // Step 6: map to Finding[] immutably.
@@ -448,7 +448,7 @@ export async function scanTier2(serverName: string, options?: Tier2Options): Pro
   // sanitizeForTerminal also truncates to 256 chars, and `audit --json` /
   // `--sarif` feed machine consumers that must stay byte-faithful (the v0.20.0
   // decision — sanitize on human-render branches, JSON verbatim).
-  return parsed.findings.map((f): Finding => ({
+  return validated.data.findings.map((f): Finding => ({
     severity: normaliseSeverity(f.severity),
     // NOTE: every finding is typed prompt-injection regardless of what the
     // scanner actually reported, which mis-files e.g. a CVE under the
