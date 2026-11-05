@@ -217,8 +217,80 @@ export function assertConsentObservation(obs, client, action, tool) {
   }
 }
 
+export const doctorCases = ['direct', 'guarded'].flatMap(mode => ['healthy', 'malformed', 'denied', 'recovered'].map(scenario => `${mode}-${scenario}`));
+
+export function assertDoctorObservation(obs, client) {
+  assert.equal(obs.execution.timedOut, false);
+  assert.equal(obs.execution.status, 0, obs.execution.stderr + obs.execution.stdout);
+  assert.equal(obs.receipt?.status, 'pass');
+  assertNativeWire(obs.wire, client, 'mcpm_doctor');
+  const root = '/opt/mcpm-native', home = `${root}/doctor-home`;
+  const mode = obs.request.version;
+  assert.ok(['direct', 'guarded'].includes(mode));
+  assert.ok(['doctor-healthy', 'doctor-malformed', 'doctor-denied', 'doctor-recovered'].includes(obs.request.case));
+  const key = client === 'vscode' ? 'servers' : 'mcpServers';
+  assert.deepEqual(JSON.parse(JSON.stringify(obs.config[key])), { 'native-doctor': {
+    ...(client === 'vscode' ? { type: 'stdio' } : {}), command: `${root}/node/bin/node`,
+    args: [`${root}/doctor-peer.mjs`, `${root}/work`, home, mode],
+  } }, 'native client must launch the exact doctor recorder and mode');
+  if (mode === 'guarded') assert.match(obs.pins?.servers?.['native-doctor']?.mcpm_doctor?.current_hash ?? '', /^sha256:[a-f0-9]{64}$/, 'missing real guard doctor schema pin');
+  else assert.equal(obs.pins, null, 'direct cases must precede guard enrollment');
+  const calls = obs.wire.filter(row => row.direction === 'to-server' && row.message.method === 'tools/call');
+  assert.equal(calls.length, 1, 'exactly one read-only doctor call');
+  assert.equal(calls[0].message.params.name, 'mcpm_doctor');
+  assert.deepEqual(calls[0].message.params.arguments, {});
+  const reply = id => {
+    const matches = obs.wire.filter(row => row.direction === 'from-server' && row.message.id === id);
+    assert.equal(matches.length, 1, 'missing or duplicate correlated response');
+    assert.equal(matches[0].message.error, undefined);
+    return matches[0].message.result;
+  };
+  const listing = obs.wire.find(row => row.direction === 'to-server' && row.message.method === 'tools/list');
+  assert.ok(listing, 'missing native tools/list');
+  const tool = reply(listing.message.id).tools.find(tool => tool.name === 'mcpm_doctor');
+  assert.equal(tool.outputSchema.properties.schemaVersion.const, 1);
+  assert.equal(tool.annotations.readOnlyHint, true);
+  const result = reply(calls[0].message.id);
+  const visible = client === 'vscode' ? obs.receipt.results : obs.receipt.responses;
+  assert.ok(Array.isArray(visible));
+  if (client === 'claude-code' || obs.request.case !== 'doctor-denied') assert.equal(visible.length, 1);
+  if (obs.request.case === 'doctor-denied') {
+    assert.equal(result.isError, true);
+    assert.equal(result.structuredContent, undefined, 'error must not fabricate healthy evidence');
+    assert.match(JSON.stringify(result), /EACCES|permission denied/i);
+    assert.match(JSON.stringify(visible) + (obs.receipt.doctorError ?? ''), /EACCES|permission denied/i, 'client must surface the error');
+    if (client === 'claude-code') assert.ok(visible.some(row => row.is_error === true), 'Claude must preserve tool error state');
+  } else {
+    assert.notEqual(result.isError, true);
+    assert.equal(obs.receipt.doctorError, undefined);
+    if (client === 'claude-code') assert.notEqual(visible[0].is_error, true);
+    const model = result.structuredContent;
+    assert.equal(model?.schemaVersion, 1);
+    assert.deepEqual(JSON.parse(result.content.find(part => part.type === 'text').text), model);
+    assert.equal(model.ok, obs.request.case !== 'doctor-malformed');
+    assert.deepEqual(model.clients.map(row => row.id).sort(), ['claude-code', 'claude-desktop', 'cursor', 'gemini-cli', 'vscode', 'windsurf']);
+    for (const row of model.clients) {
+      assert.equal(typeof row.label, 'string');
+      assert.equal(row.exists, row.id === 'cursor');
+      assert.equal(row.malformed, row.id === 'cursor' && obs.request.case === 'doctor-malformed');
+      assert.equal(row.serverCount, 0); assert.equal(row.guardedCount, 0);
+    }
+    assert.deepEqual(model.runtimes.map(row => row.name).sort(), ['docker', 'npx', 'uvx']);
+    for (const runtime of model.runtimes) assert.equal(typeof runtime.available, 'boolean');
+    assert.equal(model.crossClient, null); assert.deepEqual(model.secrets, []);
+    if (obs.request.case === 'doctor-malformed') {
+      assert.equal(model.issues.length, 1); assert.equal(model.issues[0].kind, 'malformed-config');
+      assert.match(model.issues[0].message, /Cursor/);
+    } else assert.deepEqual(model.issues, []);
+    const parts = visible.flatMap(row => typeof row.content === 'string' ? [row.content]
+      : row.content.map(part => part.value ?? part.text).filter(text => typeof text === 'string'));
+    assert.ok(parts.some(text => { try { assert.deepEqual(JSON.parse(text), model); return true; } catch { return false; } }), 'native-visible JSON must preserve the doctor model');
+  }
+}
+
 export function validateReport(report, client, pins, hashes, evidence, artifact) {
-  const expected = report.suite === 'trust' ? trustCases : report.suite === 'approvals' ? approvalCases : ['install-and-native-echo', 'enable-and-native-block-recovery', 'warn-and-forward', 'cancel-and-recover',
+  assert.ok(['baseline', 'realistic-config', 'approvals', 'trust', 'doctor'].includes(report.suite), 'unknown native suite');
+  const expected = report.suite === 'doctor' ? doctorCases : report.suite === 'trust' ? trustCases : report.suite === 'approvals' ? approvalCases : ['install-and-native-echo', 'enable-and-native-block-recovery', 'warn-and-forward', 'cancel-and-recover',
     ...(client === 'vscode' ? ['restart-without-cached-result'] : []), 'update-preserves-wrap-and-settings', 'schema-drift-and-recovery', 'disable-restores-launch-and-remove-preserves-settings'];
   assert.equal(report.schemaVersion, 1);
   assert.equal(report.client, client); assert.equal(report.clientVersion, client === 'vscode' ? pins.vscode.version : pins.claudeCode);
@@ -232,7 +304,17 @@ export function validateReport(report, client, pins, hashes, evidence, artifact)
   const references = report.cases.flatMap(c => { assert.ok(Array.isArray(c.evidence) && c.evidence.length > 0, 'missing case evidence'); return c.evidence; });
   assert.equal(new Set(references).size, references.length, 'case evidence was overwritten');
   assert.deepEqual(references.sort(), Object.keys(evidence).filter(f => f !== 'report.json').sort(), 'incomplete case evidence export');
-  if (report.suite === 'trust') {
+  if (report.suite === 'doctor') {
+    assert.equal(report.syntheticRegistryAndLauncher, false);
+    assert.equal(report.syntheticModelGateway, client === 'claude-code');
+    report.cases.forEach((row, i) => {
+      assert.equal(row.evidence.length, 1);
+      const obs = evidence[row.evidence[0]];
+      assert.equal(obs.request.case, 'doctor-' + doctorCases[i].split('-')[1]);
+      assert.equal(obs.request.version, doctorCases[i].split('-')[0]);
+      assertDoctorObservation(obs, client);
+    });
+  } else if (report.suite === 'trust') {
     const plans = client === 'vscode'
       ? [['trust-workspace-deny'], ['trust-server-deny'], ['trust-server-allow', 'trust-server-persisted'], ['trust-definition-deny', 'trust-definition-allow']]
       : [['trust-workspace-deny'], ['trust-server-deny'], ['trust-server-allow', 'trust-server-persisted'], ['trust-definition-change']];

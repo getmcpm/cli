@@ -8,6 +8,12 @@ _Add entries here, never under a stamped version_ — a release commit renames t
 heading, and a branch that wrote beneath it merges without conflict straight into a
 published section (it happened to #170).
 
+### Added
+
+- Separate native `mcpm_doctor` validation suite for VS Code and Claude Code:
+  real serve discovery/calls, direct and guarded results, malformed/denied config
+  evidence and recovery, with native-visible and MCP-wire assertions.
+
 ## [0.49.0] - 2026-11-03
 
 Publication verified on npm and the official MCP Registry. The published archive

@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { createHash } from 'node:crypto';
 import { applyEdits, getNodeValue, modify, parseTree } from 'jsonc-parser';
 import { serverName } from './fixture-registry.mjs';
-import { assertEcho as checkEcho, assertNativeWire, assertGuestBoundary, cliArtifact } from './checks.mjs';
+import { assertEcho as checkEcho, assertNativeWire, assertGuestBoundary, cliArtifact, assertDoctorObservation } from './checks.mjs';
 import { gateway } from './gateway.mjs';
 import { approveFixtureDialogs, fixtureInputPrompt, fixtureInputValue } from './approval.mjs';
 import { consentDialogs } from './consent-vscode.mjs';
@@ -19,10 +19,10 @@ import { approvalCases, assertConsentObservation } from './checks.mjs';
 const root = path.dirname(fileURLToPath(import.meta.url));
 const client = process.argv[2];
 const flags = process.argv.slice(3);
-assert.ok(flags.every(f => ['candidate', 'realistic', 'approvals', 'trust'].includes(f)) && new Set(flags).size === flags.length);
-const candidate = flags.includes('candidate'), realistic = flags.includes('realistic'), approvals = flags.includes('approvals'), trust = flags.includes('trust');
-assert.ok([realistic, approvals, trust].filter(Boolean).length <= 1);
-assert.ok((!realistic && !trust) || candidate);
+assert.ok(flags.every(f => ['candidate', 'realistic', 'approvals', 'trust', 'doctor'].includes(f)) && new Set(flags).size === flags.length);
+const candidate = flags.includes('candidate'), realistic = flags.includes('realistic'), approvals = flags.includes('approvals'), trust = flags.includes('trust'), doctor = flags.includes('doctor');
+assert.ok([realistic, approvals, trust, doctor].filter(Boolean).length <= 1);
+assert.ok((!realistic && !trust && !doctor) || candidate);
 assert.ok(['vscode', 'claude-code'].includes(client));
 assert.equal(process.platform, 'darwin', 'native test requires macOS guest');
 assert.equal(root, '/opt/mcpm-native', 'native test must run inside the prepared guest');
@@ -56,8 +56,8 @@ function assertEcho(content, expected) {
 }
 let currentCase;
 let observationNumber = 0;
-const report = { schemaVersion: 1, boundary, client, suite: trust ? 'trust' : approvals ? 'approvals' : realistic ? 'realistic-config' : 'baseline', cliArtifact: await cliArtifact(root, candidate), platform: process.platform, arch: process.arch, node: process.version,
-  configPath, syntheticRegistryAndLauncher: true, syntheticModelGateway: client === 'claude-code', cases: [],
+const report = { schemaVersion: 1, boundary, client, suite: doctor ? 'doctor' : trust ? 'trust' : approvals ? 'approvals' : realistic ? 'realistic-config' : 'baseline', cliArtifact: await cliArtifact(root, candidate), platform: process.platform, arch: process.arch, node: process.version,
+  configPath, syntheticRegistryAndLauncher: !doctor, syntheticModelGateway: client === 'claude-code', cases: [],
   notTested: ['Live registry/npm service behavior', 'Real provider/model or usage-skill behavior', ...(trust ? ['Inline chat, Agent Host, portable VS Code profiles and non-project server scopes'] : approvals ? ['VS Code native macOS dialog rendering, inline chat and Agent Host approvals'] : ['Interactive chat/approval UI']), 'All protocol features or other platforms/clients'] };
 async function json(file, fallback) {
   try {
@@ -92,7 +92,8 @@ async function execute(command, args, extraEnv = {}, interrupt) {
   } finally { clearTimeout(timeout); clearInterval(poll); }
 }
 async function native(caseName, version, consent, trustIntent) {
-  const eventOffset = (await lines(`${homedir()}/.mcpm/guard-events.jsonl`)).length;
+  const stateHome = doctor ? `${root}/doctor-home` : homedir();
+  const eventOffset = (await lines(`${stateHome}/.mcpm/guard-events.jsonl`)).length;
   const request = { case: caseName, text: `native-${caseName}${approvals || trust ? '-' + (observationNumber + 1) : ''}`, version, ...(consent ? { consent } : {}), ...(trustIntent ? { trust: trustIntent } : {}) };
   for (const name of ['wire.jsonl', 'gateway.jsonl', 'receipt.json', 'reload.json', 'consent-intent.json', 'consent-ack.json', 'trust-intent.json', 'trust-ack.jsonl', 'trust-ui.jsonl']) await rm(`${work}/${name}`, { force: true });
   await writeFile(`${work}/request.json`, JSON.stringify(request));
@@ -128,12 +129,12 @@ async function native(caseName, version, consent, trustIntent) {
     } finally { await model.close(); }
   }
   const wire = await lines(`${work}/wire.jsonl`);
-  const events = (await lines(`${homedir()}/.mcpm/guard-events.jsonl`)).slice(eventOffset);
+  const events = (await lines(`${stateHome}/.mcpm/guard-events.jsonl`)).slice(eventOffset);
   const observedConfigPath = trustIntent?.configPath ?? configPath;
   const observation = { request, execution, receipt, wire, events, configPath: observedConfigPath, config: await json(observedConfigPath),
     configText: await readFile(observedConfigPath, 'utf8'),
     backupText: await readFile(observedConfigPath + '.bak', 'utf8').catch(e => { if (e.code !== 'ENOENT') throw e; return null; }),
-    pins: await json(`${homedir()}/.mcpm/pins.json`, null),
+    pins: await json(`${stateHome}/.mcpm/pins.json`, null),
     ...(trust && client === 'vscode' ? { trustUI: await lines(`${work}/trust-ui.jsonl`) } : {}),
     ...(approvals || trust ? { clientSettings: await json(client === 'vscode' ? `${homedir()}/Library/Application Support/Code/User/settings.json`
       : trust ? `${trustIntent.workspacePath}/.claude/settings.local.json` : `${root}/.claude/settings.local.json`, null) } : {}) };
@@ -170,10 +171,31 @@ for (const file of [...(await readdir(root)).filter(f => /\.(mjs|json|tgz|tcl)$/
 await mkdir(path.dirname(configPath), { recursive: true }); await writeFile(configPath, seedText);
 if (client === 'vscode') await writeFile(`${homedir()}/Library/Application Support/Code/User/settings.json`, JSON.stringify({ 'chat.tools.global.autoApprove': !approvals, ...(approvals ? { 'chat.permissions.default': 'default', 'window.dialogStyle': 'custom' } : {}), ...(trust ? { 'chat.mcp.autostart': 'never' } : {}), 'telemetry.telemetryLevel': 'off', 'update.mode': 'none', 'extensions.autoUpdate': false, 'chat.mcp.discovery.enabled': trust ? { 'cursor-workspace': true } : {} }));
 // Simulate npm's launcher only for the named, dependency-free fixture package.
-await chmod(`${root}/launcher.mjs`, 0o755);
-await symlink(`${root}/launcher.mjs`, `${root}/bin/npx`);
+if (!doctor) {
+  await chmod(`${root}/launcher.mjs`, 0o755);
+  await symlink(`${root}/launcher.mjs`, `${root}/bin/npx`);
+}
 
-if (trust) {
+if (doctor) {
+  const home = `${root}/doctor-home`;
+  await mkdir(home, { recursive: true });
+  await mkdir(`${home}/.cursor`, { recursive: true });
+  for (const mode of ['direct', 'guarded']) {
+    for (const scenario of ['healthy', 'malformed', 'denied', 'recovered']) {
+      await run(`${mode}-${scenario}`, async () => {
+        await chmod(`${home}/.cursor`, 0o700);
+        await writeFile(`${home}/.cursor/mcp.json`, scenario === 'malformed' ? '{broken' : '{"mcpServers":{}}');
+        const entry = { command: node, args: [`${root}/doctor-peer.mjs`, work, home, mode] };
+        await writeFile(configPath, JSON.stringify({ ...seed, [key]: { 'native-doctor': { ...(client === 'vscode' ? { type: 'stdio' } : {}), ...entry } } }));
+        try {
+          if (scenario === 'denied') await chmod(`${home}/.cursor`, 0o000);
+          const obs = await native(`doctor-${scenario}`, mode);
+          assertDoctorObservation(obs, client);
+        } finally { await chmod(`${home}/.cursor`, 0o700); }
+      });
+    }
+  }
+} else if (trust) {
   const workspace = async (name, marker = 'retained') => {
     const workspacePath = `${root}/trust-${client}-${name}`;
     const projectConfig = client === 'vscode' ? `${workspacePath}/${name === 'workspace-deny' ? '.vscode/mcp.json' : '.cursor/mcp.json'}` : `${workspacePath}/.mcp.json`;

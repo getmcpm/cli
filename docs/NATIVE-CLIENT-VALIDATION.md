@@ -57,6 +57,64 @@ archive hashes and installs npm dependencies with lifecycle scripts disabled.
 Claude Code's reviewed, pinned native-binary installer runs inside the offline
 guest to connect its preloaded platform binary to the CLI entry point.
 
+### Validate native doctor results
+
+This is unreleased validation tooling, measured on 2026-11-05 against the actual
+published v0.49.0 archive. The corrected fresh run passed all sixteen native cases:
+
+| Installed client | Observed opening | Doctor cases |
+| --- | --- | --- |
+| VS Code 1.141.0 | initialize, 2025-11-25 | 8 pass, 0 fail |
+| Claude Code 2.1.296 | server/discover, 2026-07-28 | 8 pass, 0 fail |
+
+Each client ran first direct, then guarded. The VM guest was macOS 26.6.2/arm64,
+Node 26.11.1, with no host shares and a verified loopback-only packet filter.
+The archive SHA-256 was `89999bb554a4ec05dfe643754bc8d5693a8c0df6cc8f0d797cd228eb4862c722`.
+Independent verification bound npm SHA-512 integrity, installed runtime files,
+harness hashes, native receipts and successful deletion of both guest clones.
+Temporary evidence: `/private/tmp/mcpm-doctor-reviewed-native/manifest.json`.
+
+VS Code exposed JSON/error text in native text parts (`value`); it did not expose
+an explicit MCP error flag in that API result. Claude exposed JSON text and
+`tool_result.is_error: true` for access denial. The correlated wire retained
+`structuredContent` alongside identical JSON text, and denied calls had
+`isError: true` without a fabricated structured success result. Each observation
+starts a fresh native client process; recovery is measured after access restoration
+and restart, not in the same live server session.
+
+Astra reviewed and fixed native result decoding, strict fixture/provenance checks,
+recorder shutdown and a JSONC null-prototype comparison false failure. The first
+VS Code report failed only that last harness assertion; the fresh corrected run
+supersedes it. All 34 local harness checks pass, including negatives for incomplete
+reports, missing error state, wrong launch modes and unexpected mutating calls.
+
+Prepare an explicit modern mcpm archive (v0.49.0 or later) with the existing
+candidate-archive mechanism, then use the separate doctor suite:
+
+```sh
+node scripts/native-client/prepare.mjs /tmp/mcpm-doctor-payload /tmp/getmcpm-cli-0.49.0.tgz
+node scripts/native-client/run-vm.mjs /path/to/tart \
+  /tmp/mcpm-native-vms /tmp/mcpm-doctor-payload /tmp/mcpm-doctor-evidence \
+  --candidate --doctor
+```
+
+The runner boots VS Code first and Claude Code second, in separate disposable
+VM clones. Each client discovers and invokes the real archive's `mcpm_doctor`
+with empty arguments. Direct and guarded connections each cover a healthy
+synthetic home, malformed Cursor config, inaccessible Cursor parent directory,
+and recovery after access restoration. The doctor-inspected home is separate
+from the native client's launch config. No fixture registry or package launcher
+is used for the doctor server; Claude's model gateway remains synthetic.
+
+A transparent recorder outside the guard captures correlated native-facing MCP
+frames. Checks require the advertised version-1 schema, identical text/structured
+models, issue-bearing results and tool errors without fabricated healthy output.
+Native-visible JSON/error checks are separate from wire assertions: these tests
+do not claim the VS Code or Claude API exposes structuredContent unchanged.
+This suite does not test real model decisions, default tool approvals, provider
+credentials, legacy binaries or every client release. The existing pinned
+baseline suite and its measured versions remain unchanged.
+
 ### Test a candidate with realistic configuration
 
 Build and pack the current checkout, then explicitly prepare/run that artifact:
