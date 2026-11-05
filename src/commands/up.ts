@@ -46,7 +46,7 @@ import { parseEnvFile } from "../stack/env.js";
 import { resolveInstallEntry, parseSecretsMode, validateRemoteUrl } from "./install.js";
 import { assertLockedPackageConsistency, bindLockedPackage, packageCoordinate } from "../registry/package-coordinate.js";
 import { mergeUpdateEntry } from "./update.js";
-import { isWrapped, unwrapEntry, rewrapEntry } from "../guard/wrap.js";
+import { isWrapped, unwrapEntry, rewrapEntry, assertUnambiguousWrap } from "../guard/wrap.js";
 import { assessReleaseAge, DEFAULT_MIN_RELEASE_AGE_HOURS } from "../scanner/cooldown.js";
 import { extractRegistryMeta } from "../utils/format-trust.js";
 import { assessServerStatus } from "../scanner/registry-status.js";
@@ -323,6 +323,7 @@ export async function handleUp(
       }))[name];
       if (malformed) throw new Error(`Malformed client entry for ${name}; repair it before installing the locked package`);
       if (!configured) { entries.set(client, next); continue; }
+      assertUnambiguousWrap(configured);
       const existing = isWrapped(configured) ? unwrapEntry(configured) : configured;
       if (!existing) throw new Error(`Malformed guard marker for ${name}; refusing to replace it`);
       const legacy = resolveInstallEntry(publication, client, coordinate, true);

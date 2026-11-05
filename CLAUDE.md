@@ -7,6 +7,13 @@
 
 ## What We're Building
 
+**Wrapper recognition (unreleased #155 candidate):** guard enable/disable,
+status, doctor and update distinguish plain servers, recognized wrapper forms and
+ambiguous wrappers. Server-owned marker-looking arguments remain enrollable;
+malformed or missing plausible wrapper paths refuse mutation with backup/repair
+guidance. Recognition checks launcher structure and local package metadata, not
+binary authenticity or native activation. See `docs/GUARD.md`.
+
 **Native doctor tooling (v0.49.1):** The separate `--candidate --doctor` VM
 suite invokes real `mcpm serve` through installed VS Code, then Claude Code.
 It separates native-visible JSON/error evidence from structured/text wire proof;

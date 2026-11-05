@@ -21,7 +21,7 @@ import type { ClientId } from "../config/paths.js";
 import type { ConfigAdapter, McpServerEntry } from "../config/adapters/index.js";
 import type { getConfigPath } from "../config/paths.js";
 import { buildDriftModel, type ClientState } from "../config/drift.js";
-import { isWrapped } from "../guard/wrap.js";
+import { isWrapped, classifyWrap, WRAP_REPAIR_MESSAGE } from "../guard/wrap.js";
 import { scanConfigSecrets, type ConfigSecretFinding } from "../scanner/config-secrets.js";
 import { sanitizeForTerminal } from "../guard/sanitize.js";
 
@@ -192,6 +192,11 @@ export async function buildDoctorModel(deps: DoctorModelDeps): Promise<DoctorMod
     }
     const servers = read.servers ?? {};
     const entries = Object.values(servers);
+    for (const [name, entry] of Object.entries(servers)) {
+      if (classifyWrap(entry) === "ambiguous") issues.push({
+        kind: "malformed-config", message: `Server "${name}" in ${label}: ${WRAP_REPAIR_MESSAGE}`,
+      });
+    }
     return {
       id: clientId,
       label,

@@ -22,11 +22,9 @@ import {
 import { handleDoctor } from "../../server/handlers.js";
 import type { ServerDeps } from "../../server/handlers.js";
 
-// A wrapped entry: isWrapped() matches the contiguous ["guard","run","--inner"].
-const WRAPPED: McpServerEntry = {
-  command: "mcpm",
-  args: ["guard", "run", "--inner", "--server-name", "x", "--", "npx", "srv"],
-};
+import { wrapEntry } from "../../guard/wrap.js";
+
+const WRAPPED = wrapEntry("x", { command: "npx", args: ["srv"] }, { mcpmBinary: "mcpm" });
 
 const ENV: DoctorReportEnv = {
   mcpm: "0.19.0",
@@ -73,6 +71,13 @@ function fullDeps(
 }
 
 describe("buildDoctorModel (D7)", () => {
+  it("reports an ambiguous wrapper as malformed and unguarded", async () => {
+    const model = await buildDoctorModel(modelDeps({ broken: { command: "mcpm", args: ["guard", "run", "--inner"] } }, () => true));
+    expect(model.clients.find((c) => c.id === "claude-desktop")!.guardedCount).toBe(0);
+    expect(model.issues.some((i) => i.message.includes("trusted client-config backup"))).toBe(true);
+    expect(model.ok).toBe(false);
+  });
+
   it("counts guarded servers and flags a server on a missing runtime", async () => {
     const model = await buildDoctorModel(
       modelDeps(

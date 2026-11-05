@@ -63,7 +63,7 @@ describe("version-bound package launches (#120)", () => {
       disabled: true, cwd: "/user/data", includeTools: ["read_file"], timeout: 1234,
     };
     try {
-      await adapter.addServer(config, "alpha", wrapEntry("alpha", original, { mcpmBinary: "/user/node", scriptPath: "/user/mcpm/dist/index.js" }, { profileHash: "a".repeat(64), required: true }));
+      await adapter.addServer(config, "alpha", wrapEntry("alpha", original, { mcpmBinary: "mcpm" }, { profileHash: "a".repeat(64), required: true }));
       const deps = { getInstalledServers: async () => [{ name: "alpha", version: "9.0.0", clients: ["gemini-cli"], installedAt: trust.assessedAt }],
         getServer: async (_name, version) => {
           const publication = entry();

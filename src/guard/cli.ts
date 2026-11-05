@@ -21,7 +21,7 @@ import {
   type OrchestratorDeps,
 } from "./orchestrator.js";
 import os from "node:os";
-import { defaultWrapContext, isWrapped, unwrapEntry, type ConfineMarker } from "./wrap.js";
+import { defaultWrapContext, isWrapped, classifyWrap, unwrapEntry, type ConfineMarker } from "./wrap.js";
 import { deriveDefaultProfile } from "./confine/derive.js";
 import {
   readConfineStore,
@@ -154,7 +154,7 @@ async function printEnableDryRun(opts: EnableOpts): Promise<void> {
       return s.malformed;
     });
     for (const s of malformed) {
-      opts.write(`    ⚠ MALFORMED ${sanitize(s.name)} (will be skipped, not wrapped)\n`);
+      opts.write(`    ⚠ MALFORMED ${sanitize(s.name)} (will be skipped, not wrapped)${s.wrapError ? `: ${s.wrapError}` : ""}\n`);
     }
   }
 }
@@ -205,7 +205,7 @@ async function collectConfineTargets(opts: ConfineComputeOpts): Promise<Map<stri
     }
     for (const [name, entry] of Object.entries(entries)) {
       if (opts.server !== undefined && name !== opts.server) continue;
-      if (!entry.command || isWrapped(entry)) continue;
+      if (!entry.command || classifyWrap(entry) !== "plain") continue;
       // Tie-breaker: first client wins. If the same server NAME runs a different
       // command across clients (e.g. `npx` in one, `node` in another), the net
       // classification is taken from the first-seen command. Pass `--client` to
@@ -644,7 +644,7 @@ function printStatus(status: StatusReport, opts: CommandIO): void {
           : s.unguarded
             ? "⚠ UNGUARDED"
             : "·";
-      opts.write(`    ${marker} ${sanitize(s.name)}\n`);
+      opts.write(`    ${marker} ${sanitize(s.name)}${s.wrapError ? `: ${s.wrapError}` : ""}\n`);
     }
   }
 }

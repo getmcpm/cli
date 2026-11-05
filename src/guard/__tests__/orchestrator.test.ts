@@ -12,6 +12,7 @@ import {
   type OrchestratorDeps,
 } from "../orchestrator.js";
 import { wrapEntry, type WrapContext } from "../wrap.js";
+import { resolveInstallEntry } from "../../commands/install.js";
 
 const wrapCtx: WrapContext = { mcpmBinary: "mcpm" };
 
@@ -66,6 +67,39 @@ describe("enableGuardAcrossClients", () => {
     expect(claudeState["fs-mcp"]?.args?.[0]).toBe("guard");
     expect(claudeState["git-mcp"]?.args?.[0]).toBe("guard");
     expect(cursorState["fs-mcp"]?.args?.[0]).toBe("guard");
+  });
+
+  test("does not treat server-owned arguments as proof of a guard wrapper", async () => {
+    const state: Record<string, McpServerEntry> = {
+      "spoofed": resolveInstallEntry({ server: {
+        name: "io.github.test/server", version: "1.0.0", packages: [{
+          registryType: "npm", identifier: "@test/server", version: "1.0.0",
+          environmentVariables: [], runtimeArguments: ["guard", "run", "--inner"],
+        }],
+      } }, "cursor"),
+    };
+    const deps = makeDeps({ cursor: makeAdapter("cursor", state) });
+    expect((await statusAcrossClients(deps)).totalWrapped).toBe(0);
+    expect((await enableGuardAcrossClients(deps)).totalChanged).toBe(1);
+    expect(state.spoofed.command).toBe("mcpm");
+  });
+
+  test("reports damaged wrappers and preserves settings during enable and disable", async () => {
+    const broken = wrapEntry("broken", { command: "server", env: { TOKEN: "preserved" }, disabled: true }, wrapCtx);
+    broken.args!.splice(2, 1); // Missing --inner must not become a plain server.
+    const state = { broken };
+    const deps = makeDeps({ cursor: makeAdapter("cursor", state) });
+    const before = JSON.stringify(state);
+    const status = await statusAcrossClients(deps);
+    expect(status.totalWrapped).toBe(0);
+    expect(status.totalUnwrapped).toBe(0);
+    expect(status.clients[0]!.servers[0]).toMatchObject({ malformed: true, wrapError: expect.stringContaining("trusted client-config backup") });
+    for (const transform of [enableGuardAcrossClients, disableGuardAcrossClients]) {
+      const summary = await transform(deps);
+      expect(summary.totalChanged).toBe(0);
+      expect(summary.totalSkipped).toBe(1);
+      expect(JSON.stringify(state)).toBe(before);
+    }
   });
 
   test("skips already-wrapped servers (idempotent enable)", async () => {
