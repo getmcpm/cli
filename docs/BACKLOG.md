@@ -17,7 +17,7 @@ used the published v0.49.0 archive.
 
 | Order | ID | Scope/status | Dependency |
 | --- | --- | --- | --- |
-| 1 | #155 | Wrapper recognition fix in review; not released | Reproduced install-to-orchestration case and legacy matrix |
+| 1 | #155 | Wrapper recognition merged; v0.49.2 release preparation | Reproduced install-to-orchestration case and legacy matrix |
 | 2 | #141 | Existing: read-only project/scope visibility | Honest wrapper/unknown states; explicit project roots |
 | 3 | #122 | Existing: managed-policy-aware setup | #155; one pinned host/native policy fixture set |
 | 4 | #156 | New: local skill/plugin change-review receipt; experiment | #141; one consumer; fixed file/host scope |
@@ -33,7 +33,7 @@ are excluded. Do not implement the whole queue in parallel.
 
 ## #155 — Honest wrapper identity and protection status
 
-**Status:** confirmed P1, not fixed by #308; the current candidate adds launcher/marker recognition and explicit ambiguity with repair guidance. [Validation](WRAPPER-IDENTITY-VALIDATION.md) records Sol implementation, Astra review/fixes and packed/native checks; publication remains pending. **User/problem:** a plain server can
+**Status:** confirmed P1, not fixed by #308; PR #312 merged the fix with launcher/marker recognition and explicit ambiguity with repair guidance. [Validation](WRAPPER-IDENTITY-VALIDATION.md) records Sol implementation, Astra review/fixes and packed/native checks; v0.49.2 publication verification remains separate. **User/problem:** a plain server can
 be misidentified as already guarded, undermining enrollment/status evidence.
 **MVP:** define recognized wrapper, plain entry and ambiguous/invalid states;
 handle original launch forms without silently rewriting or double-wrapping them.
