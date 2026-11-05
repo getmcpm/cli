@@ -118,4 +118,4 @@ permissions, provider/model behavior or other host versions/platforms.
 Temporary receipts/probe remain in `/private/tmp/mcpm-141-reviewed-sandbox-evidence`,
 `/private/tmp/mcpm-141-sandbox` and `/private/tmp/mcpm-141-reviewed-protocol`. The test
 container and volume were removed after isolation/receipt read-back. This remains
-an unpublished candidate; current release is v0.49.2.
+a historical candidate; #315 merged and is included in v0.50.0 release preparation.

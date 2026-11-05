@@ -7,7 +7,7 @@
 
 ## What We're Building
 
-**Project/scope inventory (unreleased #141 candidate):**
+**Project/scope inventory (v0.50.0 release preparation):**
 `mcpm scope <project-root> [--json]` inventories fixed Claude Code MCP sources
 and instruction-file candidates without running commands/clients or changing
 config. It omits values and instruction contents, reports uncertain coverage,

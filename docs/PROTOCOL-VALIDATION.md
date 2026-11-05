@@ -25,7 +25,8 @@ above on the host. Host-only launcher regression checks run with
 dependency tree. The initial inputs are CLI **0.47.0**, SDK v1 **1.32.1**, SDK v2
 client/server **2.3.1**, Inspector **2.10.1**, and Node **26.11.1** on Debian
 Bookworm. The Docker base is pinned by its multi-platform manifest digest.
-Production dependencies and the root lockfile are unchanged. To update a peer
+That initial fixture addition left production dependencies and the root lockfile
+unchanged. To update a peer
 or release baseline, change its exact version in the isolated package manifest,
 regenerate that lockfile with npm, rerun the matrix, and update the measured scope
 here. Do not infer compatibility from the package's major version alone.
@@ -84,6 +85,38 @@ counts, cancellation forwarding, persisted pins/events and benign/recovery
 contents. The relevant requirements are
 the [versioning contract](https://modelcontextprotocol.io/specification/2026-07-28/basic/versioning)
 and [MRTR contract](https://modelcontextprotocol.io/specification/2026-07-28/basic/patterns/mrtr).
+
+## Dependency refresh — 2026-11-06
+
+Inspector is now pinned to **2.11.0** after a deliberate fixture update; the
+published CLI **0.47.0**, SDK v1 **1.32.1**, SDK v2 client/server **2.3.1** and
+container image stay fixed. The isolated lock also updates qs **6.17.1**,
+fast-uri **3.1.9**, body-parser **2.4.0**, undici **8.12.3**, ip-address **10.7.5**
+and zod **4.6.7**. No expected protocol outcomes were weakened or changed.
+The fixed published baseline again passed **40 comparisons**, with **zero failures**,
+**two expected unsupported combinations** and **four exclusions** on Linux/arm64.
+The packed updated placeholder-version candidate separately passed **87 comparisons**,
+with **zero failures**, the same **two unsupported combinations** and **four exclusions**.
+Its archive SHA-256 is `398a2f267fa49b21c5d3fe6d4087c24d63d24ae5a75d01e86eb701cbeaa82fb8`;
+this proves that candidate, not a published release.
+
+The root dependency refresh separately resolves prompts **8.7.5**, SDK v1
+**1.32.2**, hono **4.13.16**, @hono/node-server **2.1.6**, and qs **6.17.1**.
+A clean lock regeneration also advances Sigstore bundle **5.0.1**, Sigstore verify
+**4.1.3**, semver **7.8.6**, and Vitest/coverage **5.1.0** within existing ranges.
+Build/test tooling now uses tsup **9.0.0** and Vite **8.3.5**. All nine root
+overrides remain present and the root lock has no fixture importers.
+
+The [tsup 9 release](https://github.com/egoist/tsup/releases/tag/v9.0.0) raises
+its Node floor; the [Vite 8 migration](https://vite.dev/guide/migration) changes
+its transformation toolchain. Their published engine ranges, and every installed
+package engine declaration, accept the CLI's Node **22.22.2**, **24.15.0** and
+**26.0.0** floors. The existing build and test configuration needed no migration.
+On Node **24.20.0** with pnpm **10.30.0**, frozen install, typecheck, build,
+**3,761 tests**, coverage gates, the coverage-threshold probe, and **45 native/
+protocol harness self-checks** passed. Production, full-root and isolated-fixture
+dependency audits reported zero advisories. Native harness self-checks are not a
+fresh native-client VM run.
 
 ## Reading the evidence
 
