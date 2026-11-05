@@ -7,7 +7,7 @@
 
 ## What We're Building
 
-**Wrapper recognition (unreleased #155 candidate):** guard enable/disable,
+**Wrapper recognition (v0.49.2):** guard enable/disable,
 status, doctor and update distinguish plain servers, recognized wrapper forms and
 ambiguous wrappers. Server-owned marker-looking arguments remain enrollable;
 malformed or missing plausible wrapper paths refuse mutation with backup/repair

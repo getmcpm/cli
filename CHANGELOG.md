@@ -8,6 +8,8 @@ _Add entries here, never under a stamped version_ — a release commit renames t
 heading, and a branch that wrote beneath it merges without conflict straight into a
 published section (it happened to #170).
 
+## [0.49.2] - 2026-11-05
+
 ### Fixed
 
 - Recognize guard wrappers by launcher and valid marker rather than server-owned arguments; refuse ambiguous legacy or malformed wrappers with recovery guidance.

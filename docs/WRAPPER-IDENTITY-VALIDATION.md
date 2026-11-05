@@ -1,7 +1,8 @@
 # Wrapper recognition validation — 2026-11-05
 
-Unreleased #155 candidate, based on main `b3fc7ac2347fcaf0c1e622e8c437e9d2405a066e`.
-Published runtime remains v0.49.1.
+#155 merged in [PR #312](https://github.com/getmcpm/cli/pull/312) as
+`d895575b80671a95c987a440323606ca21543687`, included in v0.49.2 release preparation.
+The candidate checks below are distinct from publication/archive verification.
 
 ## Behavior and compatibility
 
