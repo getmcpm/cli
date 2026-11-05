@@ -929,10 +929,11 @@ When helping with this project:
   distinction between checks not run and checks passed; Jev/Clef is deferred.
 - We are OSS-first — avoid design decisions that require proprietary lock-in
 - Check `docs/ARCHITECTURE.md` for the detailed implementation plan
-- Blockers and deferred work are tracked in the maintainer's private research notes
-  (Obsidian, `mcpm/` folder — deliberately not in this repo; moved out of the
-  repo's `TODOS.md` on 2026-08-31). `docs/ROADMAP.md` remains the public strategic
-  layer checked into this repo.
+- `docs/BACKLOG.md` is the selected public trust/DevX queue, aligned with the
+  maintainer's private Obsidian `mcpm/` backlog. Detailed historical findings remain
+  there (the former repo `TODOS.md` moved out on 2026-08-31). Research proposals
+  are not build commitments. `docs/ROADMAP.md` remains the historical feature plan;
+  the dated research report linked from the active backlog records current direction.
 - The official MCP Registry API v0.1 is at `registry.modelcontextprotocol.io`
 - V1 is local-first: no server infrastructure, JSON files in `~/.mcpm/`
 - Immutable data patterns: always return new objects, never mutate

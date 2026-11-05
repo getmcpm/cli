@@ -5,7 +5,12 @@ Released v0.48.1. Candidate measurements from
 
 ## Contract and scope
 
-The [stable Skills extension](https://skills.extensions.modelcontextprotocol.io/specification/stable/skills)
+Extension stage rechecked 2026-11-05: the [official catalog](https://modelcontextprotocol.io/extensions/overview)
+and extension repository classify Skills as Beta. A Final SEP does not imply a
+Stable extension. This corrects the previous maturity label/link; it does not
+change the dated SDK fixtures or establish host loading/approval support.
+
+The [Beta Skills extension](https://github.com/modelcontextprotocol/ext-skills/blob/main/specification/beta/skills.mdx)
 defines `skills/list`, `skills/get`, ordinary `resources/read` and optional
 `resources/directory/read`. Skill entries expose verbatim frontmatter before a
 host reads content. The [TypeScript SDK Skills API](https://ts.sdk.modelcontextprotocol.io/v2/servers/skills)
