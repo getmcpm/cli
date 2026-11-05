@@ -2,7 +2,7 @@
 name: mcpm
 description: Discover, assess, verify and manage MCP servers with the @getmcpm/cli package. Use when working with mcpm evidence, project locks or AI client MCP configuration.
 metadata:
-  version: "1.2.0"
+  version: "1.2.1"
   evidence-contract: "mcpm_search, mcpm_info, advertised mcpm_doctor and verify --json schemaVersion 1"
 ---
 
@@ -63,6 +63,13 @@ report `blocked`, `provenanceBlocked`, `error`, `noBaselines`, `uncovered` or
 `vacuous` as applicable. `unenforceable` entries and `checkedProvenanceCount: 0`
 remain coverage limits even when `ok` is true. Published-record matches and build
 provenance do not prove downloaded bytes or code safety.
+
+Native-client commands are separate from these read-only mcpm operations. A
+command named inspection is not necessarily non-executing: Claude Code `mcp get`
+has launched a configured server. Do not run `mcp get` or another client's
+inspection/connection command during a read-only inventory/audit unless server
+execution is authorized. Keep activation unknown or use documented non-executing
+evidence; do not silently substitute another client command that can launch it.
 
 ## Apply only the intended change
 
