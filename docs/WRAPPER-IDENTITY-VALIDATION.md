@@ -1,7 +1,7 @@
 # Wrapper recognition validation — 2026-11-05
 
 #155 merged in [PR #312](https://github.com/getmcpm/cli/pull/312) as
-`d895575b80671a95c987a440323606ca21543687`, included in v0.49.2 release preparation.
+`d895575b80671a95c987a440323606ca21543687`, released in v0.49.2; see [published archive proof](RELEASE-2026-11-05-v0.49.2.md).
 The candidate checks below are distinct from publication/archive verification.
 
 ## Behavior and compatibility
