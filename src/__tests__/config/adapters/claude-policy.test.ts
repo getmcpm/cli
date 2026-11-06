@@ -31,6 +31,35 @@ beforeEach(async () => {
 afterEach(async () => { await rm(root, { recursive: true, force: true }); });
 
 describe("Claude Code file policy preflight", () => {
+  it("models user settings once when the project lives below home and still refuses other ancestors", async () => {
+    const project = path.join(home, "repos", "project");
+    await mkdir(project, { recursive: true });
+    await settings({ allowedMcpServers: [{ serverName: "fixture" }] }, "user");
+    const adapter = new ClaudeCodeAdapter({ ...context(), root: project });
+    await adapter.replaceServer(config, "fixture", wrapped());
+    expect(JSON.parse(await readFile(config, "utf8")).mcpServers.fixture).toEqual(wrapped());
+    await settings({ deniedMcpServers: [{ serverCommand: ["node", "fixture.js"] }] }, "user");
+    await expect(adapter.replaceServer(config, "fixture", wrapped())).rejects.toThrow(/underlying.*denied/i);
+    await settings({}, "user");
+    const ancestor = path.join(home, "repos", ".claude");
+    await mkdir(ancestor);
+    await writeFile(path.join(ancestor, "settings.json"), "{}");
+    await expect(adapter.replaceServer(config, "fixture", wrapped())).rejects.toThrow(/Ancestor project settings/);
+    await rm(ancestor, { recursive: true });
+    await writeFile(path.join(home, ".claude", "settings.local.json"), "{}");
+    await expect(adapter.replaceServer(config, "fixture", wrapped())).rejects.toThrow(/Ancestor project settings/);
+  });
+  it.each(["", " \t\r\n"])("initializes an empty current config while retaining strict empty policy handling (%j)", async raw => {
+    await writeFile(config, raw);
+    const adapter = new ClaudeCodeAdapter(context());
+    expect(await adapter.read(config)).toEqual({});
+    await adapter.addServer(config, "fixture", original);
+    expect(JSON.parse(await readFile(config, "utf8")).mcpServers.fixture).toEqual(original);
+    expect(await readFile(`${config}.bak`, "utf8")).toBe(raw);
+    await settings({});
+    await writeFile(path.join(managed, "managed-settings.json"), raw);
+    await expect(adapter.replaceServer(config, "fixture", wrapped())).rejects.toThrow(/managed policy malformed/);
+  });
   it("reproduces original-command deny bypass through replaceServer, before any writes", async () => {
     await settings({ deniedMcpServers: [{ serverCommand: ["node", "fixture.js"] }] });
     const before = await readFile(config, "utf8");

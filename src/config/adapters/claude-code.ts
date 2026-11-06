@@ -26,7 +26,7 @@ export class ClaudeCodeAdapter extends BaseAdapter {
 
   protected override async readRaw(configPath: string): Promise<Record<string, unknown>> {
     const directory = await realpath(path.dirname(configPath)).catch(() => path.dirname(configPath));
-    const read = await readConfig(path.join(directory, path.basename(configPath)));
+    const read = await readConfig(path.join(directory, path.basename(configPath)), { allowEmpty: true });
     if (read.state !== "present" && read.state !== "missing") {
       throw new Error(`Claude Code file policy unknown: Current configuration ${read.state}`);
     }

@@ -118,7 +118,9 @@ export async function planClaudePolicyChange(configPath: string, name: string, p
     ];
     for (let ancestor = path.dirname(root); ; ancestor = path.dirname(ancestor)) {
       for (const name of ["settings.json", "settings.local.json"]) {
-        const state = await inspect(path.join(ancestor, ".claude", name));
+        const candidate = path.join(ancestor, ".claude", name);
+        if (candidate === files[0].path) continue;
+        const state = await inspect(candidate);
         if (state !== "missing") return refuse("Ancestor project settings require unsupported root/selection resolution");
       }
       if (ancestor === path.dirname(ancestor)) break;
@@ -145,7 +147,7 @@ export async function planClaudePolicyChange(configPath: string, name: string, p
     if (exclusive.state !== "missing") return refuse(exclusive.state === "present" ? "managed-mcp exclusive control: user-global definitions are not selected" : `managed-mcp policy ${exclusive.state}`, exclusive.state === "present" ? "blocked" : "unknown");
     if (managedSettings.managedMcpServers && Object.hasOwn(managedSettings.managedMcpServers, name)) return refuse("managedMcpServers supplies this name; user-global definition is shadowed", "blocked");
     const configDirectory = await realpath(path.dirname(configPath)).catch(() => path.dirname(configPath));
-    const current = await readConfig(path.join(configDirectory, path.basename(configPath)));
+    const current = await readConfig(path.join(configDirectory, path.basename(configPath)), { allowEmpty: true });
     if (current.state !== "missing" && current.state !== "present") return refuse(`Current configuration ${current.state}`);
     if (current.value?.env !== undefined) return refuse("Legacy global configuration environment is outside the supported profile");
     const serverMap = current.value?.mcpServers;

@@ -38,7 +38,7 @@ function duplicateKeys(node: Node): boolean {
   return node.children?.some(duplicateKeys) ?? false;
 }
 
-export async function readConfig(file: string): Promise<{ state: FileState; value?: Record<string, unknown> }> {
+export async function readConfig(file: string, options: { allowEmpty?: boolean } = {}): Promise<{ state: FileState; value?: Record<string, unknown> }> {
   const state = await inspect(file);
   if (state !== "present") return { state };
   try {
@@ -64,6 +64,7 @@ export async function readConfig(file: string): Promise<{ state: FileState; valu
       const bytes = buffer.subarray(0, length);
       if (!isUtf8(bytes)) return { state: "malformed" };
       const raw = bytes.toString("utf8");
+      if (options.allowEmpty && raw.trim() === "") return { state: "present", value: {} };
       const errors: ParseError[] = [];
       const tree = parseTree(raw, errors, { disallowComments: true, allowTrailingComma: false });
       if (!tree || errors.length || duplicateKeys(tree)) return { state: "malformed" };
