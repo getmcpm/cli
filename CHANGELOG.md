@@ -8,6 +8,8 @@ _Add entries here, never under a stamped version_ — a release commit renames t
 heading, and a branch that wrote beneath it merges without conflict straight into a
 published section (it happened to #170).
 
+## [0.50.1] - 2026-11-06
+
 ### Fixed
 
 - Preflight Claude Code stdio file-policy decisions before wrapping or rewriting launches, including original and wrapper argv; refuse local denial or unknown policy without weakening managed controls, and surface unobserved host-policy planes. Guard policy refusals return exit 1, including dry-run; existing wrappers are audited and exact teardown can restore native denial. Previews no longer create the consent/confinement store directory merely to read absent state.
