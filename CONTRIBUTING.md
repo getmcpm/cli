@@ -3,6 +3,14 @@
 Thanks for your interest. mcpm is a security tool, so the bar is correctness and
 determinism over feature breadth.
 
+## Agent-assisted contributions
+
+[AGENTS.md](AGENTS.md) is the shared contributor entry point; Claude Code imports
+it through CLAUDE.md. Repo-owned development/release skills and current project
+context are indexed in [maintainer workflow](docs/MAINTAINER-WORKFLOW.md).
+The separately distributed [public mcpm usage skill](skills/mcpm/SKILL.md) is for
+CLI consumers; installing the npm package does not install contributor skills.
+
 ## Development setup
 
 Requires **Node.js `^22.22.2 || ^24.15.0 || >=26.0.0`** and **pnpm 10**. That range is
@@ -11,7 +19,7 @@ the intersection of every runtime dependency's own `engines`, not a preference â
 a Node a dependency does not support.
 
 ```
-pnpm install            # frozen lockfile
+pnpm install --frozen-lockfile
 pnpm run typecheck      # tsc --noEmit + tooling configs (this is also `lint`)
 pnpm run build          # tsup -> dist/
 pnpm test               # vitest

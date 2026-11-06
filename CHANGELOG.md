@@ -8,6 +8,11 @@ _Add entries here, never under a stamped version_ — a release commit renames t
 heading, and a branch that wrote beneath it merges without conflict straight into a
 published section (it happened to #170).
 
+### Documentation
+
+- Share current contributor instructions through AGENTS.md, with a thin Claude import and repo-owned development/release skills; retain the former context file in a dated historical archive.
+- Clarify in the public mcpm skill (1.2.1) that native inspection commands such as Claude Code `mcp get` can execute a server; add authored scope/wrapper/doctor acceptance scenarios without claiming model compliance.
+
 ## [0.50.0] - 2026-11-06
 
 ### Added
