@@ -12,6 +12,8 @@ published section (it happened to #170).
 
 ### Fixed
 
+- Keep Claude Code policy checks usable for projects beneath home by recognizing the existing user settings source once. Restore explicit initialization of empty current client configs while retaining strict policy-file parsing and exact original-byte backups.
+
 - Preflight Claude Code stdio file-policy decisions before wrapping or rewriting launches, including original and wrapper argv; refuse local denial or unknown policy without weakening managed controls, and surface unobserved host-policy planes. Guard policy refusals return exit 1, including dry-run; existing wrappers are audited and exact teardown can restore native denial. Previews no longer create the consent/confinement store directory merely to read absent state.
 
 ### Documentation

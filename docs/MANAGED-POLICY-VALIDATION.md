@@ -42,6 +42,11 @@ canonicalized), non-regular files, invalid UTF-8, duplicate decoded JSON keys,
 malformed JSON and files larger than 1 MiB. Descriptor/path metadata changes
 during a read produce unknown. Missing files are distinct from unreadable files;
 an empty settings file is conservatively unknown rather than an empty allowlist.
+Only current user-global client-config reads accept empty/whitespace content as
+an empty object, retaining mcpm's explicit-initialization behavior and backing up
+the original bytes before a write. This is not native JSON-validity evidence:
+Claude Code 2.1.296 reports such input as corrupted and performs recovery. The
+strict default remains unchanged for policy files and the scope inventory.
 
 Rules contain exactly one `serverName`, `serverCommand` or `serverUrl` key.
 For stdio, command matching is an exact command-and-arguments array comparison;
@@ -77,7 +82,10 @@ macOS native result or all-client protection is implied.
 A present managed drop-in directory, detected macOS MDM preference file,
 Windows/WSL, alternate config directory, ancestor project settings, worktree
 root selection, or unsupported local policy/source selector refuses the
-transformation as unknown. A top-level `env` in legacy `~/.claude.json` is an
+transformation as unknown. The already-modeled `~/.claude/settings.json` source
+is not counted again as an unsupported ancestor when the project lives beneath
+home; other ancestor settings, including `~/.claude/settings.local.json`, still
+refuse. A top-level `env` in legacy `~/.claude.json` is an
 unsupported additional source and refuses stdio transformations. Supported settings
 JSON must not contain `policyHelper`, `policyHelpers`, `parentSettings`, `managedSourcesBehavior`, `strictPluginOnlyCustomization` or
 `wslInheritsWindowsSettings`; helpers never execute. The plan does not resolve
@@ -111,7 +119,7 @@ credential-variable probe did not reproduce and is not counted as a finding.
 Fresh artifact checks must use the final reviewed bytes, not those vulnerable
 pre-review candidate archives.
 
-### Reviewed candidate checkpoint — 2026-11-06
+### Reviewed pre-follow-up candidate checkpoint — 2026-11-06
 
 Sol built the slice; Astra independently reviewed and fixed confirmed regressions.
 The frozen candidate archive SHA-256 is
@@ -162,6 +170,27 @@ and `/private/tmp/mcpm-policy-122-final-protocol-20261106/verified-binding.json`
 These are candidate observations, separate from the vulnerable published 0.50.0
 baseline and any later actual-published artifact verification. No model/provider
 turn, full host-policy coverage or macOS native-client result is claimed.
+
+### Compatibility follow-up — release pending
+
+PR #324 merged the reviewed implementation, but no release was published. A later
+review found two compatibility regressions: projects below home misclassified
+user settings as an unsupported ancestor, and empty current-config initialization
+was rejected. Both have shared-adapter regressions and narrowly scoped fixes. Node 24.20.0
+typecheck including tooling, build and the full suite pass: 161 files, 3,793 tests
+passed and three skipped. The archive and native/protocol checkpoint above precede these fixes and are not
+proof of the follow-up artifact. Fresh follow-up archive
+`a08c4f6347c4b4d812ebfe93f041ca0b59e62c9722f4a2fc37e514561927caf8`
+passed 22 native policy cases plus three packed initialization cases (empty,
+whitespace and strict empty-policy refusal), and 87 protocol checks with zero
+failures, two expected unsupported and four exclusions. All 66 installed JS files,
+archive, lock, harness/skill hashes and actual container boundaries were
+independently verified. Exact-archive clean-install smoke, coverage (91.56% lines,
+86.72% branches) and the negative-threshold gate passed. Receipts:
+`/private/tmp/mcpm-policy-122-compat-final-native-20261106/verified-final.json`
+and `/private/tmp/mcpm-policy-122-compat-final-protocol-20261106/verified-binding.json`.
+These remain candidate checks; publication verification is separate. The empty-config native probe observed corrupted-JSON recovery, not clean
+native acceptance; compatible mcpm initialization is a separate behavior.
 
 Semantics checked against official
 [managed MCP documentation](https://code.claude.com/docs/en/managed-mcp) and

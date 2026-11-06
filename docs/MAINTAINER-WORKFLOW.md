@@ -4,9 +4,12 @@
 
 Current published CLI: **v0.50.0**. The bounded Claude Code scope inventory from
 project backlog #141 shipped; broader host/project coverage remains open.
-**#122 managed-policy-aware setup** is a reviewed candidate, not yet merged or
-released; its [candidate validation](MANAGED-POLICY-VALIDATION.md) records the
-bounded Claude Code profile and migration limits. See the [active backlog](BACKLOG.md) and
+**#122 managed-policy-aware setup** merged in PR #324 but remains unreleased.
+The compatibility follow-up candidate is verified and Astra reviewed; PR/CI,
+merge and release are pending. Its [candidate validation](MANAGED-POLICY-VALIDATION.md)
+separates the earlier archive checkpoint from the verified follow-up and records
+the bounded profile and limits.
+See the [active backlog](BACKLOG.md) and
 [v0.50.0 release evidence](RELEASE-2026-11-06-v0.50.0.md) for the actual source,
 companion matrix, archive verification and proof limits. Historical native
 measurements belong to their named versions; this checkpoint is not a new run.

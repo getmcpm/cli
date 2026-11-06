@@ -22,6 +22,17 @@ it("classifies absent, unreadable, oversized and symlink files without returning
   const link = path.join(dir, "link.json"); await symlink(file, link);
   expect((await readConfig(link)).state).toBe("symlink-skipped");
 });
+it("limits empty initialization to the opted-in current-config read without weakening JSON validation", async () => {
+  await writeFile(file, " \t\r\n");
+  expect(await readConfig(file)).toEqual({ state: "malformed" });
+  expect(await readConfig(file, { allowEmpty: true })).toEqual({ state: "present", value: {} });
+  await writeFile(file, Buffer.from([0xff]));
+  expect(await readConfig(file, { allowEmpty: true })).toEqual({ state: "malformed" });
+  await writeFile(file, '{"mcpServers":{},"mcpServers":{}}');
+  expect(await readConfig(file, { allowEmpty: true })).toEqual({ state: "malformed" });
+  await writeFile(file, " ".repeat(1024 * 1024 + 1));
+  expect(await readConfig(file, { allowEmpty: true })).toEqual({ state: "too-large" });
+});
 it("rejects changes during a read rather than returning a clean snapshot", async () => {
   await writeFile(file, "{}");
   const actual = await vi.importActual<typeof import("node:fs/promises")>("node:fs/promises");
