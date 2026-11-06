@@ -1,6 +1,10 @@
-# Claude Code managed-policy preflight — candidate #122
+# Claude Code managed-policy preflight — bounded #122
 
-This candidate adds the `claude-code-2.1.296-stdio-files` projection before
+Available in [v0.50.1](RELEASE-2026-11-06-v0.50.1.md), after #324/#325 and
+Astra review/fixes. Published archive verification is in that release record;
+earlier candidate checkpoints below retain their own identities.
+
+This release adds the `claude-code-2.1.296-stdio-files` projection before
 Claude Code user-global stdio configuration writes. It addresses a measured
 failure in the published 0.50.0 baseline: replacing a denied server command with
 a relay command can bypass native exact-command denial, while replacing an
@@ -171,9 +175,9 @@ These are candidate observations, separate from the vulnerable published 0.50.0
 baseline and any later actual-published artifact verification. No model/provider
 turn, full host-policy coverage or macOS native-client result is claimed.
 
-### Compatibility follow-up — release pending
+### Reviewed compatibility follow-up checkpoint — 2026-11-06
 
-PR #324 merged the reviewed implementation, but no release was published. A later
+At this candidate checkpoint, PR #324 had merged and publication was held. A later
 review found two compatibility regressions: projects below home misclassified
 user settings as an unsupported ancestor, and empty current-config initialization
 was rejected. Both have shared-adapter regressions and narrowly scoped fixes. Node 24.20.0

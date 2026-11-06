@@ -17,11 +17,10 @@ used the published v0.49.0 archive.
 
 | Order | ID | Scope/status | Dependency |
 | --- | --- | --- | --- |
-| 1 | #122 | Existing: managed-policy-aware setup | #155; one pinned host/native policy fixture set |
-| 2 | #156 | New: local skill/plugin change-review receipt; experiment | #141; one consumer; fixed file/host scope |
-| 3 | #157 | New: pinned external-report ingestion; conditional | #156 or a concrete multi-tool support case |
-| 4 | #140 | Existing: remaining Skills manifest/byte verification | Actual consumer; pinned beta revision |
-| 5 | #158 | New: native artifact activation/drift measurement; conditional | #156 demand; disposable profile/host access |
+| 1 | #156 | New: local skill/plugin change-review receipt; experiment | #141; one consumer; fixed file/host scope |
+| 2 | #157 | New: pinned external-report ingestion; conditional | #156 or a concrete multi-tool support case |
+| 3 | #140 | Existing: remaining Skills manifest/byte verification | Actual consumer; pinned beta revision |
+| 4 | #158 | New: native artifact activation/drift measurement; conditional | #156 demand; disposable profile/host access |
 | Later | #159 | New: offline ACP v1 evidence spike; demand-gated | One real trace consumer; stable interpretation |
 | Later | #95 | Existing: hook confinement GO/NO-GO experiment | Measured cohort and restrictive policy |
 
@@ -65,7 +64,7 @@ writes, recursive whole-home discovery or native policy reimplementation.
 
 ## #122 — Managed-policy-aware setup and wrap plan
 
-**Status:** built by Sol and reviewed/fixed by Astra; merged in PR #324 but not released. The pre-follow-up candidate passed 19 native cases and 87 protocol comparisons. The home-ancestor and empty-current-config follow-up candidate is verified and Astra reviewed: 22 native cases, three packed initialization cases and 87 protocol checks passed. PR/CI, merge and release are pending. See [projection and limits](MANAGED-POLICY-VALIDATION.md). **User/problem:** changing the command to a
+**Status:** bounded Claude Code MVP shipped in [v0.50.1](RELEASE-2026-11-06-v0.50.1.md), after #324/#325 and Astra review/fixes. Actual published archive passed 22 native policy cases, three initialization cases and 87 protocol checks. Whole-host coverage and legacy-wrapper migration limits remain explicit in the [projection record](MANAGED-POLICY-VALIDATION.md). **User/problem:** changing the command to a
 wrapper can change a client's allow/deny decision. **MVP:** read one supported,
 versioned policy source set and compare current/proposed launches before writes.
 Report exact reason and uncertainty; preserve native restrictions.
