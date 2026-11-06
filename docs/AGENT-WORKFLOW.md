@@ -32,6 +32,17 @@ and `doctor`/`sync --check` for configuration. These operations answer different
 questions. Scores are not probabilities, registry presence is not publisher
 verification, and record/provenance matches are not proof of safe code.
 
+## Local artifact review in v0.51.0
+
+The CLI-only `mcpm review-artifacts` compares two explicit local USTAR skill or
+plugin snapshots; it is not an additional served MCP tool. Consume member hashes,
+mode changes, declarations/references and byte/declaration coverage together.
+Incomplete reports exit 1 and cannot establish definite absence or native
+activation. Even complete coverage is not a safety verdict. The dated profiles,
+preparation/withholding limits and no-execution boundary are documented in
+[artifact review](ARTIFACT-REVIEW.md). The measured Ponytail consumer decision
+used the receipt plus manual source review; it does not prove model compliance.
+
 ## Skill distribution
 
 The [skill](../skills/mcpm/SKILL.md) is self-contained Agent Skills Markdown with
