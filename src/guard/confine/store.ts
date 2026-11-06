@@ -21,7 +21,7 @@ import { mkdir, readFile, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import lockfile from "proper-lockfile";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
-import { getStorePath } from "../../store/index.js";
+import os from "node:os";
 import { fileSha, writeFileAtomic } from "../store-integrity.js";
 import {
   CONFINE_FORMAT_VERSION,
@@ -43,16 +43,16 @@ export class ConfineIntegrityError extends Error {
 }
 
 async function confinePath(): Promise<string> {
-  return path.join(await getStorePath(), CONFINE_FILENAME);
+  return path.join(os.homedir(), ".mcpm", CONFINE_FILENAME);
 }
 
 async function integrityPath(): Promise<string> {
-  return path.join(await getStorePath(), CONFINE_INTEGRITY_FILENAME);
+  return path.join(os.homedir(), ".mcpm", CONFINE_INTEGRITY_FILENAME);
 }
 
 /** Absolute ~/.mcpm/sandbox root — the parent of every per-server scratch dir. */
 export async function confineSandboxRoot(): Promise<string> {
-  return path.join(await getStorePath(), SANDBOX_DIRNAME);
+  return path.join(os.homedir(), ".mcpm", SANDBOX_DIRNAME);
 }
 
 /**

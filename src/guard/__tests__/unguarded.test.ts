@@ -11,7 +11,7 @@
  */
 
 import { describe, expect, test, beforeEach, afterEach } from "vitest";
-import { mkdtempSync, rmSync, statSync, readFileSync } from "node:fs";
+import { mkdtempSync, rmSync, statSync, readFileSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -87,6 +87,7 @@ describe("readUnguardedConsent / writeUnguardedConsent", () => {
   test("missing file → empty set", async () => {
     const got = await readUnguardedConsent();
     expect(got).toEqual([]);
+    expect(existsSync(path.join(tmpHome, ".mcpm"))).toBe(false);
   });
 
   test("write then read round-trips (sorted + deduped)", async () => {

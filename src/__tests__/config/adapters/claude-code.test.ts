@@ -1,7 +1,7 @@
 /**
  * Tests for src/config/adapters/claude-code.ts
  *
- * ClaudeCodeAdapter is a rootKey-only subclass of BaseAdapter (identical I/O to
+ * ClaudeCodeAdapter shares BaseAdapter I/O (identical preservation to
  * ClaudeDesktopAdapter, which is exhaustively covered in claude-desktop.test.ts).
  * We assert only what is specific to this adapter: its clientId, and the one
  * behavior that matters most for `~/.claude.json` — that a write into the
@@ -14,8 +14,21 @@
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
+// This suite isolates BaseAdapter I/O; real policy fixtures exercise the shared write gate separately.
+vi.mock("../../../config/claude-policy.js", () => ({
+  planClaudePolicyChange: async () => ({ filePolicy: "preserved", reason: "isolated I/O fixture" }),
+  assertClaudePolicyPlan: () => {},
+  describeClaudePolicyPlan: () => "test file projection",
+}));
+
+vi.mock("../../../config/read-bounded-json.js", async () => {
+  const { readFile } = await import("fs/promises");
+  return { readConfig: async (file: string) => ({ state: "present", value: JSON.parse(await readFile(file, "utf8")) }) };
+});
+
 vi.mock("fs/promises", () => ({
   readFile: vi.fn(),
+  realpath: vi.fn(async (file: string) => file),
   writeFile: vi.fn(),
   rename: vi.fn(),
   mkdir: vi.fn(),

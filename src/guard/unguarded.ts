@@ -26,7 +26,10 @@
  */
 
 import { z } from "zod";
-import { readJson, writeJson } from "../store/index.js";
+import { readFile } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
+import { writeJson } from "../store/index.js";
 
 export const UNGUARDED_FILENAME = "guard-unguarded.json";
 
@@ -75,7 +78,9 @@ export function mergeUnguarded(
  * blanket consent).
  */
 export async function readUnguardedConsent(): Promise<string[]> {
-  const raw = await readJson<unknown>(UNGUARDED_FILENAME).catch(() => null);
+  // A preview must not create the store just to discover that no consent exists.
+  const raw: unknown = await readFile(path.join(os.homedir(), ".mcpm", UNGUARDED_FILENAME), "utf8")
+    .then(text => JSON.parse(text) as unknown).catch(() => null);
   if (raw === null) return [];
   const parsed = UnguardedStoreSchema.safeParse(raw);
   if (!parsed.success) return [];

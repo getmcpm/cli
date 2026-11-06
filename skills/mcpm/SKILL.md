@@ -2,7 +2,7 @@
 name: mcpm
 description: Discover, assess, verify and manage MCP servers with the @getmcpm/cli package. Use when working with mcpm evidence, project locks or AI client MCP configuration.
 metadata:
-  version: "1.2.1"
+  version: "1.2.2"
   evidence-contract: "mcpm_search, mcpm_info, advertised mcpm_doctor and verify --json schemaVersion 1"
 ---
 
@@ -91,3 +91,20 @@ protection or re-lock unexpected drift just to finish. A transient fetch error
 can be retried; persistent unavailable evidence requires investigation. Remote
 HTTP/SSE servers do not get the stdio guard's runtime protection. A skill helps
 agents follow a workflow; the CLI and guard enforce policy.
+
+## Native policy before wrapping
+
+When the installed CLI supports the Claude Code file-policy preflight, start with
+`mcpm guard enable --client claude-code --server <name> --dry-run`. A denied or
+unknown file-policy transformation exits 1; stop rather than changing managed
+controls or finding a wrapper/argument bypass. The actual shared config write
+gate also covers install, update and up. Compare current/original and proposed
+launcher decisions; command policies compare every argument, including wrapper
+arguments. A successful file projection still reports overall host policy unknown:
+server-managed, MDM/registry, session and other-project restrictions are not
+resolved. Preserve those unknowns and verify authorized native behavior separately.
+
+Existing recognized wrappers are checked by the supported preview too. An upgrade
+does not automatically repair old wrappers or stop running servers. Exact
+unwrapping can restore native denial when that repair is authorized; it is not
+permission to run the denied command or weaken managed controls.

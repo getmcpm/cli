@@ -6,6 +6,7 @@
  */
 
 import chalk from "chalk";
+import { describeClaudePolicyPlan } from "../config/claude-policy.js";
 import { access } from "node:fs/promises";
 import type { ClientId } from "../config/paths.js";
 import { CLIENT_IDS, getConfigPath } from "../config/paths.js";
@@ -13,6 +14,7 @@ import { detectInstalledClients } from "../config/detector.js";
 import { getAdapter } from "../config/adapters/factory.js";
 import {
   enableGuardAcrossClients,
+  previewEnableAcrossClients,
   disableGuardAcrossClients,
   statusAcrossClients,
   type ClientReport,
@@ -119,6 +121,7 @@ export async function runEnableCommand(opts: EnableOpts): Promise<void> {
       opts.write(
         chalk.yellow(`\n⚠ OS confinement aborted: ${sanitize((err as Error).message)}`) + "\n",
       );
+      if ((err as Error).message.startsWith("Claude Code file policy")) throw new Error("OS confinement enrollment refused");
       return;
     }
   }
@@ -128,35 +131,28 @@ export async function runEnableCommand(opts: EnableOpts): Promise<void> {
   printEnableDisable(summary, opts);
   printUnguardedWarning(summary, previousConsented, opts);
   if (confineMarkers !== undefined) printConfineNotice(confineMarkers, opts);
-  printRestartReminder(opts);
+  if (summary.totalChanged > 0) printRestartReminder(opts);
+  if (summary.clients.some(client => client.error?.startsWith("Claude Code file policy") || client.servers.some(server => server.reason?.startsWith("Claude Code file policy")))) throw new Error("Claude Code file policy refused one or more transformations");
 }
 
 async function printEnableDryRun(opts: EnableOpts): Promise<void> {
-  const deps = buildDeps({ allowUnguarded: opts.allowUnguarded });
-  const status = await statusAcrossClients(deps);
+  let confineMarkers: ReadonlyMap<string, ConfineMarker> | undefined;
+  if (opts.confine === "standard") {
+    try { confineMarkers = await computeConfineMarkers({ ...opts, dryRun: true }); }
+    catch (error) { opts.write(`OS confinement aborted: ${sanitize((error as Error).message)}\n`); throw new Error("OS confinement enrollment refused"); }
+  }
+  const plans = await previewEnableAcrossClients(buildDeps({ allowUnguarded: opts.allowUnguarded, confineMarkers }), opts);
   const confineNote = opts.confine === "standard" ? " (with OS confinement)" : "";
   opts.write(`Dry-run: planned wraps${confineNote}\n`);
-  for (const c of status.clients) {
-    if (opts.client !== undefined && c.clientId !== opts.client) continue;
-    const candidates = c.servers.filter((s) => {
-      if (opts.server !== undefined && s.name !== opts.server) return false;
-      // A malformed entry can't actually be wrapped (the real enable path
-      // routes it to `skipped`, never `transforms`) — exclude it here too.
-      return !s.wrapped && !s.malformed;
-    });
-    opts.write(`  ${CLIENT_LABELS[c.clientId]}: would wrap ${candidates.length} server(s)\n`);
-    for (const s of candidates) opts.write(`    + ${sanitize(s.name)}\n`);
-    // A malformed entry is excluded from `candidates` above, but the real
-    // enable path DOES report it (in `skipped`) — show it here too so the
-    // dry-run preview doesn't under-report vs what enable actually does.
-    const malformed = c.servers.filter((s) => {
-      if (opts.server !== undefined && s.name !== opts.server) return false;
-      return s.malformed;
-    });
-    for (const s of malformed) {
-      opts.write(`    ⚠ MALFORMED ${sanitize(s.name)} (will be skipped, not wrapped)${s.wrapError ? `: ${s.wrapError}` : ""}\n`);
-    }
+  for (const plan of plans) {
+    opts.write(`  ${CLIENT_LABELS[plan.clientId]}: would wrap ${plan.transforms.length} server(s)\n`);
+    if (plan.readError) opts.write(`    ⚠ ${sanitize(plan.readError)}\n`);
+    for (const { name, policy } of plan.transforms) opts.write(`    + ${sanitize(name)}${policy ? `: ${describeClaudePolicyPlan(policy)}` : ""}\n`);
+    for (const { name, reason } of plan.skipped) opts.write(`    ⚠ ${reason.includes("malformed") ? "MALFORMED " : ""}${sanitize(name)}: ${sanitize(reason)}\n`);
+    for (const { name, reason } of plan.unguarded) opts.write(`    ⚠ ${sanitize(name)}: ${sanitize(reason)}\n`);
+    if (plan.clientId === "claude-code") opts.write("    File-policy projection only; overall host policy UNKNOWN (server-managed/MDM/registry/session/other projects unobserved).\n");
   }
+  if (plans.some(plan => plan.readError?.startsWith("Claude Code file policy") || plan.skipped.some(skip => skip.reason.startsWith("Claude Code file policy")))) throw new Error("Claude Code file policy refused the dry-run transformation");
 }
 
 // ---------------------------------------------------------------------------
@@ -167,6 +163,7 @@ export interface ConfineComputeOpts {
   readonly client?: ClientId;
   readonly server?: string;
   readonly write: (s: string) => void;
+  readonly dryRun?: boolean;
 }
 
 interface ConfineTarget {
@@ -250,7 +247,10 @@ export async function computeConfineMarkers(
   }
 
   const { markers, storeToWrite } = await resolveConfineMarkers(targets, store, opts);
-  if (storeToWrite !== null) await writeConfineStore(storeToWrite);
+  const plans = await previewEnableAcrossClients(buildDeps({ confineMarkers: markers }), opts);
+  const policyRefusal = plans.flatMap(plan => plan.skipped).find(skip => skip.reason.startsWith("Claude Code file policy"));
+  if (policyRefusal) throw new Error(policyRefusal.reason);
+  if (storeToWrite !== null && !opts.dryRun) await writeConfineStore(storeToWrite);
   return markers;
 }
 
@@ -471,7 +471,8 @@ export async function runDisableCommand(opts: DisableOpts): Promise<void> {
   const deps = buildDeps();
   const summary = await disableGuardAcrossClients(deps, opts);
   printEnableDisable(summary, opts);
-  printRestartReminder(opts);
+  if (summary.totalChanged > 0) printRestartReminder(opts);
+  if (summary.clients.some(client => client.error?.startsWith("Claude Code file policy") || client.servers.some(server => server.reason?.startsWith("Claude Code file policy")))) throw new Error("Claude Code file policy refused one or more transformations");
   await warnUnresolvablePlaceholders(opts);
 }
 
