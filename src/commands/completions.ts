@@ -34,7 +34,7 @@ export interface CompletionsDeps {
 // command/subcommand added or removed can't silently leave the completions stale.
 export const SUBCOMMANDS = [
   "search", "install", "info", "list", "remove", "audit", "update", "outdated",
-  "scope", "doctor", "init", "import", "serve", "disable", "enable", "alias", "export",
+  "scope", "review-artifacts", "doctor", "init", "import", "serve", "disable", "enable", "alias", "export",
   "lock", "up", "verify", "diff", "sync", "publish", "guard", "secrets", "why", "completions",
 ];
 
@@ -98,6 +98,7 @@ _mcpm() {
     'update:Check for newer versions of installed servers'
     'outdated:Show installed servers with newer versions available'
     'scope:Inventory Claude Code project scopes'
+    'review-artifacts:Compare local USTAR skill/plugin snapshots'
     'doctor:Check MCP setup health'
     'init:Install a curated starter pack'
     'import:Import existing MCP configs'
@@ -160,6 +161,7 @@ complete -c mcpm -n '__fish_use_subcommand' -a audit -d 'Scan installed servers'
 complete -c mcpm -n '__fish_use_subcommand' -a update -d 'Check for updates'
 complete -c mcpm -n '__fish_use_subcommand' -a outdated -d 'Show servers with newer versions'
 complete -c mcpm -n '__fish_use_subcommand' -a scope -d 'Inventory Claude Code project scopes'
+complete -c mcpm -n '__fish_use_subcommand' -a review-artifacts -d 'Compare local USTAR skill/plugin snapshots'
 complete -c mcpm -n '__fish_use_subcommand' -a doctor -d 'Check MCP setup health'
 complete -c mcpm -n '__fish_use_subcommand' -a init -d 'Install a starter pack'
 complete -c mcpm -n '__fish_use_subcommand' -a import -d 'Import existing configs'

@@ -17,7 +17,7 @@ used the published v0.49.0 archive.
 
 | Order | ID | Scope/status | Dependency |
 | --- | --- | --- | --- |
-| 1 | #156 | New: local skill/plugin change-review receipt; experiment | #141; one consumer; fixed file/host scope |
+| 1 | #156 | Validated candidate: archive-only skill/plugin receipt; one-consumer gate met | Final review, hosted checks, merge and release pending |
 | 2 | #157 | New: pinned external-report ingestion; conditional | #156 or a concrete multi-tool support case |
 | 3 | #140 | Existing: remaining Skills manifest/byte verification | Actual consumer; pinned beta revision |
 | 4 | #158 | New: native artifact activation/drift measurement; conditional | #156 demand; disposable profile/host access |
@@ -82,10 +82,26 @@ reproduce the current matching behavior before selecting the fix.
 
 ## #156 — Local skill/plugin change-review receipt
 
-**Status:** new, bounded beyond-MCP experiment. **User/problem:** a developer
+**Status:** implemented candidate, not yet merged or published. Sol built the
+archive-only `review-artifacts` command and Astra independently reviewed/fixed
+the implementation, including a bounded-input Markdown CPU regression. The
+current source checkpoint passed 3,846 tests (three skipped). One real mcpm
+maintainer used candidate receipts plus manual source review to
+retain the reviewed Ponytail 5.3.3 source update without requesting a rollback;
+no global update, install or activation was performed. A fresh archive of the
+latest reviewed source passed clean-install smoke, 87 protocol checks and the
+same consumer comparisons with independently checked runtime/input/report byte
+bindings; the retain decision was reaffirmed. Real macOS confinement dogfood
+also passed. These are candidate results, not publication or activation proof.
+See the [profile](ARTIFACT-REVIEW.md) and
+[candidate evidence record](ARTIFACT-REVIEW-VALIDATION.md).
+
+**User/problem:** a developer
 reviewing an update needs to understand changed instructions and executable
 components across scope/cache layers. **MVP:** compare two explicitly supplied
-local snapshots of Agent Skills and one Claude plugin dialect. Reuse existing
+local snapshots of Agent Skills and one Claude plugin dialect. The implemented
+input is two explicit uncompressed USTAR00 archives; directory inputs are refused
+before child reads, and archive member paths never reach the filesystem. Reuse existing
 inspection primitives and native validators where useful; identify source, exact
 changed files, declared components, referenced scripts and interpretation limits.
 
@@ -97,12 +113,18 @@ configured/cached/loaded/unknown; do not guess runtime
 activation or fully infer commands from prose. No network, install, scripts,
 permission grants, credential-store reads or automatic native-validator execution.
 Reports omit credential values; withheld sensitive inputs remain coverage gaps,
-and hashing is not described as secret redaction. One consumer uses the report to
-decide a concrete update; otherwise stop or integrate native/APM tooling.
+and hashing is not described as secret redaction. The one-consumer acceptance
+gate is met for the bounded experiment: the receipt bound actual source-snapshot
+bytes/modes to declarations, references and coverage gaps before the maintainer's
+concrete retain/rollback decision. Both real reports exited 1 with incomplete
+coverage; manual semantic review remained necessary. This does not demonstrate
+general demand, time savings, superiority over native/Git/APM workflows, safety
+or activation. Further expansion retains the consumer/value stop rule.
 **Dependencies:** #141; a review workflow/consumer. **Non-goals:** marketplace,
 generic scanner, installer, universal safety score or host enforcement.
-**Effort:** 2–4 days for the experiment. **Risk:** native tools already cover much
-of this; value is unproven. [Format](https://agentskills.io/specification),
+**Effort:** original estimate 2–4 days for the experiment. **Risk:** native tools
+already cover much of this; repeat use and wider value remain unproven.
+[Format](https://agentskills.io/specification),
 [native plugin lifecycle](https://code.claude.com/docs/en/plugins/loading).
 
 ## #157 — Versioned external evidence ingestion
