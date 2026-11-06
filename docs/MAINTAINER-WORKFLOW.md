@@ -2,17 +2,16 @@
 
 ## Current checkpoint — 2026-11-06
 
-Current published CLI: **v0.50.0**. The bounded Claude Code scope inventory from
-project backlog #141 shipped; broader host/project coverage remains open.
-**#122 managed-policy-aware setup** merged in PR #324 but remains unreleased.
-The compatibility follow-up candidate is verified and Astra reviewed; PR/CI,
-merge and release are pending. Its [candidate validation](MANAGED-POLICY-VALIDATION.md)
-separates the earlier archive checkpoint from the verified follow-up and records
-the bounded profile and limits.
-See the [active backlog](BACKLOG.md) and
-[v0.50.0 release evidence](RELEASE-2026-11-06-v0.50.0.md) for the actual source,
-companion matrix, archive verification and proof limits. Historical native
-measurements belong to their named versions; this checkpoint is not a new run.
+Current published CLI: **v0.50.1**. The bounded Claude Code managed-policy slice
+from #122 shipped after #324/#325 and Astra review/fixes. Exact published archive,
+protocol/native evidence and companion synchronization state are in the
+[v0.50.1 release record](RELEASE-2026-11-06-v0.50.1.md). The
+[policy profile](MANAGED-POLICY-VALIDATION.md) retains whole-host uncertainty and
+legacy-wrapper migration limits. #156 remains next in the queue; it was not
+started during this release-first closeout. Conditional #157/#159 retain their
+consumer/demand stop rules. Broader #141 host coverage remains open.
+See the [active backlog](BACKLOG.md). Historical native measurements belong to
+their named versions; this checkpoint does not extend them to another archive.
 
 ## Instruction and skill loading
 
