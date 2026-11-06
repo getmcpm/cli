@@ -65,7 +65,7 @@ writes, recursive whole-home discovery or native policy reimplementation.
 
 ## #122 — Managed-policy-aware setup and wrap plan
 
-**Status:** existing safety gap. **User/problem:** changing the command to a
+**Status:** candidate built by Sol and reviewed/fixed by Astra; 19 native cases and 87 protocol comparisons passed. Not merged or released. See [projection and limits](MANAGED-POLICY-VALIDATION.md). **User/problem:** changing the command to a
 wrapper can change a client's allow/deny decision. **MVP:** read one supported,
 versioned policy source set and compare current/proposed launches before writes.
 Report exact reason and uncertainty; preserve native restrictions.

@@ -368,6 +368,23 @@ export async function handleUp(
       ? ({ vars: {}, warnings: [] } as Awaited<ReturnType<typeof parseEnvFile>>)
       : await parseEnvFile(".env");
 
+  // The same adapter projection runs in dry-run and before snapshots/secret writes.
+  for (const [name, plan] of plans) {
+    for (const [client, entry] of plan.entries) {
+      const adapter = deps.getAdapter(client);
+      if (!adapter.planServerChange) continue;
+      const declared = Object.fromEntries(Object.entries(stackFile.servers[name].env ?? {})
+        .filter(([key, declaration]) => declaration.required || declaration.default !== undefined ||
+          envFileVars.vars[key] !== undefined || (options.allowProcessEnv !== false && process.env[key] !== undefined))
+        .map(([key]) => [key, ""]));
+      const original = { ...entry, env: { ...entry.env, ...declared } };
+      const wrapper = plan.wrappers.get(client);
+      const policy = await adapter.planServerChange(deps.getPath(client), name, wrapper ? rewrapEntry(wrapper, original) : original);
+      if (policy.filePolicy !== "preserved") throw new Error(`Claude Code file policy ${policy.filePolicy}: ${policy.reason}`);
+      deps.output(`Claude Code file policy preserved for ${name}; overall host policy UNKNOWN (server-managed/MDM/registry/session/other projects unobserved).\n`);
+    }
+  }
+
   // Step 6: Re-assess trust in parallel
   const scannerAvailable = await deps.checkScannerAvailable();
 

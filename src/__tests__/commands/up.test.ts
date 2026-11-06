@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { wrapEntry } from "../../guard/wrap.js";
 import { handleUp } from "../../commands/up.js";
 import type { UpDeps, UpOptions } from "../../commands/up.js";
 import type { ClientId } from "../../config/paths.js";
@@ -118,6 +119,35 @@ servers:
 // ---------------------------------------------------------------------------
 
 describe("handleUp", () => {
+  it.each([true, false])("blocks native file-policy refusal before writes, dryRun=%s", async (dryRun) => {
+    const stackPath = await writeStackAndLock(basicStack, basicLock);
+    const adapter = {
+      ...makeAdapter(),
+      planServerChange: vi.fn().mockResolvedValue({ filePolicy: "blocked", reason: "proposed underlying denied: exact command policy" }),
+    };
+    const deps = makeDeps({ getAdapter: vi.fn().mockReturnValue(adapter) });
+    await expect(handleUp({ stackFile: stackPath, dryRun }, deps)).rejects.toThrow(/file policy blocked/);
+    expect(adapter.planServerChange).toHaveBeenCalledOnce();
+    expect(adapter.addServer).not.toHaveBeenCalled();
+    expect(deps.promptEnvVar).not.toHaveBeenCalled();
+  });
+
+  it("preflights the exact wrapper argv when an optional declared variable stays unset", async () => {
+    const name = "io.github.test/server-a";
+    const stackPath = await writeStackAndLock(`${basicStack}    env:\n      MCPM_TEST_OPTIONAL_UNSET:\n        required: false\n`, basicLock);
+    const original = { command: "npx", args: ["-y", "@test/server-a@1.2.0"] };
+    const adapter = {
+      ...makeAdapter({ [name]: wrapEntry(name, original, { mcpmBinary: "/fixture/mcpm" }) }),
+      planServerChange: vi.fn().mockResolvedValue({ filePolicy: "preserved" }),
+    };
+    await handleUp({ stackFile: stackPath, allowProcessEnv: false, allowEnvFile: false }, makeDeps({ getAdapter: vi.fn().mockReturnValue(adapter) }));
+    expect(adapter.planServerChange).toHaveBeenCalledOnce();
+    expect(adapter.addServer).toHaveBeenCalledOnce();
+    const preview = adapter.planServerChange.mock.calls[0][2];
+    const written = adapter.addServer.mock.calls[0][2];
+    expect([preview.command, ...preview.args]).toEqual([written.command, ...written.args]);
+  });
+
   it("installs all servers from yaml + lock", async () => {
     const stackPath = await writeStackAndLock(basicStack, basicLock);
     const deps = makeDeps();

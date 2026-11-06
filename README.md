@@ -299,7 +299,7 @@ Those 20 points **inform the score but cannot clear a safety floor.** The MCP se
 | `mcpm completions <shell>` | Generate shell completion scripts (bash, zsh, fish) |
 | `mcpm why <name>` | Explain a server's trust score (breakdown of all components) |
 | `mcpm serve` | Start mcpm as an MCP server (stdio transport) |
-| `mcpm guard enable` | Wrap detected client configs with the inspection relay |
+| `mcpm guard enable` | Wrap detected client configs with the inspection relay; Claude Code stdio gets a [file-policy preflight](docs/MANAGED-POLICY-VALIDATION.md), with host coverage unknown |
 | `mcpm guard disable` | Restore original client configs |
 | `mcpm guard status` | Show what's wrapped and the per-server pin state |
 | `mcpm guard demo` | Run the synthetic prompt-injection scenario (visible block) |

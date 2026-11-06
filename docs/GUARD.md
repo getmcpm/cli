@@ -170,6 +170,14 @@ Bare invocation. Shows status if any servers are wrapped, otherwise prints help.
 ### `mcpm guard enable [--client <id>] [--server <name>] [--dry-run]`
 Wraps detected client configs. Use `--client` to scope to one (`claude-desktop` / `claude-code` / `cursor` / `vscode` / `windsurf` / `gemini-cli`); `--server` to scope to a single server name. `--dry-run` prints the planned changes without writing.
 
+Claude Code stdio writes now compare current/original and proposed launches with
+the versioned 2.1.296 file-policy projection before wrapping, backups or confine
+profile writes. Denied or unknown local policy refuses with exit 1 (dry-run too).
+A passing file projection still reports overall host policy unknown; unobserved
+server-managed/MDM/session/other-project restrictions can change native behavior.
+See [supported sources, matching and limits](MANAGED-POLICY-VALIDATION.md).
+
+
 The wrap transformation in JSON:
 ```
 { "command": "<orig>", "args": [...], "env": {...} }
@@ -444,3 +452,8 @@ If guard itself crashes (e.g. on PATH disruption — the wrapped command points 
 - HTTP-transport servers — v0.5.0 wraps stdio only. HTTP guard is deferred (v0.10.0 made HTTP/SSE fail-closed deny-by-default; a streamable-HTTP MITM relay is still the full fix)
 
 **Performance budget:** spike measured 0.065ms p99 small / 3.1ms p99 large message overhead through the SDK framing helpers (OQ1 closed). With NFKC + 15 regexes per leaf added on top, expected p99 is < 10ms for large messages.
+
+Existing Claude Code wrappers are audited by the supported enable/dry-run policy
+preflight. Upgrade alone does not rewrite them or stop running servers. An
+authorized exact unwrap can restore native command denial; it does not grant
+permission or provide a runtime policy-enforcement layer.

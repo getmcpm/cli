@@ -33,6 +33,9 @@ export interface McpServerEntry {
 export interface ConfigAdapter {
   readonly clientId: ClientId;
 
+  /** Read-only native file-policy projection, when supported by this adapter. */
+  planServerChange?(configPath: string, name: string, entry: McpServerEntry): Promise<import("../claude-policy.js").ClaudePolicyPlan>;
+
   /**
    * Read all MCP server entries from the config file. An entry that fails
    * shape validation is dropped rather than propagated; `onSkip` (name, raw) is

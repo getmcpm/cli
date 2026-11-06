@@ -17,6 +17,7 @@
 import { copyFile } from "node:fs/promises";
 import type { ClientId } from "../config/paths.js";
 import type { ConfigAdapter, McpServerEntry } from "../config/adapters/index.js";
+import { describeClaudePolicyPlan, type ClaudePolicyPlan } from "../config/claude-policy.js";
 import { wrapEntry, unwrapEntry, isWrapped, classifyWrap, WRAP_REPAIR_MESSAGE, type WrapContext, type ConfineMarker } from "./wrap.js";
 
 export interface ClientReport {
@@ -90,6 +91,13 @@ export function enableGuardAcrossClients(
   return runAcrossClients(deps, "enable", filter);
 }
 
+/** Same read-only preflight as enable, before snapshots, config or consent writes. */
+export async function previewEnableAcrossClients(deps: OrchestratorDeps, filter?: { client?: ClientId; server?: string }) {
+  const clients = await selectTargetClients(deps, filter?.client);
+  const consent = deps.readUnguardedConsent ? await deps.readUnguardedConsent() : [];
+  return Promise.all(clients.map(client => planForClient(client, deps, "enable", filter?.server, consent)));
+}
+
 export function disableGuardAcrossClients(
   deps: OrchestratorDeps,
   filter?: { client?: ClientId; server?: string },
@@ -140,7 +148,7 @@ async function runAcrossClients(
   // operator sees the typo rather than getting a silent "0 changed" result.
   if (filter?.server !== undefined) {
     const matched = reports.some((r) => r.servers.some((s) => s.name === filter.server));
-    if (!matched) {
+    if (!matched && !reports.some(report => report.error?.startsWith("Claude Code file policy"))) {
       throw new Error(
         `--server "${filter.server}" not found in any detected client config. ` +
           `Run \`mcpm guard status\` to see available servers.`,
@@ -279,6 +287,7 @@ interface ClientPlan {
   readonly transforms: ReadonlyArray<{
     readonly name: string;
     readonly nextEntry: McpServerEntry;
+    readonly policy?: ClaudePolicyPlan;
   }>;
   readonly skipped: ReadonlyArray<{ readonly name: string; readonly reason: string }>;
   /** H9: url servers the user CONSENTED to run unguarded (reported visibly). */
@@ -320,7 +329,7 @@ async function planForClient(
     };
   }
 
-  const transforms: { name: string; nextEntry: McpServerEntry }[] = [];
+  const transforms: { name: string; nextEntry: McpServerEntry; policy?: ClaudePolicyPlan }[] = [];
   const consentedSet = new Set(consentedUnguarded);
 
   for (const [name, entry] of Object.entries(entries)) {
@@ -331,7 +340,10 @@ async function planForClient(
     }
     if (action === "enable") {
       if (isWrapped(entry)) {
-        skipped.push({ name, reason: "already wrapped" });
+        const policy = await adapter.planServerChange?.(deps.getConfigPath(clientId), name, entry);
+        skipped.push({ name, reason: policy && policy.filePolicy !== "preserved"
+          ? `Claude Code file policy ${policy.filePolicy}: ${policy.reason}; ${describeClaudePolicyPlan(policy)}`
+          : "already wrapped" });
         continue;
       }
       if (!entry.command) {
@@ -378,7 +390,19 @@ async function planForClient(
     }
   }
 
-  return { clientId, action, transforms, skipped, unguarded };
+  const permitted: typeof transforms = [];
+  for (const transform of transforms) {
+    if (adapter.planServerChange) {
+      const policy = await adapter.planServerChange(deps.getConfigPath(clientId), transform.name, transform.nextEntry);
+      if (policy.filePolicy !== "preserved") {
+        skipped.push({ name: transform.name, reason: `Claude Code file policy ${policy.filePolicy}: ${policy.reason}; ${describeClaudePolicyPlan(policy)}` });
+        continue;
+      }
+      transform.policy = policy;
+    }
+    permitted.push(transform);
+  }
+  return { clientId, action, transforms: permitted, skipped, unguarded };
 }
 
 async function applyPlan(plan: ClientPlan, deps: OrchestratorDeps): Promise<ClientReport> {
@@ -437,7 +461,10 @@ function summarize(
     for (const server of report.servers) {
       if (server.status === "wrapped" || server.status === "unwrapped") totalChanged++;
       else if (server.status === "unguarded") totalUnguarded++;
-      else totalSkipped++;
+      else {
+        totalSkipped++;
+        if (server.reason?.startsWith("Claude Code file policy")) errors++;
+      }
     }
   }
   return { action, clients: reports, totalChanged, totalSkipped, totalUnguarded, errors };
