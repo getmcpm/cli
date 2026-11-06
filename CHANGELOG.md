@@ -8,6 +8,12 @@ _Add entries here, never under a stamped version_ — a release commit renames t
 heading, and a branch that wrote beneath it merges without conflict straight into a
 published section (it happened to #170).
 
+## [0.51.0] - 2026-11-06
+
+### Added
+
+- Experimental `mcpm review-artifacts` compares two explicit local USTAR skill/plugin snapshots without extraction or execution. Receipts bind file hashes, mode changes, declarations and literal references to retained bytes, with separate byte/declaration coverage and unknown host state.
+
 ## [0.50.1] - 2026-11-06
 
 ### Fixed

@@ -1,8 +1,9 @@
 /** Bounded, strict JSON snapshot reader shared by non-executing configuration checks. */
 import { isUtf8 } from "node:buffer";
 import { constants } from "node:fs";
-import { lstat, open, access } from "node:fs/promises";
+import { lstat, open, access, type FileHandle } from "node:fs/promises";
 import path from "node:path";
+import type { Stats } from "node:fs";
 import { parseTree, type Node, type ParseError } from "jsonc-parser";
 export type FileState = "present" | "missing" | "unreadable" | "symlink-skipped" | "not-file" | "too-large" | "malformed";
 const MAX_CONFIG_BYTES = 1024 * 1024;
@@ -38,41 +39,60 @@ function duplicateKeys(node: Node): boolean {
   return node.children?.some(duplicateKeys) ?? false;
 }
 
-export async function readConfig(file: string, options: { allowEmpty?: boolean } = {}): Promise<{ state: FileState; value?: Record<string, unknown> }> {
+export const fileIdentity = (stat: Stats): string => [stat.dev, stat.ino, stat.mode, stat.size, stat.mtimeMs, stat.ctimeMs].join(":");
+
+/** One explicit file only. This is not a contained recursive directory reader. */
+export async function readBoundedBytes(file: string, maxBytes = MAX_CONFIG_BYTES, retainHandle = false): Promise<{ state: FileState; bytes?: Buffer; identity?: string; handle?: FileHandle }> {
   const state = await inspect(file);
   if (state !== "present") return { state };
   try {
+    const before = await lstat(file);
     // Do not follow a final symlink or block if a regular file was replaced by a FIFO.
     const handle = await open(file, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0) | (constants.O_NONBLOCK ?? 0));
+    let retained = false;
     try {
       const stat = await handle.stat();
       if (!stat.isFile()) return { state: "not-file" };
-      if (stat.size > MAX_CONFIG_BYTES) return { state: "too-large" };
-      const buffer = Buffer.alloc(MAX_CONFIG_BYTES + 1);
+      if (fileIdentity(stat) !== fileIdentity(before)) return { state: "unreadable" };
+      if (stat.size > maxBytes) return { state: "too-large" };
+      const buffer = Buffer.alloc(maxBytes + 1);
       let length = 0;
       while (length < buffer.length) {
         const { bytesRead } = await handle.read(buffer, length, buffer.length - length, null);
         if (!bytesRead) break;
         length += bytesRead;
       }
-      if (length > MAX_CONFIG_BYTES) return { state: "too-large" };
+      if (length > maxBytes) return { state: "too-large" };
       const after = await handle.stat();
       const named = await lstat(file);
-      if (after.dev !== stat.dev || after.ino !== stat.ino || after.size !== stat.size ||
-          after.mtimeMs !== stat.mtimeMs || after.ctimeMs !== stat.ctimeMs ||
-          named.dev !== stat.dev || named.ino !== stat.ino || named.isSymbolicLink()) return { state: "unreadable" };
+      if (fileIdentity(after) !== fileIdentity(stat) || fileIdentity(named) !== fileIdentity(stat) || named.isSymbolicLink()) return { state: "unreadable" };
       const bytes = buffer.subarray(0, length);
-      if (!isUtf8(bytes)) return { state: "malformed" };
-      const raw = bytes.toString("utf8");
-      if (options.allowEmpty && raw.trim() === "") return { state: "present", value: {} };
-      const errors: ParseError[] = [];
-      const tree = parseTree(raw, errors, { disallowComments: true, allowTrailingComma: false });
-      if (!tree || errors.length || duplicateKeys(tree)) return { state: "malformed" };
-      const value: unknown = JSON.parse(raw);
-      return object(value) ? { state: "present", value } : { state: "malformed" };
-    } finally { await handle.close(); }
+      retained = retainHandle;
+      return { state: "present", bytes, identity: fileIdentity(stat), ...(retained ? { handle } : {}) };
+    } finally { if (!retained) await handle.close(); }
   } catch (error) {
     return { state: code(error) === "ELOOP" ? "symlink-skipped" : "unreadable" };
   }
+}
+
+/** Parse exactly the retained bytes, rejecting duplicate keys and invalid UTF-8. */
+export function parseJsonObject(bytes: Buffer): Record<string, unknown> | undefined {
+  try {
+    if (!isUtf8(bytes)) return undefined;
+    const raw = bytes.toString("utf8");
+    const errors: ParseError[] = [];
+    const tree = parseTree(raw, errors, { disallowComments: true, allowTrailingComma: false });
+    if (!tree || errors.length || duplicateKeys(tree)) return undefined;
+    const value: unknown = JSON.parse(raw);
+    return object(value) ? value : undefined;
+  } catch { return undefined; }
+}
+
+export async function readConfig(file: string, options: { allowEmpty?: boolean } = {}): Promise<{ state: FileState; value?: Record<string, unknown> }> {
+  const result = await readBoundedBytes(file);
+  if (!result.bytes) return { state: result.state };
+  if (options.allowEmpty && isUtf8(result.bytes) && result.bytes.toString("utf8").trim() === "") return { state: "present", value: {} };
+  const value = parseJsonObject(result.bytes);
+  return value ? { state: "present", value } : { state: "malformed" };
 }
 

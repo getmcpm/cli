@@ -2,7 +2,7 @@
 name: mcpm
 description: Discover, assess, verify and manage MCP servers with the @getmcpm/cli package. Use when working with mcpm evidence, project locks or AI client MCP configuration.
 metadata:
-  version: "1.2.2"
+  version: "1.3.0"
   evidence-contract: "mcpm_search, mcpm_info, advertised mcpm_doctor and verify --json schemaVersion 1"
 ---
 
@@ -40,6 +40,19 @@ CLI evidence and state the limitation; do not invent fields or upgrade silently.
 - Inspect installed configuration with `mcpm list --json`, `mcpm doctor --json`
   and `mcpm sync --check --json`. Those JSON shapes, except sync, are version
   dependent. An unreadable configuration is unknown, not an empty clean client.
+- For an explicitly requested local skill/plugin update review, check
+  `mcpm review-artifacts --help`. Supply two prepared uncompressed USTAR snapshots
+  and an explicit `agent-skills-2026-11-06` or `claude-plugin-2026-11-06` profile,
+  then request `--json`. Directories, compressed archives and unsupported tar
+  records are refused; mcpm never extracts, installs or executes these inputs.
+  Check `schemaVersion`, exit status, `byteInventoryComplete`,
+  `declarationCoverageComplete`, both source/member digests, modes and gaps.
+  Use changed files/declarations to focus manual source review; the receipt does
+  not analyze script behavior or approve an update. Literal references are
+  candidates, not inferred commands. Configured/cached/loaded/enforced remain
+  unknown. Omit sensitive bytes before packaging when they must not be read;
+  `--withhold` only omits interpretation/member hashes and leaves a coverage gap,
+  while the archive buffer and its digest still include any packaged bytes.
 
 ## Interpret the result
 
