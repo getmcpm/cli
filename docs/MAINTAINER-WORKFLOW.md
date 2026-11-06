@@ -2,34 +2,27 @@
 
 ## Current checkpoint — 2026-11-06
 
-Current published CLI: **v0.50.1**. The bounded Claude Code managed-policy slice
-from #122 shipped after #324/#325 and Astra review/fixes. Exact published archive,
-protocol/native evidence and companion synchronization state are in the
-[v0.50.1 release record](RELEASE-2026-11-06-v0.50.1.md). The
-[policy profile](MANAGED-POLICY-VALIDATION.md) retains whole-host uncertainty and
-legacy-wrapper migration limits.
+Current published CLI: **v0.51.0**. Experimental #156 archive-only local
+Agent Skills/Claude plugin change receipts shipped through Sol implementation,
+Astra review/fixes and CI-green [PR #327](https://github.com/getmcpm/cli/pull/327).
+Actual npm archive authentication, smoke, 87 modern/legacy protocol checks and
+real-consumer reruns passed with exact runtime/input/harness bindings. Both
+companion updates are Astra-reviewed/CI-green and merged; the deployed playground
+returned all seven expected public assets. See the
+[v0.51.0 release record](RELEASE-2026-11-06-v0.51.0.md).
 
-#156 is now an implemented, unmerged/unpublished candidate: archive-only local
-Agent Skills/Claude plugin change receipts, with separate byte/declaration
-coverage and unknown host state. Sol built it; Astra independently reviewed and
-fixed declaration, reference, containment/format and Markdown CPU edge cases.
-The current source checkpoint passed 3,846 tests, three skipped. A real Ponytail
-retain/rollback review met the one-consumer gate using receipts plus manual
-semantic review. A fresh latest-source archive passed clean-install smoke,
-87 protocol checks and consumer comparisons with exact runtime/input/report
-bindings; the retain decision was reaffirmed. Real macOS confinement dogfood
-and source coverage passed. Earlier candidate receipts retain their separate
-identities; none constitutes an installation/activation/safety approval.
-See [artifact review](ARTIFACT-REVIEW.md) and its
-[candidate validation record](ARTIFACT-REVIEW-VALIDATION.md). Final
-artifact/documentation review, hosted checks, merge and release remain pending
-at this checkpoint. The 0.51.0 changelog section is prepared; publication has not
-occurred in this record.
+The [artifact profile](ARTIFACT-REVIEW.md) keeps byte/declaration coverage and
+host state separate. The one-consumer retention decision met the bounded gate;
+manual source review remained necessary, with no measured efficiency or native
+activation/safety claim. The [candidate history](ARTIFACT-REVIEW-VALIDATION.md)
+retains earlier archive identities and excluded attempts. The public mcpm skill
+is 1.3.0. Contributor skills remain repo-only.
 
-Conditional #157/#159 retain their consumer/demand stop rules; the one-consumer
-experiment does not authorize building them. Broader #141 host coverage remains open.
-See the [active backlog](BACKLOG.md). Historical native measurements belong to
-their named versions; this checkpoint does not extend them to another archive.
+The bounded #122 Claude policy slice remains documented against its named
+[v0.50.1 archive](RELEASE-2026-11-06-v0.50.1.md); its native measurements do not
+transfer to 0.51.0. Conditional #157/#159 retain consumer/demand stop rules;
+#158 requires demonstrated activation-drift need. Broader #141 remains open.
+See the [active backlog](BACKLOG.md).
 
 ## Instruction and skill loading
 

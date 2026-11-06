@@ -17,7 +17,7 @@ used the published v0.49.0 archive.
 
 | Order | ID | Scope/status | Dependency |
 | --- | --- | --- | --- |
-| 1 | #156 | Validated candidate: archive-only skill/plugin receipt; one-consumer gate met | Final review, hosted checks, merge and release pending |
+| Shipped | #156 | Bounded archive-only receipt in v0.51.0; one-consumer gate met | Expansion retains consumer/value stop rule |
 | 2 | #157 | New: pinned external-report ingestion; conditional | #156 or a concrete multi-tool support case |
 | 3 | #140 | Existing: remaining Skills manifest/byte verification | Actual consumer; pinned beta revision |
 | 4 | #158 | New: native artifact activation/drift measurement; conditional | #156 demand; disposable profile/host access |
@@ -82,19 +82,16 @@ reproduce the current matching behavior before selecting the fix.
 
 ## #156 — Local skill/plugin change-review receipt
 
-**Status:** implemented candidate, not yet merged or published. Sol built the
-archive-only `review-artifacts` command and Astra independently reviewed/fixed
-the implementation, including a bounded-input Markdown CPU regression. The
-current source checkpoint passed 3,846 tests (three skipped). One real mcpm
-maintainer used candidate receipts plus manual source review to
-retain the reviewed Ponytail 5.3.3 source update without requesting a rollback;
-no global update, install or activation was performed. A fresh archive of the
-latest reviewed source passed clean-install smoke, 87 protocol checks and the
-same consumer comparisons with independently checked runtime/input/report byte
-bindings; the retain decision was reaffirmed. Real macOS confinement dogfood
-also passed. These are candidate results, not publication or activation proof.
+**Status:** bounded archive-only command shipped in
+[v0.51.0](RELEASE-2026-11-06-v0.51.0.md), through Sol implementation and Astra
+independent review/fixes. The actual npm archive passed authentication,
+clean-install smoke, 87 protocol checks and both real consumer comparisons with
+exact runtime/input/member bindings. Both consumer reports correctly returned
+incomplete coverage; the maintainer retained reviewed Ponytail 5.3.3 source
+using the receipt plus manual review. No global update, native activation or
+safety approval occurred. Further expansion retains the consumer/value stop rule.
 See the [profile](ARTIFACT-REVIEW.md) and
-[candidate evidence record](ARTIFACT-REVIEW-VALIDATION.md).
+[candidate history](ARTIFACT-REVIEW-VALIDATION.md).
 
 **User/problem:** a developer
 reviewing an update needs to understand changed instructions and executable

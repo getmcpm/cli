@@ -1,5 +1,9 @@
 # Artifact-review candidate evidence — 2026-11-06
 
+> Historical prepublication checkpoints below. #156 subsequently shipped in
+> [v0.51.0](RELEASE-2026-11-06-v0.51.0.md), whose actual npm archive was separately
+> authenticated and tested. Earlier pending/0.50.1 wording is retained history.
+
 This record describes project backlog #156 before merge/publication. Current
 published CLI remains v0.50.1; no v0.51.0 publication is claimed here. The
 [command/profile contract](ARTIFACT-REVIEW.md) defines the supported archive and
