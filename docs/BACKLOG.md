@@ -1,4 +1,4 @@
-# Active trust and DevX backlog — 2026-11-06
+# Active trust and DevX backlog — 2026-11-07
 
 This is the current, deliberately selected queue, aligned with the project
 Obsidian backlog. **#IDs are project backlog IDs, not GitHub issue numbers.** It
@@ -18,7 +18,7 @@ used the published v0.49.0 archive.
 | Order | ID | Scope/status | Dependency |
 | --- | --- | --- | --- |
 | Shipped | #156 | Bounded archive-only receipt in v0.51.0; one-consumer gate met | Expansion retains consumer/value stop rule |
-| 2 | #157 | New: pinned external-report ingestion; conditional | #156 or a concrete multi-tool support case |
+| Deferred | #157 | Consumer gate evaluated for mcpm's own development/release workflow; adapter unbuilt | Artifact-bound contract and measured incremental value still required |
 | 3 | #140 | Existing: remaining Skills manifest/byte verification | Actual consumer; pinned beta revision |
 | 4 | #158 | New: native artifact activation/drift measurement; conditional | #156 demand; disposable profile/host access |
 | Later | #159 | New: offline ACP v1 evidence spike; demand-gated | One real trace consumer; stable interpretation |
@@ -126,7 +126,15 @@ already cover much of this; repeat use and wider value remain unproven.
 
 ## #157 — Versioned external evidence ingestion
 
-**Status:** new, conditional delta to existing E6/E10a reports. **User/problem:**
+**Status:** deferred/unbuilt after the
+[2026-11-07 consumer-gate evaluation](EXTERNAL-EVIDENCE-DECISION.md) against
+mcpm's own development/release workflow. The maintainer is a concrete consumer
+of existing CodeQL/Scorecard, SBOM/provenance and release evidence. An actual
+Scorecard SARIF was inspected; ingestion has no demonstrated incremental
+labeled findings/false-positive review-cost benefit yet, and its source binding,
+coverage, redaction and retention contract is incomplete. No runtime code or
+release follows this decision. E6/E10a are existing roadmap proposals, not
+shipped reports. **User/problem:**
 users combining tools need findings tied to the exact analyzed artifact and
 analysis coverage. **MVP:** accept one already-produced local report from one
 pinned scanner; preserve original tool/version, digest, severity, mode and gaps.

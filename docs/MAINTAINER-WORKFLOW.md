@@ -1,6 +1,6 @@
 # Maintainer workflow and context
 
-## Current checkpoint — 2026-11-06
+## Current checkpoint — 2026-11-07
 
 Current published CLI: **v0.51.0**. Experimental #156 archive-only local
 Agent Skills/Claude plugin change receipts shipped through Sol implementation,
@@ -20,8 +20,14 @@ is 1.3.0. Contributor skills remain repo-only.
 
 The bounded #122 Claude policy slice remains documented against its named
 [v0.50.1 archive](RELEASE-2026-11-06-v0.50.1.md); its native measurements do not
-transfer to 0.51.0. Conditional #157/#159 retain consumer/demand stop rules;
-#158 requires demonstrated activation-drift need. Broader #141 remains open.
+transfer to 0.51.0. The [#157 consumer gate](EXTERNAL-EVIDENCE-DECISION.md)
+evaluated mcpm's actual development/release reports, including a retained
+Scorecard SARIF. A maintainer consumer exists; the adapter remains deferred and
+unbuilt pending artifact/coverage/privacy contracts and measured incremental
+findings/review cost. E6/E10a remain roadmap proposals, not shipped report commands.
+This docs-only decision requires no CLI release. Conditional #159 retains its
+consumer/demand stop rule; #158 requires demonstrated activation-drift need.
+Broader #141 remains open.
 See the [active backlog](BACKLOG.md).
 
 ## Instruction and skill loading
