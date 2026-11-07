@@ -433,3 +433,8 @@ before reclaiming any leftover clone.
 
 The next step is real model/skill evaluation with dedicated, authorized test
 access and bounded usage, followed by additional named clients/platforms.
+
+The separate [inline-plugin lifecycle experiment](NATIVE-PLUGIN-LIFECYCLE.md)
+measures one pinned Claude Code Linux arm64 hook across a live update/reload/disable
+and restart. It uses a disposable offline container; its evidence does not extend
+the macOS client/consent measurements above.

@@ -19,8 +19,8 @@ used the published v0.49.0 archive.
 | --- | --- | --- | --- |
 | Shipped | #156 | Bounded archive-only receipt in v0.51.0; one-consumer gate met | Expansion retains consumer/value stop rule |
 | Deferred | #157 | Consumer gate evaluated for mcpm's own development/release workflow; adapter unbuilt | Artifact-bound contract and measured incremental value still required |
-| Validated; awaiting merge | #140 | Full retained Skills fixture MVP for the existing release-harness consumer | Pinned Beta; both archive matrices, independent replay/readback and maintainer acceptance |
-| 4 | #158 | New: native artifact activation/drift measurement; conditional | #156 demand; disposable profile/host access |
+| Merged PR #333 | #140 | Full retained Skills fixture MVP for the existing release-harness consumer | Pinned Beta; both archive matrices, independent replay/readback and maintainer acceptance |
+| Validated bounded MVP | #158 | Native inline-hook activation/drift experiment | Eight observations/75 checks; independent bindings and maintainer acceptance; scoped evidence below |
 | Later | #159 | New: offline ACP v1 evidence spike; demand-gated | One real trace consumer; stable interpretation |
 | Later | #95 | Existing: hook confinement GO/NO-GO experiment | Measured cohort and restrictive policy |
 
@@ -153,7 +153,7 @@ vendor contracts and hidden egress. [Snyk contract caution](https://github.com/s
 ## #140 — Retained Skills manifest and content verification
 
 **Status:** existing, partially shipped: metadata inspection is in v0.48.1.
-The bounded fixture MVP is validated and awaiting merge.
+The bounded fixture MVP merged in PR #333 (`58d6727`) after all nine CI checks; no npm release was needed.
 The [retained-fixture MVP](RETAINED-SKILLS-DECISION.md) extends the actual
 release-harness consumer beyond its original single-file consistency assertions.
 It checks retained origin/URI identity, every declared resource's raw bytes,
@@ -175,6 +175,8 @@ or claiming host-side loading enforcement. **Effort:** 3–5 days after the fixt
 contract. **Risk:** Beta revisions/host support change. [Authoritative repository](https://github.com/modelcontextprotocol/ext-skills).
 
 ## #158 — Native artifact activation and update-drift evidence
+
+**Validated bounded MVP:** the [Claude inline-hook experiment](NATIVE-PLUGIN-LIFECYCLE.md) passed eight source-bound native observations (three clean processes, zero API requests/turns/cost) and 75 native self-checks. Independent final raw/image/source/config bindings passed and the maintainer accepted the scoped evidence. Implementation and limits are documented below; delivery is tracked by the repository PR.
 
 **Status:** new, conditional follow-up to #156; distinct from MCP doctor tests.
 **User/problem:** installed/cached plugin bytes can differ from running-session

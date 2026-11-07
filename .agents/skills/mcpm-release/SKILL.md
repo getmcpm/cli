@@ -145,3 +145,9 @@ action; never silently omit a companion or claim the entire release is synced.
 
 Report the CLI release link, actual artifact verification, companion outcomes,
 incoming relevant PRs and any material unchecked limits concisely.
+
+For [native inline-plugin lifecycle evidence](../../../docs/NATIVE-PLUGIN-LIFECYCLE.md),
+consume the complete expected/observed hook lifecycle and independent input/image
+bindings. A fixture hook marker proves only that command component on its named
+host; it cannot certify all plugin bytes or text-skill activation. Harness-only
+changes do not themselves require an npm release or companion repin.

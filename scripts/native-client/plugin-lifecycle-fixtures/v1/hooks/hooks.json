@@ -1,0 +1,1 @@
+{"hooks":{"SessionStart":[{"hooks":[{"type":"command","command":"node /probe/marker.mjs v1","timeout":5}]}],"UserPromptSubmit":[{"hooks":[{"type":"command","command":"node /probe/marker.mjs v1","timeout":5}]}]}}

@@ -1,4 +1,5 @@
 import { test } from 'node:test';
+import './plugin-lifecycle-self-check.mjs';
 import assert from 'node:assert/strict';
 import { fixtureMetadata, serverName } from './fixture-registry.mjs';
 import { assertEcho, assertNativeWire, assertGuestBoundary, assertConsentObservation, assertTrustObservation, trustCases, checkPayload, cliArtifact, evidenceFiles, validateReport } from './checks.mjs';
