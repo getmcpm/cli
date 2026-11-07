@@ -33,9 +33,19 @@ Candidate and actual-published-archive matrices each passed 139 comparisons;
 independent capture/image readback and maintainer acceptance preserve expected
 nonclean outcomes. Runtime/public-skill bytes are unchanged; no package release
 or companion repin is needed for this verification-tooling change.
-The validated fixture change is awaiting merge.
+The fixture change merged in [PR #333](https://github.com/getmcpm/cli/pull/333)
+at `58d6727` after all nine CI checks. The retained final local captures and hosted
+CI captures were independently replayed; this was a tooling merge without an npm release.
 #157's docs-only decision requires no CLI release. Conditional #159 retains its
 consumer/demand stop rule; #158 requires demonstrated activation-drift need.
+The [#158 native inline-hook experiment](NATIVE-PLUGIN-LIFECYCLE.md) separates
+configured bytes, native metadata and executed command identity across a live
+update/reload/disable plus fresh-process restarts. Its final native run passed all
+eight observations with three clean process exits and zero API requests/turns/cost;
+75 native self-checks passed. Independent raw/image/source/config bindings passed
+and the maintainer accepted the bounded evidence. This validates the original
+fixture-scoped MVP; the repository PR tracks delivery.
+One hook marker cannot establish text-skill or whole-plugin activation.
 Broader #141 remains open.
 See the [active backlog](BACKLOG.md).
 

@@ -50,6 +50,12 @@ the expected/observed verification status and declared-set coverage together.
 A harness pass on an expected mismatch/incomplete case is not clean skill
 verification; catalog/directory scope and native loading remain separate.
 
+For the [native inline-hook experiment](../../../docs/NATIVE-PLUGIN-LIFECYCLE.md),
+run the existing native self-check entry point and the explicit offline native
+command. Consume executed command markers plus complete raw lifecycle evidence;
+settings, hook listings and declared bundle versions alone do not prove loading.
+Keep text-skill activation unknown and real host profiles outside the fixture.
+
 ## Requested review and fix loop
 
 Follow the user's model split: when requested, Sol builds and Astra reviews the

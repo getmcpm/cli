@@ -79,6 +79,10 @@ published-reference pins are retained.
 
 ## Validation and consumer decision
 
+Merged in [PR #333](https://github.com/getmcpm/cli/pull/333), main `58d6727`, after
+all nine CI checks. Hosted CI capture/runtime bindings were independently replayed
+in addition to the local evidence below. No npm release was required.
+
 Source checks passed typecheck/build and 3,846 tests (three skipped). Fifty-nine
 local Node harness/self-checks passed, including 48 retained Skills self-checks
 and the launcher check; the container passed the other 58 checks. Astra
