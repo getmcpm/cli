@@ -36,15 +36,20 @@ or companion repin is needed for this verification-tooling change.
 The fixture change merged in [PR #333](https://github.com/getmcpm/cli/pull/333)
 at `58d6727` after all nine CI checks. The retained final local captures and hosted
 CI captures were independently replayed; this was a tooling merge without an npm release.
-#157's docs-only decision requires no CLI release. Conditional #159 retains its
-consumer/demand stop rule; #158 requires demonstrated activation-drift need.
+#157's docs-only decision requires no CLI release. The
+[#159 ACP consumer gate](ACP-TRACE-DECISION.md) found a real permission/cancellation
+review consumer with MCP/native evidence, but no supplied ACP v1 trace or
+concrete ACP-specific question beyond those logs in this workflow. The offline
+spike remains deferred/unbuilt; a named one-off review can reopen the original
+bounded MVP with an actual value-redacted trace and retention scope.
 The [#158 native inline-hook experiment](NATIVE-PLUGIN-LIFECYCLE.md) separates
 configured bytes, native metadata and executed command identity across a live
 update/reload/disable plus fresh-process restarts. Its final native run passed all
 eight observations with three clean process exits and zero API requests/turns/cost;
 75 native self-checks passed. Independent raw/image/source/config bindings passed
 and the maintainer accepted the bounded evidence. This validates the original
-fixture-scoped MVP; the repository PR tracks delivery.
+fixture-scoped MVP. It merged in [PR #334](https://github.com/getmcpm/cli/pull/334)
+at `117966d` after all nine CI checks, without an npm release or companion repin.
 One hook marker cannot establish text-skill or whole-plugin activation.
 Broader #141 remains open.
 See the [active backlog](BACKLOG.md).
