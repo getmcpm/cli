@@ -22,7 +22,7 @@ used the published v0.49.0 archive.
 | Merged PR #333 | #140 | Full retained Skills fixture MVP for the existing release-harness consumer | Pinned Beta; both archive matrices, independent replay/readback and maintainer acceptance |
 | Merged PR #334 | #158 | Native inline-hook activation/drift experiment | Eight observations/75 checks; independent bindings and maintainer acceptance; scoped evidence below |
 | Deferred/unbuilt | #159 | Offline ACP v1 trace spike; consumer gate evaluated | Current workflow has MCP/native evidence; no supplied ACP trace or concrete ACP-specific review question |
-| Later | #95 | Existing: hook confinement GO/NO-GO experiment | Measured cohort and restrictive policy |
+| Measured NO-GO | #95 | Bounded command-hook confinement decision experiment; production integration unbuilt | Three of five useful cases compatible; all selected effects denied; detached cancellation limitation |
 
 Effort ranges below are engineering judgments for one contributor including tests
 and documentation, not delivery promises. Native setup, access and review delays
@@ -215,6 +215,15 @@ spike. **Risk:** semantic drift and privacy in traces. [ACP v1 security](https:/
 ## #95 — Hook confinement decision experiment
 
 Existing conditional experiment, not a new benchmark or production runtime.
+**Status:** the [bounded experiment](HOOK-CONFINEMENT-DECISION.md) measured mcpm's
+own development/release command fixtures on macOS 27.3 with a separate strict
+policy. All five unconfined cases worked; strict syntax/test/pack worked, while
+both CLI inspect cases failed during user-info startup. All selected sensitive
+effects were denied with positive controls, but the detached grandchild continued
+work after group cancellation before its separate bounded self-exit. Independent
+raw/input replay supports NO-GO for integrating this candidate. The experiment
+is complete; a production strict-hook backend remains unbuilt. Original scope
+and stop rule remain:
 Select a small authorized command-hook cohort, compare useful benign work against
 sensitive-read, egress, out-of-root-write, child escape and cancellation fixtures
 in a disposable environment. Separate command hooks from HTTP/MCP/prompt/agent
