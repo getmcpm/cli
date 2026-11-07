@@ -163,6 +163,23 @@ for the named comparisons and security limits. These calls test transport and
 guard decisions; they do not activate a skill in a host or measure agent behavior.
 
 
+## Retained Skills fixture checks (#140)
+
+The retained-fixture MVP extends the release-harness consumer with 26 retained
+Skills scenarios per protocol era, directly and through the actual guard.
+Trusted connection identity, correlated held/read/refreshed captures and every
+declared member's raw bytes are checked against the pinned Beta interpretation
+and independent fixture files. Expected nonclean outcomes must remain nonclean;
+the harness passing such a case is not a clean skill verdict. Both final local
+candidate and actual 0.51.0 archive matrices passed 139 comparisons with zero
+failures; independent replay/readback and maintainer acceptance are recorded in the
+[contract, oracle and validation record](RETAINED-SKILLS-DECISION.md).
+
+No public CLI or production guard manifest enforcement is added. Native loading,
+approval, publisher authenticity and whole-server hidden-file coverage remain
+outside this fixture validation. Legacy SDK interoperability is separate from
+the Beta specification's modern protocol requirement.
+
 ## Doctor evidence candidate checks (v0.49.0)
 
 The explicit candidate-archive mode adds twelve doctor comparisons: missing,

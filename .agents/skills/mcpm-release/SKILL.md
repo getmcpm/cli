@@ -91,6 +91,9 @@ Clean-install the downloaded archive with disposable client state and run the
 repository's release smoke and modern/legacy direct/guarded protocol sandbox.
 Bind receipts to archive/runtime hashes, dependency lock, harness, public skill
 and actual isolation. Keep expected unsupported cases and exclusions visible.
+For [retained Skills fixtures](../../../docs/RETAINED-SKILLS-DECISION.md), verify
+expected versus observed statuses and per-member byte/origin/coverage bindings;
+a harness pass on an expected nonclean case is not a clean skill verdict.
 Use native-client checks where needed for the changed behavior; record exact
 versions and separate configured, observed-loaded and enforced evidence. Do not
 transfer old native results to a new archive or claim universal compatibility.

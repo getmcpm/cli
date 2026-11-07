@@ -45,6 +45,11 @@ consent, provider/model behavior or universal conformance from SDK/source checks
 Native inspection commands may execute servers: do not invoke `mcp get` or another
 client merely to fill unknowns in a read-only audit.
 
+For [retained Skills fixtures](../../../docs/RETAINED-SKILLS-DECISION.md), consume
+the expected/observed verification status and declared-set coverage together.
+A harness pass on an expected mismatch/incomplete case is not clean skill
+verification; catalog/directory scope and native loading remain separate.
+
 ## Requested review and fix loop
 
 Follow the user's model split: when requested, Sol builds and Astra reviews the
