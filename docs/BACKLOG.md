@@ -20,8 +20,8 @@ used the published v0.49.0 archive.
 | Shipped | #156 | Bounded archive-only receipt in v0.51.0; one-consumer gate met | Expansion retains consumer/value stop rule |
 | Deferred | #157 | Consumer gate evaluated for mcpm's own development/release workflow; adapter unbuilt | Artifact-bound contract and measured incremental value still required |
 | Merged PR #333 | #140 | Full retained Skills fixture MVP for the existing release-harness consumer | Pinned Beta; both archive matrices, independent replay/readback and maintainer acceptance |
-| Validated bounded MVP | #158 | Native inline-hook activation/drift experiment | Eight observations/75 checks; independent bindings and maintainer acceptance; scoped evidence below |
-| Later | #159 | New: offline ACP v1 evidence spike; demand-gated | One real trace consumer; stable interpretation |
+| Merged PR #334 | #158 | Native inline-hook activation/drift experiment | Eight observations/75 checks; independent bindings and maintainer acceptance; scoped evidence below |
+| Deferred/unbuilt | #159 | Offline ACP v1 trace spike; consumer gate evaluated | Current workflow has MCP/native evidence; no supplied ACP trace or concrete ACP-specific review question |
 | Later | #95 | Existing: hook confinement GO/NO-GO experiment | Measured cohort and restrictive policy |
 
 Effort ranges below are engineering judgments for one contributor including tests
@@ -176,9 +176,11 @@ contract. **Risk:** Beta revisions/host support change. [Authoritative repositor
 
 ## #158 — Native artifact activation and update-drift evidence
 
-**Validated bounded MVP:** the [Claude inline-hook experiment](NATIVE-PLUGIN-LIFECYCLE.md) passed eight source-bound native observations (three clean processes, zero API requests/turns/cost) and 75 native self-checks. Independent final raw/image/source/config bindings passed and the maintainer accepted the scoped evidence. Implementation and limits are documented below; delivery is tracked by the repository PR.
+**Validated bounded MVP:** the [Claude inline-hook experiment](NATIVE-PLUGIN-LIFECYCLE.md) passed eight source-bound native observations (three clean processes, zero API requests/turns/cost) and 75 native self-checks. Independent final raw/image/source/config bindings passed and the maintainer accepted the scoped evidence. Implementation and limits below retain the measured fixture scope.
 
-**Status:** new, conditional follow-up to #156; distinct from MCP doctor tests.
+**Status:** the bounded fixture MVP merged in PR #334 (`117966d`) after all nine
+CI checks, without an npm release or companion repin. The original conditional
+follow-up to #156 is distinct from MCP doctor tests.
 **User/problem:** installed/cached plugin bytes can differ from running-session
 state. **MVP:** one pinned host, synthetic plugin/skill, disposable profile and
 deterministic component marker; observe update/reload/disable/restart identity.
@@ -193,7 +195,11 @@ universal host claims or default-consent bypass. **Effort:** 3–6 days plus set
 
 ## #159 — Offline ACP permission/cancellation evidence spike
 
-**Status:** new research candidate, not an active runtime commitment.
+**Status:** the [current-workflow consumer gate](ACP-TRACE-DECISION.md) was
+evaluated; the offline ACP spike remains deferred and unbuilt. A real
+permission/cancellation review consumer exists, but its inspected streams are
+MCP and Claude native/SDK. Reopen for a concrete ACP trace review, including a
+one-off need, with the supplied trace and retention scope below.
 **User/problem:** a concrete ACP consumer may need to explain permission and
 cancellation handling across captured traces. **MVP:** one supplied, value-redacted
 ACP v1 trace and fixture set; check correlation, denied/cancelled outcomes and
