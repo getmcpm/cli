@@ -1,6 +1,6 @@
 # Maintainer workflow and context
 
-## Current checkpoint — 2026-11-07
+## Current checkpoint — 2026-11-08
 
 Current published CLI: **v0.51.0**. Experimental #156 archive-only local
 Agent Skills/Claude plugin change receipts shipped through Sol implementation,
@@ -25,7 +25,16 @@ evaluated mcpm's actual development/release reports, including a retained
 Scorecard SARIF. A maintainer consumer exists; the adapter remains deferred and
 unbuilt pending artifact/coverage/privacy contracts and measured incremental
 findings/review cost. E6/E10a remain roadmap proposals, not shipped report commands.
-This docs-only decision requires no CLI release. Conditional #159 retains its
+The [#140 retained-Skills MVP](RETAINED-SKILLS-DECISION.md) implements the
+original pinned-fixture MVP for the existing release-harness consumer. Metadata
+inspection remains separately shipped; it adds retained manifest/raw
+byte/identity/state verification without production guard or host-loading claims.
+Candidate and actual-published-archive matrices each passed 139 comparisons;
+independent capture/image readback and maintainer acceptance preserve expected
+nonclean outcomes. Runtime/public-skill bytes are unchanged; no package release
+or companion repin is needed for this verification-tooling change.
+The validated fixture change is awaiting merge.
+#157's docs-only decision requires no CLI release. Conditional #159 retains its
 consumer/demand stop rule; #158 requires demonstrated activation-drift need.
 Broader #141 remains open.
 See the [active backlog](BACKLOG.md).

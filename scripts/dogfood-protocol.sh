@@ -18,7 +18,7 @@ trap cleanup EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
 # Send only the harness and public fixtures to Docker, never the entire checkout.
-for file in Dockerfile package.json package-lock.json harness.mjs self-check.mjs peer.mjs run.mjs; do
+for file in Dockerfile package.json package-lock.json harness.mjs self-check.mjs peer.mjs run.mjs skills-verification.mjs skills-self-check.mjs skills-peer.mjs skills-oracle.json; do
   cp "$ROOT/scripts/protocol-sandbox/$file" "$CONTEXT/$file"
 done
 if [ -n "$CANDIDATE" ]; then
@@ -37,6 +37,7 @@ fs.writeFileSync(dockerfile, fs.readFileSync(dockerfile, 'utf8').replace('COPY p
 NODE
 fi
 cp "$ROOT/skills/mcpm/SKILL.md" "$CONTEXT/mcpm-SKILL.md"
+cp -R "$ROOT/scripts/protocol-sandbox/skills-fixtures" "$CONTEXT/skills-fixtures"
 mkdir "$CONTEXT/fixtures"
 for group in benign warn attacks; do
   cp "$ROOT/src/guard/__tests__/fixtures/mcptox/$group"/modern-*.json "$CONTEXT/fixtures/"

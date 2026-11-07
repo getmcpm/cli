@@ -1,4 +1,4 @@
-# Active trust and DevX backlog — 2026-11-07
+# Active trust and DevX backlog — 2026-11-08
 
 This is the current, deliberately selected queue, aligned with the project
 Obsidian backlog. **#IDs are project backlog IDs, not GitHub issue numbers.** It
@@ -19,7 +19,7 @@ used the published v0.49.0 archive.
 | --- | --- | --- | --- |
 | Shipped | #156 | Bounded archive-only receipt in v0.51.0; one-consumer gate met | Expansion retains consumer/value stop rule |
 | Deferred | #157 | Consumer gate evaluated for mcpm's own development/release workflow; adapter unbuilt | Artifact-bound contract and measured incremental value still required |
-| 3 | #140 | Existing: remaining Skills manifest/byte verification | Actual consumer; pinned beta revision |
+| Validated; awaiting merge | #140 | Full retained Skills fixture MVP for the existing release-harness consumer | Pinned Beta; both archive matrices, independent replay/readback and maintainer acceptance |
 | 4 | #158 | New: native artifact activation/drift measurement; conditional | #156 demand; disposable profile/host access |
 | Later | #159 | New: offline ACP v1 evidence spike; demand-gated | One real trace consumer; stable interpretation |
 | Later | #95 | Existing: hook confinement GO/NO-GO experiment | Measured cohort and restrictive policy |
@@ -152,8 +152,18 @@ vendor contracts and hidden egress. [Snyk contract caution](https://github.com/s
 
 ## #140 — Retained Skills manifest and content verification
 
-**Status:** existing, partially shipped: metadata inspection is in v0.48.1;
-manifest/byte/identity and loading boundaries remain separate. **MVP:** only with
+**Status:** existing, partially shipped: metadata inspection is in v0.48.1.
+The bounded fixture MVP is validated and awaiting merge.
+The [retained-fixture MVP](RETAINED-SKILLS-DECISION.md) extends the actual
+release-harness consumer beyond its original single-file consistency assertions.
+It checks retained origin/URI identity, every declared resource's raw bytes,
+held/refreshed state and explicit incomplete coverage against pinned Beta
+fixtures. Both actual SDK/direct/guarded archive matrices passed 139 comparisons;
+independent replay/readback and maintainer acceptance cover the expected nonclean
+outcomes as well as complete declared-set cases. This is the fixture-scoped MVP;
+no new public CLI or
+production guard manifest-enforcement claim is required or implemented.
+Manifest/byte/identity and loading boundaries remain separate. **MVP:** only with
 a concrete consumer, validate retained static manifests and raw-byte digest/size
 relationships in pinned beta fixtures, keyed by origin plus URI.
 
