@@ -56,6 +56,13 @@ command. Consume executed command markers plus complete raw lifecycle evidence;
 settings, hook listings and declared bundle versions alone do not prove loading.
 Keep text-skill activation unknown and real host profiles outside the fixture.
 
+For the [command-hook confinement experiment](../../../docs/HOOK-CONFINEMENT-DECISION.md),
+run its dependency-free receipt checks through the native self-check entry point.
+Native measurement requires the reviewed explicit public-input/disposable layout;
+never use real hooks or broaden the production standard profile to finish a run.
+Consume useful-work breakage, independently observed effects and descendant
+cancellation separately. A safely cleaned-up detached survivor remains NO-GO.
+
 ## Requested review and fix loop
 
 Follow the user's model split: when requested, Sol builds and Astra reviews the

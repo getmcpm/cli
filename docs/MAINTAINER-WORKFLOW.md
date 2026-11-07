@@ -42,6 +42,8 @@ review consumer with MCP/native evidence, but no supplied ACP v1 trace or
 concrete ACP-specific question beyond those logs in this workflow. The offline
 spike remains deferred/unbuilt; a named one-off review can reopen the original
 bounded MVP with an actual value-redacted trace and retention scope.
+That decision merged in [PR #335](https://github.com/getmcpm/cli/pull/335)
+at `0ab4d5d` after all nine CI checks; it did not ship an ACP feature.
 The [#158 native inline-hook experiment](NATIVE-PLUGIN-LIFECYCLE.md) separates
 configured bytes, native metadata and executed command identity across a live
 update/reload/disable plus fresh-process restarts. Its final native run passed all
@@ -52,6 +54,16 @@ fixture-scoped MVP. It merged in [PR #334](https://github.com/getmcpm/cli/pull/3
 at `117966d` after all nine CI checks, without an npm release or companion repin.
 One hook marker cannot establish text-skill or whole-plugin activation.
 Broader #141 remains open.
+The [#95 command-hook experiment](HOOK-CONFINEMENT-DECISION.md) measured a
+separate restrictive process policy against five useful mcpm workflow cases and
+synthetic file/egress/descendant controls. Three useful cases remained compatible;
+both public CLI inspect cases failed during user-info startup. All selected
+effects were denied, including in the detached grandchild, but cancellation did
+not stop that grandchild. Independent raw/input replay and 29 focused / 104 native
+self-checks support the measured NO-GO for integrating this fixed candidate.
+Separate self-expiry cleaned up the fixture; it does not repair cancellation.
+Production confinement/runtime/dependencies/public usage skill are unchanged,
+so no npm release or companion repin is needed.
 See the [active backlog](BACKLOG.md).
 
 ## Instruction and skill loading
