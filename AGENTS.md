@@ -58,9 +58,11 @@ runtime protection are the product. Keep changes small, deterministic and scoped
   actual enforcement are separate evidence. Static recognition cannot authenticate
   a launcher; a native command named inspection can still execute a server
   (Claude Code `mcp get` has done so). Keep read-only work non-executing.
-- `mcpm scope` inventories fixed Claude Code sources/instruction metadata only;
-  host version, effective selection, loading and enforcement stay unknown. It is
-  separate from DoctorModel and the nine served MCP tools.
+- `mcpm scope` defaults to the fixed Claude Code inventory; `--client vscode`
+  separately inventories fixed VS Code/Copilot sources and instruction metadata.
+  Source formats/origins are not cross-harness precedence or a selected-profile
+  calculation. Host version, effective selection, loading and enforcement stay
+  unknown. It is separate from DoctorModel and the nine served MCP tools.
 - Tests first for behavior: reproduce a bug before fixing the shared cause and
   inspect all callers. Exercise the public path and realistic edge cases, not a
   hand-copied implementation. For security predicates, verify the relevant clause

@@ -48,10 +48,19 @@ attestation. **Effort:** 3–6 days, revised after the compatibility inventory.
 
 ## #141 — Project exposure and scope inventory
 
-**Status:** the bounded Claude Code `mcpm scope <project-root> [--json]` slice shipped in [v0.50.0](RELEASE-2026-11-06-v0.50.0.md) after #315 and Astra review/fixes. Seven actual published CLI scope cases and 87 protocol comparisons passed. The broader #141 item remains open: additional host dialects remain unimplemented/unmeasured. See [scope documentation](PROJECT-SCOPE.md). **User/problem:** global-only evidence
+**Status:** the bounded Claude Code `mcpm scope <project-root> [--json]` slice shipped in [v0.50.0](RELEASE-2026-11-06-v0.50.0.md) after #315 and Astra review/fixes. Seven actual published CLI scope cases and 87 protocol comparisons passed. The published slice remains Claude-only; the VS Code candidate below is not shipped, and broader profile/host coverage remains open. See [scope documentation](PROJECT-SCOPE.md). **User/problem:** global-only evidence
 can miss project configuration and precedence. **MVP:** explicit project root,
 one host profile first, read-only project MCP entries and applicable instruction
 files; identify origin, scope, shadowing and unreadable/unsupported coverage.
+
+The current VS Code extension is a candidate, not merged or released: explicit
+`--client vscode` inventories four fixed VS Code/Copilot origins with distinct
+JSON/JSONC/bare-map semantics and instruction metadata. Duplicate names do not
+become a cross-harness winner. Candidate source/packed compatibility checks,
+twelve actual CLI cases and the separately pinned native path/editor reference
+passed with independent read-back. Remaining profile/remote/workspace-file
+coverage is recorded in [the candidate section](PROJECT-SCOPE.md#vs-code-candidate-validation--2026-11-08-not-released).
+The broader #141 scope remains open.
 
 **Acceptance:** parent/workspace paths, symlink escapes, duplicate names, malformed
 files, denied access, secret placeholders and unknown host versions cannot become
