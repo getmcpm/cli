@@ -130,7 +130,7 @@ try {
   const valid = '{ // inert project JSONC\n "servers": {}, "inputs": [], }\n';
   await put(nativeFiles[0], valid); await put(nativeFiles[1], valid);
   await put(nativeFiles[2], '{"mcpServers":{}}'); await put(nativeFiles[3], '{"mcpServers":{}}');
-  await put(nativeFiles[4], JSON.stringify({ 'chat.mcp.autostart': 'never', 'chat.mcp.discovery.enabled': {}, 'telemetry.telemetryLevel': 'off', 'update.mode': 'none', 'extensions.autoUpdate': false, 'extensions.autoCheckUpdates': false, 'extensions.ignoreRecommendations': true, 'workbench.startupEditor': 'none' }));
+  await put(nativeFiles[4], JSON.stringify({ 'chat.mcp.autostart': 'never', 'chat.mcp.discovery.enabled': {}, 'telemetry.telemetryLevel': 'off', 'update.mode': 'none', 'extensions.autoUpdate': 'off', 'extensions.autoCheckUpdates': false, 'extensions.ignoreRecommendations': true, 'workbench.startupEditor': 'none' }));
   await fs.mkdir('/home/node/.cache', { recursive: true }); await fs.mkdir('/work/extensions', { recursive: true });
   await put('/work/extension/package.json', JSON.stringify({ name: 'mcpm-scope-validation', publisher: 'mcpm', version: '1.0.0', engines: { vscode: '*' }, main: './extension.cjs' }));
   await fs.copyFile('/app/extension.cjs', '/work/extension/extension.cjs');

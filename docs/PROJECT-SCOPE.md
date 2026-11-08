@@ -137,9 +137,10 @@ forwarded VS Code entries; interactive-input entries are excluded. Workspace
 portable and user portable capabilities also differ. This inventory does not
 normalize formats or resolve those forwarding/activation rules.
 
-## VS Code candidate validation — 2026-11-08 (not released)
+## VS Code candidate validation — 2026-11-08 (historical candidate)
 
-The extension is a candidate for review, not part of published v0.51.0. Source
+This historical candidate preceded the v0.52.0 release; its archive and native
+measurements remain separate from the actual published checkpoint below. Source
 typecheck/build/coverage passed (3,877 tests passed, one skipped). The packed
 candidate passed 139 modern/legacy comparisons, zero failures, two expected
 unsupported combinations and four exclusions, plus a clean-install smoke.
@@ -246,6 +247,17 @@ raw CLI/native receipts, input hashes and actual runtime boundary together.
 entry point; they are not native proof. The native process uses `--no-sandbox`
 inside the outer container and disables Workspace Trust for this inert reference;
 it establishes no Chromium-sandbox, native-consent or enforcement guarantee.
+
+## Published VS Code checkpoint — 2026-11-08
+
+The bounded VS Code profile shipped in v0.52.0. The actual authenticated npm
+archive, rather than the placeholder-version candidate above, passed a separate
+clean-install smoke and 139 modern/legacy protocol comparisons (zero failures,
+two expected unsupported combinations and four exclusions), with independent
+runtime/lock/harness and retained-capture read-back. See the
+[release evidence](RELEASE-2026-11-08-v0.52.0.md) for source/artifact identities,
+fresh native measurements, the retained failed fixture-migration attempt and
+companion state. Host selection, MCP activation and enforcement remain unknown.
 
 ## Primary references
 

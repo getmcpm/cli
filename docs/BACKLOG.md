@@ -53,13 +53,12 @@ can miss project configuration and precedence. **MVP:** explicit project root,
 one host profile first, read-only project MCP entries and applicable instruction
 files; identify origin, scope, shadowing and unreadable/unsupported coverage.
 
-The current VS Code extension is a candidate, not merged or released: explicit
-`--client vscode` inventories four fixed VS Code/Copilot origins with distinct
-JSON/JSONC/bare-map semantics and instruction metadata. Duplicate names do not
-become a cross-harness winner. Candidate source/packed compatibility checks,
-twelve actual CLI cases and the separately pinned native path/editor reference
-passed with independent read-back. Remaining profile/remote/workspace-file
-coverage is recorded in [the candidate section](PROJECT-SCOPE.md#vs-code-candidate-validation--2026-11-08-not-released).
+The bounded VS Code extension shipped in [v0.52.0](RELEASE-2026-11-08-v0.52.0.md):
+explicit `--client vscode` inventories four fixed VS Code/Copilot origins with
+format-specific parsing and instruction metadata. Duplicate names do not become
+a cross-harness winner. Candidate and published evidence retain separate archive
+identities. Remaining named-profile, remote, workspace-file and other-host
+coverage stays explicit in [the scope contract](PROJECT-SCOPE.md).
 The broader #141 scope remains open.
 
 **Acceptance:** parent/workspace paths, symlink escapes, duplicate names, malformed
