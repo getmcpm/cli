@@ -8,6 +8,8 @@ _Add entries here, never under a stamped version_ — a release commit renames t
 heading, and a branch that wrote beneath it merges without conflict straight into a
 published section (it happened to #170).
 
+## [0.52.0] - 2026-11-08
+
 ### Added
 
 - Extend read-only `mcpm scope` with explicit `--client vscode`: fixed VS Code/Copilot configuration origins, format-specific JSON/JSONC reads, duplicate-declaration metadata and instruction-file metadata. Selected profile, forwarding, loading and enforcement remain unknown; Claude Code stays the default.
