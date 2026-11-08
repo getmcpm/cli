@@ -23,14 +23,14 @@ case "$1" in
   cp) printf '{"cases":[]}' > "$3/report.json" ;;
 esac
 `, { mode: 0o755 });
-    // Exercise the real launcher without waiting 120 seconds or requiring Docker.
+    // Exercise the real launcher without waiting 180 seconds or requiring Docker.
     await writeFile(`${root}/deadline.cjs`, `
 const assert = require('node:assert/strict');
 const cp = require('node:child_process');
 const original = cp.spawnSync;
 cp.spawnSync = (command, args, options) => {
   if (command !== 'docker' || args[0] !== 'start') return original(command, args, options);
-  assert.equal(options.timeout, 120000);
+  assert.equal(options.timeout, 180000);
   assert.equal(options.killSignal, 'SIGKILL');
   return process.env.RUNNING === 'true'
     ? { status: null, error: { code: 'ETIMEDOUT' }, signal: 'SIGKILL' }

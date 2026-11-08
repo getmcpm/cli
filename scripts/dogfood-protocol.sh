@@ -51,7 +51,7 @@ CONTAINER="$(docker create --network none --read-only --user 1000:1000 --cap-dro
 set +e
 node - "$CONTAINER" "$OUTPUT" <<'NODE'
 const r = require('node:child_process').spawnSync('docker', ['start', '-a', process.argv[2]], {
-  stdio: 'inherit', timeout: 120000, killSignal: 'SIGKILL',
+  stdio: 'inherit', timeout: 180000, killSignal: 'SIGKILL',
 });
 const status = r.error?.code === 'ETIMEDOUT' ? 124 : (r.status ?? 1);
 require('node:fs').writeFileSync(`${process.argv[3]}/execution.json`, JSON.stringify({

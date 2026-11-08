@@ -147,6 +147,15 @@ Independent runtime/lock/harness and retained-capture read-back passed.
 Candidate SHA-256:
 `a76558b6009adf5f8a2428ae067ed173e0060dc6a13e936689be037d10ccea48`.
 The public usage skill source is 1.3.1; this is not an npm publication.
+Hosted PR #337 runs at `9a3968d` twice reached the outer 120-second protocol
+launcher deadline: the first completed 131 passing cases with eight unrun; an
+unchanged retry completed 135 passing cases with four unrun. Neither reported
+a case assertion failure, and both remain failed/incomplete executions. The
+outer launcher budget is now 180 seconds for the full 139-case workload; per-case
+deadlines, assertions, resources and thresholds are unchanged. The launcher
+regression exercises the real shell path with an ETIMEDOUT result and requires
+exit 124, container kill before evidence export, and final removal. Fresh hosted
+CI must validate the new head; local completion does not replace that check.
 The normal native self-check entry points passed 124 tests, including 20 focused
 scope receipt checks. The protocol result includes independent replay of 104
 retained direct/guarded captures.
