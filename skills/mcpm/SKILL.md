@@ -2,7 +2,7 @@
 name: mcpm
 description: Discover, assess, verify and manage MCP servers with the @getmcpm/cli package. Use when working with mcpm evidence, project locks or AI client MCP configuration.
 metadata:
-  version: "1.3.0"
+  version: "1.3.1"
   evidence-contract: "mcpm_search, mcpm_info, advertised mcpm_doctor and verify --json schemaVersion 1"
 ---
 
@@ -31,9 +31,17 @@ CLI evidence and state the limitation; do not invent fields or upgrade silently.
   unknown schema version. Doctor structured output starts in v0.49.0; older servers
   still provide JSON text without this advertised contract.
 - For a user-selected project root, check `mcpm scope --help` for availability,
-  then use `mcpm scope <project-root> --json` when supported. This CLI-only,
-  read-only Claude Code inventory is separate from doctor and MCP tools. Check
-  `schemaVersion`, exit status, `inventoryComplete`, source states and coverage.
+  then use `mcpm scope <project-root> --json` for the default Claude Code profile.
+  Use `--client vscode` only when help advertises that selector and the user wants
+  VS Code. This CLI-only, read-only inventory is separate from doctor/MCP tools.
+  Check `client`, `schemaVersion`, exit status, `inventoryComplete`, source states
+  and coverage. VS Code `servers` and portable Copilot `mcpServers` have separate
+  origins/formats; `sameNameIn` observes duplicate declarations, not precedence
+  or an effective winner. Project portable `.mcp.json` can be JSONC or a bare map;
+  Copilot user `mcp-config.json` is strict JSON. Do not rewrite one as the other.
+  Default user-profile paths are candidates, not proof of the selected profile,
+  harness or forwarding. Named profiles, remote/workspace-file sources and
+  instruction applicability can remain unknown even when fixed inventory is complete.
   A complete fixed-source inventory does not establish complete host coverage,
   effective selection, loading or enforcement. Do not run clients or servers to
   fill unknown fields without authorization.

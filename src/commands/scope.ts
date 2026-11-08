@@ -1,9 +1,9 @@
-/** Read-only, bounded Claude Code configuration inventory; never host activation evidence. */
+/** Read-only, bounded client configuration inventories; never host activation evidence. */
 import { lstat, realpath } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { readConfig, inspect, type FileState } from "../config/read-bounded-json.js";
-import type { Command } from "commander";
+import { Option, type Command } from "commander";
 import type { McpServerEntry } from "../config/adapters/index.js";
 import { McpServerEntrySchema } from "../config/adapters/base.js";
 import { classifyWrap } from "../guard/wrap.js";
@@ -37,6 +37,23 @@ export interface ScopeModel {
   servers: Server[];
   instructions: Instruction[];
   coverage: string[];
+}
+type VSCodeOrigin = "vscode-project" | "copilot-project" | "vscode-user" | "copilot-user";
+interface VSCodeSource extends Source {
+  origin: VSCodeOrigin;
+  format: "vscode" | "copilot-portable";
+  container: "servers" | "mcpServers" | "bare";
+  uninterpretedRootFields: boolean | "unknown";
+}
+interface VSCodeServer extends Omit<Server, "possibleShadowedBy"> {
+  origin: VSCodeOrigin;
+  format: VSCodeSource["format"];
+  sameNameIn: { origin: VSCodeOrigin; source: string }[];
+}
+export interface VSCodeScopeModel extends Omit<ScopeModel, "client" | "sources" | "servers"> {
+  client: "vscode";
+  sources: VSCodeSource[];
+  servers: VSCodeServer[];
 }
 interface ScopeDeps { home?: string; managedDirectory?: string; }
 const own = (o: Record<string, unknown>, key: string): unknown => Object.hasOwn(o, key) ? o[key] : undefined;
@@ -151,8 +168,99 @@ export async function buildScopeModel(projectRoot: string, deps: ScopeDeps = {})
   return model;
 }
 
-export function renderScope(model: ScopeModel): string {
+const VSCODE_COVERAGE = [
+  "Fixed local configuration candidates only. Host version, selected user profile/harness, effective selection, forwarding, loading and enforcement are unknown.",
+  "VS Code servers and portable Copilot mcpServers are separate formats/origins. Same-name declarations are duplication, not precedence or an effective winner. Eligible VS Code forwarding depends on the harness and interactive inputs.",
+  "Only the default Code/User and ~/.copilot fallback locations are candidates. Named profiles, Insiders, portable/user-data-dir installations, remote configuration, COPILOT_HOME/XDG_CONFIG_HOME overrides, settings and automatic discovery are not resolved.",
+  "The explicit directory is one folder, not a discovered workspace. .code-workspace mcp settings, extra workspace folders/URIs, dev containers, managed policy, trust, approvals, exclusions, plugins and connectors are unexamined.",
+  "Known server field shapes are checked, not complete native schema/format acceptance. uninterpretedRootFields marks extra root fields without exposing values. Unsupported fields and transport/cwd/envFile/input/environment semantics are not resolved. Portable workspace and user capabilities differ; neither is normalized into VS Code configuration.",
+  "Fixed root/ancestor and harness-user instruction candidates are metadata only; applicability is unknown and no instruction precedence is inferred. Local profile instructions, recursive *.instructions.md/rules, nested/on-demand files, custom locations, imports, CODEX_HOME and parent-repository settings are unexamined.",
+  "No commands, hooks, servers, credential helpers or clients execute. Values/placeholders and instruction contents are neither expanded nor output. Guard form is static metadata, not authentication or protection evidence; node launcher identity is unknown.",
+  "Symlink components are skipped; an explicitly selected root is canonicalized. Config reads are bounded to 1 MiB, reject duplicate keys and invalid UTF-8, and remain filesystem snapshots rather than atomic tree views.",
+];
+const ScopeEntryWithoutEnvSchema = McpServerEntrySchema.omit({ env: true });
+
+/** Separate fixed VS Code/Copilot candidates, without changing the Claude default. */
+export async function buildVSCodeScopeModel(projectRoot: string, deps: { home?: string; platform?: NodeJS.Platform } = {}): Promise<VSCodeScopeModel> {
+  const requested = projectRoot === "" ? "" : path.resolve(projectRoot);
+  const model: VSCodeScopeModel = {
+    schemaVersion: 1, client: "vscode", hostVersion: "unknown", root: { path: requested, state: "unreadable" },
+    inventoryComplete: false, effective: "unknown", loaded: "unknown", enforced: "unknown",
+    sources: [], servers: [], instructions: [], coverage: [...VSCODE_COVERAGE],
+  };
+  if (!requested) { model.root.state = "not-directory"; return model; }
+  try {
+    const canonical = await realpath(requested);
+    if (!(await lstat(canonical)).isDirectory()) { model.root.state = "not-directory"; return model; }
+    model.root = { path: canonical, state: "directory" };
+  } catch (error) {
+    model.root.state = missing(error) ? "missing" : code(error) === "ENOTDIR" ? "not-directory" : "unreadable";
+    return model;
+  }
+  const root = model.root.path, home = path.resolve(deps.home ?? os.homedir()), platform = deps.platform ?? process.platform;
+  // An injected home keeps fixture reads inside that home; runtime Windows uses APPDATA like the existing adapter.
+  const appData = platform === "darwin" ? path.join(home, "Library", "Application Support") : platform === "win32"
+    ? (!deps.home && process.env.APPDATA && path.win32.isAbsolute(process.env.APPDATA) ? process.env.APPDATA : home) : path.join(home, ".config");
+  const candidates: { path: string; scope: "project" | "user"; origin: VSCodeOrigin; format: VSCodeSource["format"] }[] = [
+    { path: path.join(root, ".vscode", "mcp.json"), scope: "project", origin: "vscode-project", format: "vscode" },
+    { path: path.join(root, ".mcp.json"), scope: "project", origin: "copilot-project", format: "copilot-portable" },
+    { path: path.join(appData, "Code", "User", "mcp.json"), scope: "user", origin: "vscode-user", format: "vscode" },
+    { path: path.join(home, ".copilot", "mcp-config.json"), scope: "user", origin: "copilot-user", format: "copilot-portable" },
+  ];
+  for (const candidate of candidates) {
+    const expected = candidate.format === "vscode" ? "servers" : "mcpServers";
+    const result = await readConfig(candidate.path, { jsonc: candidate.origin !== "copilot-user" });
+    const source: VSCodeSource = { ...candidate, state: result.state, container: expected, uninterpretedRootFields: "unknown" };
+    model.sources.push(source);
+    if (!result.value) continue;
+    const rootKeys = candidate.format === "vscode" ? ["servers", "inputs", "sandbox"] : ["mcpServers"];
+    source.uninterpretedRootFields = Object.keys(result.value).some(key => !rootKeys.includes(key));
+    const wrong = expected === "servers" ? "mcpServers" : "servers";
+    let container = own(result.value, expected);
+    const wrongValue = own(result.value, wrong);
+    if (candidate.origin === "copilot-project" && !Object.hasOwn(result.value, "mcpServers")) {
+      // The pinned parser treats every bare root key as an independent declaration, even "servers".
+      source.container = "bare"; source.uninterpretedRootFields = false; container = result.value;
+    } else if (wrongValue !== undefined) source.state = "malformed";
+    if (container === undefined) continue;
+    if (!object(container)) { source.state = "malformed"; continue; }
+    for (const [name, entry] of Object.entries(container)) {
+      const env = object(entry) ? entry.env : undefined;
+      const valid = object(entry) && ScopeEntryWithoutEnvSchema.safeParse(entry).success &&
+        (source.container !== "bare" || typeof entry.command === "string" || typeof entry.url === "string") &&
+        (env === undefined || (object(env) && Object.values(env).every(value => value === null || typeof value === "string" || (typeof value === "number" && Number.isFinite(value))))) &&
+        ["type", "transport", "cwd", "envFile"].every(key => entry[key] === undefined || typeof entry[key] === "string");
+      if (!valid) source.state = "malformed";
+      model.servers.push({ name, scope: source.scope, source: source.path, origin: source.origin, format: source.format,
+        configured: true, declaration: valid ? "object" : "malformed", guardForm: valid && object(entry) ? guardForm(entry) : "unknown",
+        sameNameIn: [], effective: "unknown" });
+    }
+  }
+  const names = new Map<string, VSCodeServer[]>();
+  for (const server of model.servers) { const peers = names.get(server.name) ?? []; peers.push(server); names.set(server.name, peers); }
+  for (const server of model.servers) server.sameNameIn = names.get(server.name)!.filter(peer => peer !== server).map(peer => ({ origin: peer.origin, source: peer.source }));
+  async function instruction(file: string, scope: Instruction["scope"]): Promise<void> {
+    if (!model.instructions.some(row => row.path === file)) model.instructions.push({ path: file, scope, state: await inspect(file), applicability: "unknown" });
+  }
+  for (const file of [".copilot/copilot-instructions.md", ".claude/CLAUDE.md", ".codex/AGENTS.md"]) await instruction(path.join(home, file), "user");
+  const ancestors = [];
+  for (let dir = root; ; dir = path.dirname(dir)) { ancestors.unshift(dir); if (path.dirname(dir) === dir) break; }
+  for (const dir of ancestors) for (const file of [".github/copilot-instructions.md", "AGENTS.md", "CLAUDE.md", ".claude/CLAUDE.md"]) await instruction(path.join(dir, file), dir === root ? "project" : "ancestor");
+  model.inventoryComplete = [...model.sources, ...model.instructions].every(source => source.state === "present" || source.state === "missing");
+  return model;
+}
+
+export function renderScope(model: ScopeModel | VSCodeScopeModel): string {
   const safe = (value: string) => sanitizeForTerminal(value);
+  if (model.client === "vscode") return [
+    `VS Code scope inventory: ${safe(model.root.path)} (${model.root.state})`,
+    `Fixed-source inventory: ${model.inventoryComplete ? "complete" : "incomplete"}; effective / loaded / enforced: unknown`,
+    ...model.sources.map(source => `  ${source.origin} [${source.format}, ${source.container}]: ${safe(source.path)} (${source.state}); uninterpreted root fields: ${source.uninterpretedRootFields}`),
+    ...model.servers.map(server => `  ${safe(server.name)} [${server.origin}]: ${server.declaration}; guard form: ${server.guardForm}; same name in: ${server.sameNameIn.map(peer => peer.origin).join(", ") || "none observed"}; effective: unknown`),
+    "Instruction candidates (applicability unknown):",
+    ...model.instructions.map(instruction => `  ${instruction.scope}: ${safe(instruction.path)} (${instruction.state})`),
+    ...model.coverage,
+  ].join("\n");
   return [
     `Claude Code scope inventory: ${safe(model.root.path)} (${model.root.state})`,
     `Fixed-source inventory: ${model.inventoryComplete ? "complete" : "incomplete"}; effective / loaded / enforced: unknown`,
@@ -166,10 +274,11 @@ export function renderScope(model: ScopeModel): string {
 
 export function registerScopeCommand(program: Command): void {
   program.command("scope <project-root>")
-    .description("Inventory fixed Claude Code project/user sources without executing clients")
+    .description("Inventory fixed project/user sources without executing clients (Claude Code by default)")
+    .addOption(new Option("--client <client>", "Client inventory profile").choices(["claude-code", "vscode"]).default("claude-code"))
     .option("--json", "Output the inventory as JSON")
-    .action(async (root: string, options: { json?: boolean }) => {
-      const model = await buildScopeModel(root);
+    .action(async (root: string, options: { json?: boolean; client: "claude-code" | "vscode" }) => {
+      const model = options.client === "vscode" ? await buildVSCodeScopeModel(root) : await buildScopeModel(root);
       stdoutOutput(options.json ? JSON.stringify(model, null, 2) : renderScope(model));
       if (!model.inventoryComplete) process.exitCode = 1;
     });

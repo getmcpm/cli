@@ -58,7 +58,11 @@ _mcpm_completions() {
       return 0
       ;;
     --client|-c)
-      COMPREPLY=( $(compgen -W "${CLIENT_IDS.join(" ")}" -- "\${cur}") )
+      if [[ "\${COMP_WORDS[1]}" == scope ]]; then
+        COMPREPLY=( $(compgen -W "claude-code vscode" -- "\${cur}") )
+      else
+        COMPREPLY=( $(compgen -W "${CLIENT_IDS.join(" ")}" -- "\${cur}") )
+      fi
       return 0
       ;;
     completions)
@@ -97,7 +101,7 @@ _mcpm() {
     'audit:Scan all installed servers for trust assessment'
     'update:Check for newer versions of installed servers'
     'outdated:Show installed servers with newer versions available'
-    'scope:Inventory Claude Code project scopes'
+    'scope:Inventory fixed project/client sources'
     'review-artifacts:Compare local USTAR skill/plugin snapshots'
     'doctor:Check MCP setup health'
     'init:Install a curated starter pack'
@@ -138,6 +142,9 @@ _mcpm() {
         secrets)
           _values 'secrets command' ${SECRETS_SUBCOMMANDS}
           ;;
+        scope)
+          _arguments '--client[Inventory profile]:client:(claude-code vscode)'
+          ;;
         remove|disable|enable|install|info|search)
           _arguments '--client[Target client]:client:(${CLIENT_IDS.join(" ")})'
           ;;
@@ -160,7 +167,7 @@ complete -c mcpm -n '__fish_use_subcommand' -a remove -d 'Remove an MCP server'
 complete -c mcpm -n '__fish_use_subcommand' -a audit -d 'Scan installed servers'
 complete -c mcpm -n '__fish_use_subcommand' -a update -d 'Check for updates'
 complete -c mcpm -n '__fish_use_subcommand' -a outdated -d 'Show servers with newer versions'
-complete -c mcpm -n '__fish_use_subcommand' -a scope -d 'Inventory Claude Code project scopes'
+complete -c mcpm -n '__fish_use_subcommand' -a scope -d 'Inventory fixed project/client sources'
 complete -c mcpm -n '__fish_use_subcommand' -a review-artifacts -d 'Compare local USTAR skill/plugin snapshots'
 complete -c mcpm -n '__fish_use_subcommand' -a doctor -d 'Check MCP setup health'
 complete -c mcpm -n '__fish_use_subcommand' -a init -d 'Install a starter pack'
@@ -183,6 +190,7 @@ complete -c mcpm -n '__fish_use_subcommand' -a completions -d 'Generate completi
 complete -c mcpm -n '__fish_seen_subcommand_from completions' -a 'bash zsh fish'
 complete -c mcpm -n '__fish_seen_subcommand_from guard' -a '${GUARD_SUBCOMMANDS}'
 complete -c mcpm -n '__fish_seen_subcommand_from secrets' -a '${SECRETS_SUBCOMMANDS}'
+complete -c mcpm -n '__fish_seen_subcommand_from scope' -l client -a 'claude-code vscode' -d 'Inventory profile'
 complete -c mcpm -n '__fish_seen_subcommand_from remove disable enable install info' -l client -s c -a '${CLIENT_IDS.join(" ")}' -d 'Target client'
 complete -c mcpm -l json -d 'Output as JSON'
 complete -c mcpm -l yes -s y -d 'Skip confirmation'

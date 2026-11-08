@@ -5,8 +5,29 @@
 import { describe, it, expect, vi } from "vitest";
 import { handleCompletions } from "../../commands/completions.js";
 import type { ShellType } from "../../commands/completions.js";
+import { execFileSync } from "node:child_process";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
 
 describe("handleCompletions", () => {
+  it("offers only the two scope profiles while preserving other client commands", () => {
+    const output = vi.fn(); handleCompletions("bash", { output });
+    const script = output.mock.calls[0][0] as string;
+    const home = mkdtempSync(path.join(tmpdir(), "mcpm-completion-test-"));
+    const complete = (command: string) => execFileSync("/bin/bash", ["--noprofile", "--norc", "-c", `${script}\nCOMP_WORDS=(mcpm ${command} /tmp --client ''); COMP_CWORD=4; _mcpm_completions; printf '%s\\n' "\${COMPREPLY[@]}"`], { encoding: "utf8", env: { PATH: "/usr/bin:/bin", HOME: home } }).trim().split("\n");
+    try {
+      expect(complete("scope")).toEqual(["claude-code", "vscode"]);
+      expect(complete("install")).toContain("claude-desktop");
+    } finally { rmSync(home, { recursive: true, force: true }); }
+    for (const shell of ["zsh", "fish"] as const) {
+      const generated = vi.fn(); handleCompletions(shell, { output: generated });
+      const text = generated.mock.calls[0][0] as string;
+      expect(text).toContain("claude-code vscode");
+      expect(text).not.toContain("Inventory Claude Code project scopes");
+      expect(text).toContain("claude-desktop");
+    }
+  });
   it("generates bash completions containing mcpm commands", () => {
     const output = vi.fn();
     handleCompletions("bash", { output });

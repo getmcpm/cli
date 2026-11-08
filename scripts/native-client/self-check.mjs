@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import './plugin-lifecycle-self-check.mjs';
 import '../hook-confine/self-check.mjs';
+import { checkReport as checkVSCodeScopeReport, caseIds as vscodeScopeCases, fixtureFiles as vscodeScopeFiles, nativeFiles as vscodeNativeFiles, cliEnvironment as vscodeScopeEnv, sourceIdentities as vscodeScopeSources } from '../scope-vscode/check.mjs';
 import assert from 'node:assert/strict';
 import { fixtureMetadata, serverName } from './fixture-registry.mjs';
 import { assertEcho, assertNativeWire, assertGuestBoundary, assertConsentObservation, assertTrustObservation, trustCases, checkPayload, cliArtifact, evidenceFiles, validateReport } from './checks.mjs';
@@ -20,6 +21,53 @@ import { TerminalScreen } from './terminal.mjs';
 import { claudeConsent, claudeStartup, interactiveClaude, terminalChoices } from './consent-claude.mjs';
 import { vscodeTrustButton } from './trust-vscode.mjs';
 import { claudeProjectTrust, interactiveClaudeTrust } from './trust-claude.mjs';
+
+// Authored unit projection only; native proof must come from the manual offline run.
+function vscodeScopeProjection() {
+  const originalText = '{"servers":{}}';
+  const sha = text => createHash('sha256').update(text).digest('hex');
+  const file = text => ({ state: 'file', mode: 0o600, bytes: Buffer.byteLength(text), base64: Buffer.from(text).toString('base64'), sha256: sha(text) });
+  const snapshot = Object.fromEntries(vscodeScopeFiles.map(name => [name, file('authored unit fixture')]));
+  const cli = vscodeScopeCases.map(id => {
+    const success = ['vscode-json', 'vscode-human', 'claude-default', 'claude-explicit'].includes(id);
+    const root = id === 'missing-root' ? '/work/not-present' : id === 'empty-root' ? '' : '/work/scope-cli/project';
+    const options = id === 'claude-default' ? ['--json'] : id === 'claude-explicit' ? ['--client', 'claude-code', '--json'] : ['--client', id === 'bad-client' ? 'unsupported' : 'vscode', ...(id === 'vscode-human' ? [] : ['--json'])];
+    const model = { schemaVersion: 1, root: { path: root }, client: id.startsWith('claude') ? 'claude-code' : 'vscode', hostVersion: 'unknown', effective: 'unknown', loaded: 'unknown', enforced: 'unknown', inventoryComplete: success,
+      sources: vscodeScopeSources.map(source => ({ ...source, state: 'present' })), servers: vscodeScopeSources.map(source => ({ name: 'same', source: source.path, scope: source.scope, format: source.format, configured: true, origin: source.origin, sameNameIn: vscodeScopeSources.filter(peer => peer.origin !== source.origin).map(peer => ({ origin: peer.origin, source: peer.path })) })) };
+    const failure = { 'vscode-malformed': [0, 'malformed'], 'vscode-user-jsonc': [3, 'malformed'], 'vscode-symlink': [0, 'symlink-skipped'], 'vscode-denied': [0, 'unreadable'] }[id];
+    if (failure) model.sources[failure[0]].state = failure[1];
+    if (id === 'missing-root' || id === 'empty-root') model.sources = [];
+    if (id === 'vscode-bare') { model.sources[1].container = 'bare'; model.sources[1].state = 'malformed'; model.servers = [{ name: 'servers', declaration: 'malformed' }, { name: 'visible-neighbor', declaration: 'object' }]; }
+    return { id, command: '/usr/local/bin/node', args: ['/app/node_modules/@getmcpm/cli/dist/index.js', 'scope', root, ...options], cwd: '/work/scope-cli/project', env: vscodeScopeEnv, status: success ? 0 : 1, signal: null, stdout: id === 'vscode-human' ? 'VS Code scope inventory:' : id === 'bad-client' ? '' : JSON.stringify(model), stderr: '', before: snapshot, after: structuredClone(snapshot), markerExists: false, marker: { path: '/work/scope-cli/EXECUTION_MARKER', state: 'missing', code: 'ENOENT' } };
+  });
+  const nativeBefore = Object.fromEntries(vscodeNativeFiles.map(name => [name, file(originalText)]));
+  return { schemaVersion: 1, boundary: { uid: 1000, gid: 1000, capEff: '0000000000000000', noNewPrivs: '1', interfaces: ['lo'], rootWriteError: 'EROFS' }, cli, sentinelControl: { status: 0, signal: null, markerContents: 'SCOPE_SECRET_EXEC', removed: true }, productCommit: '2a59476c9bfcb90b3ddc372c36762471b7dfad1c', nativeBefore, nativeAfter: structuredClone(nativeBefore),
+    nativeProcess: { status: 0, signal: null, command: '/opt/vscode/bin/code', args: ['--no-sandbox'], env: { HOME: '/home/node' } },
+    native: { status: 'pass', version: '1.141.0', commands: ['workbench.mcp.openUserMcpJson'], configPath: '/home/node/.config/Code/User/mcp.json', projectPath: '/work/native-project/.vscode/mcp.json', languageId: 'jsonc', initialVersion: 1, initialDiagnosticsKind: 'snapshot', initialDiagnostics: [], invalidDiagnostics: [{ severity: 0 }], restoredDiagnostics: [], originalText, originalSha256: sha(originalText), restoredSha256: sha(originalText), transitions: [{ version: 2, text: '{"servers":', sha256: sha('{"servers":') }, { version: 3, text: originalText, sha256: sha(originalText) }], diagnosticEvents: [{ path: '/work/native-project/.vscode/mcp.json', version: 2, sha256: sha('{"servers":'), diagnostics: [{ severity: 0 }] }, { path: '/work/native-project/.vscode/mcp.json', version: 3, sha256: sha(originalText), diagnostics: [] }] } };
+}
+test('VS Code scope receipt checks require all actual observations and preserve unknown activation', () => {
+  assert.equal(checkVSCodeScopeReport(vscodeScopeProjection()).status, 'pass');
+});
+for (const [name, change] of [
+  ['lost CLI case', r => r.cli.pop()], ['executed marker', r => { r.cli[0].markerExists = true; }],
+  ['changed config', r => { r.cli[0].after[vscodeScopeFiles[0]].sha256 = 'b'.repeat(64); }],
+  ['secret output', r => { r.cli[0].stderr = 'SCOPE_SECRET'; }],
+  ['missing native negative control', r => { r.native.invalidDiagnostics = []; }],
+  ['foreign native profile', r => { r.native.configPath = '/outside/mcp.json'; }],
+  ['unrestored native bytes', r => { r.native.restoredSha256 = 'b'.repeat(64); }],
+  ['missing native fixture snapshot', r => { r.nativeBefore = {}; r.nativeAfter = {}; }],
+  ['failed executable positive control', r => { r.sentinelControl.status = 1; }],
+  ['lost syntax transition', r => { r.native.transitions.pop(); }],
+  ['forged transition hash', r => { r.native.transitions[0].sha256 = 'b'.repeat(64); }],
+  ['noncausal document version', r => { r.native.transitions[0].version = 1; }],
+  ['preexisting syntax error', r => { r.native.initialDiagnostics = [{ severity: 0 }]; }],
+  ['failed native process', r => { r.nativeProcess.status = 1; }],
+  ['lost owned diagnostic event', r => { r.native.diagnosticEvents = []; }],
+  ['wrong CLI invocation', r => { r.cli[0].args = []; }],
+  ['wrong source format', r => { const model = JSON.parse(r.cli[0].stdout); model.sources[0].format = 'wrong'; r.cli[0].stdout = JSON.stringify(model); }],
+  ['forged snapshot hashes', r => { for (const stage of ['before', 'after']) r.cli[0][stage][vscodeScopeFiles[0]].sha256 = 'b'.repeat(64); }],
+  ['nonzero runtime capability', r => { r.boundary.capEff = '1'; }],
+]) test(`VS Code scope rejects ${name}`, () => { const report = vscodeScopeProjection(); change(report); assert.throws(() => checkVSCodeScopeReport(report)); });
 
 test('macOS PTY driver uses the visible choice and exits after success or pre-dispatch refusal', { skip: process.platform !== 'darwin', timeout: 30000 }, async () => {
   const work = await mkdtemp(tmpdir() + '/mcpm-consent-pty-');

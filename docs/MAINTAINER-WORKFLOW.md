@@ -54,6 +54,16 @@ fixture-scoped MVP. It merged in [PR #334](https://github.com/getmcpm/cli/pull/3
 at `117966d` after all nine CI checks, without an npm release or companion repin.
 One hook marker cannot establish text-skill or whole-plugin activation.
 Broader #141 remains open.
+The [VS Code scope extension candidate](PROJECT-SCOPE.md#vs-code-profile---client-vscode)
+adds only an explicit selector to the read-only CLI: four fixed VS Code/Copilot
+origins, format-specific parsing and instruction metadata, with selected profile,
+forwarding and activation unknown. Default Claude output is unchanged. The
+candidate passed source/packed checks, 139 protocol comparisons and twelve actual
+packed CLI cases. The pinned Linux VS Code path/JSONC editor reference and
+independent image/input read-back passed; all 124 native self-checks passed.
+This does not establish MCP selection or activation. It is not merged or published;
+the requested delivery is an open PR, without merge/release. The public usage
+skill source is 1.3.1 while published v0.51.0 retains its prior release attribution.
 The [#95 command-hook experiment](HOOK-CONFINEMENT-DECISION.md) measured a
 separate restrictive process policy against five useful mcpm workflow cases and
 synthetic file/egress/descendant controls. Three useful cases remained compatible;

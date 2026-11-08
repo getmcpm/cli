@@ -4,7 +4,7 @@ import { constants } from "node:fs";
 import { lstat, open, access, type FileHandle } from "node:fs/promises";
 import path from "node:path";
 import type { Stats } from "node:fs";
-import { parseTree, type Node, type ParseError } from "jsonc-parser";
+import { getNodeValue, parseTree, type Node, type ParseError } from "jsonc-parser";
 export type FileState = "present" | "missing" | "unreadable" | "symlink-skipped" | "not-file" | "too-large" | "malformed";
 const MAX_CONFIG_BYTES = 1024 * 1024;
 const object = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
@@ -76,23 +76,24 @@ export async function readBoundedBytes(file: string, maxBytes = MAX_CONFIG_BYTES
 }
 
 /** Parse exactly the retained bytes, rejecting duplicate keys and invalid UTF-8. */
-export function parseJsonObject(bytes: Buffer): Record<string, unknown> | undefined {
+export function parseJsonObject(bytes: Buffer, options: { jsonc?: boolean } = {}): Record<string, unknown> | undefined {
   try {
     if (!isUtf8(bytes)) return undefined;
-    const raw = bytes.toString("utf8");
+    const text = bytes.toString("utf8");
+    const raw = options.jsonc ? text.replace(/^\uFEFF/, "") : text;
     const errors: ParseError[] = [];
-    const tree = parseTree(raw, errors, { disallowComments: true, allowTrailingComma: false });
+    const tree = parseTree(raw, errors, { disallowComments: !options.jsonc, allowTrailingComma: options.jsonc === true });
     if (!tree || errors.length || duplicateKeys(tree)) return undefined;
-    const value: unknown = JSON.parse(raw);
+    const value: unknown = options.jsonc ? getNodeValue(tree) : JSON.parse(raw);
     return object(value) ? value : undefined;
   } catch { return undefined; }
 }
 
-export async function readConfig(file: string, options: { allowEmpty?: boolean } = {}): Promise<{ state: FileState; value?: Record<string, unknown> }> {
+export async function readConfig(file: string, options: { allowEmpty?: boolean; jsonc?: boolean } = {}): Promise<{ state: FileState; value?: Record<string, unknown> }> {
   const result = await readBoundedBytes(file);
   if (!result.bytes) return { state: result.state };
   if (options.allowEmpty && isUtf8(result.bytes) && result.bytes.toString("utf8").trim() === "") return { state: "present", value: {} };
-  const value = parseJsonObject(result.bytes);
+  const value = parseJsonObject(result.bytes, options);
   return value ? { state: "present", value } : { state: "malformed" };
 }
 
