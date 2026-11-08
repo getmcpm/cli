@@ -2,7 +2,15 @@
 
 ## Current checkpoint — 2026-11-08
 
-Current published CLI: **v0.51.0**. Experimental #156 archive-only local
+Current published CLI: **v0.52.0**. The bounded VS Code/Copilot extension to
+`mcpm scope` shipped after reviewed #329/#330/#337 and release stamp #338.
+The exact npm archive passed independent provenance/SBOM/tamper authentication,
+66-file source-build comparison, clean-install smoke and 139 protocol comparisons.
+See the [v0.52.0 release record](RELEASE-2026-11-08-v0.52.0.md) for actual published
+native/companion checkpoints and limits. Public usage skill source is 1.3.1.
+#331 remains separate; broader #141 coverage stays open.
+
+Previously, v0.51.0's experimental #156 archive-only local
 Agent Skills/Claude plugin change receipts shipped through Sol implementation,
 Astra review/fixes and CI-green [PR #327](https://github.com/getmcpm/cli/pull/327).
 Actual npm archive authentication, smoke, 87 modern/legacy protocol checks and
@@ -15,8 +23,8 @@ The [artifact profile](ARTIFACT-REVIEW.md) keeps byte/declaration coverage and
 host state separate. The one-consumer retention decision met the bounded gate;
 manual source review remained necessary, with no measured efficiency or native
 activation/safety claim. The [candidate history](ARTIFACT-REVIEW-VALIDATION.md)
-retains earlier archive identities and excluded attempts. The public mcpm skill
-is 1.3.0. Contributor skills remain repo-only.
+retains earlier archive identities and excluded attempts. The v0.51.0 public mcpm skill
+was 1.3.0. Contributor skills remain repo-only.
 
 The bounded #122 Claude policy slice remains documented against its named
 [v0.50.1 archive](RELEASE-2026-11-06-v0.50.1.md); its native measurements do not
@@ -54,16 +62,17 @@ fixture-scoped MVP. It merged in [PR #334](https://github.com/getmcpm/cli/pull/3
 at `117966d` after all nine CI checks, without an npm release or companion repin.
 One hook marker cannot establish text-skill or whole-plugin activation.
 Broader #141 remains open.
-The [VS Code scope extension candidate](PROJECT-SCOPE.md#vs-code-profile---client-vscode)
+The [released VS Code scope extension](PROJECT-SCOPE.md#vs-code-profile---client-vscode)
 adds only an explicit selector to the read-only CLI: four fixed VS Code/Copilot
 origins, format-specific parsing and instruction metadata, with selected profile,
 forwarding and activation unknown. Default Claude output is unchanged. The
 candidate passed source/packed checks, 139 protocol comparisons and twelve actual
 packed CLI cases. The pinned Linux VS Code path/JSONC editor reference and
 independent image/input read-back passed; all 124 native self-checks passed.
-This does not establish MCP selection or activation. It is not merged or published;
-the requested delivery is an open PR, without merge/release. The public usage
-skill source is 1.3.1 while published v0.51.0 retains its prior release attribution.
+This does not establish MCP selection or activation. The slice merged in #337
+and shipped in v0.52.0; fresh published evidence is recorded separately from
+that historical candidate in the release record. The public usage skill source
+is 1.3.1; v0.51.0 retains its prior release attribution.
 The [#95 command-hook experiment](HOOK-CONFINEMENT-DECISION.md) measured a
 separate restrictive process policy against five useful mcpm workflow cases and
 synthetic file/egress/descendant controls. Three useful cases remained compatible;
