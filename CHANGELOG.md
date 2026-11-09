@@ -8,6 +8,13 @@ _Add entries here, never under a stamped version_ — a release commit renames t
 heading, and a branch that wrote beneath it merges without conflict straight into a
 published section (it happened to #170).
 
+## [0.52.1] - 2026-11-10
+
+### Changed
+
+- Publish an email-metadata patch using the verified npm maintainer contact `hello@m1ngshum.com`; runtime code and dependencies are unchanged from 0.52.0. Historical npm versions retain their original metadata.
+- Keep guard-playground and mcp-guardbench pinned to their tested 0.52.0 baseline for this metadata-only patch; no companion merge or deployment is included.
+
 ## [0.52.0] - 2026-11-08
 
 ### Added
