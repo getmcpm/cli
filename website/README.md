@@ -44,11 +44,12 @@ universal native-client enforcement. Command previews contain no invented result
 - Dashboard: https://app.netlify.com/projects/mcpm-homepage
 - Cloudflare DNS: DNS-only CNAME `mcpm` to `mcpm-homepage.netlify.app`.
 - Public visitor access; preserve managed HTTPS and HTTP-to-HTTPS redirects.
-- GitHub target: `getmcpm/cli`, production branch `main`. The repository connection
-  must be completed in Netlify before Git deployments are active.
+- Connected GitHub repository: `getmcpm/cli`, using the Netlify GitHub App.
+- Production branch: `main`; pushes to `main` automatically build and publish.
+- Pull requests build Deploy Previews without replacing the production site.
 - Root `netlify.toml` sets base `website`, command `sh build.sh`, and publish `dist`
   (relative to the base directory). PR deploys are previews; merging to `main`
-  publishes production once connected. Do not create a replacement project.
+  publishes production. Do not create a replacement project.
 
 Publish only `index.html`, `styles.css`, `tokens.css`, `base.css`, `site.js`, and
 `assets/logo.svg`, preserving their paths. Stage these six files into an empty
