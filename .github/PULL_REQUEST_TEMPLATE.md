@@ -11,6 +11,6 @@
 
 ## Checklist
 
-- [ ] I've read the [contributing guidelines](../README.md#contributing)
+- [ ] I've read the [contributing guidelines](../CONTRIBUTING.md)
 - [ ] No hardcoded secrets or credentials
 - [ ] Tests added for new functionality

@@ -90,8 +90,9 @@ run health checks; an unavailable external scanner does not earn a clean pass.
 See [score math, scanner protocol and safety floors](docs/TRUST.md).
 
 Tool pins use **trust on first observation (TOFU)** at runtime, not approval at
-install. Initial malicious definitions can become the baseline. Later description
-changes warn; schema/annotation changes block under the default drift rules.
+install. Initial malicious definitions can become the baseline. Field-level
+comparison warns on description-only changes and blocks schema/annotation changes;
+unannounced same-session changes and older coarse pins can also block.
 Pattern findings can independently block. Review the actual upgrade before
 accepting drift; do not automatically re-pin merely to clear a refusal.
 

@@ -296,7 +296,7 @@ The relay refuses to use either file if its sidecar doesn't match — this is th
 
 > Status: shipped in v0.16.0 (PRs #108–#111). macOS only in v1. Opt-in — without `--confine`, `enable`/`disable` behave exactly as before.
 
-Every guard feature above is **detection**: the relay reasons about the JSON-RPC bytes flowing through it and warns or blocks. But the relay is a stdio MITM — it can inspect every frame yet cannot *contain* the child MCP server it spawns. A server that simply *decides* to read `~/.ssh` or write `~/Library/LaunchAgents` never expresses that intent through inspectable traffic. `--confine` is the first **enforcement** primitive: it wraps the relayed child in an OS sandbox with selected secret-path read denials and write/network restrictions. The finite denylist does not cover every credential location; configured credentials are intentionally delivered to the child. Network-enabled launchers can send accessible data. Detection and confinement cover different boundaries.
+The relay detects patterns and enforces block decisions on MCP traffic. It cannot by itself *contain* the child MCP server it spawns. A server that simply *decides* to read `~/.ssh` or write `~/Library/LaunchAgents` never expresses that intent through inspectable traffic. `--confine` adds **OS process enforcement**: it wraps the relayed child in an OS sandbox with selected secret-path read denials and write/network restrictions. The finite denylist does not cover every credential location; configured credentials are intentionally delivered to the child. Network-enabled launchers can send accessible data. Detection and confinement cover different boundaries.
 
 ### The standard tier
 

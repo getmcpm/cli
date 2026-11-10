@@ -16,12 +16,16 @@ Levels are a **ratio** of the points available, not absolute: **safe** at 80% of
 `maxPossible` or better, **caution** at 50-79%, **risky** below 50%. With no external
 scanner (`maxPossible` 80) that puts safe at 64 points, not 80.
 
-`mcpm audit` shows **`clean · not run`** where the server cleared every check that
-actually ran and the only unmeasured component is the health check — audit never
-executes servers, so that bucket scores a flat 15/30 and would otherwise drag every
-flawless server into **caution**. It is a statement about what mcpm did (found nothing,
-ran nothing), deliberately weaker than **safe**, which is reserved for servers whose
-health check really ran.
+`mcpm audit` displays **`clean · not run`** when its measured scan buckets have
+no findings and satisfy the clean-label predicate, but the health check did not run.
+That display label does not change the numeric score or stored `level`. The `safe`
+level is a score-ratio classification, not proof that a health check ran; an opt-in
+external scanner can raise the ratio into that band despite the unrun health bucket.
+
+Audit does not apply the release-age cooldown used by `why`, `install`, `up` and
+`lock`, so the same candidate's scores can differ. Read performed/unrun checks and
+findings alongside the number rather than treating different commands as identical
+assessments.
 
 Without an external scanner, `maxPossible` is 80: the external bucket is dropped from
 the denominator rather than counted as a failure. That denominator is not the achievable
@@ -97,7 +101,7 @@ hijacked-publish (Postmark) attack.
 
 `mcpm lock` and `mcpm why` additionally **cryptographically verify** the provenance
 **offline** — the attestation's Sigstore bundle is checked against a vendored trust root
-(no network at verify time), and the attested subject digest is bound to the package's
+(the cryptographic step is offline; fetching npm records still uses the network), and the attested subject digest is bound to the package's
 `dist.integrity`, so a valid attestation for a *different* tarball can't pass. When it
 holds, the record reads `verified`; otherwise `attested` — an *unverified* registry
 record — or `unsigned` (neutral). Report-only, and honest about scope: `verified` means

@@ -154,10 +154,10 @@ mcpm/
 
 | Module | Purpose |
 |---|---|
-| `commands/` | 26 CLI commands (incl. `guard` subcommand group with 13 subcommands and `publish` with 3 subcommands), each a self-contained Commander action |
+| `commands/` | Commander command registration and actions, including the `guard` and `publish` subcommand groups |
 | `server/` | MCP server (stdio): 9 tools wrapping CLI logic via injectable handlers |
 | `stack/` | Stack file schemas (mcpm.yaml/mcpm-lock.yaml), semver resolution, trust policy, .env parsing |
-| `guard/` | **v0.5.0 runtime defense.** Stdio MITM relay, OWASP MCP Top 10 pattern engine, schema pinning + drift detection, policy file editor, integrity sidecars, event log. Plus `guard/confine/` (F1, released v0.16.0, macOS-only, opt-in via --confine): the first **enforcement** primitive — the relay optionally wraps the child spawn in an OS sandbox (macOS `sandbox-exec`) to deny selected secret-path reads and restrict writes/network according to its profile, complementing byte-level detection. Configured secrets are still delivered to the child; network-enabled launchers can exfiltrate accessible data. See [confinement limits](GUARD.md#os-confinement---confine). |
+| `guard/` | **v0.5.0 runtime defense.** Stdio MITM relay, OWASP MCP Top 10 pattern engine, schema pinning + drift detection, policy file editor, integrity sidecars, event log. Plus `guard/confine/` (F1, released v0.16.0, macOS-only, opt-in via --confine): **OS process enforcement** — the relay optionally wraps the child spawn in an OS sandbox (macOS `sandbox-exec`) to deny selected secret-path reads and restrict writes/network according to its profile, complementing byte-level detection. Configured secrets are still delivered to the child; network-enabled launchers can exfiltrate accessible data. See [confinement limits](GUARD.md#os-confinement---confine). |
 | `registry/` | Typed HTTP client for the official MCP Registry API (v0.1 at registry.modelcontextprotocol.io) |
 | `config/` | OS-aware config paths, client detection, and per-client config adapters with atomic writes |
 | `scanner/` | Trust scoring engine: tier 1 (built-in static pattern analysis over registry metadata — secrets, prompt injection, typosquatting, exfil-shaped args), tier 2 (the opt-in external scanner named by `MCPM_EXTERNAL_SCANNER`, off by default), composite score |
@@ -191,6 +191,8 @@ mcpm/
 | `mcpm completions <shell>` | Generate shell completion scripts (bash, zsh, fish) |
 | `mcpm serve` | Start mcpm as an MCP server (stdio transport) |
 | `mcpm why <name>` | Explain a server's trust score (breakdown of all scoring components) |
+| `mcpm scope <project-root>` | Read-only fixed-source inventory; [coverage](PROJECT-SCOPE.md) |
+| `mcpm review-artifacts <before.tar> <after.tar> --profile <profile>` | Local archive comparison; [profiles and limits](ARTIFACT-REVIEW.md) |
 | `mcpm secrets` | Manage encrypted credentials for MCP servers |
 | `mcpm publish` | Publish an MCP server to the official registry |
 | `mcpm guard enable / disable / status` | Wrap detected client configs with the inspection relay; restore; report state |
@@ -278,14 +280,15 @@ Tool pins are first-observation TOFU, not install-time approval.
 
 ### OS confinement (F1 — released v0.16.0)
 
-Everything above is **detection**: the relay reasons about JSON-RPC bytes and warns
-or blocks. It cannot *contain* the child it spawns — a server that decides to read
+The relay detects patterns and enforces block decisions on JSON-RPC traffic.
+It cannot by itself *contain* the child it spawns — a server that decides to read
 `~/.ssh` or write `~/Library/LaunchAgents` never expresses that intent through
-inspectable traffic. `--confine` is the first **enforcement** primitive: it wraps the
+inspectable traffic. `--confine` is **OS process enforcement**: it wraps the
 relayed child in an OS sandbox with selected secret-path read denials and
 write/network restrictions. This finite profile does not cover every credential
-location or prevent general exfiltration; configured secrets still reach the child. Detection (watch) and confinement (contain) are
-complementary. **macOS-only in v1** (Linux `bwrap` deferred); **opt-in** — without
+location or prevent general exfiltration; configured secrets still reach the child.
+Wire inspection/enforcement and process confinement are complementary.
+**macOS-only in v1** (Linux `bwrap` deferred); **opt-in** — without
 `--confine`, enable/disable behavior is unchanged.
 
 ```
