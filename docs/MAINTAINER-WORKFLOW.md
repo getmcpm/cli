@@ -1,89 +1,27 @@
 # Maintainer workflow and context
 
-## Current checkpoint — 2026-11-08
+## Current checkpoint — 2026-11-10
 
-Current published CLI: **v0.52.0**. The bounded VS Code/Copilot extension to
-`mcpm scope` shipped after reviewed #329/#330/#337 and release stamp #338.
-The exact npm archive passed independent provenance/SBOM/tamper authentication,
-66-file source-build comparison, clean-install smoke and 139 protocol comparisons.
-See the [v0.52.0 release record](RELEASE-2026-11-08-v0.52.0.md) for actual published
-native/companion checkpoints and limits. Public usage skill source is 1.3.1.
-#331 remains separate; broader #141 coverage stays open.
+Latest published CLI: **v0.52.1**, an email-metadata-only patch; runtime code and
+dependencies remain unchanged from **v0.52.0**, the last behavior release.
+Guard-playground and mcp-guardbench deliberately retain their tested **0.52.0**
+baseline. The patch does not claim fresh 0.52.1 runtime/native/companion tests;
+see [CHANGELOG](../CHANGELOG.md#0521---2026-11-10).
 
-Previously, v0.51.0's experimental #156 archive-only local
-Agent Skills/Claude plugin change receipts shipped through Sol implementation,
-Astra review/fixes and CI-green [PR #327](https://github.com/getmcpm/cli/pull/327).
-Actual npm archive authentication, smoke, 87 modern/legacy protocol checks and
-real-consumer reruns passed with exact runtime/input/harness bindings. Both
-companion updates are Astra-reviewed/CI-green and merged; the deployed playground
-returned all seven expected public assets. See the
-[v0.51.0 release record](RELEASE-2026-11-06-v0.51.0.md).
+The [v0.52.0 release record](RELEASE-2026-11-08-v0.52.0.md) owns the published
+archive, protocol, native-reference and companion evidence. Public usage skill
+source is **1.3.1**. The explicit VS Code/Copilot `scope` selector shipped there;
+Claude Code remains the default and broader #141 coverage remains open.
 
-The [artifact profile](ARTIFACT-REVIEW.md) keeps byte/declaration coverage and
-host state separate. The one-consumer retention decision met the bounded gate;
-manual source review remained necessary, with no measured efficiency or native
-activation/safety claim. The [candidate history](ARTIFACT-REVIEW-VALIDATION.md)
-retains earlier archive identities and excluded attempts. The v0.51.0 public mcpm skill
-was 1.3.0. Contributor skills remain repo-only.
-
-The bounded #122 Claude policy slice remains documented against its named
-[v0.50.1 archive](RELEASE-2026-11-06-v0.50.1.md); its native measurements do not
-transfer to 0.51.0. The [#157 consumer gate](EXTERNAL-EVIDENCE-DECISION.md)
-evaluated mcpm's actual development/release reports, including a retained
-Scorecard SARIF. A maintainer consumer exists; the adapter remains deferred and
-unbuilt pending artifact/coverage/privacy contracts and measured incremental
-findings/review cost. E6/E10a remain roadmap proposals, not shipped report commands.
-The [#140 retained-Skills MVP](RETAINED-SKILLS-DECISION.md) implements the
-original pinned-fixture MVP for the existing release-harness consumer. Metadata
-inspection remains separately shipped; it adds retained manifest/raw
-byte/identity/state verification without production guard or host-loading claims.
-Candidate and actual-published-archive matrices each passed 139 comparisons;
-independent capture/image readback and maintainer acceptance preserve expected
-nonclean outcomes. Runtime/public-skill bytes are unchanged; no package release
-or companion repin is needed for this verification-tooling change.
-The fixture change merged in [PR #333](https://github.com/getmcpm/cli/pull/333)
-at `58d6727` after all nine CI checks. The retained final local captures and hosted
-CI captures were independently replayed; this was a tooling merge without an npm release.
-#157's docs-only decision requires no CLI release. The
-[#159 ACP consumer gate](ACP-TRACE-DECISION.md) found a real permission/cancellation
-review consumer with MCP/native evidence, but no supplied ACP v1 trace or
-concrete ACP-specific question beyond those logs in this workflow. The offline
-spike remains deferred/unbuilt; a named one-off review can reopen the original
-bounded MVP with an actual value-redacted trace and retention scope.
-That decision merged in [PR #335](https://github.com/getmcpm/cli/pull/335)
-at `0ab4d5d` after all nine CI checks; it did not ship an ACP feature.
-The [#158 native inline-hook experiment](NATIVE-PLUGIN-LIFECYCLE.md) separates
-configured bytes, native metadata and executed command identity across a live
-update/reload/disable plus fresh-process restarts. Its final native run passed all
-eight observations with three clean process exits and zero API requests/turns/cost;
-75 native self-checks passed. Independent raw/image/source/config bindings passed
-and the maintainer accepted the bounded evidence. This validates the original
-fixture-scoped MVP. It merged in [PR #334](https://github.com/getmcpm/cli/pull/334)
-at `117966d` after all nine CI checks, without an npm release or companion repin.
-One hook marker cannot establish text-skill or whole-plugin activation.
-Broader #141 remains open.
-The [released VS Code scope extension](PROJECT-SCOPE.md#vs-code-profile---client-vscode)
-adds only an explicit selector to the read-only CLI: four fixed VS Code/Copilot
-origins, format-specific parsing and instruction metadata, with selected profile,
-forwarding and activation unknown. Default Claude output is unchanged. The
-candidate passed source/packed checks, 139 protocol comparisons and twelve actual
-packed CLI cases. The pinned Linux VS Code path/JSONC editor reference and
-independent image/input read-back passed; all 124 native self-checks passed.
-This does not establish MCP selection or activation. The slice merged in #337
-and shipped in v0.52.0; fresh published evidence is recorded separately from
-that historical candidate in the release record. The public usage skill source
-is 1.3.1; v0.51.0 retains its prior release attribution.
-The [#95 command-hook experiment](HOOK-CONFINEMENT-DECISION.md) measured a
-separate restrictive process policy against five useful mcpm workflow cases and
-synthetic file/egress/descendant controls. Three useful cases remained compatible;
-both public CLI inspect cases failed during user-info startup. All selected
-effects were denied, including in the detached grandchild, but cancellation did
-not stop that grandchild. Independent raw/input replay and 29 focused / 104 native
-self-checks support the measured NO-GO for integrating this fixed candidate.
-Separate self-expiry cleaned up the fixture; it does not repair cancellation.
-Production confinement/runtime/dependencies/public usage skill are unchanged,
-so no npm release or companion repin is needed.
-See the [active backlog](BACKLOG.md).
+The [active backlog](BACKLOG.md) owns selected work and acceptance. Recent bounded
+MVP/decision records cover [archive review](ARTIFACT-REVIEW.md),
+[retained Skills](RETAINED-SKILLS-DECISION.md),
+[native hook lifecycle](NATIVE-PLUGIN-LIFECYCLE.md),
+[hook confinement NO-GO](HOOK-CONFINEMENT-DECISION.md),
+[external evidence deferral](EXTERNAL-EVIDENCE-DECISION.md) and
+[ACP trace deferral](ACP-TRACE-DECISION.md). Their measurements remain bound to
+named inputs/hosts, rather than transferring to every subsequent package.
+#331 remains separate. Contributor skills remain repo-only.
 
 ## Instruction and skill loading
 
@@ -134,8 +72,8 @@ the wrapper reference or Windows behavior. Local receipt:
 
 - [CONTRIBUTING](../CONTRIBUTING.md): toolchain, source checks and release smoke.
 - [Contracts](CONTRACTS.md), [architecture](ARCHITECTURE.md), [guard](GUARD.md),
-  [policy](POLICY.md), [security delivery status](SECURITY-HARDENING.md) and
-  [security reporting](../SECURITY.md): maintained behavior and boundaries.
+  [policy](POLICY.md) and [security reporting](../SECURITY.md): maintained behavior
+  and boundaries. [Security hardening](SECURITY-HARDENING.md) retains a dated plan.
 - [Protocol baseline](PROTOCOL-VALIDATION.md), [candidate serve](SERVE-PROTOCOL-VALIDATION.md),
   [Skills metadata](SKILLS-GUARD-VALIDATION.md), [doctor evidence](DOCTOR-EVIDENCE-VALIDATION.md),
   [native clients](NATIVE-CLIENT-VALIDATION.md), [Cursor](CURSOR-CLIENT-VALIDATION.md)

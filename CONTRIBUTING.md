@@ -34,7 +34,8 @@ merging Dependabot's lockfile. GitHub Actions bumps are unaffected.
 
 `@types/node` is pinned to the engines floor (22), so a local `typecheck` only proves
 the code compiles against Node 22's API. CI re-runs it per matrix leg against that
-leg's own typings. To reproduce a `Typecheck against @types/node <major>` failure:
+leg's own typings. To reproduce a `Typecheck against @types/node <major>` failure,
+use an isolated clean checkout so restoring the two experiment files cannot erase existing work:
 
 ```
 pnpm add -D @types/node@26   # or 24 — the major CI failed on
@@ -45,7 +46,9 @@ git checkout -- package.json pnpm-lock.yaml
 ### Dogfooding a release
 
 `pnpm dogfood:release` packs the tarball, clean-installs it, and smoke-runs the real
-binary. It gates `pnpm publish`, so it runs against your *local* build and needs a Node
+binary. The supported tag-release workflow requires this gate before publishing.
+A direct local `pnpm publish` only runs the package's build lifecycle hook; it does not
+automatically run this smoke. The smoke uses your *local* build and needs a Node
 inside `engines.node`.
 
 To smoke an **already-published** version instead, set `MCPM_DOGFOOD_SPEC` — the same

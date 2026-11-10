@@ -1,5 +1,10 @@
 # Launch Checklist
 
+> **Historical v0.1.0 launch plan.** Commands, starter packs, CI assumptions and
+> tag/push/outreach tasks below are retained context, not current procedures or
+> authorization. `mcpm init` now scaffolds an empty stack. Use the canonical
+> [release skill](../.agents/skills/mcpm-release/SKILL.md) for current releases.
+
 ## Pre-launch (day before)
 
 - [ ] All tests pass: `pnpm test`

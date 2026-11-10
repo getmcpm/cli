@@ -1,18 +1,19 @@
-# mcpm-guard signature reference (v0.43.0)
+# mcpm-guard signature reference
 
 The shipped signature catalog + how to add one. See `docs/GUARD.md` for the runtime model.
 
-## Currently shipped (22 catalog entries)
+## Shipped catalog
 
 > The **category** column is each signature's own `category` field in
 > `src/guard/signatures.ts`. Those strings (`OWASP-MCP-1`, `OWASP-MCP-2`, …) are the
 > **obsolete OWASP MCP Top 10 v0.1 numbering**, kept only as stable internal tags — they
 > are NOT the current classification. The pinned MCP01–MCP10 mapping every emitted finding
 > actually carries lives in `src/guard/owasp.ts` and is documented in
-> `docs/owasp-mcp-mapping.md`; README's "What it catches" table renders those ids.
+> [OWASP mapping](owasp-mcp-mapping.md).
 
 | id | category | severity | target | description |
 |---|---|---|---|---|
+| `discovery-metadata-injection` | OWASP-MCP-1 | critical | discovery_metadata | Heuristic instruction patterns in skill frontmatter/`_meta` and resource discovery metadata, including `<important>`/`<system>` and instruction-shaped text. Metadata-only: no archive/content verification, publisher authentication, consent or activation enforcement. Legitimate instructions can match; see [coverage](GUARD.md#protocol-and-carrier-coverage). |
 | `owasp-mcp-2-instruction-injection-in-response` | OWASP-MCP-2 | critical | tool_response | Imperative instructions in tool response content (Ignore previous / Disregard prior / Forget all / You are now in developer mode / `<\|system\|>`) |
 | `owasp-mcp-7-path-exfil-in-args` | OWASP-MCP-7 | high | tool_call_args | Sensitive file paths in tool arguments (.ssh / .aws/credentials / .env / id_rsa / .gnupg / .kube/config) |
 | `owasp-mcp-1-tool-description-injection` | OWASP-MCP-1 | critical | tool_description | Instruction-shaped text in tool descriptions (poisoning / rug-pull patterns) |
@@ -114,7 +115,7 @@ recognized by `guard mute`, `guard list-signatures`, and policy overrides:
 
 Plus the runtime drift detectors (`schema-drift`, `schema-drift-cosmetic`, `schema-drift-in-session`) — emitted by the relay, not by the signature engine. Drift is classified per changed field (H4): a **description-only** change is `schema-drift-cosmetic` (severity high → warn, forwarded — the parallel `tool_description` pattern scan still blocks any regex-detectable injection on the same frame, since the relay takes the MAX action); a **schema or annotations** change — or any pre-H4 pin with no stored field hashes — is `schema-drift` (critical → block). A server→client `notifications/tools/list_changed` arms a single-shot re-validation so an *announced* upgrade is classified against the pin rather than tripping the same-session guard. Cosmetic warn is bounded by the pattern-engine regex floor (a paraphrased poison the regexes miss degrades to a forwarded warn — the opt-in LLM-judge tier is the V2 answer, not the drift tier).
 
-> **Not signatures: confine + orig-hash spawn events.** The `--confine` OS-sandbox primitive (F1, released in v0.16.0) adds **no OWASP signatures** — the catalog above is unchanged by confine (22 entries over 8 inspected targets). It emits relay/spawn **events** (not detection signatures) to `guard-events.jsonl`: category `CONFINE` — `confine-applied`, `confine-hash-mismatch`, `confine-marker-stripped`, `confine-profile-missing`, `confine-backend-missing`, `confine-marker-malformed`; plus category `RELAY` — `orig-hash-mismatch` (the wrap marker's `--orig-hash` verified at spawn, #108). These reason about spawn-time enrollment/integrity, not JSON-RPC frame content, so they are outside the signature engine.
+> **Not signatures: confine + orig-hash spawn events.** The `--confine` OS-sandbox primitive (F1, released in v0.16.0) adds **no OWASP signatures** — the catalog above is unchanged by confine. It emits relay/spawn **events** (not detection signatures) to `guard-events.jsonl`: category `CONFINE` — `confine-applied`, `confine-hash-mismatch`, `confine-marker-stripped`, `confine-profile-missing`, `confine-backend-missing`, `confine-marker-malformed`; plus category `RELAY` — `orig-hash-mismatch` (the wrap marker's `--orig-hash` verified at spawn, #108). These reason about spawn-time enrollment/integrity, not JSON-RPC frame content, so they are outside the signature engine.
 
 ## Action mapping
 

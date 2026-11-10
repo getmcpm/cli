@@ -16,7 +16,7 @@ mcpm/
 │   │   ├── audit.ts                — trust-scan installed servers
 │   │   ├── update.ts               — update installed servers
 │   │   ├── doctor.ts               — check MCP setup health
-│   │   ├── init.ts                 — install a curated starter pack
+│   │   ├── init.ts                 — scaffold an empty mcpm.yaml stack
 │   │   ├── import.ts               — import servers from client config
 │   │   ├── serve.ts                — start mcpm as an MCP server
 │   │   ├── disable.ts              — disable a server (thin wrapper over toggle)
@@ -79,9 +79,9 @@ mcpm/
 │   │   ├── env.ts                  — .env file parser
 │   │   └── index.ts                — public API surface
 │   ├── guard/                       — v0.5.0 runtime defense (mcpm-guard)
-│   │   ├── types.ts                — Severity, Signature, InspectResult types (8 SignatureTargets)
+│   │   ├── types.ts                — Severity, Signature, InspectResult types (including discovery_metadata)
 │   │   ├── patterns.ts             — pattern engine (NFKC + leaf walk + regex + decode-and-rescan)
-│   │   ├── signatures.ts           — the shipped signature catalog (22 entries)
+│   │   ├── signatures.ts           — the shipped signature catalog
 │   │   ├── owasp.ts                — OWASP MCP Top 10 (beta) pin carried on every emitted finding
 │   │   ├── inspect-frame.ts        — the ONE stateless composition every consumer shares (relay, `guard inspect`, release gate)
 │   │   ├── relay.ts                — production stdio MITM (subprocess + in-process variants)
@@ -134,7 +134,7 @@ mcpm/
 ├── scripts/
 │   ├── demo.sh                     — asciinema demo recording script
 │   ├── dogfood-confine.sh          — hermetic end-to-end `--confine` dogfood (real macOS Seatbelt enforcement)
-│   ├── dogfood-release.sh          — pack → clean-install → smoke-run the real binary; gates `pnpm publish`
+│   ├── dogfood-release.sh          — pack → clean-install → smoke-run the real binary; gates the supported tag-release workflow (local prepublishOnly builds only)
 │   ├── cursor-client/run.mjs       — isolated real Cursor CLI config/lifecycle/discovery harness
 │   ├── gemini-client/run.mjs       — isolated real Gemini CLI lifecycle/connection harness
 │   └── launch-checklist.md         — pre/post-launch checklist
@@ -154,10 +154,10 @@ mcpm/
 
 | Module | Purpose |
 |---|---|
-| `commands/` | 26 CLI commands (incl. `guard` subcommand group with 13 subcommands and `publish` with 3 subcommands), each a self-contained Commander action |
+| `commands/` | Commander command registration and actions, including the `guard` and `publish` subcommand groups |
 | `server/` | MCP server (stdio): 9 tools wrapping CLI logic via injectable handlers |
 | `stack/` | Stack file schemas (mcpm.yaml/mcpm-lock.yaml), semver resolution, trust policy, .env parsing |
-| `guard/` | **v0.5.0 runtime defense.** Stdio MITM relay, OWASP MCP Top 10 pattern engine, schema pinning + drift detection, policy file editor, integrity sidecars, event log. Plus `guard/confine/` (F1, released v0.16.0, macOS-only, opt-in via --confine): the first **enforcement** primitive — the relay optionally wraps the child spawn in an OS sandbox (macOS `sandbox-exec`) so a server physically can't read secret files or persist, complementing byte-level detection. See `docs/GUARD.md`. |
+| `guard/` | **v0.5.0 runtime defense.** Stdio MITM relay, OWASP MCP Top 10 pattern engine, schema pinning + drift detection, policy file editor, integrity sidecars, event log. Plus `guard/confine/` (F1, released v0.16.0, macOS-only, opt-in via --confine): **OS process enforcement** — the relay optionally wraps the child spawn in an OS sandbox (macOS `sandbox-exec`) to deny selected secret-path reads and restrict writes/network according to its profile, complementing byte-level detection. Configured secrets are still delivered to the child; network-enabled launchers can exfiltrate accessible data. See [confinement limits](GUARD.md#os-confinement---confine). |
 | `registry/` | Typed HTTP client for the official MCP Registry API (v0.1 at registry.modelcontextprotocol.io) |
 | `config/` | OS-aware config paths, client detection, and per-client config adapters with atomic writes |
 | `scanner/` | Trust scoring engine: tier 1 (built-in static pattern analysis over registry metadata — secrets, prompt injection, typosquatting, exfil-shaped args), tier 2 (the opt-in external scanner named by `MCPM_EXTERNAL_SCANNER`, off by default), composite score |
@@ -177,7 +177,7 @@ mcpm/
 | `mcpm update` | Check for newer versions and update installed servers |
 | `mcpm outdated` | Show version drift for installed servers (use `mcpm audit` for current security findings) |
 | `mcpm doctor` | Check MCP setup health (runtimes, configs, servers) |
-| `mcpm init <pack>` | Install a curated starter pack of MCP servers |
+| `mcpm init` | Scaffold an empty mcpm.yaml; legacy pack arguments only print a removal notice |
 | `mcpm disable <name>` | Disable a server without removing it from config |
 | `mcpm enable <name>` | Re-enable a previously disabled server |
 | `mcpm import` | Import existing servers from client config files |
@@ -191,6 +191,8 @@ mcpm/
 | `mcpm completions <shell>` | Generate shell completion scripts (bash, zsh, fish) |
 | `mcpm serve` | Start mcpm as an MCP server (stdio transport) |
 | `mcpm why <name>` | Explain a server's trust score (breakdown of all scoring components) |
+| `mcpm scope <project-root>` | Read-only fixed-source inventory; [coverage](PROJECT-SCOPE.md) |
+| `mcpm review-artifacts <before.tar> <after.tar> --profile <profile>` | Local archive comparison; [profiles and limits](ARTIFACT-REVIEW.md) |
 | `mcpm secrets` | Manage encrypted credentials for MCP servers |
 | `mcpm publish` | Publish an MCP server to the official registry |
 | `mcpm guard enable / disable / status` | Wrap detected client configs with the inspection relay; restore; report state |
@@ -269,81 +271,24 @@ flowchart TD
     style O fill:#ffccbc
 ```
 
-### Guard data flow (v0.5.0 — when `mcpm guard enable` is active)
+### Guard data flow
 
-```mermaid
-sequenceDiagram
-participant IDE as IDE<br/>(Claude Desktop)
-participant Relay as mcpm guard<br/>run --inner
-participant Child as Real MCP<br/>Server
-participant PinStore as ~/.mcpm/pins.json
-participant PolicyFile as ~/.mcpm/<br/>guard-policy.yaml
-participant EventLog as ~/.mcpm/<br/>guard-events.jsonl
-
-Note over IDE,EventLog: ENABLE PHASE (mcpm guard enable)<br/>Rewrites IDE config: real-server-cmd → mcpm guard run --inner -- real-server-cmd
-
-Note over IDE,EventLog: RUNTIME PHASE - JSON-RPC Inspection<br/>Load policy (muted signatures, paused_until)
-
-IDE->>Relay: JSON-RPC request<br/>(method: tool call)
-
-rect rgb(200, 150, 150)
-Note over Relay: PARENT→CHILD INSPECT
-Relay->>Relay: inspectMessage()<br/>Pattern engine<br/>(OWASP-MCP Top 10)
-Relay->>Relay: Check signatures vs<br/>tool_call_args<br/>(e.g., owasp-mcp-7-path-exfil)
-Relay->>Relay: applyPolicy()<br/>signature_overrides
-end
-
-alt BLOCK or WARN
-Relay->>EventLog: append event
-Relay->>IDE: JSON-RPC error<br/>(code: -32099)
-else PASS
-Relay->>Child: forward request
-end
-
-Child->>Relay: JSON-RPC response<br/>(e.g., tools/list)
-
-rect rgb(150, 200, 150)
-Note over Relay: CHILD→PARENT INSPECT
-Relay->>Relay: inspectMessage()<br/>Pattern engine<br/>(OWASP-MCP Top 10)
-
-alt hasToolsList()?
-Relay->>PinStore: Load pins
-Relay->>Relay: inspectForDriftSync():<br/>Hash live schema<br/>vs pinned hash
-Relay->>Relay: SECURITY F3:<br/>Check firstHashes<br/>for same-session drift
-alt Schema mismatch or in-session drift
-Relay->>EventLog: append finding<br/>(signature: schema-drift)
-Relay->>IDE: JSON-RPC error<br/>(block)
-else Schema matches
-Relay->>Relay: Locked pin read-modify-write (#232)<br/>(AWAITED for a never-pinned<br/>server's first tools/list — v0.34.1;<br/>off-thread thereafter, awaited before exit)
-end
-end
-end
-
-Relay->>Relay: applyPolicy()<br/>on pattern + drift findings
-Relay->>Relay: mergeInspect()<br/>Highest severity wins
-
-alt BLOCK
-Relay->>EventLog: append event
-Relay->>IDE: JSON-RPC error<br/>(code: -32099,<br/>remediation)
-else WARN (policy: log_only)
-Relay->>EventLog: append event
-Relay->>IDE: forward response<br/>(event logged)
-else PASS
-Relay->>IDE: forward response
-end
-
-Note over IDE,EventLog: Event log entry (if findings):<br/>{ts, server_name, direction,<br/>action, findings:[{signature_id,<br/>category, severity, target,<br/>matched_text_excerpt, remediation}]}
-```
+See the canonical [guard message flow](GUARD.md#full-message-flow). Each direction
+is inspected independently: block substitutes an error; warn logs and forwards
+the original frame. `log_only` contributes pass while retaining its finding.
+Tool pins are first-observation TOFU, not install-time approval.
 
 ### OS confinement (F1 — released v0.16.0)
 
-Everything above is **detection**: the relay reasons about JSON-RPC bytes and warns
-or blocks. It cannot *contain* the child it spawns — a server that decides to read
+The relay detects patterns and enforces block decisions on JSON-RPC traffic.
+It cannot by itself *contain* the child it spawns — a server that decides to read
 `~/.ssh` or write `~/Library/LaunchAgents` never expresses that intent through
-inspectable traffic. `--confine` is the first **enforcement** primitive: it wraps the
-relayed child in an OS sandbox so it physically cannot read secret files or persist,
-regardless of the JSON-RPC it emits. Detection (watch) and confinement (contain) are
-complementary. **macOS-only in v1** (Linux `bwrap` deferred); **opt-in** — without
+inspectable traffic. `--confine` is **OS process enforcement**: it wraps the
+relayed child in an OS sandbox with selected secret-path read denials and
+write/network restrictions. This finite profile does not cover every credential
+location or prevent general exfiltration; configured secrets still reach the child.
+Wire inspection/enforcement and process confinement are complementary.
+**macOS-only in v1** (Linux `bwrap` deferred); **opt-in** — without
 `--confine`, enable/disable behavior is unchanged.
 
 ```

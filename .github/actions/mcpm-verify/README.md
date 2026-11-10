@@ -25,7 +25,9 @@ blocking server and its reason, grouped by dimension.
 
 ## Usage
 
-Pin the action to a release SHA (or tag):
+Pin the Action source to a reviewed release SHA (or tag) **and** select the CLI
+version separately. The Action defaults to `version: latest`; an Action-source
+pin alone does not pin the `@getmcpm/cli` package it executes:
 
 ```yaml
 name: mcpm
@@ -35,16 +37,16 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: getmcpm/cli/.github/actions/mcpm-verify@v0.43.0
-        # with:
-        #   version: latest          # @getmcpm/cli version/dist-tag to run
-        #   working-directory: .     # dir containing mcpm.yaml / mcpm-lock.yaml
+      - uses: getmcpm/cli/.github/actions/mcpm-verify@v0.52.1
+        with:
+          version: 0.52.1             # executed @getmcpm/cli version
+          working-directory: .        # dir containing mcpm.yaml / mcpm-lock.yaml
 ```
 
 Equivalent one-liner (no action):
 
 ```yaml
-      - run: npx --yes @getmcpm/cli verify
+      - run: npx --yes @getmcpm/cli@0.52.1 verify
 ```
 
 Pre-commit hook (same verb):
@@ -55,7 +57,7 @@ Pre-commit hook (same verb):
   hooks:
     - id: mcpm-verify
       name: mcpm verify
-      entry: npx --yes @getmcpm/cli verify
+      entry: npx --yes @getmcpm/cli@0.52.1 verify
       language: system
       pass_filenames: false
 ```
@@ -80,4 +82,4 @@ Once the gate is in your CI, advertise it with a static badge:
 `0` verified · `1` block or no lock file found. A block is any of: integrity drift /
 unverifiable / format mismatch / missing baseline; a provenance signer-changed /
 regression / unverifiable verdict; declared servers the lock does not cover; or a
-vacuous run over an empty lock. See `docs/CONTRACTS.md`.
+vacuous run over an empty lock. See [contracts](../../../docs/CONTRACTS.md).
