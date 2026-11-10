@@ -2,10 +2,13 @@
 
 ## Project Structure
 
+Selected implementation paths are shown below; this is not an exhaustive file inventory.
+
 ```
 mcpm/
 ├── src/
 │   ├── index.ts                    — CLI entry point (Commander)
+│   ├── artifacts/                   — bounded USTAR snapshot reading + skill/plugin review
 │   ├── commands/
 │   │   ├── index.ts                — command registration
 │   │   ├── search.ts               — search the MCP registry
@@ -17,6 +20,8 @@ mcpm/
 │   │   ├── update.ts               — update installed servers
 │   │   ├── doctor.ts               — check MCP setup health
 │   │   ├── init.ts                 — scaffold an empty mcpm.yaml stack
+│   │   ├── scope.ts                — read-only Claude Code / VS Code source inventory
+│   │   ├── review-artifacts.ts     — local skill/plugin archive comparison
 │   │   ├── import.ts               — import servers from client config
 │   │   ├── serve.ts                — start mcpm as an MCP server
 │   │   ├── disable.ts              — disable a server (thin wrapper over toggle)
@@ -56,6 +61,7 @@ mcpm/
 │   │       ├── gemini-cli.ts
 │   │       ├── vscode.ts
 │   │       ├── windsurf.ts
+│   │       ├── parked-servers.ts   — shared Cursor/Gemini disabled-definition storage
 │   │       └── factory.ts          — adapter factory by client ID
 │   ├── scanner/
 │   │   ├── trust-score.ts          — 0-100 composite trust score
@@ -121,7 +127,7 @@ mcpm/
 │       ├── format-trust.ts         — format trust score display
 │       └── fs.ts                   — shared filesystem helpers (isEnoent)
 ├── src/__tests__/
-│   ├── commands/                    — 35 command test files
+│   ├── commands/                    — CLI command tests
 │   ├── config/                      — adapter + detector + paths + drift tests
 │   ├── output/                      — SARIF mapper tests
 │   ├── registry/                    — registry-client tests
@@ -155,6 +161,7 @@ mcpm/
 | Module | Purpose |
 |---|---|
 | `commands/` | Commander command registration and actions, including the `guard` and `publish` subcommand groups |
+| `artifacts/` | Bounded local USTAR snapshot inventory and skill/plugin declaration comparison; [profiles and limits](ARTIFACT-REVIEW.md) |
 | `server/` | MCP server (stdio): 9 tools wrapping CLI logic via injectable handlers |
 | `stack/` | Stack file schemas (mcpm.yaml/mcpm-lock.yaml), semver resolution, trust policy, .env parsing |
 | `guard/` | **v0.5.0 runtime defense.** Stdio MITM relay, OWASP MCP Top 10 pattern engine, schema pinning + drift detection, policy file editor, integrity sidecars, event log. Plus `guard/confine/` (F1, released v0.16.0, macOS-only, opt-in via --confine): **OS process enforcement** — the relay optionally wraps the child spawn in an OS sandbox (macOS `sandbox-exec`) to deny selected secret-path reads and restrict writes/network according to its profile, complementing byte-level detection. Configured secrets are still delivered to the child; network-enabled launchers can exfiltrate accessible data. See [confinement limits](GUARD.md#os-confinement---confine). |
@@ -166,43 +173,9 @@ mcpm/
 
 ## Commands
 
-| Command | Description |
-|---|---|
-| `mcpm search <query>` | Search the MCP registry for servers |
-| `mcpm install <name>` | Install an MCP server to detected client configs |
-| `mcpm info <name>` | Show full details for an MCP server |
-| `mcpm list` | List all installed servers across detected AI clients |
-| `mcpm remove <name>` | Remove a server from client config(s) |
-| `mcpm audit` | Scan all installed servers and produce a trust report |
-| `mcpm update` | Check for newer versions and update installed servers |
-| `mcpm outdated` | Show version drift for installed servers (use `mcpm audit` for current security findings) |
-| `mcpm doctor` | Check MCP setup health (runtimes, configs, servers) |
-| `mcpm init` | Scaffold an empty mcpm.yaml; legacy pack arguments only print a removal notice |
-| `mcpm disable <name>` | Disable a server without removing it from config |
-| `mcpm enable <name>` | Re-enable a previously disabled server |
-| `mcpm import` | Import existing servers from client config files |
-| `mcpm alias` | Create short aliases for long server names |
-| `mcpm export` | Export installed servers as an mcpm.yaml stack file |
-| `mcpm lock` | Resolve versions and create mcpm-lock.yaml with trust snapshots |
-| `mcpm up` | Install all servers from mcpm.yaml with trust verification |
-| `mcpm diff` | Compare installed servers against mcpm.yaml and lock file |
-| `mcpm sync` | Cross-client config-drift dashboard (`--check` CI gate, exit 2) |
-| `mcpm verify` | Client-free lockfile integrity gate for CI (`--json`) |
-| `mcpm completions <shell>` | Generate shell completion scripts (bash, zsh, fish) |
-| `mcpm serve` | Start mcpm as an MCP server (stdio transport) |
-| `mcpm why <name>` | Explain a server's trust score (breakdown of all scoring components) |
-| `mcpm scope <project-root>` | Read-only fixed-source inventory; [coverage](PROJECT-SCOPE.md) |
-| `mcpm review-artifacts <before.tar> <after.tar> --profile <profile>` | Local archive comparison; [profiles and limits](ARTIFACT-REVIEW.md) |
-| `mcpm secrets` | Manage encrypted credentials for MCP servers |
-| `mcpm publish` | Publish an MCP server to the official registry |
-| `mcpm guard enable / disable / status` | Wrap detected client configs with the inspection relay; restore; report state |
-| `mcpm guard enable --confine` | Opt-in: also enroll unwrapped stdio servers into an OS sandbox (macOS-only; `--confine off` disables) |
-| `mcpm guard doctor-confine` | Read-only: report OS-backend availability + enrolled servers (tier / net / require_confine) |
-| `mcpm guard demo` | Synthetic prompt-injection scenario (visible block in terminal) |
-| `mcpm guard accept-drift / mute / unmute / pause / cleanup` | Runtime tuning + escape hatches |
-| `mcpm guard inspect [file]` | Run the signature catalog over MCP JSON-RPC frame(s) offline — no relay, no server, no network. The public seam external benchmarks score mcpm through (`--json`, exit 0/1/2) |
-| `mcpm guard list-signatures / reset-integrity` | Catalog inspection + integrity sidecar regeneration |
-| `mcpm guard run --inner` | Internal: relay entry point invoked by wrapped configs (semver-exempt) |
+Use the maintained [CLI command index](USAGE.md#commands) for public commands and
+`mcpm <command> --help` for options. `mcpm guard run --inner` is the internal
+relay entry point invoked by wrapped configurations and is semver-exempt.
 
 ## Data Flow
 
@@ -212,7 +185,7 @@ Start["user: mcpm install &lt;name&gt;"]
 Start --> GetServer["Fetch from Registry<br/>(registry/client.ts)"]
 GetServer --> Tier1["Tier-1 Scanner<br/>(scanner/tier1.ts)<br/>Pattern detection:<br/>secrets, injection,<br/>typosquatting,<br/>exfil-args"]
 Tier1 --> CheckExt{"External scanner<br/>available?"}
-CheckExt -->|No| Trust["Compute Trust Score<br/>(scanner/trust-score.ts)<br/>health + static +<br/>registry meta"]
+CheckExt -->|No| Trust["Compute Trust Score<br/>(scanner/trust-score.ts)<br/>static + registry meta<br/>health check not run"]
 CheckExt -->|Yes| Tier2["Tier-2 Scanner<br/>(scanner/tier2.ts)<br/>Run the installed<br/>MCPM_EXTERNAL_SCANNER"]
 Tier2 --> Trust
 Trust --> CheckMinTrust{"Score ≥<br/>minTrust?"}
@@ -244,22 +217,27 @@ style Store fill:#ccffee
 
 ### Secrets resolution data flow (`--secrets keychain`)
 
-Plaintext secrets exist only in the guarded child's in-memory env — never on disk. Resolution is a property of **guarded** servers only.
+With `--secrets keychain`, mcpm encrypts environment values marked secret and writes
+placeholders for those values into client configuration. Other environment values
+pass through; plaintext mode remains the default. Guard resolves placeholders in
+memory before spawning the child. This does not prevent the child from writing or
+transmitting the decrypted values, or remove earlier plaintext copies/backups.
+Without guard, placeholders remain literal strings.
 
 ```mermaid
 flowchart TD
     A["User runs<br/>mcpm install<br/>with --secrets keychain"] -->|prompts for API key| B["Secret value entered"]
     B -->|applyKeychainSecrets| C["Encrypt via AES-GCM<br/>HKDF-derived key from<br/>OS keychain master key<br/>or PBKDF2-derived<br/>machine key fallback"]
-    C -->|deriveKeychainId<br/>sanitizes + SHA256| D["Store in ~/.mcpm/secrets.enc.json<br/>Key: derived-id/KEY<br/>Value: k1:salt:iv:ct"]
+    C -->|deriveKeychainId<br/>sanitizes + SHA256| D["Store in ~/.mcpm/secrets.enc.json<br/>Key: derived-id/KEY<br/>Value: encrypted ciphertext"]
     C -->|create placeholder| E["Client config file<br/>env: API_KEY =<br/>mcpm:keychain:derived-id/KEY"]
-    E -->|plaintext not on disk| F["Plaintext secret<br/>never persists"]
+    E -->|secret-marked values| F["Placeholders replace plaintext<br/>in the new config entry"]
 
     G["User runs<br/>mcpm guard run --inner<br/>wraps server"] -->|at startup| H["resolveEnvPlaceholders<br/>reads declaredEnvKeys"]
     H -->|parse &amp; match| I["Find mcpm:keychain:derived-id/KEY<br/>in child env"]
     I -->|lookup in store| J["Read + decrypt<br/>from secrets.enc.json<br/>Route on k1: prefix<br/>keychain or machine scheme"]
     J -->|inject into memory| K["Child process env<br/>API_KEY = decrypted_value<br/>in-memory only"]
     K -->|pass to child| L["startRelay<br/>spawns guarded server<br/>with plaintext in memory"]
-    L -->|process exits| M["Plaintext discarded<br/>never written to disk"]
+    L --> M["Child can use decrypted values;<br/>later persistence or egress<br/>is outside secret storage"]
 
     O["Without guard<br/>placeholder remains<br/>literal string"]
     E -.->|if guard disabled| O
@@ -375,18 +353,19 @@ Plus, when `mcpm guard enable` runs, each touched client config gets a
 
 Linux and Windows paths are also supported. Config key: `mcpServers` (Claude Desktop, Claude Code, Cursor, Windsurf, Gemini CLI) or `servers` (VS Code).
 
-Cursor parks disabled definitions in `_mcpmDisabledServers` outside the active
-map and retains logical inventory for mcpm. It does not edit approval state or
-stop existing processes. Gemini's generic disabled flag remains ineffective in
-the measured connection probe. See [Cursor validation](CURSOR-CLIENT-VALIDATION.md)
-and [Gemini validation](GEMINI-CLIENT-VALIDATION.md) for exact scope.
+Cursor and Gemini park disabled definitions in `_mcpmDisabledServers` outside
+the active map and retain logical inventory for mcpm. Enable restores the managed
+user-global definition. This does not stop running peers or override native
+approval/exclusion state or independently supplied project definitions. Gemini's
+older `disabled:true` entries need `mcpm disable` again to move them into parked
+storage. See [Cursor validation](CURSOR-CLIENT-VALIDATION.md) and
+[Gemini validation](GEMINI-CLIENT-VALIDATION.md) for measured scope and limits.
 
 All config writes use atomic file operations (write to `.tmp`, then `fs.rename`). Files are written with `mode: 0o600` and directories with `mode: 0o700` to restrict access.
 
 ## Testing
 
 - **Framework**: vitest with `@vitest/coverage-v8`
-- **Test count**: 3,049 tests (measured 2026-09-19 at v0.42.0)
 - **Coverage thresholds**: lines 80%, branches 75%
 - **Test locations**: `src/__tests__/` (commands, config, output, registry, server, smoke, stack, store) + colocated `*.test.ts` (registry, scanner, stack, guard — `src/guard/__tests__/`)
 - **Approach**: injectable `fetchImpl` for registry tests (no network calls), temp directories for config adapter tests
@@ -405,7 +384,8 @@ pnpm test:watch        # watch mode
 
 Runs on push to `main` and pull requests. Matrix: Node 22, 24, 26. All GitHub Actions are SHA-pinned.
 
-Steps: `pnpm install --frozen-lockfile` → `typecheck` → `build` → `test:coverage`
+Steps: `pnpm install --frozen-lockfile` → `typecheck` → `build` → native harness
+self-checks (no VM/accounts) → `test:coverage`
 → `scripts/probe-coverage-thresholds.sh` (the coverage threshold must still fail a build)
 → `typecheck` again against `@types/node` for that leg's own Node major (the pinned
 `@types/node` tracks the engines floor, so the first typecheck only describes Node 22).
@@ -415,6 +395,12 @@ A second job, **`confine-macos`**, runs on `macos-latest` and executes
 F1 `--confine` sandbox against real macOS Seatbelt enforcement under a throwaway `$HOME`.
 The ubuntu matrix structurally cannot exercise `sandbox-exec`, so this leg is what keeps
 the flagship enforcement path CI-verified.
+
+The **`protocol-sandbox`** job separately runs the pinned published stdio
+compatibility matrix and a fresh packed candidate matrix. Its launcher checks
+and synthetic evidence uploads are defined in `ci.yml`; a baseline pass alone
+does not validate candidate code. See [protocol validation](PROTOCOL-VALIDATION.md)
+and [candidate serve validation](SERVE-PROTOCOL-VALIDATION.md) for coverage.
 
 ### Publish (`publish.yml`)
 
