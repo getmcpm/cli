@@ -8,7 +8,7 @@ channel below resolves that one package, so there is no ambiguity about what you
 | Method | Command | Notes |
 |---|---|---|
 | **npm** | `npm install -g @getmcpm/cli` | global bin `mcpm` |
-| **npx** | `npx @getmcpm/cli <command>` | no install; always latest |
+| **npx** | `npx @getmcpm/cli <command>` | on-demand execution; pin `@getmcpm/cli@<version>` for reproducibility |
 | **pnpm** | `pnpm add -g @getmcpm/cli` | |
 | **mise** | `mise use -g npm:@getmcpm/cli` | via mise's built-in `npm:` backend — no registry entry needed |
 

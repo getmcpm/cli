@@ -1,18 +1,19 @@
-# mcpm-guard signature reference (v0.43.0)
+# mcpm-guard signature reference
 
 The shipped signature catalog + how to add one. See `docs/GUARD.md` for the runtime model.
 
-## Currently shipped (22 catalog entries)
+## Shipped catalog
 
 > The **category** column is each signature's own `category` field in
 > `src/guard/signatures.ts`. Those strings (`OWASP-MCP-1`, `OWASP-MCP-2`, …) are the
 > **obsolete OWASP MCP Top 10 v0.1 numbering**, kept only as stable internal tags — they
 > are NOT the current classification. The pinned MCP01–MCP10 mapping every emitted finding
 > actually carries lives in `src/guard/owasp.ts` and is documented in
-> `docs/owasp-mcp-mapping.md`; README's "What it catches" table renders those ids.
+> [OWASP mapping](owasp-mcp-mapping.md).
 
 | id | category | severity | target | description |
 |---|---|---|---|---|
+| `discovery-metadata-injection` | OWASP-MCP-1 | critical | discovery_metadata | Heuristic instruction patterns in skill frontmatter/`_meta` and resource discovery metadata, including `<important>`/`<system>` and instruction-shaped text. Metadata-only: no archive/content verification, publisher authentication, consent or activation enforcement. Legitimate instructions can match; see [coverage](GUARD.md#protocol-and-carrier-coverage). |
 | `owasp-mcp-2-instruction-injection-in-response` | OWASP-MCP-2 | critical | tool_response | Imperative instructions in tool response content (Ignore previous / Disregard prior / Forget all / You are now in developer mode / `<\|system\|>`) |
 | `owasp-mcp-7-path-exfil-in-args` | OWASP-MCP-7 | high | tool_call_args | Sensitive file paths in tool arguments (.ssh / .aws/credentials / .env / id_rsa / .gnupg / .kube/config) |
 | `owasp-mcp-1-tool-description-injection` | OWASP-MCP-1 | critical | tool_description | Instruction-shaped text in tool descriptions (poisoning / rug-pull patterns) |

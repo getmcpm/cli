@@ -45,7 +45,7 @@ The harness verifies its UID, effective capabilities, addressed network
 interfaces, read-only application directory and absence of host paths/sockets.
 The exported container configuration records the actual network/mount/resource
 settings. Requests and child shutdowns have deadlines; the outer test run has a
-120-second deadline. On timeout the launcher kills the attach process and stops
+180-second deadline. On timeout the launcher kills the attach process and stops
 the container before exporting evidence. Raw wire captures have message/byte
 budgets; SDK captures are limited by the tmpfs and checked against a 1 MiB budget
 when read. Large raw messages are represented by size/hash instead of full wire

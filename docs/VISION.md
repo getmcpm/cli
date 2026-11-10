@@ -1,15 +1,21 @@
 # Vision — what mcpm is becoming
 
+> **Historical strategy/design snapshot.** Dates, delivery tables, estimates and
+> market claims below retain their original context. Current selected work is
+> [BACKLOG](BACKLOG.md); current behavior is [CONTRACTS](CONTRACTS.md) and
+> [GUARD](GUARD.md). Old proposals and release sequences are not current authorization.
+
 > **Delivery checkpoint, 2026-11-05:** this strategy retains its dated planning
 > assumptions. Current runtime release is v0.49.0; see [CHANGELOG](../CHANGELOG.md).
 > The 38-case, 100% by-construction benchmark paragraph below describes its July
 > launch. The later documented corpus-v5 measurement has 57 cases, including
 > external CVE/Deadbugz-derived cases, and the v0.43.0 row reports 86.5% recall,
-> 0.0% false positives and 100% precision; see [README](../README.md).
+> 0.0% false positives and 100% precision; see the
+> [versioned benchmark table](https://github.com/getmcpm/mcp-guardbench).
 > Those are versioned measurements, not a fresh v0.49.0 benchmark or adoption claim.
 
 
-> Status: **Plan of record** · Set: 2026-07-12 · Baseline: **v0.19.0**
+> Historical status: **Plan of record** · Set: 2026-07-12 · Baseline: **v0.19.0**
 >
 > This is the strategy layer. The tactical tracks hang off it:
 > [`ROADMAP.md`](./ROADMAP.md) (security/DevX features) and

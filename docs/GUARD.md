@@ -1,6 +1,6 @@
-# mcpm-guard — Runtime defense reference (v0.5.0)
+# mcpm-guard — Runtime defense reference
 
-Long-form reference for `mcpm guard`. For the 5-minute getting-started path, see the README's "Runtime defense" section.
+Long-form reference for `mcpm guard`. For the 5-minute getting-started path, see the [README quick start](../README.md#quick-start).
 
 ---
 
@@ -31,7 +31,7 @@ Detection is layered:
 | Layer | Triggered by | Scope |
 |---|---|---|
 | **Pattern engine** | Every message | NFKC-normalized regex against tool descriptions / responses / arguments / annotations |
-| **Schema pinning** | `tools/list` responses | SHA-256 hash of {description, schema, annotations} vs the pin captured at install. Text is folded to Unicode **NFC** first (canonical equivalence only — never NFKC), so a normalization-only change is not drift |
+| **Schema pinning** | `tools/list` responses | SHA-256 hash of {description, schema, annotations} vs the pin captured on first runtime observation (TOFU, not install-time approval). Text is folded to Unicode **NFC** first (canonical equivalence only — never NFKC), so a normalization-only change is not drift |
 | **Same-session drift** | 2nd+ `tools/list` in one session | Catches mid-session rug-pull attempts before the pin write commits |
 | **Field-level drift tiering (H4)** | a drifted `tools/list` tool | Per-field hashes split a **description-only** change (cosmetic → warn, forwarded — the parallel description pattern scan still blocks regex-detectable injection) from a **schema / annotations** change (security → block); a pre-H4 pin with no field hashes stays a coarse block. An announced `notifications/tools/list_changed` arms a single-shot re-validation against the pin. `accept-drift` drops the field hashes (reverts that tool to coarse blocking) until the next first-session capture re-derives them. |
 | **Policy overrides** | Startup snapshot applied to messages | `~/.mcpm/guard-policy.yaml` signature overrides (ignore / warn / block / log_only) and global pause state (paused_until) |
@@ -98,66 +98,35 @@ The relay inspects each direction independently — a request (parent → child)
 
 ```mermaid
 sequenceDiagram
-participant IDE as IDE<br/>(Claude Desktop)
-participant Relay as mcpm guard<br/>run --inner
-participant Child as Real MCP<br/>Server
-participant PinStore as ~/.mcpm/pins.json
-participant PolicyFile as ~/.mcpm/<br/>guard-policy.yaml
-participant EventLog as ~/.mcpm/<br/>guard-events.jsonl
-
-Note over IDE,EventLog: ENABLE PHASE (mcpm guard enable)<br/>Rewrites IDE config: real-server-cmd → mcpm guard run --inner -- real-server-cmd
-
-Note over IDE,EventLog: RUNTIME PHASE - JSON-RPC Inspection<br/>Load policy (muted signatures, paused_until)
-
-IDE->>Relay: JSON-RPC request<br/>(method: tool call)
-
-rect rgb(200, 150, 150)
-Note over Relay: PARENT→CHILD INSPECT
-Relay->>Relay: inspectMessage()<br/>Pattern engine<br/>(OWASP-MCP Top 10)
-Relay->>Relay: Check signatures vs<br/>tool_call_args<br/>(e.g., owasp-mcp-7-path-exfil)
-Relay->>Relay: applyPolicy()<br/>signature_overrides
+participant Client
+participant Relay as mcpm stdio relay
+participant Child as MCP server
+participant Events as Event log
+Note over Client,Child: Explicit guard enable wraps config; restart server to load it
+Note over Relay: Load policy at startup; tool pins use first observation (TOFU)
+Client->>Relay: Request
+Relay->>Relay: Inspect request and apply policy
+alt block
+Relay->>Events: Log block
+Relay->>Client: JSON-RPC error (when replyable)
+else warn
+Relay->>Events: Log warning
+Relay->>Child: Forward original request
+else pass (including log_only contribution)
+Relay->>Child: Forward original request
 end
-
-alt BLOCK or WARN
-Relay->>EventLog: append event
-Relay->>IDE: JSON-RPC error<br/>(code: -32099)
-else PASS
-Relay->>Child: forward request
+Child->>Relay: Response
+Relay->>Relay: Inspect content and applicable pin drift; apply policy
+alt block
+Relay->>Events: Log block
+Relay->>Client: Substitute JSON-RPC error
+else warn
+Relay->>Events: Log warning
+Relay->>Client: Forward original response
+else pass (including log_only contribution)
+Relay->>Client: Forward original response
 end
-
-Child->>Relay: JSON-RPC response<br/>(e.g., tools/list)
-
-rect rgb(150, 200, 150)
-Note over Relay: CHILD→PARENT INSPECT
-Relay->>Relay: inspectMessage()<br/>Pattern engine<br/>(OWASP-MCP Top 10)
-
-alt hasToolsList()?
-Relay->>PinStore: Load pins
-Relay->>Relay: inspectForDriftSync():<br/>Hash live schema<br/>vs pinned hash
-Relay->>Relay: SECURITY F3:<br/>Check firstHashes<br/>for same-session drift
-alt Schema mismatch or in-session drift
-Relay->>EventLog: append finding<br/>(signature: schema-drift)
-Relay->>IDE: JSON-RPC error<br/>(block)
-else Schema matches
-Relay->>Relay: Locked pin read-modify-write (#232)<br/>(AWAITED for a never-pinned server's<br/>FIRST tools/list — v0.34.1, so a crash<br/>cannot leave the session baseline-less;<br/>off-thread for every later one;<br/>all awaited before the guard exits)
-end
-end
-end
-
-Relay->>Relay: applyPolicy()<br/>on pattern + drift findings
-Relay->>Relay: mergeInspect()<br/>Highest severity wins
-
-alt BLOCK
-Relay->>EventLog: append event
-Relay->>IDE: JSON-RPC error<br/>(code: -32099,<br/>remediation)
-else WARN (policy: log_only)
-Relay->>EventLog: append event
-Relay->>IDE: forward response<br/>(event logged)
-else PASS
-Relay->>IDE: forward response
-end
-
-Note over IDE,EventLog: Event log entry (if findings):<br/>{ts, server_name, direction,<br/>action, findings:[{signature_id,<br/>category, severity, target,<br/>matched_text_excerpt, owasp}]}
+Note over Relay,Events: Findings may be logged even when log_only contributes pass
 ```
 
 ---
@@ -327,7 +296,7 @@ The relay refuses to use either file if its sidecar doesn't match — this is th
 
 > Status: shipped in v0.16.0 (PRs #108–#111). macOS only in v1. Opt-in — without `--confine`, `enable`/`disable` behave exactly as before.
 
-Every guard feature above is **detection**: the relay reasons about the JSON-RPC bytes flowing through it and warns or blocks. But the relay is a stdio MITM — it can inspect every frame yet cannot *contain* the child MCP server it spawns. A server that simply *decides* to read `~/.ssh` or write `~/Library/LaunchAgents` never expresses that intent through inspectable traffic. `--confine` is the first **enforcement** primitive: it wraps the relayed child in an OS sandbox so it physically cannot read secret files or persist, regardless of the JSON-RPC it emits. Detection and confinement are complementary — watch vs contain.
+Every guard feature above is **detection**: the relay reasons about the JSON-RPC bytes flowing through it and warns or blocks. But the relay is a stdio MITM — it can inspect every frame yet cannot *contain* the child MCP server it spawns. A server that simply *decides* to read `~/.ssh` or write `~/Library/LaunchAgents` never expresses that intent through inspectable traffic. `--confine` is the first **enforcement** primitive: it wraps the relayed child in an OS sandbox with selected secret-path read denials and write/network restrictions. The finite denylist does not cover every credential location; configured credentials are intentionally delivered to the child. Network-enabled launchers can send accessible data. Detection and confinement cover different boundaries.
 
 ### The standard tier
 
@@ -371,9 +340,54 @@ The wrapped config entry carries two new tokens **before** the `--` separator: `
 ### Caveats
 
 - **macOS only.** Linux `bwrap` support and a STRICT tier (read-allowlist / scratch-only-write / host-granular net) are deferred.
-- The macOS `sandbox-exec` path is **not exercised in CI** (ubuntu-only); it is covered by mocked arg-vector unit tests plus local darwin verification — the same gap the os-keychain darwin shell-outs already carry.
+- The `confine-macos` CI job runs the hermetic confinement dogfood against real macOS Seatbelt. This exercises the named subprocess/profile checks, not native IDE loading, Windows/Linux enforcement or complete sandbox resistance.
 - Net is launcher-permissive, so confinement does **not** stop network exfil in general, and it does **not** defend against a same-user attacker who can rewrite both the IDE config *and* `~/.mcpm`.
 - **Deferred fast-follow:** the per-server `mcpm guard confine <server>` command (`--off` / `--show` / `--require` / `--allow-read/-write/-net`) is not shipped. Per-server confine is achievable today via `enable --confine --server X` + `disable --server X`.
+
+---
+
+## Runtime relay, confinement and agent hooks
+
+These boundaries can complement one another; mcpm does not install an agent-hook
+integration. Hook capabilities below refer to Claude Code's rolling official
+documentation checked **2026-11-10**, not every host or the pinned 2.1.296 fixture.
+
+| Question | mcpm stdio relay | mcpm `--confine` | Agent lifecycle hooks (Claude Code example) |
+| --- | --- | --- | --- |
+| Where does it act? | Supported MCP request/response frames for explicitly wrapped stdio servers; pattern findings and first-observation tool drift | The spawned server process's OS operations, according to its profile | Host events such as session/prompt, pre-tool and post-tool; can include native Bash/Edit tools and MCP calls |
+| What can it change? | Blocks substitute errors before forwarding; warnings forward original frames | Selected secret-path reads, writes and launcher-dependent network access are denied by macOS Seatbelt | Supported synchronous pre-tool handlers can deny/change input; supported post-tool handlers can replace output, subject to event/host contracts |
+| Is a model required? | No; deterministic local inspection | No; OS enforcement | No for command hooks, which can be deterministic/local too. Prompt/agent hooks may invoke models |
+| What is outside coverage? | HTTP/SSE, unwrapped servers, agent-native tools, uninspected binary/external content and arbitrary server effects | Agent-wide activity and hook processes; secrets outside the denylist or intentionally passed in env; general exfiltration with network enabled | Events/tools the host does not dispatch, disabled/unloaded hooks, other clients and activity outside that host; an event callback is not OS containment |
+| What about failure or timing? | Policy pause/overrides and unsupported carriers affect coverage; a response block cannot undo server effects already performed | Backend absence has documented hybrid/refusal rules; no universal sandbox/cancellation guarantee | Handler error/timeout policy varies by event/config/version. Async hooks cannot block; post-tool decisions cannot undo completed effects |
+
+Claude's [PreToolUse reference](https://code.claude.com/docs/en/hooks#pretooluse)
+and [post-tool decision control](https://code.claude.com/docs/en/hooks#posttooluse-decision-control)
+describe event-specific permissions/input/output controls. A post-tool
+`decision: block` alone does not hide the original output or undo its effects;
+output replacement is a separate supported response. See
+[background hooks](https://code.claude.com/docs/en/hooks#run-hooks-in-the-background),
+[hook security considerations](https://code.claude.com/docs/en/hooks#security-considerations)
+and [limitations](https://code.claude.com/docs/en/hooks-guide#limitations).
+Command hooks execute with the user's permissions. Their policy decisions are
+not an OS sandbox, and neither hooks nor this relay establish blanket bypass immunity.
+
+Two repository experiments retain narrower evidence:
+
+- [#158 native inline-hook lifecycle](NATIVE-PLUGIN-LIFECYCLE.md) observed one
+  command-hook fixture across update/reload/disable and fresh-process restarts:
+  eight observations, three native processes, zero model requests. It does not
+  prove text-skill activation, whole-plugin activation or general hook enforcement.
+- [#95 command-hook confinement](HOOK-CONFINEMENT-DECISION.md) measured a separate
+  restrictive direct-command candidate, **not native hook-host dispatch**. Three
+  of five useful cases worked; both public inspect commands failed at user-info
+  startup. Selected effects stayed denied, but a detached grandchild survived
+  cancellation. The fixed candidate remains **NO-GO** for production integration;
+  cleanup does not repair cancellation. No production hook backend shipped, and
+  this result is not evidence that hooks generally fail.
+
+Use host hooks for supported workflow rules, relay inspection for shared MCP
+traffic checks, and opt-in confinement for selected server effects. Each requires
+its own enrollment, coverage and failure evidence.
 
 ---
 
@@ -392,6 +406,15 @@ The wrapped config entry carries two new tokens **before** the `--` separator: `
 | `<client config>.guard-{enable,disable}.bak` | Pre-batch backup per touched client | Original JSON content |
 
 All files are written `0o600`; the parent dir is `0o700`.
+
+To review recorded blocks, for example:
+
+```sh
+jq 'select(.action == "block")' ~/.mcpm/guard-events.jsonl
+```
+
+Review events before muting a signature or accepting a drift hash; neither action
+should be an automatic response to a block.
 
 Confinement adds events (not signatures — the catalog count is unchanged) to `guard-events.jsonl` under category `CONFINE`: `confine-applied`, `confine-hash-mismatch`, `confine-marker-stripped`, `confine-profile-missing`, `confine-backend-missing`, `confine-marker-malformed`; plus `orig-hash-mismatch` (category `RELAY`, from the spawn-time `--orig-hash` verify).
 

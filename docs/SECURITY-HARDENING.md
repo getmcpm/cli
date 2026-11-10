@@ -1,6 +1,11 @@
 # mcpm Security Hardening Plan — Supply Chain + Agent Tool-Call Defense
 
-> Status: **in delivery** (see *Delivery status* below) · Baseline: **v0.42.0** · Drafted: 2026-06-12 · Reconciled to shipped state: 2026-09-19
+> **Historical strategy/design snapshot.** Dates, delivery tables, estimates and
+> market claims below retain their original context. Current selected work is
+> [BACKLOG](BACKLOG.md); current behavior is [CONTRACTS](CONTRACTS.md) and
+> [GUARD](GUARD.md). Old proposals and release sequences are not current authorization.
+
+> Historical status: **in delivery** (see dated *Delivery status* below) · Baseline: **v0.42.0** · Drafted: 2026-06-12 · Reconciled to shipped state: 2026-09-19
 >
 > **How this was produced:** a grounded multi-agent pass — (1) a file-and-function map of
 > mcpm's *current* protections and extension seams (`guard/`, `scanner/`, `stack/`,
@@ -18,10 +23,10 @@
 
 ---
 
-## Delivery status (reconciled to v0.42.0, 2026-09-19)
+## Historical delivery status (reconciled to v0.42.0, 2026-09-19)
 
 The recommended first slices (§7) shipped in **v0.10.0**. Status per control — the §5 bodies below
-retain the original design narrative, so cross-reference this table for what is actually built:
+retain the original design narrative. This table is a dated checkpoint, not current delivery status:
 
 | Control | Status | Shipped | PR |
 |---|---|---|---|

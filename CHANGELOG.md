@@ -8,6 +8,10 @@ _Add entries here, never under a stamped version_ — a release commit renames t
 heading, and a branch that wrote beneath it merges without conflict straight into a
 published section (it happened to #170).
 
+### Documentation
+
+- Shorten onboarding, index task guides, correct trust/guard/verification and historical-status claims, and compare stdio runtime inspection, server confinement and agent lifecycle hooks without changing behavior.
+
 ## [0.52.1] - 2026-11-10
 
 ### Changed

@@ -48,7 +48,7 @@ attestation. **Effort:** 3–6 days, revised after the compatibility inventory.
 
 ## #141 — Project exposure and scope inventory
 
-**Status:** the bounded Claude Code `mcpm scope <project-root> [--json]` slice shipped in [v0.50.0](RELEASE-2026-11-06-v0.50.0.md) after #315 and Astra review/fixes. Seven actual published CLI scope cases and 87 protocol comparisons passed. The published slice remains Claude-only; the VS Code candidate below is not shipped, and broader profile/host coverage remains open. See [scope documentation](PROJECT-SCOPE.md). **User/problem:** global-only evidence
+**Status:** the bounded Claude Code `mcpm scope <project-root> [--json]` slice shipped in [v0.50.0](RELEASE-2026-11-06-v0.50.0.md) after #315 and Astra review/fixes. Seven actual published CLI scope cases and 87 protocol comparisons passed. Claude Code remains the default; the explicit VS Code slice below shipped separately, and broader profile/host coverage remains open. See [scope documentation](PROJECT-SCOPE.md). **User/problem:** global-only evidence
 can miss project configuration and precedence. **MVP:** explicit project root,
 one host profile first, read-only project MCP entries and applicable instruction
 files; identify origin, scope, shadowing and unreadable/unsupported coverage.
