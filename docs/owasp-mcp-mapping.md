@@ -31,7 +31,7 @@ read as consistent with those internal tag strings. The `owasp` field
 described below is the **authoritative** pin — `category` is not, and
 should not be read as one.
 
-## The pin travels in the record (backlog #71)
+## The pin travels in the record (backlog `#71`)
 
 Every finding a guard tool emits — `mcpm guard inspect --json`,
 `~/.mcpm/guard-events.jsonl`, `mcpm guard list-signatures`, and

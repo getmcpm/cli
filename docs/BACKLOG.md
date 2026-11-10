@@ -9,7 +9,7 @@ Research proposals are not build/release authorization. Sources and scope are in
 [PR #308](https://github.com/getmcpm/cli/pull/308) merged the reviewed
 configuration, removal/store, scanner, SRI, prior-lock and import/export fixes.
 They shipped in [v0.49.1](RELEASE-2026-11-05.md). Do not schedule those same
-defects again or close the whole #123/#131/#149/#150 group because one slice is
+defects again or close the whole `#123`/`#131`/`#149`/`#150` group because one slice is
 fixed. The native doctor suite merged in #307; its recorded native measurements
 used the published v0.49.0 archive.
 
@@ -17,18 +17,18 @@ used the published v0.49.0 archive.
 
 | Order | ID | Scope/status | Dependency |
 | --- | --- | --- | --- |
-| Shipped | #156 | Bounded archive-only receipt in v0.51.0; one-consumer gate met | Expansion retains consumer/value stop rule |
-| Deferred | #157 | Consumer gate evaluated for mcpm's own development/release workflow; adapter unbuilt | Artifact-bound contract and measured incremental value still required |
-| Merged PR #333 | #140 | Full retained Skills fixture MVP for the existing release-harness consumer | Pinned Beta; both archive matrices, independent replay/readback and maintainer acceptance |
-| Merged PR #334 | #158 | Native inline-hook activation/drift experiment | Eight observations/75 checks; independent bindings and maintainer acceptance; scoped evidence below |
-| Deferred/unbuilt | #159 | Offline ACP v1 trace spike; consumer gate evaluated | Current workflow has MCP/native evidence; no supplied ACP trace or concrete ACP-specific review question |
-| Measured NO-GO | #95 | Bounded command-hook confinement decision experiment; production integration unbuilt | Three of five useful cases compatible; all selected effects denied; detached cancellation limitation |
+| Shipped | `#156` | Bounded archive-only receipt in v0.51.0; one-consumer gate met | Expansion retains consumer/value stop rule |
+| Deferred | `#157` | Consumer gate evaluated for mcpm's own development/release workflow; adapter unbuilt | Artifact-bound contract and measured incremental value still required |
+| Merged PR #333 | `#140` | Full retained Skills fixture MVP for the existing release-harness consumer | Pinned Beta; both archive matrices, independent replay/readback and maintainer acceptance |
+| Merged PR #334 | `#158` | Native inline-hook activation/drift experiment | Eight observations/75 checks; independent bindings and maintainer acceptance; scoped evidence below |
+| Deferred/unbuilt | `#159` | Offline ACP v1 trace spike; consumer gate evaluated | Current workflow has MCP/native evidence; no supplied ACP trace or concrete ACP-specific review question |
+| Measured NO-GO | `#95` | Bounded command-hook confinement decision experiment; production integration unbuilt | Three of five useful cases compatible; all selected effects denied; detached cancellation limitation |
 
 Effort ranges below are engineering judgments for one contributor including tests
 and documentation, not delivery promises. Native setup, access and review delays
 are excluded. Do not implement the whole queue in parallel.
 
-## #155 — Honest wrapper identity and protection status
+## `#155` — Honest wrapper identity and protection status
 
 **Status:** shipped in [v0.49.2](RELEASE-2026-11-05-v0.49.2.md), after #312 and
 Astra review/fixes. Published-archive SDK and native Linux launcher checks passed.
@@ -46,7 +46,7 @@ effective protection. **Non-goals:** binary authentication or general command
 attestation. **Effort:** 3–6 days, revised after the compatibility inventory.
 **Risk:** a partial predicate fix can leave false positives or break old wraps.
 
-## #141 — Project exposure and scope inventory
+## `#141` — Project exposure and scope inventory
 
 **Status:** the bounded Claude Code `mcpm scope <project-root> [--json]` slice shipped in [v0.50.0](RELEASE-2026-11-06-v0.50.0.md) after #315 and Astra review/fixes. Seven actual published CLI scope cases and 87 protocol comparisons passed. Claude Code remains the default; the explicit VS Code slice below shipped separately, and broader profile/host coverage remains open. See [scope documentation](PROJECT-SCOPE.md). **User/problem:** global-only evidence
 can miss project configuration and precedence. **MVP:** explicit project root,
@@ -59,18 +59,18 @@ format-specific parsing and instruction metadata. Duplicate names do not become
 a cross-harness winner. Candidate and published evidence retain separate archive
 identities. Remaining named-profile, remote, workspace-file and other-host
 coverage stays explicit in [the scope contract](PROJECT-SCOPE.md).
-The broader #141 scope remains open.
+The broader `#141` scope remains open.
 
 **Acceptance:** parent/workspace paths, symlink escapes, duplicate names, malformed
 files, denied access, secret placeholders and unknown host versions cannot become
 empty healthy state. Output separates configured from observed-loaded/enforced;
 no commands, hooks, credential helpers or servers run. Start with Claude Code;
 add another dialect only with fixtures and distinct semantics. **Dependencies:**
-#155 for guarded labels; #131/#149 coverage reporting. **Non-goals:** project
+`#155` for guarded labels; `#131`/`#149` coverage reporting. **Non-goals:** project
 writes, recursive whole-home discovery or native policy reimplementation.
 **Effort:** 2–4 days. **Risk:** scope precedence varies by host/version.
 
-## #122 — Managed-policy-aware setup and wrap plan
+## `#122` — Managed-policy-aware setup and wrap plan
 
 **Status:** bounded Claude Code MVP shipped in [v0.50.1](RELEASE-2026-11-06-v0.50.1.md), after #324/#325 and Astra review/fixes. Actual published archive passed 22 native policy cases, three initialization cases and 87 protocol checks. Whole-host coverage and legacy-wrapper migration limits remain explicit in the [projection record](MANAGED-POLICY-VALIDATION.md). **User/problem:** changing the command to a
 wrapper can change a client's allow/deny decision. **MVP:** read one supported,
@@ -81,14 +81,14 @@ Report exact reason and uncertainty; preserve native restrictions.
 exceptions, unreadable policy and wrapper argv have fixtures; pinned native tests
 prove denied commands remain undispatched and allowed flows remain usable.
 Unsupported policy planes are unknown and never silently permitted. **Dependencies:**
-#155 and target-version semantics. **Non-goals:** editing managed controls,
+`#155` and target-version semantics. **Non-goals:** editing managed controls,
 weakening restrictions or a cross-vendor enterprise engine. **Effort:** 3–6 days
 plus access/native-test delays. **Risk:** policy definitions are client-specific;
 reproduce the current matching behavior before selecting the fix.
 [Native command matching](https://code.claude.com/docs/en/managed-mcp),
 [versioned VS Code policy scope](https://code.visualstudio.com/docs/enterprise/manage-ai-settings).
 
-## #156 — Local skill/plugin change-review receipt
+## `#156` — Local skill/plugin change-review receipt
 
 **Status:** bounded archive-only command shipped in
 [v0.51.0](RELEASE-2026-11-06-v0.51.0.md), through Sol implementation and Astra
@@ -125,14 +125,14 @@ concrete retain/rollback decision. Both real reports exited 1 with incomplete
 coverage; manual semantic review remained necessary. This does not demonstrate
 general demand, time savings, superiority over native/Git/APM workflows, safety
 or activation. Further expansion retains the consumer/value stop rule.
-**Dependencies:** #141; a review workflow/consumer. **Non-goals:** marketplace,
+**Dependencies:** `#141`; a review workflow/consumer. **Non-goals:** marketplace,
 generic scanner, installer, universal safety score or host enforcement.
 **Effort:** original estimate 2–4 days for the experiment. **Risk:** native tools
 already cover much of this; repeat use and wider value remain unproven.
 [Format](https://agentskills.io/specification),
 [native plugin lifecycle](https://code.claude.com/docs/en/plugins/loading).
 
-## #157 — Versioned external evidence ingestion
+## `#157` — Versioned external evidence ingestion
 
 **Status:** deferred/unbuilt after the
 [2026-11-07 consumer-gate evaluation](EXTERNAL-EVIDENCE-DECISION.md) against
@@ -158,7 +158,7 @@ aggregate safety score. **Effort:** 2–4 days for one adapter. **Risk:** unstab
 vendor contracts and hidden egress. [Snyk contract caution](https://github.com/snyk/agent-scan),
 [SkillSpector scope](https://github.com/NVIDIA/SkillSpector).
 
-## #140 — Retained Skills manifest and content verification
+## `#140` — Retained Skills manifest and content verification
 
 **Status:** existing, partially shipped: metadata inspection is in v0.48.1.
 The bounded fixture MVP merged in PR #333 (`58d6727`) after all nine CI checks; no npm release was needed.
@@ -182,13 +182,13 @@ server hash as publisher identity, fetching unbounded archives, approval grants
 or claiming host-side loading enforcement. **Effort:** 3–5 days after the fixture
 contract. **Risk:** Beta revisions/host support change. [Authoritative repository](https://github.com/modelcontextprotocol/ext-skills).
 
-## #158 — Native artifact activation and update-drift evidence
+## `#158` — Native artifact activation and update-drift evidence
 
 **Validated bounded MVP:** the [Claude inline-hook experiment](NATIVE-PLUGIN-LIFECYCLE.md) passed eight source-bound native observations (three clean processes, zero API requests/turns/cost) and 75 native self-checks. Independent final raw/image/source/config bindings passed and the maintainer accepted the scoped evidence. Implementation and limits below retain the measured fixture scope.
 
 **Status:** the bounded fixture MVP merged in PR #334 (`117966d`) after all nine
 CI checks, without an npm release or companion repin. The original conditional
-follow-up to #156 is distinct from MCP doctor tests.
+follow-up to `#156` is distinct from MCP doctor tests.
 **User/problem:** installed/cached plugin bytes can differ from running-session
 state. **MVP:** one pinned host, synthetic plugin/skill, disposable profile and
 deterministic component marker; observe update/reload/disable/restart identity.
@@ -196,12 +196,12 @@ deterministic component marker; observe update/reload/disable/restart identity.
 **Acceptance:** receipts name exact loaded versions and scoped components; no
 host credentials/profiles/shared folders. Unobserved text-skill activation remains
 unknown if proving it requires model access. One component's marker cannot certify
-all bundled artifacts. **Dependencies:** demonstrated #156 need, host access;
+all bundled artifacts. **Dependencies:** demonstrated `#156` need, host access;
 separate explicit provider spend if required. **Non-goals:** live profile changes,
 universal host claims or default-consent bypass. **Effort:** 3–6 days plus setup.
 **Risk:** lifecycle differs by component/version. [Loading reference](https://code.claude.com/docs/en/plugins/loading).
 
-## #159 — Offline ACP permission/cancellation evidence spike
+## `#159` — Offline ACP permission/cancellation evidence spike
 
 **Status:** the [current-workflow consumer gate](ACP-TRACE-DECISION.md) was
 evaluated; the offline ACP spike remains deferred and unbuilt. A real
@@ -220,7 +220,7 @@ trace scope and retention limits. **Non-goals:** v2 Draft implementation, live
 proxy, agent sandbox, A2A bridge or delegation broker. **Effort:** 1–3 days for a
 spike. **Risk:** semantic drift and privacy in traces. [ACP v1 security](https://agentclientprotocol.com/protocol/v1/security).
 
-## #95 — Hook confinement decision experiment
+## `#95` — Hook confinement decision experiment
 
 Existing conditional experiment, not a new benchmark or production runtime.
 **Status:** the [bounded experiment](HOOK-CONFINEMENT-DECISION.md) measured mcpm's
@@ -242,12 +242,12 @@ or universal containment claim. [Hook kinds and lifecycle](https://code.claude.c
 
 ## Maintenance, prerequisites and explicit deferrals
 
-- #131/#149/#150: loud coverage and project ownership remain; #308 fixes only
+- `#131`/`#149`/`#150`: loud coverage and project ownership remain; #308 fixes only
   named slices. Import/export warnings are not a machine-readable completeness
   contract or transactional writes.
-- #112/#124/#125/#126/#127: prior policy/concurrency, EPIPE/EOF, pin-property and
+- `#112`/`#124`/`#125`/`#126`/`#127`: prior policy/concurrency, EPIPE/EOF, pin-property and
   confinement hypotheses remain open; reproduce each before assigning scope.
-- #142: watch protocol/extension stages and pin revisions; current Skills is Beta.
+- `#142`: watch protocol/extension stages and pin revisions; current Skills is Beta.
   Conflicting Server Card sources remain unresolved, not Stable.
 - E7: remote OAuth metadata diagnostics only after a real support case, with
   opt-in destination, DNS/redirect/size/time boundaries and no credentials/login.

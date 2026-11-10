@@ -11,7 +11,7 @@ see [CHANGELOG](../CHANGELOG.md#0521---2026-11-10).
 The [v0.52.0 release record](RELEASE-2026-11-08-v0.52.0.md) owns the published
 archive, protocol, native-reference and companion evidence. Public usage skill
 source is **1.3.1**. The explicit VS Code/Copilot `scope` selector shipped there;
-Claude Code remains the default and broader #141 coverage remains open.
+Claude Code remains the default and broader `#141` coverage remains open.
 
 The [active backlog](BACKLOG.md) owns selected work and acceptance. Recent bounded
 MVP/decision records cover [archive review](ARTIFACT-REVIEW.md),
