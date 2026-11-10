@@ -12,9 +12,14 @@ bash scripts/dogfood-protocol.sh /tmp/mcpm-protocol-evidence
 
 Requires Docker and a host Node.js to enforce the outer execution deadline.
 Provisioning the image needs registry access; the test container has no network.
-CI runs this command on Ubuntu and uploads the evidence even when comparisons
-fail. This job tests the released baseline, independently of the source tests.
-It does **not** test a candidate runtime change or automatically follow `latest`.
+This default invocation tests the fixed released baseline; it does **not** test
+a candidate runtime change or automatically follow `latest`. CI runs it on Ubuntu
+and separately builds/packs the current checkout, supplying that archive as the
+wrapper's second argument for candidate validation. The upload step runs even
+after failure and retains whichever evidence directories were produced; a failed
+baseline step skips the later candidate step. See [candidate reproduction and
+coverage](SERVE-PROTOCOL-VALIDATION.md#reproduce).
+
 The isolated manifest's `npm test` is the container entry point; use the wrapper
 above on the host. Host-only launcher regression checks run with
 `node --test scripts/protocol-sandbox/launcher-check.mjs`.
