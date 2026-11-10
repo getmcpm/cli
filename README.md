@@ -130,7 +130,7 @@ the tested companions at 0.52.0; no fresh runtime measurement is implied.
 | Goal | Start here |
 | --- | --- |
 | Explain one candidate | `mcpm why <name>` |
-| Review installed configuration and findings | `mcpm list`, `mcpm doctor`, `mcpm audit` |
+| Review installed configuration and findings | `mcpm list`, `mcpm doctor`, `mcpm audit` ([coverage report](docs/AUDIT-REPORT.md): `--report-json`) |
 | Find available updates | `mcpm outdated` |
 | Compare clients | `mcpm sync --check` |
 | Start a project stack | `mcpm init`, edit `mcpm.yaml`, then `mcpm lock` |

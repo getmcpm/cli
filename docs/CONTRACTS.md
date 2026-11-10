@@ -18,6 +18,7 @@ do-not-proceed.
 | `mcpm up --ci` | applied, no prompts | `1` | non-interactive; also non-zero on shadow collisions when combined with `--check-shadowing` |
 | `mcpm sync --check` | all clients in sync **and every config readable** | **`2`** on drift/conflict, on an entry that failed shape validation, or on a config that could not be read at all; `1` on error | **`2` is the drift signal** — the value CI consumes. `--json` emits the drift model. Since 0.37.0 (#59), `2` also covers "could not verify": previously an unreadable entry or config exited `0`, reporting in-sync over input never compared |
 | `mcpm audit` | scan complete | `1` when overall trust level is **risky**; **`2`** when the invocation cannot be satisfied | advisory findings (e.g. a delisted/deprecated server) lower the score but do not by themselves flip the exit. `2` is scoped to four invocations mcpm refuses outright: `--min-trust` above the highest score audit could produce for *every* scanned server, `--fix --json` without `--yes`, `--min-trust` without `--fix`, and `--sarif` with `--fix`. It is **not** a general "usage errors exit 2" promise — Commander's own argument-parse failures (e.g. `--min-trust 150`) still exit `1` |
+| `mcpm audit --report-json` | bounded selected assessment complete or empty inventory | `1` for incomplete assessment or existing risky score; `2` for incompatible report flags | CLI-only schema-version-1 coverage evidence; no host/installed-byte/health safety verdict. Existing audit formats remain unchanged; [report contract](AUDIT-REPORT.md) |
 | `mcpm scope <project-root>` | fixed candidates inventoried (present or absent) | `1` for an invalid root or incomplete fixed inventory | read-only Claude Code by default; explicit `--client vscode` selects a distinct VS Code/Copilot inventory. `--json` emits a version-1 client-discriminated source/metadata/coverage model, not a health/activation gate. Unsupported profile/host coverage remains unknown even on exit `0`; see [scope contract](PROJECT-SCOPE.md) |
 | `mcpm review-artifacts <before.tar> <after.tar> --profile <profile>` | bounded byte inventory and supported declaration coverage complete | `1` for incomplete/unsupported input or declaration coverage | advisory version-1 receipt, never an update approval/safety/activation gate; [archive/profile contract](ARTIFACT-REVIEW.md) |
 | `mcpm doctor` | no blocking issues | `1` | health check; the cross-client advisory section never changes the exit code |
@@ -177,6 +178,15 @@ exceptions:
   therefore now exits **2** where it previously exited **0** for a config mcpm
   could not read. The old exit `0` was the bug: the gate reported "in sync"
   over input it had never compared.
+
+### `audit --report-json`, schema version 1
+
+The separate opt-in CLI report has a stable versioned contract described in
+[coverage-aware audit](AUDIT-REPORT.md). Read inventory, assessment completeness,
+outcome, per-item check states and findings together. Accept additive fields and
+reason codes; stop on unknown versions. Existing audit `--json` (including its
+legacy empty-inventory text), SARIF, fix and `mcpm_audit` shapes/semantics are
+unchanged. The new report is incompatible with their output/mutation flags.
 
 ### `verify --json`, schema version 1
 

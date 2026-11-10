@@ -242,8 +242,12 @@ or universal containment claim. [Hook kinds and lifecycle](https://code.claude.c
 
 ## Maintenance, prerequisites and explicit deferrals
 
-- #131/#149/#150: loud coverage and project ownership remain; #308 fixes only
-  named slices. Import/export warnings are not a machine-readable completeness
+- #131/#149: the bounded CLI-only `audit --report-json` slice is implemented
+  for review, with fixed mcpm-store inventory, latest metadata, explicit check
+  states and separate empty/incomplete outcomes; see [contract](AUDIT-REPORT.md).
+  Legacy audit JSON/SARIF/MCP remain unchanged. This does not close broad audit,
+  native/client discovery, installed-byte or project-ownership coverage.
+- #150: project ownership remains; #308 fixes only named slices. Import/export warnings are not a machine-readable completeness
   contract or transactional writes.
 - #112/#124/#125/#126/#127: prior policy/concurrency, EPIPE/EOF, pin-property and
   confinement hypotheses remain open; reproduce each before assigning scope.

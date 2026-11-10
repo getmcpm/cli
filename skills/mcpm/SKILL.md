@@ -2,8 +2,8 @@
 name: mcpm
 description: Discover, assess, verify and manage MCP servers with the @getmcpm/cli package. Use when working with mcpm evidence, project locks or AI client MCP configuration.
 metadata:
-  version: "1.3.1"
-  evidence-contract: "mcpm_search, mcpm_info, advertised mcpm_doctor and verify --json schemaVersion 1"
+  version: "1.3.2"
+  evidence-contract: "mcpm_search, mcpm_info, advertised mcpm_doctor, verify --json and advertised audit --report-json schemaVersion 1"
 ---
 
 # mcpm
@@ -45,6 +45,17 @@ CLI evidence and state the limitation; do not invent fields or upgrade silently.
   A complete fixed-source inventory does not establish complete host coverage,
   effective selection, loading or enforcement. Do not run clients or servers to
   fill unknown fields without authorization.
+- For bounded store coverage, check `mcpm audit --help` for `--report-json`.
+  This CLI-only version-1 report reads the mcpm store and latest registry metadata;
+  it does not assess installed bytes, client configuration or health. Read
+  `inventory`, `assessmentComplete`, `outcome`, each server's `checks` and findings
+  together. Empty inventory differs from no findings; incomplete assessment keeps
+  sibling findings. Unrun/unavailable/failed checks never mean passed. A configured
+  `MCPM_EXTERNAL_SCANNER` can execute an installed program; unset it if execution
+  is outside scope. External `performed` means parseable adapter output, not
+  attested scanner success. Names remain untrusted identifiers; this report is not
+  anonymous. Stop on unknown schema versions. Do not combine with fix/other output
+  flags or assume legacy `--json`/`mcpm_audit` has this coverage contract.
 - Inspect installed configuration with `mcpm list --json`, `mcpm doctor --json`
   and `mcpm sync --check --json`. Those JSON shapes, except sync, are version
   dependent. An unreadable configuration is unknown, not an empty clean client.
