@@ -258,63 +258,15 @@ Tool pins are first-observation TOFU, not install-time approval.
 
 ### OS confinement (F1 — released v0.16.0)
 
-The relay detects patterns and enforces block decisions on JSON-RPC traffic.
-It cannot by itself *contain* the child it spawns — a server that decides to read
-`~/.ssh` or write `~/Library/LaunchAgents` never expresses that intent through
-inspectable traffic. `--confine` is **OS process enforcement**: it wraps the
-relayed child in an OS sandbox with selected secret-path read denials and
-write/network restrictions. This finite profile does not cover every credential
-location or prevent general exfiltration; configured secrets still reach the child.
-Wire inspection/enforcement and process confinement are complementary.
-**macOS-only in v1** (Linux `bwrap` deferred); **opt-in** — without
-`--confine`, enable/disable behavior is unchanged.
+The relay optionally applies a macOS Seatbelt profile to the spawned server via
+`guard/confine/`. Profile derivation, backend rendering and spawn decisions are
+separate modules; the enrollment store and wrapper marker bind the selected
+profile. Enrollment alone does not prove a confined launch.
 
-```
-  mcpm guard enable --confine
-       │  enrolls each UNWRAPPED stdio server it wraps
-       ▼
-  ~/.mcpm/guard-confine.yaml (+ .integrity)   ← source of truth for "server X is confined"
-       │
-       │  wrap marker gains two neutral tokens before `--`:
-       │  --confine-profile-hash <sha256>  (binds marker ↔ stored profile)
-       │  --confine-required               (bare flag, replicated into IDE config)
-       ▼
-  mcpm guard run --inner  (spawn-time decision, src/guard/confine/decide.ts)
-       │
-       ├── CONFINE  — enrolled + hash matches + backend available
-       │     └─ apply.ts wraps the child argv with backend-macos.ts (sandbox-exec)
-       │        using the derived Seatbelt profile (derive.ts + profile.ts)
-       │
-       ├── FAIL CLOSED (refuse to start, exit 1) — hash mismatch / malformed hash /
-       │     stripped marker or wiped store on a require_confine server
-       │
-       └── HYBRID (WARN loudly + run UNCONFINED, never silent) — no OS backend
-             (Linux/CI/Windows) or missing marker/profile on a NON-required server
-```
-
-Standard tier (macOS Seatbelt): **read** allow-all *except* a secret-dir denylist
-(`~/.ssh`, `~/.aws`, `~/.gnupg`, cloud/gh/npm/docker/kube creds, keychains, browser
-cookie stores, MCP client config dirs, and mcpm's own `~/.mcpm`); **write** deny all of
-`$HOME` *except* caches, the per-server scratch dir, and system temp/`/dev` — one rule
-that blocks the whole persistence class (`~/.zshrc`, LaunchAgents, PATH-shadowing
-`~/bin`, git hooks); **net** launcher-classified (npx/uvx/pip/docker/… ⇒ network "all",
-everything else ⇒ egress-deny). The confine store reuses the shared
-`store-integrity.ts` extracted from `pins.ts` + `policy.ts` and fails closed on
-integrity/shape/format-version mismatch. CONFINE events (`confine-applied`,
-`confine-hash-mismatch`, `confine-marker-stripped`, …) append to
-`guard-events.jsonl`; the OWASP signature catalog count is unchanged.
-
-The `sandbox-exec` path IS exercised in CI: the `confine-macos` job in `ci.yml` runs
-`scripts/dogfood-confine.sh` on a `macos-latest` runner, so real kernel enforcement is
-verified on every push and PR, not only locally. (The full unit suite is deliberately not
-re-run on that leg — a few tests are darwin-env sensitive; the dogfood is the enforcement
-contract that matters.)
-
-Honest caveats: net is launcher-permissive (do not read this as general exfil prevention); it
-does not defend against a same-user attacker who can rewrite **both** the IDE config
-and `~/.mcpm`. A strict tier (read-allowlist / scratch-only-write / host-granular net),
-Linux `bwrap`, and the per-server `guard confine <server>` command are deferred (per-server
-confine is achievable today via `enable --confine --server X` + `disable --server X`).
+Use the canonical [confinement reference](GUARD.md#os-confinement---confine) for
+profile permissions, enrollment, marker tokens and hybrid/fail-closed conditions.
+Configured credentials still reach the child, and network-enabled launchers can
+send accessible data. The [CI section](#cicd) describes the macOS enforcement job.
 
 ## Configuration
 
