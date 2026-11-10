@@ -1,0 +1,95 @@
+@import url("./tokens.css");
+@import url("./base.css");
+.masthead { display: flex; justify-content: space-between; align-items: center; gap: var(--space-lg); min-height: 96px; border-bottom: 1px solid var(--border); }
+.brand { display: inline-flex; align-items: center; gap: var(--space-sm); font-size: 27px; font-weight: 650; letter-spacing: -.06em; text-decoration: none; }
+nav { display: flex; align-items: center; gap: var(--space-xl); }
+nav a { display: inline-flex; align-items: center; gap: var(--space-xs); min-height: 44px; text-decoration: none; font-size: 15px; color: var(--muted); transition: color var(--duration); }
+.nav-source { color: var(--foreground); }
+.hero { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); align-items: center; gap: var(--space-3xl); padding-block: 104px 112px; }
+.intro-label, .section-label { font-size: 14px; font-weight: 500; color: var(--accent); margin-bottom: var(--space-lg); }
+h1 { font-size: clamp(2.8rem, 4.8vw, 4.5rem); letter-spacing: -.065em; line-height: 1.06; }
+.lead { max-width: 46ch; color: var(--muted); font-size: 18px; margin-top: var(--space-lg); }
+.actions { display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-lg); margin-top: var(--space-xl); }
+.primary { display: inline-flex; justify-content: space-between; align-items: center; gap: var(--space-xl); min-height: 50px; padding: var(--space-sm) var(--space-lg); background: var(--accent); color: var(--on-accent); border-radius: 6px; font-weight: 600; text-decoration: none; transition: background var(--duration); }
+.primary:hover { background: var(--accent-hover); color: var(--on-accent); }
+.primary:active, button:active { transform: translateY(1px); }
+.secondary { display: inline-flex; align-items: center; min-height: 44px; font-size: 15px; text-decoration: none; }
+.hero-note { color: var(--subtle); font-size: 14px; margin-top: var(--space-lg); }
+.workflow-preview { border: 1px solid var(--border); border-radius: var(--radius); background: var(--code-surface); min-width: 0; box-shadow: 0 24px 60px #00000025; }
+figcaption { display: flex; justify-content: space-between; flex-wrap: wrap; gap: var(--space-sm); padding: var(--space-md) var(--space-lg); border-bottom: 1px solid var(--border); font-size: 13px; color: var(--muted); }
+.preview-type { color: var(--subtle); }
+.preview-body { padding: var(--space-xl) var(--space-lg) var(--space-2xl); }
+.code-comment { font: 13px/1.6 var(--font-code); color: var(--subtle); margin-bottom: var(--space-xs); }
+pre { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 14px; line-height: 1.8; margin: 0 0 var(--space-xl); }
+pre:last-child { margin-bottom: 0; }
+.prompt { color: var(--accent); }
+.preview-footer { display: flex; gap: var(--space-sm); align-items: center; border-top: 1px solid var(--border); padding: var(--space-md) var(--space-lg); color: var(--subtle); font-size: 13px; }
+.client-strip { border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); padding-block: var(--space-lg); }
+.client-strip p { font-size: 13px; color: var(--subtle); margin-bottom: var(--space-md); }
+.client-strip ul { display: flex; flex-wrap: wrap; justify-content: space-between; gap: var(--space-md) var(--space-lg); padding: 0; margin: 0; list-style: none; font-size: 17px; font-weight: 500; color: var(--muted); }
+.commands { padding-block: 112px; }
+.section-intro { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, .8fr); gap: var(--space-3xl); align-items: end; margin-bottom: var(--space-3xl); }
+h2 { font-size: clamp(2rem, 3.3vw, 3rem); }
+.section-intro > p { color: var(--muted); max-width: 37ch; }
+.command-list > div { display: grid; grid-template-columns: minmax(0, .7fr) minmax(0, 1.3fr); gap: var(--space-3xl); padding-block: var(--space-xl); border-top: 1px solid var(--border); }
+dt { display: flex; align-items: baseline; gap: var(--space-lg); font-size: 21px; font-weight: 550; }
+.step { color: var(--subtle); font: 13px var(--font-code); }
+dd { min-width: 0; }
+h3 { font-size: 21px; letter-spacing: -.02em; font-weight: 550; }
+dd p { color: var(--muted); max-width: 60ch; margin-block: var(--space-sm) var(--space-lg); }
+dd > code { display: inline-block; color: var(--accent); font-size: 14px; }
+.text-link { display: inline-flex; gap: var(--space-sm); align-items: center; min-height: 44px; margin-top: var(--space-lg); font-size: 15px; }
+.boundaries { background: var(--surface); border-block: 1px solid var(--border); padding-block: var(--space-4xl); }
+.boundary-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: var(--space-3xl); }
+.boundary-intro { color: var(--muted); max-width: 38ch; margin-top: var(--space-lg); }
+details { padding-block: var(--space-lg); border-bottom: 1px solid var(--border); }
+details:first-child { padding-top: 0; }
+summary { cursor: pointer; min-height: 44px; font-size: 17px; font-weight: 500; }
+summary:hover { color: var(--accent); }
+details p { color: var(--muted); margin-top: var(--space-sm); max-width: 55ch; }
+.install { padding-block: 112px; }
+.install-layout { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: var(--space-3xl); align-items: start; }
+.install-layout h2 { max-width: 13ch; }
+.install-layout > div > p { color: var(--muted); margin-top: var(--space-lg); max-width: 40ch; }
+.install-box { background: var(--code-surface); border: 1px solid var(--border); border-radius: var(--radius); padding: var(--space-lg); }
+.install-command { display: flex; gap: var(--space-lg); align-items: center; justify-content: space-between; }
+.install-command code { font-size: 14px; color: var(--foreground); min-width: 0; }
+button { border: 1px solid var(--border); background: var(--surface-raised); color: var(--foreground); padding: var(--space-xs) var(--space-sm); min-height: 44px; border-radius: 6px; font-size: 13px; cursor: pointer; flex-shrink: 0; transition: background var(--duration); }
+button:hover { background: var(--border); }
+.copy-status { min-height: 1.6em; margin-top: var(--space-xs); font-size: 13px; color: var(--accent); }
+.requirements { color: var(--muted); font-size: 13px; padding-top: var(--space-md); border-top: 1px solid var(--border); }
+.requirements code { font-size: 12px; }
+.install-note { color: var(--subtle); font-size: 13px; margin-top: var(--space-sm); }
+.footer { display: flex; align-items: center; justify-content: space-between; gap: var(--space-xl); padding-block: var(--space-xl); border-top: 1px solid var(--border); }
+.footer p { font-size: 13px; color: var(--subtle); margin-top: var(--space-xs); }
+.footer .brand { font-size: 25px; }
+@media (max-width: 1050px) { .hero, .section-intro, .boundary-grid, .install-layout { gap: var(--space-xl); } .hero { padding-block: 80px; } .install-command { flex-wrap: wrap; } }
+@media (max-width: 800px) {
+  .hero { grid-template-columns: minmax(0, 1fr); gap: var(--space-2xl); padding-block: var(--space-3xl); }
+  h1 { font-size: clamp(2.8rem, 8vw, 4rem); }
+  .hero-copy { max-width: 560px; }
+  .workflow-preview { width: 100%; }
+  .section-intro, .boundary-grid, .install-layout { grid-template-columns: minmax(0, 1fr); gap: var(--space-2xl); }
+  .section-intro { margin-bottom: var(--space-2xl); }
+  .command-list > div { grid-template-columns: minmax(0, 1fr); gap: var(--space-lg); }
+  .commands, .boundaries, .install { padding-block: var(--space-3xl); }
+  .install-layout h2 { max-width: none; }
+  .footer { align-items: start; flex-direction: column; }
+}
+@media (max-width: 480px) {
+  .masthead { min-height: 80px; gap: var(--space-sm); }
+  .brand { font-size: 24px; gap: var(--space-xs); }
+  .brand img { width: 28px; height: 28px; }
+  nav { gap: var(--space-md); }
+  nav a { font-size: 13px; }
+  .masthead nav a:first-child { display: none; }
+  .hero { padding-block: var(--space-2xl); }
+  .lead { font-size: 17px; }
+  .client-strip ul { justify-content: start; gap: var(--space-sm) var(--space-lg); font-size: 15px; }
+  .preview-type { display: none; }
+  .preview-body { padding-inline: var(--space-md); }
+  figcaption, .preview-footer { padding-inline: var(--space-md); }
+  pre { font-size: 12px; }
+  .install-box { padding: var(--space-md); }
+  .footer nav { flex-wrap: wrap; }
+}
