@@ -66,9 +66,11 @@ Three places to run that, in increasing order of "not your machine":
 | a container | `docker run --rm -v "$PWD/scripts:/w/scripts:ro" -w /w -e MCPM_DOGFOOD_SPEC=@getmcpm/cli@latest node:26 ./scripts/dogfood-release.sh` | any Node major, disposable, no local Node needed |
 | GitHub | Actions → **Dogfood** → *Run workflow* | Node 22/24/26 + macOS, zero local setup |
 
-The smoke run uses a throwaway `$HOME`, so `doctor` sees a clean machine and nothing
-touches your real `~/.mcpm` or MCP client configs. `dogfood-confine.sh` does the same.
-Verified: after a full run in a container, `$HOME/.mcpm` does not exist.
+The release script sets a throwaway `$HOME` for its CLI smoke commands, so
+`doctor` sees synthetic client state. Build, pack and npm installation happen
+before that switch and use the normal home/caches; this is not an OS sandbox
+for package installation. `dogfood-confine.sh` also uses a disposable home for
+its fixture commands; `pnpm dogfood:confine` builds before running that script.
 
 macOS-only end-to-end check for the `--confine` sandbox:
 
@@ -82,9 +84,9 @@ Docker provisions the test dependencies, then runs with no network or host
 mounts. See [the matrix, evidence and limits](docs/PROTOCOL-VALIDATION.md).
 
 For installed VS Code/Claude Code checks inside disposable macOS VMs, see
-[native client validation](docs/NATIVE-CLIENT-VALIDATION.md). Its fixture/evidence
-self-checks run with `node --test scripts/native-client/self-check.mjs`; native
-VM runs require the separately pinned public client/runtime payload.
+[native client validation](docs/NATIVE-CLIENT-VALIDATION.md), including its
+account/VM-free self-check command. Native VM runs require the separately pinned
+public client/runtime payload.
 Candidate changes must use the explicit candidate mode and a fresh packed CLI;
 a passing published-baseline run does not validate changed production code.
 Use the separate `--approvals` native suite for default tool consent; the

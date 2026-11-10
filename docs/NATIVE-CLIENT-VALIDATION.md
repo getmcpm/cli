@@ -413,7 +413,7 @@ failures; they are not silently classified as unsupported.
 Run the account/VM-free harness self-checks with:
 
 ```sh
-node --test scripts/native-client/self-check.mjs
+node --test scripts/native-client/self-check.mjs scripts/native-client/peer-check.mjs scripts/native-client/doctor-self-check.mjs
 ```
 
 CI runs these checks on Node 22/24/26. CI does not run the macOS VMs; native
@@ -431,8 +431,9 @@ versions. Updating pins requires repeating the native matrix. SIGKILL, host
 shutdown and hypervisor crashes cannot guarantee cleanup; inspect the task-owned storage
 before reclaiming any leftover clone.
 
-The next step is real model/skill evaluation with dedicated, authorized test
-access and bounded usage, followed by additional named clients/platforms.
+Additional client/platform or model/skill evaluation must be selected explicitly
+under the [active backlog](BACKLOG.md). Provider-backed evaluation requires
+separate authorization, dedicated test access and bounded usage.
 
 The separate [inline-plugin lifecycle experiment](NATIVE-PLUGIN-LIFECYCLE.md)
 measures one pinned Claude Code Linux arm64 hook across a live update/reload/disable

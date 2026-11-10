@@ -10,7 +10,12 @@ What it checks:
 | Health check | 0-30 | Reserved startup/response check; current commands do not run it and score 15/30 |
 | Static scan | 0-40 | Regex-based detection of hardcoded secrets, prompt injection patterns in registry descriptions/arguments, typosquatting in package names, suspicious argument schemas |
 | External scanner | 0-20 | Results from a third-party scanner you have installed, opt-in via `MCPM_EXTERNAL_SCANNER` (off by default) |
-| Registry metadata | 0-10 | Verified publisher, publish date, download count (capped to 0 when critical findings present) |
+| Registry metadata | 0-10 | Active registry status and publication age; capped to 0 when critical or high findings are present. The reserved download-count input is not populated by current commands |
+
+The score's `isVerifiedPublisher` input currently comes from the registry's
+`status === "active"` flag. That credit does not independently verify publisher
+identity. The scorer supports download-count credit, but product registry reads
+supply no download count, so that credit is unavailable.
 
 Levels are a **ratio** of the points available, not absolute: **safe** at 80% of
 `maxPossible` or better, **caution** at 50-79%, **risky** below 50%. With no external
