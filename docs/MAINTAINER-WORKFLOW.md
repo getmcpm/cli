@@ -1,17 +1,16 @@
 # Maintainer workflow and context
 
-## Current checkpoint — 2026-11-10
+## Current checkpoint — 2026-11-12
 
-Latest published CLI: **v0.52.1**, an email-metadata-only patch; runtime code and
-dependencies remain unchanged from **v0.52.0**, the last behavior release.
-Guard-playground and mcp-guardbench deliberately retain their tested **0.52.0**
-baseline. The patch does not claim fresh 0.52.1 runtime/native/companion tests;
-see [CHANGELOG](../CHANGELOG.md#0521---2026-11-10).
+Latest published CLI: **v0.53.0**, adding the opt-in CLI-only
+`audit --report-json` evidence model. Existing JSON/SARIF/MCP results and scoring
+remain compatible. The [release record](RELEASE-2026-11-11-v0.53.0.md) owns
+fresh published-archive, protocol and companion evidence. Both companions align
+to **0.53.0**. Public usage skill source is **1.3.2**.
 
-The [v0.52.0 release record](RELEASE-2026-11-08-v0.52.0.md) owns the published
-archive, protocol, native-reference and companion evidence. Public usage skill
-source is **1.3.2**. The explicit VS Code/Copilot `scope` selector shipped there;
-Claude Code remains the default and broader `#141` coverage remains open.
+The bounded `#131`/`#149` report slice shipped; broader audit and host coverage
+remain open. Earlier VS Code/Copilot `scope` evidence remains bound to its named
+release/client; Claude Code remains the default and broader `#141` stays open.
 
 The [active backlog](BACKLOG.md) owns selected work and acceptance. Recent bounded
 MVP/decision records cover [archive review](ARTIFACT-REVIEW.md),

@@ -37,16 +37,16 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: getmcpm/cli/.github/actions/mcpm-verify@v0.52.1
+      - uses: getmcpm/cli/.github/actions/mcpm-verify@v0.53.0
         with:
-          version: 0.52.1             # executed @getmcpm/cli version
+          version: 0.53.0             # executed @getmcpm/cli version
           working-directory: .        # dir containing mcpm.yaml / mcpm-lock.yaml
 ```
 
 Equivalent one-liner (no action):
 
 ```yaml
-      - run: npx --yes @getmcpm/cli@0.52.1 verify
+      - run: npx --yes @getmcpm/cli@0.53.0 verify
 ```
 
 Pre-commit hook (same verb):
@@ -57,7 +57,7 @@ Pre-commit hook (same verb):
   hooks:
     - id: mcpm-verify
       name: mcpm verify
-      entry: npx --yes @getmcpm/cli@0.52.1 verify
+      entry: npx --yes @getmcpm/cli@0.53.0 verify
       language: system
       pass_filenames: false
 ```
