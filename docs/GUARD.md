@@ -102,8 +102,8 @@ participant Client
 participant Relay as mcpm stdio relay
 participant Child as MCP server
 participant Events as Event log
-Note over Client,Child: Explicit guard enable wraps config; restart server to load it
-Note over Relay: Load policy at startup; tool pins use first observation (TOFU)
+Note over Client,Child: Explicit guard enable wraps config, restart server to load it
+Note over Relay: Load policy at startup, tool pins use first observation (TOFU)
 Client->>Relay: Request
 Relay->>Relay: Inspect request and apply policy
 alt block
@@ -116,7 +116,7 @@ else pass (including log_only contribution)
 Relay->>Child: Forward original request
 end
 Child->>Relay: Response
-Relay->>Relay: Inspect content and applicable pin drift; apply policy
+Relay->>Relay: Inspect content and applicable pin drift, apply policy
 alt block
 Relay->>Events: Log block
 Relay->>Client: Substitute JSON-RPC error
@@ -422,7 +422,7 @@ should be an automatic response to a block.
 
 Confinement adds events (not signatures — the catalog count is unchanged) to `guard-events.jsonl` under category `CONFINE`: `confine-applied`, `confine-hash-mismatch`, `confine-marker-stripped`, `confine-profile-missing`, `confine-backend-missing`, `confine-marker-malformed`; plus `orig-hash-mismatch` (category `RELAY`, from the spawn-time `--orig-hash` verify).
 
-Each logged finding also carries an OWASP MCP Top 10 pin (backlog #71 — see
+Each logged finding also carries an OWASP MCP Top 10 pin (backlog `#71` — see
 `docs/owasp-mcp-mapping.md`), so you can filter the event log by category:
 
 ```sh
