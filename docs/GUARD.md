@@ -102,8 +102,8 @@ participant Client
 participant Relay as mcpm stdio relay
 participant Child as MCP server
 participant Events as Event log
-Note over Client,Child: Explicit guard enable wraps config; restart server to load it
-Note over Relay: Load policy at startup; tool pins use first observation (TOFU)
+Note over Client,Child: Explicit guard enable wraps config, restart server to load it
+Note over Relay: Load policy at startup, tool pins use first observation (TOFU)
 Client->>Relay: Request
 Relay->>Relay: Inspect request and apply policy
 alt block
@@ -116,7 +116,7 @@ else pass (including log_only contribution)
 Relay->>Child: Forward original request
 end
 Child->>Relay: Response
-Relay->>Relay: Inspect content and applicable pin drift; apply policy
+Relay->>Relay: Inspect content and applicable pin drift, apply policy
 alt block
 Relay->>Events: Log block
 Relay->>Client: Substitute JSON-RPC error
@@ -199,7 +199,7 @@ A URL/HTTP-transport server entry has no `command`, so the stdio MITM relay cann
 Consent does **not** add protection — it records that you accepted its absence. The underlying limitation stands: no relay exists for non-stdio transports (a streamable-HTTP MITM is deferred).
 
 ### `mcpm guard disable [--client <id>] [--server <name>]`
-Reverses the wrap by parsing the wrap marker out of the args and reconstructing the original entry. Falls back to the `.bak` if the wrap pattern is malformed (e.g. user hand-edited the config since enable).
+Reconstructs the original entry from a recognized wrap marker. Ambiguous or malformed wrappers are skipped with repair guidance; disable does not automatically restore a `.bak`. Review a trusted client-config backup and recover the original entry before enabling again. See the [wrapper recognition limits](#mcpm-guard-status).
 
 ### `mcpm guard enable [...] --confine [off]`
 Opt-in OS sandbox for the servers being wrapped (macOS only, shipped in v0.16.0). See **OS confinement (`--confine`)** below. The bare flag enrolls every unwrapped stdio server it wraps at the "standard" tier; `--confine off` is the same as omitting the flag (no enrollment). Respects `--client` / `--server`.
@@ -215,7 +215,7 @@ Wrapper recognition checks the launcher and complete marker, including its origi
 Malformed markers, missing package paths and pre-hash legacy wrappers are ambiguous: status/doctor report them without counting them guarded, and enable/disable/update refuse to rewrite them. Restore the original server from a trusted client-config backup, then enable again. Recognition is static configuration evidence: it does not authenticate binary bytes or forged package metadata, prove an old Node still exists, or prove the client loaded the wrapper. A moved script with an arbitrary alias may need manual recovery because its former identity cannot be inferred.
 
 ### `mcpm guard demo`
-Runs the in-process `prompt-injection` scenario. The output is byte-identical to what the production relay emits, so screenshotting the demo accurately represents what a real block looks like. Additional scenarios (path-exfil, rug-pull) are planned but not yet shipped.
+Runs the in-process `prompt-injection` scenario through the pattern engine and prints a demonstration-specific summary. It does not start a server subprocess or run the full relay, pin or policy pipeline; the formatted demo is not a capture of production wire output. The CLI exposes only this scenario.
 
 ### `mcpm guard accept-drift <server> [--tool <name>] [--new-hash <sha256:...>] [--remove] [--yes]`
 
@@ -279,13 +279,17 @@ control sequence.
 Shows the vendored OWASP MCP Top 10 signature catalog with id / category / severity / target / description.
 
 ### `mcpm guard reset-integrity [--policy] [--yes]`
-Regenerates the integrity sidecar after manually editing `~/.mcpm/pins.json` (default) or `~/.mcpm/guard-policy.yaml` (`--policy`).
+Regenerates the integrity sidecar for `~/.mcpm/pins.json` (default) or `~/.mcpm/guard-policy.yaml` (`--policy`). Review the file first: `--yes` is required to apply the reset; without it the command prints a warning and exits 1.
 
 Required when:
 - You copy `pins.json` between machines
 - You hand-edit `guard-policy.yaml` directly (rather than via `mcpm guard mute/unmute/pause`)
 
-The relay refuses to use either file if its sidecar doesn't match — this is the rug-pull defense for the configuration itself.
+A pins mismatch refuses relay startup. A policy mismatch warns and uses shipped
+default actions for the session, discarding stricter block promotions as well as
+mutes and pause state; see [policy fallback](POLICY.md#integrity-sidecar). These
+unkeyed hashes detect stale/corrupt content, not authenticity against a same-user
+writer who can replace both files. Reset only after reviewing the change.
 
 ### `mcpm guard run --inner --server-name <name> -- <command> [args]`
 **Internal command**, semver-exempt, not for direct user use. Invoked by wrapped client configs. Requires the `--inner` flag and refuses direct invocation without it.
@@ -310,7 +314,7 @@ On macOS, confinement is applied via Seatbelt (`sandbox-exec`). The one shipped 
 ### Enabling and disabling
 
 ```
-mcpm guard enable --confine                 # enroll every wrapped stdio server, standard tier
+mcpm guard enable --confine                 # enroll unwrapped stdio servers, standard tier
 mcpm guard enable --confine --server foo    # scope to one server
 mcpm guard enable --confine off             # same as omitting: no enrollment
 ```
@@ -326,12 +330,12 @@ mcpm guard enable --confine off             # same as omitting: no enrollment
 Confinement never fails silently. The store (`~/.mcpm/guard-confine.yaml`) is the source of truth for "is server X enrolled".
 
 - **Confine** when the server is enrolled + the profile hash matches + an OS backend is available.
-- **Run unconfined with a loud notice** when there is no OS backend (Linux / CI / Windows) or the marker/profile is missing on a **non-required** server. Never silent — backend availability is pre-checked, never inferred from a spawn error.
-- **Fail closed (refuse to start, exit 1)** at spawn time on: a profile-hash mismatch (tamper), a malformed hash, a stripped marker on a `require_confine` server, or a wiped store on a `require_confine` server.
+- **Run unconfined with a loud notice** on a **non-required** server when there is no OS backend (Linux / CI / Windows) or the marker/profile is missing. Never silent — backend availability is pre-checked, never inferred from a spawn error.
+- **Fail closed (refuse to start, exit 1)** at spawn time on: a profile-hash mismatch (tamper), a malformed hash, a stripped marker or missing profile/store on a required server, or an unavailable OS backend when either the marker or stored profile requires confinement.
 
 ### Marker tokens
 
-The wrapped config entry carries two new tokens **before** the `--` separator: `--confine-profile-hash <sha256>` (a content hash of the rendered profile, binding the marker to the stored profile) and `--confine-required` (a bare flag, present iff the server is `require_confine`, replicated into the IDE config so it survives a wiped store). Both are **neutral** to `--orig-hash` — excluded from its hash input, and the `--` position is unchanged — so unwrap/disable still work.
+The wrapped config entry carries two new tokens **before** the `--` separator: `--confine-profile-hash <sha256>` (a content hash of the stored profile, binding the marker to that profile) and `--confine-required` (a bare flag, present iff the server is `require_confine`, replicated into the IDE config so it survives a wiped store). Both are **neutral** to `--orig-hash` — excluded from its hash input, and the `--` position is unchanged — so unwrap/disable still work.
 
 ### Store
 
@@ -418,7 +422,7 @@ should be an automatic response to a block.
 
 Confinement adds events (not signatures — the catalog count is unchanged) to `guard-events.jsonl` under category `CONFINE`: `confine-applied`, `confine-hash-mismatch`, `confine-marker-stripped`, `confine-profile-missing`, `confine-backend-missing`, `confine-marker-malformed`; plus `orig-hash-mismatch` (category `RELAY`, from the spawn-time `--orig-hash` verify).
 
-Each logged finding also carries an OWASP MCP Top 10 pin (backlog #71 — see
+Each logged finding also carries an OWASP MCP Top 10 pin (backlog `#71` — see
 `docs/owasp-mcp-mapping.md`), so you can filter the event log by category:
 
 ```sh

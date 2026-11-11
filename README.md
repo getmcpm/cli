@@ -27,6 +27,9 @@ name an already-installed executable.
   <img src="./assets/demo.gif" alt="mcpm CLI demonstration" width="680">
 </p>
 
+Visit the [project homepage](https://mcpm.m1ngshum.com/), or
+[preview and deploy it locally](website/README.md).
+
 ## Quick start
 
 Requires **Node `^22.22.2 || ^24.15.0 || >=26.0.0`**: Node 22.22.2+, 24.15.0+

@@ -16,7 +16,7 @@ do-not-proceed.
 | `mcpm up --frozen` | lockfile verified, applied | `1` | fail-closed pre-install verify: blocks on integrity drift, an unverifiable record, a format mismatch, or a missing stack/lock |
 | `mcpm verify` | lockfile integrity verified | `1` | repo-only, **client-free** CI gate: the same fail-closed integrity pass as `up --frozen` (drift / unverifiable / format mismatch / suspicious missing baseline), plus `1` when no lock file is found. `--json` emits the verify model |
 | `mcpm up --ci` | applied, no prompts | `1` | non-interactive; also non-zero on shadow collisions when combined with `--check-shadowing` |
-| `mcpm sync --check` | all clients in sync **and every config readable** | **`2`** on drift/conflict, on an entry that failed shape validation, or on a config that could not be read at all; `1` on error | **`2` is the drift signal** — the value CI consumes. `--json` emits the drift model. Since 0.37.0 (#59), `2` also covers "could not verify": previously an unreadable entry or config exited `0`, reporting in-sync over input never compared |
+| `mcpm sync --check` | all clients in sync **and every config readable** | **`2`** on drift/conflict, on an entry that failed shape validation, or on a config that could not be read at all; `1` on error | **`2` is the drift signal** — the value CI consumes. `--json` emits the drift model. Since 0.37.0 (`#59`), `2` also covers "could not verify": previously an unreadable entry or config exited `0`, reporting in-sync over input never compared |
 | `mcpm audit` | scan complete | `1` when overall trust level is **risky**; **`2`** when the invocation cannot be satisfied | advisory findings (e.g. a delisted/deprecated server) lower the score but do not by themselves flip the exit. `2` is scoped to four invocations mcpm refuses outright: `--min-trust` above the highest score audit could produce for *every* scanned server, `--fix --json` without `--yes`, `--min-trust` without `--fix`, and `--sarif` with `--fix`. It is **not** a general "usage errors exit 2" promise — Commander's own argument-parse failures (e.g. `--min-trust 150`) still exit `1` |
 | `mcpm audit --report-json` | bounded selected assessment complete or empty inventory | `1` for incomplete assessment or existing risky score; `2` for incompatible report flags | CLI-only schema-version-1 coverage evidence; no host/installed-byte/health safety verdict. Existing audit formats remain unchanged; [report contract](AUDIT-REPORT.md) |
 | `mcpm scope <project-root>` | fixed candidates inventoried (present or absent) | `1` for an invalid root or incomplete fixed inventory | read-only Claude Code by default; explicit `--client vscode` selects a distinct VS Code/Copilot inventory. `--json` emits a version-1 client-discriminated source/metadata/coverage model, not a health/activation gate. Unsupported profile/host coverage remains unknown even on exit `0`; see [scope contract](PROJECT-SCOPE.md) |
@@ -138,7 +138,7 @@ uncertain existence checks fail the CLI invocation rather than claim missing.
 [Doctor validation](DOCTOR-EVIDENCE-VALIDATION.md) separates synthetic SDK wire
 and packed-candidate proof from installed native-client or provider behavior.
 
-**Added in 0.42.0, both additive (#92):**
+**Added in 0.42.0, both additive (`#92`):**
 
 - `mcpm_audit` — every per-server row now carries `error: string | null`. It is
   `null` on a row that scored, and a specific reason on a row that did not. The
@@ -150,7 +150,7 @@ and packed-candidate proof from installed native-client or provider behavior.
   carrying the advisory lines `handleUp` printed, in order. These reached only
   the CLI's stdout before, which this surface does not have.
 
-**Changed outcome in 0.43.0 (backlog #116, #234):** `mcpm_install` on a server the
+**Changed outcome in 0.43.0 (backlog `#116`, PR #234):** `mcpm_install` on a server the
 registry marks `deleted` now refuses (the tool call errors; nothing is written) where
 it installed it. `mcpm_setup` drops such a match before choosing a keyword's best
 candidate and reports it in `skipped` with the same message instead of installing
@@ -170,7 +170,7 @@ exceptions:
 
 - **`mcpm sync --json`** (the drift model) is **frozen** because CI consumes it
   alongside the exit-`2` contract above.
-  **Changed in 0.37.0 (#59), deliberately and not additively:** `ServerDrift`
+  **Changed in 0.37.0 (`#59`), deliberately and not additively:** `ServerDrift`
   gains `malformed` and `DriftModel` gains `unreadableClients`, but membership
   of `servers[]` and the `drifted`/`inSync` counts also change — a server whose
   entry failed shape validation used to be absent from the model entirely, and
@@ -215,7 +215,7 @@ provenance baselines are re-checked; an empty `provenanceBlocked` array is not
 proof that every publisher was verified. A matching published record does not
 prove downloaded bytes or code safety. See [agent workflows](AGENT-WORKFLOW.md).
 
-**Additive (backlog #71), on the unstable shapes:** `guard inspect --json`
+**Additive (backlog `#71`), on the unstable shapes:** `guard inspect --json`
 findings, each `guard-events.jsonl` line's findings, and
 `guard list-signatures --json` entries all gain an `owasp` field — the OWASP MCP
 Top 10 pin (see `docs/owasp-mcp-mapping.md`). `mcpm audit --sarif` gains a

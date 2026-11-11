@@ -14,6 +14,10 @@ published section (it happened to #170).
 
 ### Documentation
 
+- Clarify homepage discovery versus trust assessment, show server installation and explicit guard activation, and qualify account/subscription copy.
+
+- Add a standalone dark project homepage under `website/`, with a command preview, client adapter overview, installation and explicit security boundaries; add Netlify staging configuration for GitHub deployments.
+
 - Shorten onboarding, index task guides, correct trust/guard/verification and historical-status claims, and compare stdio runtime inspection, server confinement and agent lifecycle hooks without changing behavior.
 
 ## [0.52.1] - 2026-11-10
