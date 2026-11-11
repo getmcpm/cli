@@ -1,7 +1,7 @@
 # Coverage-aware audit report
 
 `mcpm audit --report-json` is an opt-in, CLI-only version-1 evidence model for
-`~/.mcpm/servers.json`. Check help for availability on older installations.
+`~/.mcpm/servers.json`. First shipped in v0.53.0; check help on older installations.
 It reads the mcpm store, fetches **latest registry metadata** for accepted names,
 and runs the existing static scanner. It does not inventory client configuration,
 select effective project entries, assess installed package bytes/versions, or

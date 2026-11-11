@@ -124,9 +124,8 @@ The public [mcp-guardbench](https://github.com/getmcpm/mcp-guardbench) contains
 versioned results and known misses measured through published `guard inspect`
 binaries. Those stateless runtime results do not measure install-time detection
 prevalence or promise coverage of unseen attacks. The
-[v0.52.0 release record](docs/RELEASE-2026-11-08-v0.52.0.md) retains that release's
-artifact, protocol and companion evidence. The metadata-only v0.52.1 patch keeps
-the tested companions at 0.52.0; no fresh runtime measurement is implied.
+[v0.53.0 release record](docs/RELEASE-2026-11-11-v0.53.0.md) retains the
+published artifact, compatibility and synchronized companion evidence.
 
 ## Common workflows
 
@@ -198,7 +197,7 @@ up through stdio MCP. For clients using an `mcpServers` configuration map:
   "mcpServers": {
     "mcpm": {
       "command": "npx",
-      "args": ["-y", "@getmcpm/cli@0.52.1", "serve"]
+      "args": ["-y", "@getmcpm/cli@0.53.0", "serve"]
     }
   }
 }

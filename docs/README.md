@@ -31,8 +31,8 @@
 Measurements belong to their named archives, inputs and hosts; consult each
 record's current reproduction instructions and retained historical limits.
 
-- [Latest behavior release: v0.52.0](RELEASE-2026-11-08-v0.52.0.md) and
-  [all release notes](../CHANGELOG.md); v0.52.1 is metadata-only.
+- [Latest release: v0.53.0](RELEASE-2026-11-11-v0.53.0.md) and
+  [all release notes](../CHANGELOG.md).
 - [Protocol baseline](PROTOCOL-VALIDATION.md), [serve](SERVE-PROTOCOL-VALIDATION.md),
   [Skills metadata](SKILLS-GUARD-VALIDATION.md) and [doctor](DOCTOR-EVIDENCE-VALIDATION.md).
 - [Native clients](NATIVE-CLIENT-VALIDATION.md), [Cursor](CURSOR-CLIENT-VALIDATION.md),
