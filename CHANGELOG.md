@@ -8,6 +8,8 @@ _Add entries here, never under a stamped version_ — a release commit renames t
 heading, and a branch that wrote beneath it merges without conflict straight into a
 published section (it happened to #170).
 
+## [0.53.0] - 2026-11-11
+
 ### Added
 
 - Add CLI-only `mcpm audit --report-json` version-1 coverage evidence for the fixed mcpm store and latest registry metadata: explicit inventory gaps, per-item registry/static/external/health states and separate empty/no-findings/incomplete outcomes. Preserve legacy audit JSON, SARIF, MCP and score/gate behavior; no report-mode writes or expanded client discovery.
