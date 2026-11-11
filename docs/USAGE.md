@@ -71,6 +71,11 @@ Review drift instead of automatically re-locking it. See the [verification
 Action](../.github/actions/mcpm-verify/README.md) and [versioned
 contracts](CONTRACTS.md) for failure and coverage semantics.
 
+`mcpm audit --report-json` emits separate versioned coverage evidence for the
+mcpm store and latest registry metadata. Consume inventory/check states and
+findings together; empty inventory and unavailable checks never prove safety.
+An explicitly configured external scanner can execute. See [the report contract](AUDIT-REPORT.md).
+
 `mcpm audit --sarif > mcpm.sarif` produces GitHub code-scanning input. Audit exits 1 for
 risky servers and 2 for an unsatisfied invocation. SARIF is report-only and cannot be
 combined with `--fix`; upload the report even when findings make audit nonzero. See [the
@@ -85,7 +90,7 @@ audit contract](CONTRACTS.md).
 | `mcpm info <name>` | Show full details for an MCP server |
 | `mcpm list` | List all installed MCP servers across detected AI clients |
 | `mcpm remove <name>` | Remove an MCP server from client config(s) |
-| `mcpm audit` | Scan all installed servers and produce a trust report (`--json`, `--sarif` for GitHub code-scanning) |
+| `mcpm audit` | Scan all installed servers and produce a trust report (`--json`, `--sarif` for GitHub code-scanning, separate `--report-json` coverage model) |
 | `mcpm update` | Check for newer versions and update installed servers |
 | `mcpm outdated` | Show version drift for installed servers (use `mcpm audit` for current security findings) |
 | `mcpm secrets` | Manage MCP server credentials (AES-GCM encrypted at rest; key held in the OS keychain — macOS Keychain / libsecret / Windows DPAPI — so a copied store can't be decrypted off-machine, with a machine-derived-key fallback where no keychain is available). `mcpm secrets migrate` upgrades older entries |
