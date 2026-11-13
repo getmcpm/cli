@@ -19,6 +19,7 @@ import {
   SearchOutput,
   InfoOutput,
   DoctorOutput,
+  AuditReportOutput,
 } from "./tools.js";
 import {
   handleSearch,
@@ -27,6 +28,7 @@ import {
   handleList,
   handleRemove,
   handleAudit,
+  handleAuditReport,
   handleDoctor,
   handleSetup,
   handleMcpUp,
@@ -136,6 +138,20 @@ export function registerTools(
   }, async () => {
     const result = await handleAudit(deps);
     return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+  });
+
+  server.registerTool("mcpm_audit_report", {
+    inputSchema: NoArgsInput,
+    outputSchema: AuditReportOutput,
+    description: "Report versioned mcpm-store audit evidence with inventory and check coverage. Empty, incomplete and not_run are not safety verdicts. Does not inspect clients or launch MCP servers itself; an explicitly configured external scanner can execute and have side effects.",
+    annotations: { readOnlyHint: true },
+  }, async () => {
+    try {
+      const result = await handleAuditReport(deps);
+      return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }], structuredContent: result };
+    } catch {
+      return { isError: true, content: [{ type: "text", text: "Audit report could not be produced." }] };
+    }
   });
 
   server.registerTool("mcpm_doctor", {

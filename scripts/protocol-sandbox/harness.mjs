@@ -26,6 +26,30 @@ export function assertDoctorResult(result) {
   return data;
 }
 
+export function assertAuditReportResult(result) {
+  assert.notEqual(result.isError, true, 'audit report returned a tool error');
+  const data = result.structuredContent;
+  assert.ok(data && typeof data === 'object', 'missing audit report structured evidence');
+  assert.equal(data.schemaVersion, 1, 'unknown audit report schema version');
+  assert.deepEqual(JSON.parse(result.content[0].text), data, 'audit report text/structured mismatch');
+  assert.equal(data.source, 'mcpm-store'); assert.equal(data.metadataSelector, 'latest');
+  assert.ok(Array.isArray(data.servers)); assert.ok(Array.isArray(data.inventory?.issues));
+  assert.deepEqual(data.scope?.excludes, ['health', 'installed-bytes', 'client-configuration', 'native-activation']);
+  assert.equal(typeof data.assessmentComplete, 'boolean');
+  assert.ok(['empty_inventory', 'incomplete_assessment', 'findings', 'no_findings'].includes(data.outcome));
+  if (data.inventory.state === 'incomplete') {
+    assert.equal(data.assessmentComplete, false); assert.equal(data.outcome, 'incomplete_assessment');
+  }
+  for (const row of data.servers) {
+    assert.equal(row.checks.health.state, 'not_run');
+    for (const check of Object.values(row.checks)) assert.ok(['performed', 'not_run', 'unavailable', 'failed'].includes(check.state));
+    for (const finding of row.findings) {
+      assert.equal(finding.message, undefined); assert.equal(finding.location, undefined);
+    }
+  }
+  return data;
+}
+
 export function assertUnknownArgument(result, key) {
   assert.equal(result.isError, true, 'unknown argument was accepted');
   const text = result.content?.filter(c => c.type === 'text').map(c => c.text).join('\n') ?? '';

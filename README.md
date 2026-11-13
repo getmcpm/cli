@@ -189,8 +189,11 @@ peers or override project-local/native exclusion state. See
 
 ## Agent use
 
-`mcpm serve` exposes search, info, install, list, remove, audit, doctor, setup and
-up through stdio MCP. For clients using an `mcpServers` configuration map:
+`mcpm serve` exposes search, info, install, list, remove, audit, audit-report, doctor, setup
+and up through stdio MCP. The new `mcpm_audit_report` tool (Unreleased) exposes the
+[versioned store coverage report](docs/AUDIT-REPORT.md); discover it in `tools/list`
+before use. The pinned v0.53.0 example below has the original nine tools. For
+clients using an `mcpServers` configuration map:
 
 ```json
 {

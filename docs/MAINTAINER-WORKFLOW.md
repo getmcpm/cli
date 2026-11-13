@@ -1,12 +1,16 @@
 # Maintainer workflow and context
 
-## Current checkpoint — 2026-11-12
+## Current checkpoint — 2026-11-13
 
 Latest published CLI: **v0.53.0**, adding the opt-in CLI-only
 `audit --report-json` evidence model. Existing JSON/SARIF/MCP results and scoring
 remain compatible. The [release record](RELEASE-2026-11-11-v0.53.0.md) owns
 fresh published-archive, protocol and companion evidence. Both companions align
-to **0.53.0**. Public usage skill source is **1.3.2**.
+to **0.53.0**. Public usage skill source is **1.3.3**.
+
+Unreleased: separate strict zero-argument `mcpm_audit_report` reuses the CLI report
+model through structured/text MCP evidence, bringing current source to ten tools.
+The v0.53.0 published reference still has nine; legacy `mcpm_audit` is unchanged.
 
 The bounded `#131`/`#149` report slice shipped; broader audit and host coverage
 remain open. Earlier VS Code/Copilot `scope` evidence remains bound to its named

@@ -199,3 +199,63 @@ See [doctor validation](DOCTOR-EVIDENCE-VALIDATION.md).
 ## Published v0.50.0 checkpoint — 2026-11-06
 
 The integrity/provenance-verified npm v0.50.0 archive passed 87 modern/legacy direct/guarded comparisons, zero failures, two expected unsupported combinations and four exclusions. Independent read-back verified the complete runtime JavaScript set, raw lock, harness/public skill and actual offline container isolation. Fixed published reference pins remain unchanged. See [publication and companion evidence](RELEASE-2026-11-06-v0.50.0.md) for hashes, CI/deployment state and limits. Historical candidate receipts above retain their original attribution.
+
+
+### Audit report candidate fixture (Unreleased)
+
+The candidate harness expects ten tools and adds `mcpm_audit_report` cases for
+missing/explicit-empty stores and malformed/invalid-row inventory, through legacy,
+auto and pinned-modern clients, each direct and guarded. It checks advertised
+closed input/versioned output, extra-argument rejection, text/structured equality,
+empty versus incomplete outcomes, value omission and the original `mcpm_audit`
+empty payload. The fixed published reference and dependency pins are unchanged.
+Run against a fresh candidate archive; this source fixture is not a recorded pass.
+
+These offline packed cases make no registry calls. Nonempty success, findings,
+registry failure, scanner opt-in/unavailability and output-validation failure are
+covered by source in-memory SDK tests with synthetic injected dependencies. They
+do not prove a live registry/scanner or native-client behavior.
+
+
+### Audit report candidate measurement — 2026-11-13
+
+Sol implementation `e27c3f4` and Astra-reviewed/fixed runtime `484645c` were
+validated using a freshly packed **0.15.0 placeholder candidate**, not a published
+release. Astra reproduced and fixed an unexpected-handler exception-message leak
+in both SDK eras; only the new tool's failure boundary changed. Present inventory
+fixtures also retain identical bytes after calls. The pre-fix run is historical.
+
+The final archive is **757,785 bytes**, SHA-256
+`f0f9ac6599f0e60c2970af78dfd1c46d74b2ed3792fca9b225bfb28a5bd28668`.
+Fresh packed execution passed **151 comparisons, zero failures, two expected
+unsupported combinations and four exclusions**. The 12 new paired cases cover
+legacy, automatic and pinned-modern negotiation, each direct and guarded. Parent
+independently replayed all **24 new raw observations**, correlating requests with
+responses and checking schema/input refusal, JSON/structured equality, inventory
+states/outcomes, privacy and unchanged legacy empty-audit payloads.
+
+Independent image readback binds all **66 runtime JavaScript files** to the source
+build and archive, plus harness, public skill, fixture bytes and resolved lock.
+Image: `sha256:fb40015a8526896e05b93d4b4192e0f4840122dde39ce9342605c9ab8230d70b`.
+Resolved lock SHA-256:
+`33637ac30e316dc0bb0fc0cc03a38cef52df0af47ed164ea5cb72f455f0affe2`.
+Frozen 34-input manifest SHA-256:
+`cf7124b7ff52b3b25ddfafe44397c6d9895f02d8a7bacac026e212396d47c67a`.
+Pinned root SDK peers are legacy 1.32.1 and modern client/server 2.3.1; the
+candidate's nested server SDK is 2.4.0. Actual execution used network none,
+read-only root, UID/GID 1000, dropped capabilities, no-new-privileges, private
+temporary state and no host bind mounts. Harness and readback containers were
+removed. No dependency or fixed published-reference pins changed.
+
+Source validation passed typecheck/build, **3,917 tests with three skipped**, and
+**59 harness self-checks**. Astra independently passed 44 built-CLI compatibility
+executions, including eight exact legacy stdout/stderr/exit comparisons. Valid
+nonempty assessments and failures are covered by source SDK fixtures, not live
+registry/scanner execution in the packed run. Native clients, provider/model
+behavior, installed-byte coverage and universal conformance remain unverified.
+
+Temporary evidence: `/private/tmp/mcpm-audit-tool-final-protocol-20261113`,
+`/private/tmp/mcpm-audit-tool-final-readback-20261113/verified-binding.json`,
+`/private/tmp/mcpm-audit-tool-final-wire-replay-20261113.json` and
+`/private/tmp/mcpm-audit-tool-astra-review-20261113.md`. These local receipts are
+not shipped artifacts; the candidate has not been merged or released.

@@ -1,4 +1,4 @@
-/** Opt-in bounded evidence; legacy audit scoring, JSON and MCP stay separate. */
+/** Bounded CLI/MCP evidence; legacy audit scoring and outputs stay separate. */
 import type { AuditDeps } from "./audit.js";
 import { readAuditInventory } from "../store/audit-inventory.js";
 import { describeRegistryError } from "../registry/errors.js";
@@ -15,7 +15,9 @@ interface ReportRow {
   checks: Record<"registry" | "static" | "external" | "health", Check>;
 }
 
-export async function handleAuditReport(deps: AuditDeps): Promise<number> {
+export type AuditReportDeps = Pick<AuditDeps, "getAuditInventory" | "scannerConfigured" | "getServer" | "scanTier1" | "checkScannerAvailable" | "scanTier2" | "computeTrustScore">;
+
+export async function buildAuditReport(deps: AuditReportDeps) {
   const { servers, ...inventory } = await (deps.getAuditInventory ?? readAuditInventory)();
   const configured = (deps.scannerConfigured ?? (() => resolveScannerCommand().status !== "disabled"))();
   let available: boolean | undefined;
@@ -67,13 +69,20 @@ export async function handleAuditReport(deps: AuditDeps): Promise<number> {
   const assessmentComplete = inventory.state !== "incomplete" && assessed === results.length;
   const findingCount = results.reduce((count, row) => count + row.findings.length, 0);
   const outcome = !assessmentComplete ? "incomplete_assessment" : inventory.state === "empty" ? "empty_inventory" : findingCount > 0 ? "findings" : "no_findings";
-  deps.output(JSON.stringify({
-    schemaVersion: 1, source: "mcpm-store", metadataSelector: "latest",
+  return {
+    schemaVersion: 1 as const, source: "mcpm-store" as const, metadataSelector: "latest" as const,
     scope: { selectedChecks: ["registry", "static", ...(configured ? ["external"] : [])], excludes: ["health", "installed-bytes", "client-configuration", "native-activation"] },
     inventory,
     assessmentComplete, outcome,
     summary: { assessed, unassessed: inventory.total === null ? null : inventory.total - assessed, findingCount },
     servers: results,
-  }, null, 2));
-  return !assessmentComplete || results.some((row) => row.score?.level === "risky") ? 1 : 0;
+  };
+}
+
+export type AuditReportModel = Awaited<ReturnType<typeof buildAuditReport>>;
+
+export async function handleAuditReport(deps: AuditDeps): Promise<number> {
+  const report = await buildAuditReport(deps);
+  deps.output(JSON.stringify(report, null, 2));
+  return !report.assessmentComplete || report.servers.some((row) => row.score?.level === "risky") ? 1 : 0;
 }
