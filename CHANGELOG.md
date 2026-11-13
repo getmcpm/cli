@@ -8,6 +8,8 @@ _Add entries here, never under a stamped version_ — a release commit renames t
 heading, and a branch that wrote beneath it merges without conflict straight into a
 published section (it happened to #170).
 
+## [0.54.0] - 2026-11-13
+
 ### Added
 
 - Add separate strict zero-argument `mcpm_audit_report` MCP tool, reusing the version-1 CLI store coverage report with advertised output schema, structured content and equivalent JSON text in modern/legacy protocols. Preserve existing `mcpm_audit`, scoring and opt-in scanner behavior.
