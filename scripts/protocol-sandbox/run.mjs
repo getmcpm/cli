@@ -117,9 +117,11 @@ try {
 async function sdkRun(clientKind, serverKind, mode, action, guarded, loc) {
   const auditScenario = action.startsWith('audit-report-') ? action.slice(13) : null;
   const auditStore = `${loc.home}/.mcpm/servers.json`;
+  let auditInput;
   if (auditScenario && auditScenario !== 'missing') {
     await mkdir(`${loc.home}/.mcpm`, { recursive: true });
-    await writeFile(auditStore, auditScenario === 'empty' ? '[]' : auditScenario === 'malformed' ? '{synthetic-private-value' : JSON.stringify([{ name: 'synthetic-private-value' }]));
+    auditInput = auditScenario === 'empty' ? '[]' : auditScenario === 'malformed' ? '{synthetic-private-value' : JSON.stringify([{ name: 'synthetic-private-value' }]);
+    await writeFile(auditStore, auditInput);
   }
   const doctorScenario = action.startsWith('doctor-') ? action.slice(7) : null;
   const cursorFile = `${loc.home}/.cursor/mcp.json`;
@@ -190,6 +192,7 @@ async function sdkRun(clientKind, serverKind, mode, action, guarded, loc) {
           assert.equal(legacy.structuredContent, undefined); assert.notEqual(legacy.isError, true);
           assert.deepEqual(JSON.parse(legacy.content[0].text), { results: [] });
         }
+        if (auditInput !== undefined) assert.equal(await readFile(auditStore, 'utf8'), auditInput, 'audit report changed inventory bytes');
         value = { result, invalid, legacy };
       } else if (doctorScenario) {
         const tools = await client.listTools();

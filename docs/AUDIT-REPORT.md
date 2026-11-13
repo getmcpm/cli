@@ -84,7 +84,8 @@ for clients consuming text. Both modern and legacy protocol paths advertise the
 schema. Require `schemaVersion: 1`, tolerate additive fields and reason codes,
 and stop on an unknown version or `isError`. Incomplete assessment is a normal
 report, not a tool error; a handler/output-validation failure returns `isError`
-without structured success evidence. MCP has no CLI exit-status signal: inspect
+without structured success evidence. Unexpected handler exception text is withheld.
+MCP has no CLI exit-status signal: inspect
 the full report, including nullable scores, inventory and selected checks.
 The existing environment-only external-scanner opt-in and all privacy/scope
 limits above apply equally to the tool. Annotations describe mcpm's report path;

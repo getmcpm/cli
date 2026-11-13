@@ -95,16 +95,18 @@ for (const era of ["modern", "legacy"] as const) describe(`${era} mcpm_audit_rep
 
   it("rejects malformed report output rather than emitting success evidence", async () => {
     const { client } = await connect(era, JSON.stringify([row]), {
-      computeTrustScore: input => ({ ...computeTrustScore(input), score: "invalid" }) as unknown as ReturnType<typeof computeTrustScore>,
+      computeTrustScore: input => ({ ...computeTrustScore(input), score: secret }) as unknown as ReturnType<typeof computeTrustScore>,
     });
     const result = await client.callTool({ name: "mcpm_audit_report", arguments: {} });
     expect(result.isError).toBe(true); expect(result.structuredContent).toBeUndefined();
     expect((result.content[0] as { text: string }).text).toMatch(/output|validation|number/i);
+    expect(JSON.stringify(result)).not.toContain(secret);
   });
 
   it("does not return structured success on a handler failure", async () => {
-    const { client } = await connect(era, "[]", { getAuditInventory: async () => { throw new Error("fixture failure"); } });
+    const { client } = await connect(era, "[]", { getAuditInventory: async () => { throw new Error(secret); } });
     const result = await client.callTool({ name: "mcpm_audit_report", arguments: {} });
     expect(result.isError).toBe(true); expect(result.structuredContent).toBeUndefined();
+    expect(JSON.stringify(result)).not.toContain(secret);
   });
 });

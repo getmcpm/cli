@@ -143,11 +143,15 @@ export function registerTools(
   server.registerTool("mcpm_audit_report", {
     inputSchema: NoArgsInput,
     outputSchema: AuditReportOutput,
-    description: "Report versioned mcpm-store audit evidence with inventory and check coverage. Empty, incomplete and not_run are not safety verdicts. Does not inspect clients or execute servers; external scanner remains opt-in.",
+    description: "Report versioned mcpm-store audit evidence with inventory and check coverage. Empty, incomplete and not_run are not safety verdicts. Does not inspect clients or launch MCP servers itself; an explicitly configured external scanner can execute and have side effects.",
     annotations: { readOnlyHint: true },
   }, async () => {
-    const result = await handleAuditReport(deps);
-    return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }], structuredContent: result };
+    try {
+      const result = await handleAuditReport(deps);
+      return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }], structuredContent: result };
+    } catch {
+      return { isError: true, content: [{ type: "text", text: "Audit report could not be produced." }] };
+    }
   });
 
   server.registerTool("mcpm_doctor", {
