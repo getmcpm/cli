@@ -199,3 +199,19 @@ See [doctor validation](DOCTOR-EVIDENCE-VALIDATION.md).
 ## Published v0.50.0 checkpoint — 2026-11-06
 
 The integrity/provenance-verified npm v0.50.0 archive passed 87 modern/legacy direct/guarded comparisons, zero failures, two expected unsupported combinations and four exclusions. Independent read-back verified the complete runtime JavaScript set, raw lock, harness/public skill and actual offline container isolation. Fixed published reference pins remain unchanged. See [publication and companion evidence](RELEASE-2026-11-06-v0.50.0.md) for hashes, CI/deployment state and limits. Historical candidate receipts above retain their original attribution.
+
+
+### Audit report candidate fixture (Unreleased)
+
+The candidate harness expects ten tools and adds `mcpm_audit_report` cases for
+missing/explicit-empty stores and malformed/invalid-row inventory, through legacy,
+auto and pinned-modern clients, each direct and guarded. It checks advertised
+closed input/versioned output, extra-argument rejection, text/structured equality,
+empty versus incomplete outcomes, value omission and the original `mcpm_audit`
+empty payload. The fixed published reference and dependency pins are unchanged.
+Run against a fresh candidate archive; this source fixture is not a recorded pass.
+
+These offline packed cases make no registry calls. Nonempty success, findings,
+registry failure, scanner opt-in/unavailability and output-validation failure are
+covered by source in-memory SDK tests with synthetic injected dependencies. They
+do not prove a live registry/scanner or native-client behavior.

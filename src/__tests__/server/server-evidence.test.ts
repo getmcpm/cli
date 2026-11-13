@@ -59,7 +59,7 @@ describe("agent evidence on the MCP wire", () => {
   it("advertises the versioned search, info and doctor output schemas", async () => {
     const { client } = await connect();
     const { tools } = await client.listTools();
-    expect(tools.filter((t) => t.outputSchema).map((t) => t.name).sort()).toEqual(["mcpm_doctor", "mcpm_info", "mcpm_search"]);
+    expect(tools.filter((t) => t.outputSchema).map((t) => t.name).sort()).toEqual(["mcpm_audit_report", "mcpm_doctor", "mcpm_info", "mcpm_search"]);
     for (const tool of tools.filter((t) => t.outputSchema)) {
       expect(tool.outputSchema?.properties?.schemaVersion).toMatchObject({ const: 1 });
     }

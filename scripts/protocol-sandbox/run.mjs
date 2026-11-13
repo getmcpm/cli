@@ -6,7 +6,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { networkInterfaces } from 'node:os';
 import { createRequire } from 'node:module';
-import { equivalent, exchange, assertEcho, assertUnsupported, assertUnknownArgument, assertInspectionEvents, assertDoctorResult } from './harness.mjs';
+import { equivalent, exchange, assertEcho, assertUnsupported, assertUnknownArgument, assertInspectionEvents, assertDoctorResult, assertAuditReportResult } from './harness.mjs';
 import { verifySkillCapture, assertSkillPair, SKILLS_SPEC } from './skills-verification.mjs';
 
 const app = path.dirname(fileURLToPath(import.meta.url));
@@ -115,6 +115,12 @@ try {
 }
 
 async function sdkRun(clientKind, serverKind, mode, action, guarded, loc) {
+  const auditScenario = action.startsWith('audit-report-') ? action.slice(13) : null;
+  const auditStore = `${loc.home}/.mcpm/servers.json`;
+  if (auditScenario && auditScenario !== 'missing') {
+    await mkdir(`${loc.home}/.mcpm`, { recursive: true });
+    await writeFile(auditStore, auditScenario === 'empty' ? '[]' : auditScenario === 'malformed' ? '{synthetic-private-value' : JSON.stringify([{ name: 'synthetic-private-value' }]));
+  }
   const doctorScenario = action.startsWith('doctor-') ? action.slice(7) : null;
   const cursorFile = `${loc.home}/.cursor/mcp.json`;
   const secret = 'synthetic-doctor-token-not-for-logging';
@@ -158,7 +164,34 @@ async function sdkRun(clientKind, serverKind, mode, action, guarded, loc) {
       });
     } else {
       await client.connect(transport, { timeout: candidate ? 5000 : 3000 });
-      if (doctorScenario) {
+      if (auditScenario) {
+        const { tools } = await client.listTools();
+        const tool = tools.find(t => t.name === 'mcpm_audit_report');
+        assert.equal(tool.outputSchema.properties.schemaVersion.const, 1);
+        assert.equal(tool.inputSchema.additionalProperties, false);
+        assert.deepEqual(tool.inputSchema.properties, {});
+        const invalid = await call('mcpm_audit_report', { fix: true });
+        assertUnknownArgument(invalid, 'fix'); assert.equal(invalid.structuredContent, undefined);
+        const result = await call('mcpm_audit_report');
+        const data = assertAuditReportResult(result);
+        assert.ok(!JSON.stringify(result).includes('synthetic-private-value'));
+        assert.deepEqual(data.servers, []);
+        assert.deepEqual(data.scope.selectedChecks, ['registry', 'static']);
+        const empty = ['missing', 'empty'].includes(auditScenario);
+        assert.equal(data.assessmentComplete, empty);
+        assert.equal(data.outcome, empty ? 'empty_inventory' : 'incomplete_assessment');
+        assert.equal(data.inventory.state, empty ? 'empty' : 'incomplete');
+        assert.equal(data.inventory.presence, auditScenario === 'missing' ? 'missing' : 'present');
+        if (auditScenario === 'missing') await assert.rejects(access(auditStore), { code: 'ENOENT' });
+        if (!empty) assert.equal(data.inventory.issues[0].code, auditScenario === 'malformed' ? 'malformed-json' : 'invalid-row');
+        // The old tool retains its separate client-config inventory and JSON payload.
+        const legacy = empty ? await call('mcpm_audit') : null;
+        if (legacy) {
+          assert.equal(legacy.structuredContent, undefined); assert.notEqual(legacy.isError, true);
+          assert.deepEqual(JSON.parse(legacy.content[0].text), { results: [] });
+        }
+        value = { result, invalid, legacy };
+      } else if (doctorScenario) {
         const tools = await client.listTools();
         const doctor = tools.tools.find(t => t.name === 'mcpm_doctor');
         assert.equal(doctor.outputSchema.properties.schemaVersion.const, 1);
@@ -207,7 +240,7 @@ async function sdkRun(clientKind, serverKind, mode, action, guarded, loc) {
       } else if (action === 'serve') {
         value = await client.listTools(); assert.ok(value.tools.some(t => t.name === 'mcpm_search'));
         if (candidate) {
-          assert.equal(value.tools.length, 9);
+          assert.equal(value.tools.length, 10);
           assert.ok(value.tools.every(t => t.inputSchema.additionalProperties === false));
           const result = await call('mcpm_list');
           assert.notEqual(result.isError, true);
@@ -345,6 +378,16 @@ if (candidate) for (const [label, client, mode] of [
       equivalent(normalize(a.value), normalize(b.value));
     } else equivalent(a.value, b.value);
     equivalent(a.version, b.version);
+    assert.equal(a.version, client === 'v1' ? '2025-11-25' : modernVersion);
+    for (const obs of [a, b]) assert.ok(obs.wire.some(w => w.message.method === (client === 'v1' ? 'initialize' : 'server/discover')));
+  });
+}
+
+if (candidate) for (const [label, client, mode] of [
+  ['legacy', 'v1', 'legacy'], ['auto', 'v2', 'auto'], ['modern', 'v2', { pin: modernVersion }],
+]) for (const scenario of ['missing', 'empty', 'malformed', 'invalid']) {
+  await pair(`${label}-mcpm-audit-report-${scenario}`, (g, l) => sdkRun(client, 'serve', mode, `audit-report-${scenario}`, g, l), (a, b) => {
+    equivalent(a.value, b.value); equivalent(a.version, b.version);
     assert.equal(a.version, client === 'v1' ? '2025-11-25' : modernVersion);
     for (const obs of [a, b]) assert.ok(obs.wire.some(w => w.message.method === (client === 'v1' ? 'initialize' : 'server/discover')));
   });

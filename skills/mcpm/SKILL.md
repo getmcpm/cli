@@ -2,8 +2,8 @@
 name: mcpm
 description: Discover, assess, verify and manage MCP servers with the @getmcpm/cli package. Use when working with mcpm evidence, project locks or AI client MCP configuration.
 metadata:
-  version: "1.3.2"
-  evidence-contract: "mcpm_search, mcpm_info, advertised mcpm_doctor, verify --json and advertised audit --report-json schemaVersion 1"
+  version: "1.3.3"
+  evidence-contract: "mcpm_search, mcpm_info, advertised mcpm_doctor, verify --json and advertised mcpm_audit_report/audit --report-json schemaVersion 1"
 ---
 
 # mcpm
@@ -45,8 +45,13 @@ CLI evidence and state the limitation; do not invent fields or upgrade silently.
   A complete fixed-source inventory does not establish complete host coverage,
   effective selection, loading or enforcement. Do not run clients or servers to
   fill unknown fields without authorization.
-- For bounded store coverage, check `mcpm audit --help` for `--report-json`.
-  This CLI-only version-1 report reads the mcpm store and latest registry metadata;
+- For bounded store coverage, discover `mcpm_audit_report` in `tools/list` and
+  require its version-1 output schema, then call it with `{}` (no arguments).
+  Prefer structuredContent, otherwise parse JSON text. Stop on isError; incomplete
+  assessment is report evidence, not a tool error. If unavailable, check
+  `mcpm audit --help` for `--report-json` (CLI report starts in v0.53.0).
+  The separate MCP report tool is newer; do not assume v0.53.0 has it.
+  This version-1 report reads the mcpm store and latest registry metadata;
   it does not assess installed bytes, client configuration or health. Read
   `inventory`, `assessmentComplete`, `outcome`, each server's `checks` and findings
   together. Empty inventory differs from no findings; incomplete assessment keeps

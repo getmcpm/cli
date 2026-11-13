@@ -62,7 +62,7 @@ runtime protection are the product. Keep changes small, deterministic and scoped
   separately inventories fixed VS Code/Copilot sources and instruction metadata.
   Source formats/origins are not cross-harness precedence or a selected-profile
   calculation. Host version, effective selection, loading and enforcement stay
-  unknown. It is separate from DoctorModel and the nine served MCP tools.
+  unknown. It is separate from DoctorModel and the ten served MCP tools.
 - Tests first for behavior: reproduce a bug before fixing the shared cause and
   inspect all callers. Exercise the public path and realistic edge cases, not a
   hand-copied implementation. For security predicates, verify the relevant clause

@@ -37,7 +37,7 @@ async function connect(status = "active") {
 }
 
 describe("modern MCP server wire contract", () => {
-  it("negotiates modern and lists the same nine strict tools deterministically", async () => {
+  it("negotiates modern and lists the same ten strict tools deterministically", async () => {
     const { client } = await connect();
     expect(client.getNegotiatedProtocolVersion()).toBe("2026-07-28");
     const first = await client.listTools(), second = await client.listTools();

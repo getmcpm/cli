@@ -1,6 +1,6 @@
 # Coverage-aware audit report
 
-`mcpm audit --report-json` is an opt-in, CLI-only version-1 evidence model for
+`mcpm audit --report-json` is an opt-in version-1 evidence model for
 `~/.mcpm/servers.json`. First shipped in v0.53.0; check help on older installations.
 It reads the mcpm store, fetches **latest registry metadata** for accepted names,
 and runs the existing static scanner. It does not inventory client configuration,
@@ -68,4 +68,24 @@ health/external checks still visible. Do not use exit status alone as a safety
 gate. `--report-json` rejects `--json`, `--sarif`, `--fix`, `--min-trust` and
 `--yes` combinations with exit `2`, before inventory reads. Existing text,
 `--json` bare-array/fix-wrapper behavior, SARIF and `mcpm_audit` are unchanged;
-their older coverage limitations remain. No new MCP input or served tool is added.
+their older coverage limitations remain.
+
+
+## MCP tool (Unreleased)
+
+`mcpm_audit_report` exposes the same report through `mcpm serve`, independently
+of the existing `mcpm_audit` client-config audit. Discover the new tool and its
+version-1 `outputSchema` in `tools/list`; v0.53.0 has only the CLI report.
+The input is a closed empty object (`{}`); extra arguments are rejected before
+reading inventory. There are no fix, scanner-selection or scope options.
+
+Prefer `structuredContent`; the JSON text block contains the equivalent object
+for clients consuming text. Both modern and legacy protocol paths advertise the
+schema. Require `schemaVersion: 1`, tolerate additive fields and reason codes,
+and stop on an unknown version or `isError`. Incomplete assessment is a normal
+report, not a tool error; a handler/output-validation failure returns `isError`
+without structured success evidence. MCP has no CLI exit-status signal: inspect
+the full report, including nullable scores, inventory and selected checks.
+The existing environment-only external-scanner opt-in and all privacy/scope
+limits above apply equally to the tool. Annotations describe mcpm's report path;
+an arbitrary configured scanner executable can still have side effects.
