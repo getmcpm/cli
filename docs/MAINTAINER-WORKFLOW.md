@@ -1,6 +1,6 @@
 # Maintainer workflow and context
 
-## Current checkpoint — 2026-11-12
+## Current checkpoint — 2026-11-13
 
 Latest published CLI: **v0.53.0**, adding the opt-in CLI-only
 `audit --report-json` evidence model. Existing JSON/SARIF/MCP results and scoring
