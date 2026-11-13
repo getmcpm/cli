@@ -124,7 +124,7 @@ The public [mcp-guardbench](https://github.com/getmcpm/mcp-guardbench) contains
 versioned results and known misses measured through published `guard inspect`
 binaries. Those stateless runtime results do not measure install-time detection
 prevalence or promise coverage of unseen attacks. The
-[v0.53.0 release record](docs/RELEASE-2026-11-11-v0.53.0.md) retains the
+[v0.54.0 release record](docs/RELEASE-2026-11-14-v0.54.0.md) retains the
 published artifact, compatibility and synchronized companion evidence.
 
 ## Common workflows
@@ -190,9 +190,9 @@ peers or override project-local/native exclusion state. See
 ## Agent use
 
 `mcpm serve` exposes search, info, install, list, remove, audit, audit-report, doctor, setup
-and up through stdio MCP. The new `mcpm_audit_report` tool (Unreleased) exposes the
+and up through stdio MCP. The new `mcpm_audit_report` tool (since v0.54.0) exposes the
 [versioned store coverage report](docs/AUDIT-REPORT.md); discover it in `tools/list`
-before use. The pinned v0.53.0 example below has the original nine tools. For
+before use. The pinned v0.54.0 example below exposes all ten tools. For
 clients using an `mcpServers` configuration map:
 
 ```json
@@ -200,7 +200,7 @@ clients using an `mcpServers` configuration map:
   "mcpServers": {
     "mcpm": {
       "command": "npx",
-      "args": ["-y", "@getmcpm/cli@0.53.0", "serve"]
+      "args": ["-y", "@getmcpm/cli@0.54.0", "serve"]
     }
   }
 }

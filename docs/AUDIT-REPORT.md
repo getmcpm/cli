@@ -71,7 +71,7 @@ gate. `--report-json` rejects `--json`, `--sarif`, `--fix`, `--min-trust` and
 their older coverage limitations remain.
 
 
-## MCP tool (Unreleased)
+## MCP tool (since v0.54.0)
 
 `mcpm_audit_report` exposes the same report through `mcpm serve`, independently
 of the existing `mcpm_audit` client-config audit. Discover the new tool and its

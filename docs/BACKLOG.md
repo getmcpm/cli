@@ -245,7 +245,7 @@ or universal containment claim. [Hook kinds and lifecycle](https://code.claude.c
 - `#131`/`#149`: the bounded CLI-only `audit --report-json` slice shipped in
   [v0.53.0](RELEASE-2026-11-11-v0.53.0.md), with fixed mcpm-store inventory, latest metadata, explicit check
   states and separate empty/incomplete outcomes; see [contract](AUDIT-REPORT.md).
-  The Unreleased `mcpm_audit_report` tool reuses that model with strict zero-argument
+  The separate `mcpm_audit_report` tool shipped in [v0.54.0](RELEASE-2026-11-14-v0.54.0.md), reusing that model with strict zero-argument
   input and versioned structured/text evidence; legacy audit JSON/SARIF/`mcpm_audit`
   remain unchanged. This does not close broad audit,
   native/client discovery, installed-byte or project-ownership coverage.
