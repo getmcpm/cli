@@ -42,7 +42,7 @@ scan; incomplete assessment retains sibling findings. Health, installed bytes,
 client configuration and native activation are outside this report. External
 `performed` means parseable adapter output, not attested scanner success. Raw
 finding/error text is omitted but names remain; do not treat it as anonymous.
-When `tools/list` advertises `mcpm_audit_report` (Unreleased), call it with `{}`
+When `tools/list` advertises `mcpm_audit_report` (since v0.54.0), call it with `{}`
 for the same report. Prefer `structuredContent`, otherwise parse JSON text; stop
 on `isError` or unknown versions. Incomplete assessment is a report outcome, not
 a protocol error. Existing `mcpm_audit` and legacy audit formats remain unchanged.

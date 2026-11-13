@@ -201,7 +201,7 @@ See [doctor validation](DOCTOR-EVIDENCE-VALIDATION.md).
 The integrity/provenance-verified npm v0.50.0 archive passed 87 modern/legacy direct/guarded comparisons, zero failures, two expected unsupported combinations and four exclusions. Independent read-back verified the complete runtime JavaScript set, raw lock, harness/public skill and actual offline container isolation. Fixed published reference pins remain unchanged. See [publication and companion evidence](RELEASE-2026-11-06-v0.50.0.md) for hashes, CI/deployment state and limits. Historical candidate receipts above retain their original attribution.
 
 
-### Audit report candidate fixture (Unreleased)
+### Audit report candidate fixture (added in v0.54.0)
 
 The candidate harness expects ten tools and adds `mcpm_audit_report` cases for
 missing/explicit-empty stores and malformed/invalid-row inventory, through legacy,
@@ -258,4 +258,14 @@ Temporary evidence: `/private/tmp/mcpm-audit-tool-final-protocol-20261113`,
 `/private/tmp/mcpm-audit-tool-final-readback-20261113/verified-binding.json`,
 `/private/tmp/mcpm-audit-tool-final-wire-replay-20261113.json` and
 `/private/tmp/mcpm-audit-tool-astra-review-20261113.md`. These local receipts are
-not shipped artifacts; the candidate has not been merged or released.
+not shipped artifacts; at that checkpoint the candidate had not been merged or released.
+
+
+### Published v0.54.0 checkpoint — 2026-11-14
+
+The authenticated npm v0.54.0 archive passed 151 modern/legacy direct/guarded
+comparisons with zero failures, two expected unsupported combinations and four
+exclusions. Fresh independent wire replay and image/runtime/harness/isolation
+bindings remain separate from the earlier placeholder candidate above. See the
+[release record](RELEASE-2026-11-14-v0.54.0.md) for exact artifact identity, retained
+Skills evidence, CLI compatibility, companion merges and deployed browser parity.

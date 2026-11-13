@@ -66,14 +66,14 @@ is the full score/breakdown object.
 the same `outputSchema` / `structuredContent` / JSON text contract.** Remaining
 tools are **unstable in `0.x`**.
 
-**Unreleased: `mcpm_audit_report` exposes the existing `audit --report-json`
+**Since v0.54.0, `mcpm_audit_report` exposes the existing `audit --report-json`
 schema-version-1 model with an `outputSchema`, `structuredContent` and equivalent
 JSON text.** The closed empty input accepts no arguments. This is a separate
 store-based tool; `mcpm_audit` payloads, scores and client-config behavior remain
 unchanged. Consume inventory, completeness, outcomes, checks and findings together;
 incomplete assessment is evidence, not a tool error. Handler/output-validation
 failures have `isError:true` and no structured success evidence. See the
-[report contract and MCP consumption rules](AUDIT-REPORT.md#mcp-tool-unreleased).
+[report contract and MCP consumption rules](AUDIT-REPORT.md#mcp-tool-since-v0540).
 
 Within schema version 1, the documented fields and meanings below are stable.
 Consumers must accept additive fields and new finding/reason codes. A breaking

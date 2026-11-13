@@ -3,7 +3,7 @@
 `mcpm serve` uses `@modelcontextprotocol/server` 2.4.0 with the SDK's explicit
 `serveStdio(factory, { legacy: "serve" })` entry. Modern `2026-07-28` peers use
 `server/discover` and per-request metadata; legacy peers retain initialization.
-Current source serves ten tools, including the unreleased `mcpm_audit_report`;
+Current source and v0.54.0 serve ten tools, including `mcpm_audit_report`;
 published v0.53.0 retains nine. Both eras use the same strict input schemas,
 handlers, trust gates, text results and declared versioned outputs. The guard retains its
 v1 SDK framing/types; it does not translate protocols. No HTTP endpoint is added.
