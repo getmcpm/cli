@@ -26,6 +26,30 @@ MVP/decision records cover [archive review](ARTIFACT-REVIEW.md),
 named inputs/hosts, rather than transferring to every subsequent package.
 #331 remains separate. Contributor skills remain repo-only.
 
+## Delivery tracking
+
+For maintainer-owned work with authorized access, use the existing private
+**mcpm Delivery** GitHub Project in the getmcpm organization. It follows the
+Credspan delivery pattern without a second planning repository. Public selected
+criteria stay in [BACKLOG](BACKLOG.md); the Project owns operational status,
+blockers and source evidence. GitHub code/PRs/checks own actual implementation
+and merge state; dated validation/release records own measured proof. Obsidian
+retains private context/history and the board link; chat work-state is a working aid.
+See the [November 15 documentation review](DOCS-REVIEW-2026-11-15.md).
+
+Use **Backlog → Ready → Building → Review → Done**, with **Planned, Implemented,
+Merged, Deployed, Verified** recorded separately as delivery evidence. Ready needs
+bounded scope/acceptance and cleared gates. Done applies only to the card's named
+acceptance: a verified negative experiment is not a production capability, and a
+shipped slice never closes its broad remaining-scope card. Keep #157/#159 consumer
+gates and #95 NO-GO explicit. Leave dates/priorities unset until triage/commitment.
+
+At start, reconcile the scoped card with public criteria; after meaningful changes,
+record exact review/head/check/tag/archive/deployment evidence and remaining limits.
+Do not create duplicate tracking, expose private board/card/vault details in public
+PRs, or infer implementation/merge/release/provider-spend permission from a card.
+Public contributions must not require access to private maintainer tracking.
+
 ## Instruction and skill loading
 
 [Root AGENTS.md](../AGENTS.md) holds shared current contributor instructions.
