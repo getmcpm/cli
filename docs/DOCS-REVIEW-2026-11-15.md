@@ -110,6 +110,23 @@ or deployment was performed for this docs-only review. External link health and
 Obsidian visual rendering are not comprehensively verified. Temporary audit
 receipts are working evidence, not durable release artifacts.
 
+### Final tracking integration review
+
+The new private operational note was reviewed separately from the 59 existing
+notes. Independent live Project API readback checked private visibility, configured
+fields/views, linked repositories and every imported card's scope, status, source
+reference and stop rule. Priorities and target dates remained unset. Corrected a
+private-note navigation target, distinguished completed negative experiments from
+deferred production work, and corrected the archive-review card's consumer to the
+maintainer's actual plugin-update decision. Private card details remain outside
+this report; UI rendering and visible board grouping were not verified.
+
+The final contributor instructions, repo-owned development/release skills,
+selected backlog and maintainer workflow agree on public criteria versus private
+operational ownership. Missing private access does not block public contributions;
+tracking state grants no additional implementation, merge or release authority.
+The public consumer skill and runtime remain unchanged.
+
 ## Complete repository Markdown inventory at the review base
 
 Each file below was included in the inventory/structural scan. Category membership
