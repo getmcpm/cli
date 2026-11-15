@@ -1,4 +1,4 @@
-# Active trust and DevX backlog — 2026-11-08
+# Active trust and DevX backlog — 2026-11-15
 
 This is the current, deliberately selected queue, aligned with the project
 Obsidian backlog. **#IDs are project backlog IDs, not GitHub issue numbers.** It
@@ -13,14 +13,23 @@ defects again or close the whole `#123`/`#131`/`#149`/`#150` group because one s
 fixed. The native doctor suite merged in #307; its recorded native measurements
 used the published v0.49.0 archive.
 
+## Delivery tracking
+
+This file owns public selected scope, acceptance and stop rules. The private
+maintainer **mcpm Delivery** Project (getmcpm organization) owns operational
+status, blockers and delivery evidence; see the [working agreement](MAINTAINER-WORKFLOW.md#delivery-tracking).
+Project drafts are snapshots linked to these criteria, not GitHub issues or new
+work authorization. Keep broad remaining scope separate from verified bounded
+slices. Private board/card links and vault contents stay outside public docs.
+
 ## Ordered queue
 
 | Order | ID | Scope/status | Dependency |
 | --- | --- | --- | --- |
 | Shipped | `#156` | Bounded archive-only receipt in v0.51.0; one-consumer gate met | Expansion retains consumer/value stop rule |
 | Deferred | `#157` | Consumer gate evaluated for mcpm's own development/release workflow; adapter unbuilt | Artifact-bound contract and measured incremental value still required |
-| Merged PR #333 | `#140` | Full retained Skills fixture MVP for the existing release-harness consumer | Pinned Beta; both archive matrices, independent replay/readback and maintainer acceptance |
-| Merged PR #334 | `#158` | Native inline-hook activation/drift experiment | Eight observations/75 checks; independent bindings and maintainer acceptance; scoped evidence below |
+| Verified fixture | `#140` | Retained Skills fixture MVP for the existing release-harness consumer; #333 | Pinned Beta; both archive matrices, independent replay/readback and maintainer acceptance |
+| Measured MVP | `#158` | Bounded native inline-hook activation/drift experiment; #334 | Eight observations/75 checks; independent bindings and maintainer acceptance; scoped evidence below |
 | Deferred/unbuilt | `#159` | Offline ACP v1 trace spike; consumer gate evaluated | Current workflow has MCP/native evidence; no supplied ACP trace or concrete ACP-specific review question |
 | Measured NO-GO | `#95` | Bounded command-hook confinement decision experiment; production integration unbuilt | Three of five useful cases compatible; all selected effects denied; detached cancellation limitation |
 
@@ -264,3 +273,19 @@ or universal containment claim. [Hook kinds and lifecycle](https://code.claude.c
   hosted control plane, rebranding and paid decision-provider integration remain
   deferred. Existing vendor capabilities and user demand must be checked before
   promoting any of them.
+
+
+## Maintenance intake snapshot — 2026-11-15
+
+Open proposed dependency updates are CLI #331/#351/#352/#354/#355/#358/#359 and
+[guard-playground #36](https://github.com/getmcpm/guard-playground/pull/36).
+Review their diffs, engines, frozen locks/overrides and affected harnesses before
+scheduling or merging; #331's ora major stays separate. No priorities, dates or
+merge permission are inferred from this intake.
+
+The optional macOS job for documentation closeout #357 was queued at merge and
+later cancelled; [run 43463105106](https://github.com/getmcpm/cli/actions/runs/43463105106)
+now reports failure. Its cause is unverified. Required checks and release-source
+CI/publication passed. Diagnose queue/infrastructure cancellation versus code
+failure before proposing a change; do not weaken gates or substitute proof from
+a different head. This is a maintenance question, not an established product bug.

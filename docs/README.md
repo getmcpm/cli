@@ -5,6 +5,7 @@
 - [Quick start](../README.md#quick-start) and [installation channels](DISTRIBUTION.md).
 - [CLI workflows, stacks and command index](USAGE.md).
 - [Trust scores, scanner protocol and supply-chain evidence](TRUST.md).
+- [Coverage-aware CLI and MCP audit reports](AUDIT-REPORT.md).
 - [Guard setup, remediation and confinement](GUARD.md).
 - [Project scope inventory](PROJECT-SCOPE.md) and [local artifact comparison](ARTIFACT-REVIEW.md).
 - [Agent evidence/workflows](AGENT-WORKFLOW.md) and the self-contained
