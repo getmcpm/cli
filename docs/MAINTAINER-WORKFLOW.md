@@ -30,10 +30,12 @@ named inputs/hosts, rather than transferring to every subsequent package.
 
 For maintainer-owned work with authorized access, use the existing private
 **mcpm Delivery** GitHub Project in the getmcpm organization. It follows the
-Credspan delivery pattern without a second planning repository. Public selected
-criteria stay in [BACKLOG](BACKLOG.md); the Project owns operational status,
-blockers and source evidence. GitHub code/PRs/checks own actual implementation
-and merge state; dated validation/release records own measured proof. Obsidian
+Credspan delivery pattern with private planning issues as the durable execution
+records. Read that repository's `AGENTS.md` and `PROCESS.md`, alongside the shared
+`project-workflow` skill when available. Public selected criteria stay in
+[BACKLOG](BACKLOG.md); private issues retain assignments, blockers, handoffs and
+source evidence, and the Project displays their operational fields. GitHub
+code/PRs/checks own actual implementation and merge state; dated validation/release records own measured proof. Obsidian
 retains private context/history and the board link; chat work-state is a working aid.
 See the [November 15 documentation review](DOCS-REVIEW-2026-11-15.md).
 
@@ -44,8 +46,14 @@ acceptance: a verified negative experiment is not a production capability, and a
 shipped slice never closes its broad remaining-scope card. Keep #157/#159 consumer
 gates and #95 NO-GO explicit. Leave dates/priorities unset until triage/commitment.
 
-At start, reconcile the scoped card with public criteria; after meaningful changes,
-record exact review/head/check/tag/archive/deployment evidence and remaining limits.
+At start, search existing private issues/cards and reconcile the scoped task with
+public criteria. Record one active agent/chat owner before implementation; direct
+user assignment establishes ownership absent a conflict, while autonomous queue
+allocation needs a conditional claim or named coordinator. Read current task
+content before updating and preserve user edits. After meaningful changes, record
+exact review/head/check/tag/archive/deployment evidence and remaining limits, then
+read back issue state and Project fields. Keep public backlog IDs distinct from
+private issue numbers; completed bounded slices do not close broader work.
 Do not create duplicate tracking, expose private board/card/vault details in public
 PRs, or infer implementation/merge/release/provider-spend permission from a card.
 Public contributions must not require access to private maintainer tracking.

@@ -16,11 +16,12 @@ used the published v0.49.0 archive.
 ## Delivery tracking
 
 This file owns public selected scope, acceptance and stop rules. The private
-maintainer **mcpm Delivery** Project (getmcpm organization) owns operational
-status, blockers and delivery evidence; see the [working agreement](MAINTAINER-WORKFLOW.md#delivery-tracking).
-Project drafts are snapshots linked to these criteria, not GitHub issues or new
-work authorization. Keep broad remaining scope separate from verified bounded
-slices. Private board/card links and vault contents stay outside public docs.
+maintainer planning issues own execution assignments, blockers and delivery
+evidence; the **mcpm Delivery** Project (getmcpm organization) displays their
+operational status; see the [working agreement](MAINTAINER-WORKFLOW.md#delivery-tracking).
+Planning issues link to these criteria; their issue numbers are distinct from
+the public backlog IDs. Neither issues nor Project status grant work
+authorization. Keep broad remaining scope separate from verified bounded slices. Private board/card links and vault contents stay outside public docs.
 
 ## Ordered queue
 
