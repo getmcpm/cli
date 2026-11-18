@@ -17,7 +17,9 @@ runtime protection are the product. Keep changes small, deterministic and scoped
   permission. Review-only requests stay read-only. A build or PR does not imply
   authorization to merge, tag, publish, deploy or contact other people.
 - For maintainer-owned work with authorized Project access, reconcile the existing
-  delivery card using [maintainer tracking rules](docs/MAINTAINER-WORKFLOW.md#delivery-tracking).
+  private planning issue/card using [maintainer tracking rules](docs/MAINTAINER-WORKFLOW.md#delivery-tracking).
+  Read the private planning repository's `AGENTS.md` and `PROCESS.md` and the shared
+  `project-workflow` skill when available; retain one active implementation owner.
   Public criteria stay in [BACKLOG](docs/BACKLOG.md); private access must not block public contributions.
 - Preserve dirty worktrees, unrelated files and local history. Use isolated
   checkouts when needed; never reset or restore another contributor's work.

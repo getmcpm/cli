@@ -132,7 +132,7 @@ Claude Code `mcp get` reference previously launched a harmless server sentinel.
 ## Documentation and completion gate
 
 For maintainer-owned releases with authorized Project access, update the existing
-scoped card under the [tracking agreement](../../../docs/MAINTAINER-WORKFLOW.md#delivery-tracking).
+scoped private planning issue/card under the [tracking agreement](../../../docs/MAINTAINER-WORKFLOW.md#delivery-tracking).
 Keep merged, published/deployed and verified evidence separate; mark Done only
 when that card's acceptance is met. Private access is not required for public contributions.
 

@@ -79,7 +79,7 @@ Do not infer approval, merge or publication from a clean local review.
 ## Documentation and handoff
 
 For maintainer-owned work with authorized Project access, reconcile the existing
-scoped delivery card using the [tracking agreement](../../../docs/MAINTAINER-WORKFLOW.md#delivery-tracking).
+scoped private planning issue/card using the [tracking agreement](../../../docs/MAINTAINER-WORKFLOW.md#delivery-tracking).
 Record reviewed heads, checks, blockers and remaining scope; do not close a broader
 parent for a shipped slice. Missing private access must not block a public contribution.
 
