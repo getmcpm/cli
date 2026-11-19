@@ -188,6 +188,9 @@ exceptions:
   could not read. The old exit `0` was the bug: the gate reported "in sync"
   over input it had never compared.
 
+With no installed servers, `mcpm update --json` and `mcpm outdated --json`
+exit 0 and write `[]` to stdout. Plain invocations print `No servers installed.`.
+
 ### `audit --report-json`, schema version 1
 
 The separate opt-in CLI report and new `mcpm_audit_report` tool share the stable
