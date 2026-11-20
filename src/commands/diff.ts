@@ -26,6 +26,7 @@ import {
   parseStackFile,
   parseLockFile,
   isLockedRegistryServer,
+  isUrlServer,
 } from "../stack/schema.js";
 
 // ---------------------------------------------------------------------------
@@ -77,7 +78,7 @@ export async function handleDiff(
 
   // Collect installed servers across all clients
   const clients = await deps.detectClients();
-  const installed = new Map<string, { clients: ClientId[]; entry: McpServerEntry }>();
+  const installed = new Map<string, { client: ClientId; entry: McpServerEntry }[]>();
   const unreadable = new Map<string, ClientId[]>();
 
   for (const clientId of clients) {
@@ -91,9 +92,9 @@ export async function handleDiff(
       for (const [name, entry] of Object.entries(servers)) {
         const existing = installed.get(name);
         if (existing) {
-          existing.clients.push(clientId);
+          existing.push({ client: clientId, entry });
         } else {
-          installed.set(name, { clients: [clientId], entry: { ...entry } });
+          installed.set(name, [{ client: clientId, entry }]);
         }
       }
     } catch {
@@ -107,7 +108,8 @@ export async function handleDiff(
 
   // Check each declared server
   for (const name of declaredNames) {
-    const locked = lockFile.servers[name];
+    const declared = stackFile.servers[name];
+    const locked = Object.hasOwn(lockFile.servers, name) ? lockFile.servers[name] : undefined;
     const inst = installed.get(name);
 
     if (!inst) {
@@ -127,14 +129,34 @@ export async function handleDiff(
               clients: [],
             }
       );
+    } else if (isUrlServer(declared)) {
+      const byDetail = new Map<string, ClientId[]>();
+      for (const { client, entry } of inst) {
+        let detail = "installed";
+        if (locked && isLockedRegistryServer(locked)) {
+          detail = "declared and locked transports differ";
+        } else if (locked && locked.url !== declared.url) {
+          detail = "declared and locked remote endpoints differ";
+        } else if (!entry.url || entry.command) {
+          detail = "installed transport differs from remote URL";
+        } else if (entry.url !== declared.url) {
+          detail = "remote endpoint differs";
+        }
+        const group = byDetail.get(detail);
+        if (group) group.push(client);
+        else byDetail.set(detail, [client]);
+      }
+      for (const [detail, clients] of byDetail) {
+        entries.push({ name, status: detail === "installed" ? "match" : "mismatch", detail, clients });
+      }
     } else if (locked && isLockedRegistryServer(locked)) {
-      const installedVersion = extractInstalledVersion(inst.entry, locked.identifier);
+      const installedVersion = extractInstalledVersion(inst[0].entry, locked.identifier);
       if (installedVersion !== null && installedVersion !== locked.version) {
         entries.push({
           name,
           status: "mismatch",
           detail: `locked v${locked.version}, installed v${installedVersion}`,
-          clients: inst.clients,
+          clients: inst.map(({ client }) => client),
         });
       } else {
         const detail = `v${locked.version} (trust: ${locked.trust.score}/${locked.trust.maxPossible})`;
@@ -142,7 +164,7 @@ export async function handleDiff(
           name,
           status: "match",
           detail: installedVersion === null ? `${detail} (version not verifiable)` : detail,
-          clients: inst.clients,
+          clients: inst.map(({ client }) => client),
         });
       }
     } else {
@@ -150,7 +172,7 @@ export async function handleDiff(
         name,
         status: "match",
         detail: "installed",
-        clients: inst.clients,
+        clients: inst.map(({ client }) => client),
       });
     }
   }
@@ -182,7 +204,7 @@ export async function handleDiff(
         name,
         status: "extra",
         detail: "not in mcpm.yaml",
-        clients: inst.clients,
+        clients: inst.map(({ client }) => client),
       });
     }
   }
@@ -231,7 +253,7 @@ export async function handleDiff(
   }
 
   if (mismatched.length > 0) {
-    deps.output("Version mismatch (installed differs from lock):");
+    deps.output("Mismatch (installed or declared state differs):");
     for (const e of mismatched) {
       deps.output(`  ~ ${e.name} ${e.detail} [${e.clients.join(", ")}]`);
     }
@@ -316,10 +338,7 @@ function formatLocked(locked: LockedServer): string {
   if (isLockedRegistryServer(locked)) {
     return `v${locked.version} (trust: ${locked.trust.score}/${locked.trust.maxPossible})`;
   }
-  if ("url" in locked) {
-    return `url: ${(locked as { url: string }).url}`;
-  }
-  return "locked";
+  return "remote URL (locked)";
 }
 
 // ---------------------------------------------------------------------------

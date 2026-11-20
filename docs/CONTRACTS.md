@@ -188,6 +188,13 @@ exceptions:
   could not read. The old exit `0` was the bug: the gate reported "in sync"
   over input it had never compared.
 
+For URL servers, `mcpm diff` compares each readable client entry locally against
+the stack URL and checks the locked URL when present. The JSON array can contain
+multiple rows for one name when clients disagree. Each row lists only the clients
+with that result. URL rows report the mismatch category without printing endpoint
+values. The comparison uses literal URL strings and distinguishes URL entries from
+command entries.
+
 With no installed servers, `mcpm update --json` and `mcpm outdated --json`
 exit 0 and write `[]` to stdout. Plain invocations print `No servers installed.`.
 
