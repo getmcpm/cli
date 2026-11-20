@@ -8,6 +8,8 @@ _Add entries here, never under a stamped version_ — a release commit renames t
 heading, and a branch that wrote beneath it merges without conflict straight into a
 published section (it happened to #170).
 
+## [0.54.1] - 2026-11-20
+
 ### Fixed
 
 - Return an empty JSON array from `mcpm update --json` and `mcpm outdated --json` when no servers are installed.
