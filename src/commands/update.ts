@@ -211,7 +211,7 @@ export async function handleUpdate(
   const servers = await getInstalledServers();
 
   if (servers.length === 0) {
-    output("No servers installed.");
+    output(options.json ? "[]" : "No servers installed.");
     return;
   }
 

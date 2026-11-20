@@ -157,7 +157,7 @@ export async function handleOutdated(
   const installed = await getInstalledServers();
 
   if (installed.length === 0) {
-    output("No servers installed.");
+    output(options.json ? "[]" : "No servers installed.");
     return;
   }
 

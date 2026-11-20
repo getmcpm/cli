@@ -56,6 +56,20 @@ function run(args: string[], home: string): RunResult {
   return { stdout, stderr, code: r.status ?? -1, out: `${stdout}\n${stderr}` };
 }
 
+describe("CLI smoke — empty update queries", () => {
+  it.each(["update", "outdated"])("%s keeps empty JSON and human output distinct", (command) => {
+    withHome((home) => {
+      const json = run([command, "--json"], home);
+      expect(json.code).toBe(0);
+      expect(JSON.parse(json.stdout)).toEqual([]);
+
+      const plain = run([command], home);
+      expect(plain.code).toBe(0);
+      expect(plain.stdout.trim()).toBe("No servers installed.");
+    });
+  });
+});
+
 describe("CLI smoke — sanity", () => {
   it("--version prints the package version and exits 0", () => {
     withHome((home) => {
