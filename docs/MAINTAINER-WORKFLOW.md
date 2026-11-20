@@ -2,14 +2,14 @@
 
 ## Current checkpoint — 2026-11-20
 
-Latest published CLI: **v0.54.1**. Successful empty `update --json` and
-`outdated --json` queries now write `[]`. The ten served tools and fixed
-protocol reference are unchanged. Public usage skill source is **1.3.3**.
+Latest published CLI: **v0.54.2**. The integrity verification source uses a
+JavaScript escape for its cache-key separator, so Git can render future edits
+as text. Cache-key bytes and the ten served tools are unchanged.
 
-The [v0.54.1 release record](RELEASE-2026-11-20-v0.54.1.md) records verification
-of the published archive and protocol checks. Companion alignment is tracked
-in the linked PRs. The [v0.54.0 record](RELEASE-2026-11-14-v0.54.0.md) retains
-the original structured audit report and companion deployment evidence.
+The [v0.54.2 release record](RELEASE-2026-11-20-v0.54.2.md) records published
+archive and protocol verification, and tracks the companion alignment PRs.
+The [v0.54.1 record](RELEASE-2026-11-20-v0.54.1.md) covers the empty JSON
+output fix. Public usage skill source is **1.3.3**.
 
 The bounded `#131`/`#149` report slice shipped; broader audit and host coverage
 remain open. Earlier VS Code/Copilot `scope` evidence remains bound to its named
