@@ -1,4 +1,4 @@
-# Active trust and DevX backlog — 2026-11-15
+# Active trust and DevX backlog — 2026-11-19
 
 This is the current, deliberately selected queue, aligned with the project
 Obsidian backlog. **#IDs are project backlog IDs, not GitHub issue numbers.** It
@@ -23,7 +23,25 @@ Planning issues link to these criteria; their issue numbers are distinct from
 the public backlog IDs. Neither issues nor Project status grant work
 authorization. Keep broad remaining scope separate from verified bounded slices. Private board/card links and vault contents stay outside public docs.
 
-## Ordered queue
+## Next decisions — 2026-11-19
+
+| Order | Decision | Evidence needed to advance |
+| --- | --- | --- |
+| 1 | Give a team exporting its stack a way to detect conflicts and incomplete reads (backlog ID `#150`). | A CI consumer can distinguish the cases below using a versioned, read-only preflight while existing export YAML remains compatible. |
+| 2 | Evaluate Codex as the next project inventory profile (backlog ID `#141`). | One sanitized review case and a comparison with native tooling on a pinned Codex revision show a changed decision or one removable manual step. |
+| 3 | Evaluate one benign MCP exchange for upstream conformance coverage. | The upstream runner supports the role and transport, the case fills a documented gap, and another implementer can replay it. |
+
+**Export coverage.** Nine disposable-home runs of the published v0.54.0 CLI on Linux with Node 24.22.1 all exited 0. A single stdio entry, identical entries in Claude Code and Cursor, and conflicting commands/arguments in either client order produced byte-identical YAML and empty stderr. An empty home and a valid Cursor config under an inaccessible directory also produced identical YAML and empty stderr. An unreadable file and an invalid entry each warned when tested alone. A valid same-name sibling suppressed the invalid-entry warning. The existing export tests and path detector explain why coverage must be evaluated before name deduplication and stack projection. [Export tests](../src/__tests__/commands/export.test.ts) · [Client detection](../src/config/detector.ts) · [Export handler](../src/commands/export.ts)
+
+Acceptance includes source read failures, missing sources, omitted entries, equivalent duplicates and conflicts. Compare launch definitions before projecting them to YAML. Report source clients and differing field categories, withholding argument, URL, header and environment values. Reversing the two client definitions must retain the conflict. Preserve existing stack syntax and output.
+
+**Codex inventory.** Start with one decision about the origin of a server or its declared tool restrictions. Use inert fixtures for overlapping user/project declarations, a disabled server and an unreadable source. Keep effective selection, trust and runtime activation unknown. Stop if the native workflow already answers the question. [Pinned Codex configuration schema](https://github.com/openai/codex/blob/aadb51b2b60c488a7aa047775876c196eb60cb2f/codex-rs/core/config.schema.json) · [Current inventory contract](PROJECT-SCOPE.md)
+
+**Upstream fixture.** The pinned conformance guide shows a URL for server testing and a command for client testing. Verify transport support before preparing a fixture. Reuse an existing scenario where it applies. Keep an mcpm-specific discrepancy in the local suite, and stop the upstream experiment if it needs a new transport bridge. [Conformance runner](https://github.com/modelcontextprotocol/conformance/blob/96a6f9478b7f2e125cf0360a213383cf57533893/README.md) · [Direct/guarded comparison](../scripts/protocol-sandbox/harness.mjs)
+
+Broader audit coverage (backlog IDs `#131`/`#149`) needs one named consumer, source and decision beyond the store report. The evidence and ACP ingestion proposals retain their consumer gates, and the measured hook confinement decision still applies.
+
+## Previously selected work
 
 | Order | ID | Scope/status | Dependency |
 | --- | --- | --- | --- |
@@ -276,17 +294,10 @@ or universal containment claim. [Hook kinds and lifecycle](https://code.claude.c
   promoting any of them.
 
 
-## Maintenance intake snapshot — 2026-11-15
+## Maintenance intake — checked 2026-11-20
 
-Open proposed dependency updates are CLI #331/#351/#352/#354/#355/#358/#359 and
-[guard-playground #36](https://github.com/getmcpm/guard-playground/pull/36).
-Review their diffs, engines, frozen locks/overrides and affected harnesses before
-scheduling or merging; #331's ora major stays separate. No priorities, dates or
-merge permission are inferred from this intake.
+On November 20, the four CLI harness dependency PRs ([351](https://github.com/getmcpm/cli/pull/351), [352](https://github.com/getmcpm/cli/pull/352), [354](https://github.com/getmcpm/cli/pull/354), [355](https://github.com/getmcpm/cli/pull/355)) and [guard-playground 36](https://github.com/getmcpm/guard-playground/pull/36) were open. Each CLI rollup showed six successes and one neutral result. Both playground checks passed. Review paired changes to the same harness lockfile together and recheck the resulting head after either update.
 
-The optional macOS job for documentation closeout #357 was queued at merge and
-later cancelled; [run 43463105106](https://github.com/getmcpm/cli/actions/runs/43463105106)
-now reports failure. Its cause is unverified. Required checks and release-source
-CI/publication passed. Diagnose queue/infrastructure cancellation versus code
-failure before proposing a change; do not weaken gates or substitute proof from
-a different head. This is a maintenance question, not an established product bug.
+The root dependency PRs ([331](https://github.com/getmcpm/cli/pull/331), [358](https://github.com/getmcpm/cli/pull/358), [359](https://github.com/getmcpm/cli/pull/359)) were open with failing and cancelled checks. Inspect each failure, supported engines and frozen lock overrides before scheduling an update. Treat the ora major separately. [Dependency update guidance](../CONTRIBUTING.md)
+
+The optional macOS closeout job for CLI PR 357 was cancelled before running a step. GitHub's annotations record that a hosted runner could not be acquired after multiple attempts and cite macOS arm64 capacity constraints. The diagnosis is complete. Revisit scheduling if capacity delays recur. [Check annotations](https://api.github.com/repos/getmcpm/cli/check-runs/132014957578/annotations) · [Workflow run](https://github.com/getmcpm/cli/actions/runs/43463105106)
