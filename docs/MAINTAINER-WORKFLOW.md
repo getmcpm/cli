@@ -2,14 +2,13 @@
 
 ## Current checkpoint — 2026-11-20
 
-Latest published CLI: **v0.54.2**. The integrity verification source uses a
-JavaScript escape for its cache-key separator, so Git can render future edits
-as text. Cache-key bytes and the ten served tools are unchanged.
+Latest published CLI: **v0.54.3**. The `diff` command compares remote
+endpoints per client without printing URL values. The ten served tools and
+public usage skill source version **1.3.3** are unchanged.
 
-The [v0.54.2 release record](RELEASE-2026-11-20-v0.54.2.md) records published
-archive and protocol verification, and tracks the companion alignment PRs.
-The [v0.54.1 record](RELEASE-2026-11-20-v0.54.1.md) covers the empty JSON
-output fix. Public usage skill source is **1.3.3**.
+The [v0.54.3 release record](RELEASE-2026-11-20-v0.54.3.md) records archive and
+protocol verification and tracks companion alignment. The
+[v0.54.2 record](RELEASE-2026-11-20-v0.54.2.md) covers readable integrity source diffs.
 
 The bounded `#131`/`#149` report slice shipped; broader audit and host coverage
 remain open. Earlier VS Code/Copilot `scope` evidence remains bound to its named
