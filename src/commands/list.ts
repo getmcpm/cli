@@ -15,6 +15,7 @@ import { Command } from "commander";
 import chalk from "chalk";
 import { sanitizeForTerminal } from "../guard/sanitize.js";
 import Table from "cli-table3";
+import { detectClientConfigCandidates } from "../config/detector.js";
 import type { ClientId } from "../config/paths.js";
 import type { ConfigAdapter, McpServerEntry } from "../config/adapters/index.js";
 import { formatMcpEntryCommand } from "../utils/format-entry.js";
@@ -79,6 +80,7 @@ export async function handleList(
   // #59: entries read() dropped for failing shape validation. `list` is the
   // inventory command, and --json has no stderr channel a consumer reads.
   const malformed: Array<{ name: string; client: ClientId }> = [];
+  const unreadableClients: ClientId[] = [];
 
   for (const clientId of clients) {
     try {
@@ -94,10 +96,15 @@ export async function handleList(
         rows.push({ client: clientId, serverName, entry: { ...entry } });
       }
     } catch {
-      // Skip clients with malformed or unreadable configs
+      unreadableClients.push(clientId);
     }
   }
 
+  for (const client of unreadableClients) {
+    const notice = `${client}: config could not be read; installed server list is incomplete.`;
+    if (options.json) process.stderr.write(`mcpm: ${notice}\n`);
+    else output(chalk.yellow(notice));
+  }
   // --json flag: output raw JSON array and return early.
   if (options.json === true) {
     const jsonData = rows.map(({ client, serverName, entry }) => ({
@@ -120,7 +127,7 @@ export async function handleList(
   // No servers found.
   if (rows.length === 0) {
     output(
-      malformed.length > 0
+      malformed.length > 0 || unreadableClients.length > 0
         ? "No readable MCP servers installed."
         : "No MCP servers installed. Try: mcpm search <query>"
     );
@@ -167,12 +174,12 @@ export function registerList(program: Command): void {
     .option("--client <id>", "Filter output to a single client (claude-desktop, claude-code, cursor, vscode, windsurf, gemini-cli)")
     .option("--json", "Output raw JSON instead of a formatted table")
     .action(async (opts: { client?: string; json?: boolean }) => {
-      const { detectInstalledClients, getConfigPath, getAdapter } = await import("../config/index.js");
+      const { getConfigPath, getAdapter } = await import("../config/index.js");
 
       await handleList(
         { client: opts.client, json: opts.json },
         {
-          detectClients: detectInstalledClients,
+          detectClients: detectClientConfigCandidates,
           getAdapter,
           getPath: getConfigPath,
           output: stdoutOutput,
