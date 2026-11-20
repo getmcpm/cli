@@ -80,6 +80,7 @@ export async function handleDiff(
   const clients = await deps.detectClients();
   const installed = new Map<string, { client: ClientId; entry: McpServerEntry }[]>();
   const unreadable = new Map<string, ClientId[]>();
+  const unreadableClients: ClientId[] = [];
 
   for (const clientId of clients) {
     try {
@@ -98,7 +99,7 @@ export async function handleDiff(
         }
       }
     } catch {
-      // Skip unreadable clients
+      unreadableClients.push(clientId);
     }
   }
 
@@ -113,22 +114,24 @@ export async function handleDiff(
     const inst = installed.get(name);
 
     if (!inst) {
-      const badClients = unreadable.get(name);
-      entries.push(
-        badClients
-          ? {
-              name,
-              status: "unreadable",
-              detail: "entry does not match the expected shape - cannot compare",
-              clients: badClients,
-            }
-          : {
-              name,
-              status: "missing",
-              detail: locked ? formatLocked(locked) : "not locked",
-              clients: [],
-            }
-      );
+      const badClients = unreadable.get(name) ?? [];
+      if (unreadableClients.length > 0 || badClients.length > 0) {
+        entries.push({
+          name,
+          status: "unreadable",
+          detail: unreadableClients.length > 0
+            ? "could not determine presence because client configs are unreadable"
+            : "entry does not match expected shape - cannot compare",
+          clients: [...new Set([...badClients, ...unreadableClients])],
+        });
+      } else {
+        entries.push({
+          name,
+          status: "missing",
+          detail: locked ? formatLocked(locked) : "not locked",
+          clients: [],
+        });
+      }
     } else if (isUrlServer(declared)) {
       const byDetail = new Map<string, ClientId[]>();
       for (const { client, entry } of inst) {
@@ -209,7 +212,12 @@ export async function handleDiff(
     }
   }
 
-  // Output
+  // Keep coverage warnings off JSON stdout.
+  for (const client of unreadableClients) {
+    const notice = `${client}: config could not be read; comparison is incomplete.`;
+    if (options.json) process.stderr.write(`mcpm: ${notice}\n`);
+    else deps.output(notice);
+  }
   if (options.json) {
     deps.output(JSON.stringify(entries, null, 2));
     return;
@@ -235,10 +243,10 @@ export async function handleDiff(
   }
 
   if (badShape.length > 0) {
-    deps.output("Unreadable (installed but the entry does not match the expected shape):");
+    deps.output("Unreadable (could not compare):");
     for (const e of badShape) {
       deps.output(
-        `  ? ${sanitizeForTerminal(e.name)} [${e.clients.join(", ")}] - fix the entry, then re-run`
+        `  ? ${sanitizeForTerminal(e.name)} [${e.clients.join(", ")}] - ${e.detail}`
       );
     }
     deps.output("");
@@ -346,7 +354,7 @@ function formatLocked(locked: LockedServer): string {
 // ---------------------------------------------------------------------------
 
 import { Command } from "commander";
-import { detectInstalledClients } from "../config/detector.js";
+import { detectClientConfigCandidates } from "../config/detector.js";
 import { getConfigPath } from "../config/paths.js";
 import { getAdapter as getAdapterDefault } from "../config/index.js";
 import { stdoutOutput } from "../utils/output.js";
@@ -365,7 +373,7 @@ export function registerDiffCommand(program: Command): void {
         await handleDiff(
           { stackFile: opts.file, json: opts.json },
           {
-            detectClients: detectInstalledClients,
+            detectClients: detectClientConfigCandidates,
             getAdapter: getAdapterDefault,
             getPath: getConfigPath,
             output: stdoutOutput,
