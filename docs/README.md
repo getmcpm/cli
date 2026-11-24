@@ -5,6 +5,7 @@
 - [Quick start](../README.md#quick-start) and [installation channels](DISTRIBUTION.md).
 - [CLI workflows, stacks and command index](USAGE.md).
 - [Trust scores, scanner protocol and supply-chain evidence](TRUST.md).
+- [Coverage-aware CLI and MCP audit reports](AUDIT-REPORT.md).
 - [Guard setup, remediation and confinement](GUARD.md).
 - [Project scope inventory](PROJECT-SCOPE.md) and [local artifact comparison](ARTIFACT-REVIEW.md).
 - [Agent evidence/workflows](AGENT-WORKFLOW.md) and the self-contained
@@ -31,8 +32,9 @@
 Measurements belong to their named archives, inputs and hosts; consult each
 record's current reproduction instructions and retained historical limits.
 
-- [Latest release: v0.54.0](RELEASE-2026-11-14-v0.54.0.md) and
+- [Latest release: v0.54.4](RELEASE-2026-11-20-v0.54.4.md) and
   [all release notes](../CHANGELOG.md).
+- [v0.54.3 release verification](RELEASE-2026-11-20-v0.54.3.md).
 - [Protocol baseline](PROTOCOL-VALIDATION.md), [serve](SERVE-PROTOCOL-VALIDATION.md),
   [Skills metadata](SKILLS-GUARD-VALIDATION.md) and [doctor](DOCTOR-EVIDENCE-VALIDATION.md).
 - [Native clients](NATIVE-CLIENT-VALIDATION.md), [Cursor](CURSOR-CLIENT-VALIDATION.md),

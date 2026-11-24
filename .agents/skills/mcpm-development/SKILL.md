@@ -78,6 +78,12 @@ Do not infer approval, merge or publication from a clean local review.
 
 ## Documentation and handoff
 
+For maintainer-owned work with authorized Project access, reconcile the existing
+scoped private planning issue/card using the [tracking agreement](../../../docs/MAINTAINER-WORKFLOW.md#delivery-tracking).
+Record reviewed heads, checks, blockers and remaining scope; do not close a broader
+parent for a shipped slice. Missing private access must not block a public contribution.
+
+
 Update only relevant docs/contracts, Unreleased changelog entries and the public
 [mcpm usage skill](../../../skills/mcpm/SKILL.md) when its consumer workflow
 changes. Increment its descriptive version when its instructions change; keep it

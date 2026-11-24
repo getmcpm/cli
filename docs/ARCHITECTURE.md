@@ -162,7 +162,7 @@ mcpm/
 |---|---|
 | `commands/` | Commander command registration and actions, including the `guard` and `publish` subcommand groups |
 | `artifacts/` | Bounded local USTAR snapshot inventory and skill/plugin declaration comparison; [profiles and limits](ARTIFACT-REVIEW.md) |
-| `server/` | MCP server (stdio): 9 tools wrapping CLI logic via injectable handlers |
+| `server/` | MCP server (stdio): ten tools via injectable handlers, including the separate [coverage-aware audit report](AUDIT-REPORT.md#mcp-tool-since-v0540) |
 | `stack/` | Stack file schemas (mcpm.yaml/mcpm-lock.yaml), semver resolution, trust policy, .env parsing |
 | `guard/` | **v0.5.0 runtime defense.** Stdio MITM relay, OWASP MCP Top 10 pattern engine, schema pinning + drift detection, policy file editor, integrity sidecars, event log. Plus `guard/confine/` (F1, released v0.16.0, macOS-only, opt-in via --confine): **OS process enforcement** — the relay optionally wraps the child spawn in an OS sandbox (macOS `sandbox-exec`) to deny selected secret-path reads and restrict writes/network according to its profile, complementing byte-level detection. Configured secrets are still delivered to the child; network-enabled launchers can exfiltrate accessible data. See [confinement limits](GUARD.md#os-confinement---confine). |
 | `registry/` | Typed HTTP client for the official MCP Registry API (v0.1 at registry.modelcontextprotocol.io) |
