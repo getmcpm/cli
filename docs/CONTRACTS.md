@@ -188,6 +188,12 @@ exceptions:
   could not read. The old exit `0` was the bug: the gate reported "in sync"
   over input it had never compared.
 
+`sync --check`, `list` and `diff` check the fixed client config paths. An
+absent file is empty. A config that cannot be read leaves the result incomplete.
+In JSON mode, `list` and `diff` keep their array output and warn on stderr.
+When a declared server has no readable entry and any client config is unreadable,
+`diff` reports `unreadable` instead of `missing`. Readable client rows are retained.
+
 For URL servers, `mcpm diff` compares each readable client entry locally against
 the stack URL and checks the locked URL when present. The JSON array can contain
 multiple rows for one name when clients disagree. Each row lists only the clients

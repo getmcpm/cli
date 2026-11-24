@@ -2,13 +2,10 @@
 
 ## Current checkpoint — 2026-11-20
 
-Latest published CLI: **v0.54.3**. The `diff` command compares remote
-endpoints per client without printing URL values. The ten served tools and
-public usage skill source version **1.3.3** are unchanged.
-
-The [v0.54.3 release record](RELEASE-2026-11-20-v0.54.3.md) records archive and
-protocol verification and tracks companion alignment. The
-[v0.54.2 record](RELEASE-2026-11-20-v0.54.2.md) covers readable integrity source diffs.
+The latest published CLI is **v0.54.4**. Read-only `sync`, `list` and `diff`
+report unreadable client configs and retain results from readable configs. The
+[release record](RELEASE-2026-11-20-v0.54.4.md) includes package and protocol
+verification and links to the companion updates.
 
 The bounded `#131`/`#149` report slice shipped; broader audit and host coverage
 remain open. Earlier VS Code/Copilot `scope` evidence remains bound to its named
