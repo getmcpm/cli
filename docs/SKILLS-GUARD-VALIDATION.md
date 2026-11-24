@@ -101,8 +101,15 @@ verify Skills manifests across requests, authenticate publishers from supplied
 digests, pin skill approvals, validate every extension shape or detect arbitrary
 prompt injection. Binary blobs and external content remain outside this slice.
 The SDK also supports these handlers on legacy transports; that measurement is
-separate from the stable extension's modern base-protocol requirement. Two
+separate from the Beta specification's modern base-protocol requirement. Two
 unsupported reference combinations remain legacy→modern-only and modern-pinned→legacy.
+
+The [#140 retained-fixture MVP](RETAINED-SKILLS-DECISION.md) adds separate
+release-harness verification of retained manifests, raw resource bytes and
+origin/state coverage. Both archive matrices passed 139 comparisons with
+independent replay/readback and maintainer acceptance. It does not change the
+production guard limits above or establish
+host activation/approval behavior.
 
 
 ## v0.48.1 publication

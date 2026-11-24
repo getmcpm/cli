@@ -23,6 +23,9 @@ if (kind === 'serve') {
   child.on('error', error => { console.error(error.message); process.exit(1); });
   child.on('exit', code => process.exit(code ?? 1));
   process.on('SIGTERM', () => child.kill('SIGTERM'));
+} else if (kind === 'skills-retained') {
+  const { serveRetainedSkills } = await import('./skills-peer.mjs');
+  await serveRetainedSkills(process.argv[4], process.argv[5], observe);
 } else if (kind.startsWith('skills')) {
   // Use the candidate's actual server dependency; fixed reference SDKs stay pinned.
   const require = createRequire(process.argv[4]);

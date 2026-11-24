@@ -49,7 +49,7 @@ ISO 8601 string. If in the future at session startup, the relay short-circuits i
 
 ## Validation
 
-The relay parses the YAML through a strict Zod schema. Malformed shapes (e.g. `paused_until: 99999999999999` — numeric, not ISO string) cause Zod to fall back to **empty policy** — fail toward more restrictive enforcement.
+The relay parses the YAML through a Zod schema. Malformed shapes (e.g. `paused_until: 99999999999999` — numeric, not ISO string) cause Zod to fall back to **empty policy**, applying shipped default actions.
 
 Date strings must be **full ISO 8601 UTC** (e.g. `2026-05-17T18:00:00Z`). The schema is
 `z.string().datetime()` with no `offset` option, so it accepts **only** the `Z` form:
@@ -58,11 +58,12 @@ Date strings must be **full ISO 8601 UTC** (e.g. `2026-05-17T18:00:00Z`). The sc
 - `2026-05-17T18:00:00+02:00` (numeric offset) — **rejected**
 - `2026-05-17T18:00:00Z` — accepted
 
-This is not a lenient coercion. Because the file is validated with a single whole-file
-`safeParse` and a `.catch({})` fallback, ONE bad date string discards the **entire policy** —
-every override and any `paused_until` — and the relay proceeds with an empty policy. That
-fails toward more enforcement, not less, but it means a mistyped date silently un-mutes
-everything you muted rather than erroring. Always write the `T...Z` form.
+This is not a lenient coercion. Because the file is validated as a whole file
+with a `.catch({})` fallback, ONE bad date string discards the **entire policy** —
+every override and any `paused_until` — and the relay proceeds with an empty policy.
+All custom overrides are lost, including stricter `block` promotions as well as mutes
+and pause state. A default-warning signature promoted to block returns to warn/forward;
+this is not necessarily more restrictive. Always write the `T...Z` form.
 
 ## Action semantics (the bug fix that mattered)
 
@@ -83,9 +84,14 @@ In practice: muting one signature can't silently disable detection on a co-occur
 
 ## Integrity sidecar
 
-`~/.mcpm/guard-policy.yaml.integrity` holds the SHA-256 of `guard-policy.yaml` content. Any mismatch on read raises `PolicyIntegrityError`; the relay emits a `POLICY-INTEGRITY-ERROR` warning on stderr and falls back to full enforcement for the rest of the session (fail-safe, not a per-message block); running `mcpm guard reset-integrity --policy --yes` after review re-trusts the file.
+`~/.mcpm/guard-policy.yaml.integrity` holds the SHA-256 of `guard-policy.yaml` content. Any mismatch on read raises `PolicyIntegrityError`; the relay emits a `POLICY-INTEGRITY-ERROR` warning on stderr and falls back to shipped default actions for the rest of the session (not a per-message block); running `mcpm guard reset-integrity --policy --yes` after review re-trusts the file.
 
-This protects against a same-machine attacker (npm postinstall script, malware) writing to the policy file silently. It does NOT protect against a same-user attacker who can ALSO compute the new sidecar — see `docs/GUARD.md` threat model.
+The fallback discards stricter block promotions as well as permissive overrides,
+just like the invalid-policy fallback above.
+
+This detects a content change that leaves the sidecar stale. It does not
+authenticate policy against a same-user attacker who can recompute both files;
+see the [guard threat model](GUARD.md).
 
 ## Concurrency
 

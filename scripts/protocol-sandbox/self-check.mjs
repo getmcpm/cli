@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { equivalent, exchange, assertEcho, assertUnsupported, assertUnknownArgument, assertInspectionEvents, assertDoctorResult } from './harness.mjs';
+import { equivalent, exchange, assertEcho, assertUnsupported, assertUnknownArgument, assertInspectionEvents, assertDoctorResult, assertAuditReportResult } from './harness.mjs';
 
 test('strict-input evidence requires validation, not an unrelated handler failure', () => {
   const failure = text => ({ isError: true, content: [{ type: 'text', text }] });
@@ -98,4 +98,18 @@ test('doctor consumer rejects missing/unknown/error/mismatched success evidence'
   assert.throws(() => assertDoctorResult(result({ ...data, schemaVersion: 2 })));
   assert.throws(() => assertDoctorResult({ ...result(data), content: [{ type: 'text', text: '{}' }] }));
   assert.throws(() => assertDoctorResult(result({ ...data, issues: [{ kind: 'malformed-config' }] })));
+});
+
+
+test('audit consumer rejects missing, mismatched, unknown and false completeness evidence', () => {
+  const data = { schemaVersion: 1, source: 'mcpm-store', metadataSelector: 'latest', scope: { excludes: ['health', 'installed-bytes', 'client-configuration', 'native-activation'] }, inventory: { state: 'incomplete', issues: [{ code: 'unreadable' }] }, assessmentComplete: false, outcome: 'incomplete_assessment', servers: [] };
+  const result = value => ({ structuredContent: value, content: [{ type: 'text', text: JSON.stringify(value) }] });
+  assert.deepEqual(assertAuditReportResult(result(data)), data);
+  assert.throws(() => assertAuditReportResult({ ...result(data), isError: true }));
+  assert.throws(() => assertAuditReportResult({ content: result(data).content }));
+  assert.throws(() => assertAuditReportResult(result({ ...data, schemaVersion: 2 })));
+  assert.throws(() => assertAuditReportResult({ ...result(data), content: [{ type: 'text', text: '{}' }] }));
+  assert.throws(() => assertAuditReportResult(result({ ...data, assessmentComplete: true })));
+  assert.throws(() => assertAuditReportResult(result({ ...data, outcome: 'no_findings' })));
+  assert.throws(() => assertAuditReportResult(result({ ...data, servers: [{ findings: [], checks: { health: { state: 'performed' } } }] })));
 });

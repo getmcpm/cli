@@ -1,0 +1,190 @@
+{
+  "schemaVersion": 1,
+  "specCommit": "649f7aee87d631ac4d1fdd3b12eef0c6264fdb3a",
+  "skillUri": "skill://mcpm/SKILL.md",
+  "states": {
+    "baseline": {
+      "SKILL.md": "mcpm-SKILL.md",
+      "references/guide.md": "skills-fixtures/guide-before.txt",
+      "assets/data.bin": "skills-fixtures/asset.bin",
+      "nested/review/SKILL.md": "skills-fixtures/nested-SKILL.md"
+    },
+    "changed": {
+      "SKILL.md": "mcpm-SKILL.md",
+      "references/guide.md": "skills-fixtures/guide-after.txt",
+      "assets/data.bin": "skills-fixtures/asset.bin",
+      "nested/review/SKILL.md": "skills-fixtures/nested-SKILL.md"
+    },
+    "origin-b": {
+      "SKILL.md": "mcpm-SKILL.md",
+      "references/guide.md": "skills-fixtures/guide-b.txt",
+      "assets/data.bin": "skills-fixtures/asset.bin",
+      "nested/review/SKILL.md": "skills-fixtures/nested-SKILL.md"
+    },
+    "added": {
+      "SKILL.md": "mcpm-SKILL.md",
+      "references/guide.md": "skills-fixtures/guide-before.txt",
+      "assets/data.bin": "skills-fixtures/asset.bin",
+      "nested/review/SKILL.md": "skills-fixtures/nested-SKILL.md",
+      "references/new.txt": "skills-fixtures/added.txt"
+    },
+    "removed": {
+      "SKILL.md": "mcpm-SKILL.md",
+      "assets/data.bin": "skills-fixtures/asset.bin",
+      "nested/review/SKILL.md": "skills-fixtures/nested-SKILL.md"
+    },
+    "rotated": {
+      "SKILL.md": "mcpm-SKILL.md",
+      "assets/data.bin": "skills-fixtures/asset.bin",
+      "nested/review/SKILL.md": "skills-fixtures/nested-SKILL.md",
+      "references/rotated.md": "skills-fixtures/guide-before.txt"
+    },
+    "duplicate-frontmatter": {
+      "SKILL.md": "skills-fixtures/duplicate-frontmatter.md",
+      "references/guide.md": "skills-fixtures/guide-before.txt",
+      "assets/data.bin": "skills-fixtures/asset.bin",
+      "nested/review/SKILL.md": "skills-fixtures/nested-SKILL.md"
+    }
+  },
+  "cases": [
+    {
+      "id": "static-all-members",
+      "expected": "consistent"
+    },
+    {
+      "id": "origin-b-independent",
+      "initial": "origin-b",
+      "expected": "consistent",
+      "connectionOrigin": "fixture-B",
+      "selectedOrigin": "fixture-B"
+    },
+    {
+      "id": "wrong-origin-identical-bytes",
+      "expected": "mismatch",
+      "connectionOrigin": "fixture-B"
+    },
+    {
+      "id": "order-only-refresh",
+      "refresh": "baseline",
+      "refreshMode": "reorder",
+      "expected": "consistent"
+    },
+    {
+      "id": "rotated-refresh",
+      "refresh": "rotated",
+      "expected": "changed"
+    },
+    {
+      "id": "added-refresh",
+      "refresh": "added",
+      "expected": "changed"
+    },
+    {
+      "id": "removed-refresh",
+      "refresh": "removed",
+      "expected": "changed"
+    },
+    {
+      "id": "digest-only-refresh",
+      "refresh": "baseline",
+      "refreshMode": "digest",
+      "expected": "mismatch"
+    },
+    {
+      "id": "size-only-refresh",
+      "refresh": "baseline",
+      "refreshMode": "size",
+      "expected": "mismatch"
+    },
+    {
+      "id": "frontmatter-only-refresh",
+      "refresh": "baseline",
+      "refreshMode": "frontmatter",
+      "expected": "mismatch"
+    },
+    {
+      "id": "dynamic-refresh",
+      "refresh": "baseline",
+      "refreshMode": "dynamic",
+      "expected": "incomplete"
+    },
+    {
+      "id": "changed-content-before-refresh",
+      "read": "changed",
+      "expected": "mismatch"
+    },
+    {
+      "id": "missing-file",
+      "missingRead": "references/guide.md",
+      "expected": "incomplete"
+    },
+    {
+      "id": "unread-member",
+      "omitRead": "nested/review/SKILL.md",
+      "expected": "incomplete"
+    },
+    {
+      "id": "read-unlisted-file",
+      "read": "added",
+      "extraRead": "references/new.txt",
+      "expected": "mismatch"
+    },
+    {
+      "id": "dynamic-entry",
+      "heldMode": "dynamic",
+      "expected": "incomplete"
+    },
+    {
+      "id": "invalid-absent-manifest",
+      "heldMode": "absent",
+      "expected": "incomplete"
+    },
+    {
+      "id": "invalid-self-absent",
+      "heldMode": "self-absent",
+      "expected": "incomplete"
+    },
+    {
+      "id": "invalid-duplicate-member",
+      "heldMode": "duplicate",
+      "expected": "incomplete"
+    },
+    {
+      "id": "frontmatter-body-discrepancy",
+      "heldMode": "frontmatter",
+      "expected": "mismatch"
+    },
+    {
+      "id": "duplicate-yaml-body",
+      "initial": "duplicate-frontmatter",
+      "expected": "invalid"
+    },
+    {
+      "id": "directory-added-child",
+      "directory": "added",
+      "expected": "changed"
+    },
+    {
+      "id": "directory-missing-page",
+      "directory": "baseline",
+      "directoryPages": "partial",
+      "expected": "incomplete"
+    },
+    {
+      "id": "directory-complete-pages",
+      "directory": "baseline",
+      "directoryPages": "complete",
+      "expected": "consistent"
+    },
+    {
+      "id": "catalog-missing-page-selected-get",
+      "catalogPages": "partial",
+      "expected": "consistent"
+    },
+    {
+      "id": "catalog-complete-pages",
+      "catalogPages": "complete",
+      "expected": "consistent"
+    }
+  ]
+}

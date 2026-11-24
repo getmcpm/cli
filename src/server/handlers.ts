@@ -6,6 +6,8 @@
  */
 
 import path from "node:path";
+import { buildAuditReport, type AuditReportDeps, type AuditReportModel } from "../commands/audit-report.js";
+import { checkScannerAvailable, scanTier2 } from "../scanner/tier2.js";
 import { InstalledServerNotFoundError } from "../store/servers.js";
 import type { ClientId } from "../config/paths.js";
 import { CLIENT_IDS } from "../config/paths.js";
@@ -61,6 +63,10 @@ function validateMcpServerName(name: string): void {
 // ---------------------------------------------------------------------------
 
 export interface ServerDeps {
+  getAuditInventory?: AuditReportDeps["getAuditInventory"];
+  scannerConfigured?: AuditReportDeps["scannerConfigured"];
+  checkScannerAvailable?: AuditReportDeps["checkScannerAvailable"];
+  scanTier2?: AuditReportDeps["scanTier2"];
   registrySearch: (query: string, limit: number) => Promise<ServerEntry[]>;
   registryGetServer: (name: string) => Promise<ServerEntry>;
   detectClients: () => Promise<ClientId[]>;
@@ -893,3 +899,15 @@ export function extractKeywords(description: string): string[] {
   return tokens.length > 0 ? tokens : [description.trim()];
 }
 
+/** Same bounded store report as CLI; no client inspection or server execution. */
+export function handleAuditReport(deps: ServerDeps): Promise<AuditReportModel> {
+  return buildAuditReport({
+    getAuditInventory: deps.getAuditInventory,
+    scannerConfigured: deps.scannerConfigured,
+    getServer: deps.registryGetServer,
+    scanTier1: deps.scanTier1,
+    computeTrustScore: deps.computeTrustScore,
+    checkScannerAvailable: deps.checkScannerAvailable ?? (() => checkScannerAvailable({ onWarn: () => undefined })),
+    scanTier2: deps.scanTier2 ?? scanTier2,
+  });
+}

@@ -6,7 +6,8 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { networkInterfaces } from 'node:os';
 import { createRequire } from 'node:module';
-import { equivalent, exchange, assertEcho, assertUnsupported, assertUnknownArgument, assertInspectionEvents, assertDoctorResult } from './harness.mjs';
+import { equivalent, exchange, assertEcho, assertUnsupported, assertUnknownArgument, assertInspectionEvents, assertDoctorResult, assertAuditReportResult } from './harness.mjs';
+import { verifySkillCapture, assertSkillPair, SKILLS_SPEC } from './skills-verification.mjs';
 
 const app = path.dirname(fileURLToPath(import.meta.url));
 const cli = path.join(app, 'node_modules/@getmcpm/cli/dist/index.js');
@@ -26,7 +27,8 @@ for (const name of ['@getmcpm/cli', '@modelcontextprotocol/sdk', '@modelcontextp
 report.lockSha256 = createHash('sha256').update(await readFile(path.join(app, 'package-lock.json'))).digest('hex');
 report.cliSha256 = createHash('sha256').update(await readFile(cli)).digest('hex');
 report.harnessSha256 = {};
-for (const file of ['run.mjs', 'peer.mjs', 'harness.mjs', 'self-check.mjs', 'mcpm-SKILL.md']) {
+for (const file of ['run.mjs', 'peer.mjs', 'harness.mjs', 'self-check.mjs', 'mcpm-SKILL.md', 'skills-verification.mjs', 'skills-self-check.mjs', 'skills-peer.mjs', 'skills-oracle.json',
+  ...(await readdir(path.join(app, 'skills-fixtures'))).sort().map(file => 'skills-fixtures/' + file)]) {
   report.harnessSha256[file] = createHash('sha256').update(await readFile(path.join(app, file))).digest('hex');
 }
 report.specifications = [
@@ -67,7 +69,8 @@ async function location(id, guarded) {
   return { home, env: { PATH: process.env.PATH, HOME: home, TMPDIR: home, WIRE: `${home}/peer.jsonl` } };
 }
 function launch(server, guarded, wirePath) {
-  const args = server === 'serve' ? (candidate ? [peer, 'serve', wirePath, cli] : [cli, 'serve']) : [peer, server, ...(wirePath ? [wirePath] : []), ...(server.startsWith('skills') ? [cli] : [])];
+  const [kind, scenario] = server.split(':');
+  const args = kind === 'serve' ? (candidate ? [peer, 'serve', wirePath, cli] : [cli, 'serve']) : [peer, kind, ...(wirePath ? [wirePath] : []), ...(kind.startsWith('skills') ? [cli] : []), ...(scenario ? [scenario] : [])];
   return { command: process.execPath, args: guarded ? [cli, 'guard', 'run', '--inner', '--server-name', 'sandbox', '--', process.execPath, ...args] : args };
 }
 async function stateFiles(home) {
@@ -112,6 +115,14 @@ try {
 }
 
 async function sdkRun(clientKind, serverKind, mode, action, guarded, loc) {
+  const auditScenario = action.startsWith('audit-report-') ? action.slice(13) : null;
+  const auditStore = `${loc.home}/.mcpm/servers.json`;
+  let auditInput;
+  if (auditScenario && auditScenario !== 'missing') {
+    await mkdir(`${loc.home}/.mcpm`, { recursive: true });
+    auditInput = auditScenario === 'empty' ? '[]' : auditScenario === 'malformed' ? '{synthetic-private-value' : JSON.stringify([{ name: 'synthetic-private-value' }]);
+    await writeFile(auditStore, auditInput);
+  }
   const doctorScenario = action.startsWith('doctor-') ? action.slice(7) : null;
   const cursorFile = `${loc.home}/.cursor/mcp.json`;
   const secret = 'synthetic-doctor-token-not-for-logging';
@@ -155,7 +166,35 @@ async function sdkRun(clientKind, serverKind, mode, action, guarded, loc) {
       });
     } else {
       await client.connect(transport, { timeout: candidate ? 5000 : 3000 });
-      if (doctorScenario) {
+      if (auditScenario) {
+        const { tools } = await client.listTools();
+        const tool = tools.find(t => t.name === 'mcpm_audit_report');
+        assert.equal(tool.outputSchema.properties.schemaVersion.const, 1);
+        assert.equal(tool.inputSchema.additionalProperties, false);
+        assert.deepEqual(tool.inputSchema.properties, {});
+        const invalid = await call('mcpm_audit_report', { fix: true });
+        assertUnknownArgument(invalid, 'fix'); assert.equal(invalid.structuredContent, undefined);
+        const result = await call('mcpm_audit_report');
+        const data = assertAuditReportResult(result);
+        assert.ok(!JSON.stringify(result).includes('synthetic-private-value'));
+        assert.deepEqual(data.servers, []);
+        assert.deepEqual(data.scope.selectedChecks, ['registry', 'static']);
+        const empty = ['missing', 'empty'].includes(auditScenario);
+        assert.equal(data.assessmentComplete, empty);
+        assert.equal(data.outcome, empty ? 'empty_inventory' : 'incomplete_assessment');
+        assert.equal(data.inventory.state, empty ? 'empty' : 'incomplete');
+        assert.equal(data.inventory.presence, auditScenario === 'missing' ? 'missing' : 'present');
+        if (auditScenario === 'missing') await assert.rejects(access(auditStore), { code: 'ENOENT' });
+        if (!empty) assert.equal(data.inventory.issues[0].code, auditScenario === 'malformed' ? 'malformed-json' : 'invalid-row');
+        // The old tool retains its separate client-config inventory and JSON payload.
+        const legacy = empty ? await call('mcpm_audit') : null;
+        if (legacy) {
+          assert.equal(legacy.structuredContent, undefined); assert.notEqual(legacy.isError, true);
+          assert.deepEqual(JSON.parse(legacy.content[0].text), { results: [] });
+        }
+        if (auditInput !== undefined) assert.equal(await readFile(auditStore, 'utf8'), auditInput, 'audit report changed inventory bytes');
+        value = { result, invalid, legacy };
+      } else if (doctorScenario) {
         const tools = await client.listTools();
         const doctor = tools.tools.find(t => t.name === 'mcpm_doctor');
         assert.equal(doctor.outputSchema.properties.schemaVersion.const, 1);
@@ -204,7 +243,7 @@ async function sdkRun(clientKind, serverKind, mode, action, guarded, loc) {
       } else if (action === 'serve') {
         value = await client.listTools(); assert.ok(value.tools.some(t => t.name === 'mcpm_search'));
         if (candidate) {
-          assert.equal(value.tools.length, 9);
+          assert.equal(value.tools.length, 10);
           assert.ok(value.tools.every(t => t.inputSchema.additionalProperties === false));
           const result = await call('mcpm_list');
           assert.notEqual(result.isError, true);
@@ -347,6 +386,16 @@ if (candidate) for (const [label, client, mode] of [
   });
 }
 
+if (candidate) for (const [label, client, mode] of [
+  ['legacy', 'v1', 'legacy'], ['auto', 'v2', 'auto'], ['modern', 'v2', { pin: modernVersion }],
+]) for (const scenario of ['missing', 'empty', 'malformed', 'invalid']) {
+  await pair(`${label}-mcpm-audit-report-${scenario}`, (g, l) => sdkRun(client, 'serve', mode, `audit-report-${scenario}`, g, l), (a, b) => {
+    equivalent(a.value, b.value); equivalent(a.version, b.version);
+    assert.equal(a.version, client === 'v1' ? '2025-11-25' : modernVersion);
+    for (const obs of [a, b]) assert.ok(obs.wire.some(w => w.message.method === (client === 'v1' ? 'initialize' : 'server/discover')));
+  });
+}
+
 async function rawRun(guarded, loc, exercise, server = 'raw') {
   const { command, args } = launch(server, guarded, loc.env.WIRE);
   const session = exchange(command, args, { env: loc.env, cwd: loc.home });
@@ -423,6 +472,66 @@ if (candidate) for (const era of ['modern', 'legacy']) {
       });
     }
   }
+}
+// The maintainer consumes these outcomes as fixture compatibility evidence, not guard integrity enforcement.
+if (candidate) {
+  const oracle = JSON.parse(await readFile(path.join(app, 'skills-oracle.json'), 'utf8'));
+  assert.equal(oracle.specCommit, SKILLS_SPEC.commit);
+  const root = oracle.skillUri.slice(0, -'SKILL.md'.length);
+  async function fixtureFiles(state) {
+    return Object.fromEntries(await Promise.all(Object.entries(oracle.states[state]).map(async ([relative, file]) => [root + relative, await readFile(path.join(app, file))])));
+  }
+  report.retainedSkills = { schemaVersion: 1, spec: SKILLS_SPEC, oracleSha256: report.harnessSha256['skills-oracle.json'],
+    scope: 'retained declared-set fixture consistency; not host loading, approval, publisher authentication or guard manifest enforcement',
+    expectedCases: oracle.cases.length * 2, outcomes: [] };
+  for (const era of ['modern', 'legacy']) for (const scenario of oracle.cases) {
+    const initial = scenario.initial ?? 'baseline';
+    const expected = { origin: scenario.selectedOrigin ?? 'fixture-A', skillUri: oracle.skillUri,
+      files: await fixtureFiles(initial), readFiles: await fixtureFiles(scenario.read ?? initial),
+      ...(scenario.refresh ? { refreshedFiles: await fixtureFiles(scenario.refresh) } : {}) };
+    const id = `${era}-retained-skills-${scenario.id}`;
+    await pair(id, async (guarded, loc) => {
+      const observation = await rawRun(guarded, loc, async session => {
+        const request = (method, params = {}) => session.request(method, { ...params, ...(era === 'modern' ? { _meta: meta } : {}) });
+        const opening = era === 'modern' ? await request('server/discover') : await request('initialize', {
+          protocolVersion: '2025-11-25', capabilities: {}, clientInfo: { name: 'sandbox-client', version: '1' },
+        });
+        if (era === 'legacy') session.send({ jsonrpc: '2.0', method: 'notifications/initialized' });
+        assert.ok(opening.result?.capabilities?.extensions?.['io.modelcontextprotocol/skills']);
+        const held = await request('skills/get', { uri: oracle.skillUri });
+        const capture = { schemaVersion: 1, specCommit: SKILLS_SPEC.commit, protocolVersion: era === 'modern' ? modernVersion : '2025-11-25', origin: scenario.connectionOrigin ?? 'fixture-A',
+          skillUri: oracle.skillUri, held: held.id, reads: [], directories: [], listings: [] };
+        const paths = Object.keys(oracle.states[initial]).filter(path => path !== scenario.omitRead);
+        if (scenario.extraRead) paths.push(scenario.extraRead);
+        // Deliberately concurrent; request IDs, not response arrival order, bind each read.
+        const responses = await Promise.all(paths.map(path => request('resources/read', { uri: root + path })));
+        capture.reads = responses.map(response => response.id);
+        if (scenario.directory) {
+          const directory = await request('resources/directory/read', { uri: root + 'references' }); capture.directories.push(directory.id);
+          if (scenario.directoryPages === 'complete') capture.directories.push((await request('resources/directory/read', { uri: root + 'references', cursor: directory.result?.nextCursor })).id);
+        }
+        if (scenario.catalogPages) {
+          const listing = await request('skills/list'); capture.listings.push(listing.id);
+          if (scenario.catalogPages === 'complete') capture.listings.push((await request('skills/list', { cursor: listing.result?.nextCursor })).id);
+        }
+        if (scenario.refresh) capture.refresh = (await request('skills/get', { uri: oracle.skillUri })).id;
+        return { opening, capture };
+      }, `skills-retained:${scenario.id}`);
+      observation.value.verification = verifySkillCapture({ ...observation.value.capture, wire: observation.wire }, expected);
+      return observation;
+    }, (a, b) => {
+      equivalent(a.value.opening, b.value.opening);
+      equivalent(a.value.capture, b.value.capture);
+      assertSkillPair(a.value.verification, b.value.verification, scenario.expected);
+      for (const observation of [a, b]) {
+        if (scenario.catalogPages) assert.equal(observation.value.verification.coverage.catalogComplete, scenario.catalogPages === 'complete');
+        if (scenario.directoryPages) assert.equal(observation.value.verification.coverage.directoryComplete, scenario.directoryPages === 'complete');
+      }
+      report.retainedSkills.outcomes.push({ id, expectedStatus: scenario.expected, observedStatus: b.value.verification.status,
+        declaredSetComplete: b.value.verification.coverage.declaredSetComplete });
+    });
+  }
+  assert.equal(report.retainedSkills.outcomes.length, report.retainedSkills.expectedCases, 'retained Skills evidence is incomplete');
 }
 for (const name of (await readdir(path.join(app, 'fixtures'))).sort()) {
   const fixturePath = path.join(app, 'fixtures', name);

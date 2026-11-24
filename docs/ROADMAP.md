@@ -1,5 +1,10 @@
 # mcpm Roadmap — Security & Developer Experience
 
+> **Historical strategy/design snapshot.** Dates, delivery tables, estimates and
+> market claims below retain their original context. Current selected work is
+> [BACKLOG](BACKLOG.md); current behavior is [CONTRACTS](CONTRACTS.md) and
+> [GUARD](GUARD.md). Old proposals and release sequences are not current authorization.
+
 > **2026-11-05 delivery checkpoint:** released v0.49.0; native doctor validation
 > tooling merged in #307 and remains unreleased. Since this plan's older baseline,
 > update/settings preservation shipped in v0.45.0, package-version binding and
@@ -15,7 +20,7 @@
 > covers the developer- and enterprise-**adoption** track (distribution, org policy,
 > SIEM/SBOM evidence, client reach). This file is the security/DevX **feature** track.
 >
-> Status: in delivery · Baseline: **v0.42.0** · Drafted: 2026-06-09 · Reconciled: 2026-09-19
+> Historical status: in delivery · Baseline: **v0.42.0** · Drafted: 2026-06-09 · Reconciled: 2026-09-19
 >
 > **Delivery log:**
 > - ✅ **F4 — Release-age cooldown + install-script-shape awareness** — shipped (PR #70,

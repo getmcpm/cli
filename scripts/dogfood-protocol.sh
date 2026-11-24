@@ -18,7 +18,7 @@ trap cleanup EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
 # Send only the harness and public fixtures to Docker, never the entire checkout.
-for file in Dockerfile package.json package-lock.json harness.mjs self-check.mjs peer.mjs run.mjs; do
+for file in Dockerfile package.json package-lock.json harness.mjs self-check.mjs peer.mjs run.mjs skills-verification.mjs skills-self-check.mjs skills-peer.mjs skills-oracle.json; do
   cp "$ROOT/scripts/protocol-sandbox/$file" "$CONTEXT/$file"
 done
 if [ -n "$CANDIDATE" ]; then
@@ -37,6 +37,7 @@ fs.writeFileSync(dockerfile, fs.readFileSync(dockerfile, 'utf8').replace('COPY p
 NODE
 fi
 cp "$ROOT/skills/mcpm/SKILL.md" "$CONTEXT/mcpm-SKILL.md"
+cp -R "$ROOT/scripts/protocol-sandbox/skills-fixtures" "$CONTEXT/skills-fixtures"
 mkdir "$CONTEXT/fixtures"
 for group in benign warn attacks; do
   cp "$ROOT/src/guard/__tests__/fixtures/mcptox/$group"/modern-*.json "$CONTEXT/fixtures/"
@@ -50,7 +51,7 @@ CONTAINER="$(docker create --network none --read-only --user 1000:1000 --cap-dro
 set +e
 node - "$CONTAINER" "$OUTPUT" <<'NODE'
 const r = require('node:child_process').spawnSync('docker', ['start', '-a', process.argv[2]], {
-  stdio: 'inherit', timeout: 120000, killSignal: 'SIGKILL',
+  stdio: 'inherit', timeout: 180000, killSignal: 'SIGKILL',
 });
 const status = r.error?.code === 'ETIMEDOUT' ? 124 : (r.status ?? 1);
 require('node:fs').writeFileSync(`${process.argv[3]}/execution.json`, JSON.stringify({

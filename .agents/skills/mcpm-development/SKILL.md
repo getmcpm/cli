@@ -45,6 +45,24 @@ consent, provider/model behavior or universal conformance from SDK/source checks
 Native inspection commands may execute servers: do not invoke `mcp get` or another
 client merely to fill unknowns in a read-only audit.
 
+For [retained Skills fixtures](../../../docs/RETAINED-SKILLS-DECISION.md), consume
+the expected/observed verification status and declared-set coverage together.
+A harness pass on an expected mismatch/incomplete case is not clean skill
+verification; catalog/directory scope and native loading remain separate.
+
+For the [native inline-hook experiment](../../../docs/NATIVE-PLUGIN-LIFECYCLE.md),
+run the existing native self-check entry point and the explicit offline native
+command. Consume executed command markers plus complete raw lifecycle evidence;
+settings, hook listings and declared bundle versions alone do not prove loading.
+Keep text-skill activation unknown and real host profiles outside the fixture.
+
+For the [command-hook confinement experiment](../../../docs/HOOK-CONFINEMENT-DECISION.md),
+run its dependency-free receipt checks through the native self-check entry point.
+Native measurement requires the reviewed explicit public-input/disposable layout;
+never use real hooks or broaden the production standard profile to finish a run.
+Consume useful-work breakage, independently observed effects and descendant
+cancellation separately. A safely cleaned-up detached survivor remains NO-GO.
+
 ## Requested review and fix loop
 
 Follow the user's model split: when requested, Sol builds and Astra reviews the
@@ -59,6 +77,12 @@ unavailable, say so; do not label self-review or another model as Astra review.
 Do not infer approval, merge or publication from a clean local review.
 
 ## Documentation and handoff
+
+For maintainer-owned work with authorized Project access, reconcile the existing
+scoped private planning issue/card using the [tracking agreement](../../../docs/MAINTAINER-WORKFLOW.md#delivery-tracking).
+Record reviewed heads, checks, blockers and remaining scope; do not close a broader
+parent for a shipped slice. Missing private access must not block a public contribution.
+
 
 Update only relevant docs/contracts, Unreleased changelog entries and the public
 [mcpm usage skill](../../../skills/mcpm/SKILL.md) when its consumer workflow

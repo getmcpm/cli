@@ -1,6 +1,8 @@
 # Legitimate session corpus (FP-rate measurement)
 
-Per-session JSONL captures from real-world MCP servers. The fp-rate test
+Synthetic, realistic per-session JSONL fixtures modeled on MCP servers. These
+are not captures from real-world server executions, so the fixture result does
+not estimate a real-world false-positive rate. The fp-rate test
 runner inspects every JSON-RPC message through the production engine and
 asserts the **false-positive rate stays below 2%** (design doc Success Criterion).
 
@@ -37,7 +39,8 @@ prior instructions", "ignore previous instructions" written out exactly) WILL
 false-positive — the regex engine cannot distinguish meta-discussion from
 instruction. The fetch-mcp.jsonl fixture intentionally writes documentation
 content that **describes** attack patterns rather than quoting them verbatim,
-which mirrors how real security docs are usually written. If you add a fixture
+which keeps this seed below that known trigger; it is not evidence of how often
+real security documentation contains it. If you add a fixture
 that includes a verbatim attack phrase as benign content, the test will fail
 and that's the engine being honest about its limit, not a fixture bug.
 
@@ -45,9 +48,10 @@ Future engines could use context-aware detection (LLM-as-judge over a
 documentation/instruction window — see v0.5.1+ roadmap), but v0.5.0 ships
 without it.
 
-## Refresh policy (post-v0.5.0)
+## Proposed refresh policy (not implemented)
 
-Per design doc Reviewer Concern #11 + TODOS entry #29:
+The original design doc Reviewer Concern #11 + TODOS entry #29 proposed the
+following future process; it is not an operating capture/publication policy:
 - Maintainer captures fresh 5-minute sessions against each top-20 server every quarter
 - Capture script (`scripts/capture-fp-session.ts`, not yet written) tees stdio
   through `mcpm guard run --inner` + writes to a JSONL

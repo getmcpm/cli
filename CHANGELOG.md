@@ -8,6 +8,67 @@ _Add entries here, never under a stamped version_ — a release commit renames t
 heading, and a branch that wrote beneath it merges without conflict straight into a
 published section (it happened to #170).
 
+### Fixed
+
+- Describe the starter `mcpm.yaml` scaffold in zsh and fish completions for `mcpm init`.
+
+## [0.54.4] - 2026-11-20
+
+### Fixed
+
+- Report unreadable client configs in `sync`, `list` and `diff` without treating them as absent.
+
+## [0.54.3] - 2026-11-20
+
+### Fixed
+
+- Compare remote endpoint and transport drift per client in `mcpm diff` without printing endpoint values.
+
+## [0.54.2] - 2026-11-20
+
+### Fixed
+
+- Restore readable Git diffs for frozen integrity verification without changing cache keys.
+
+## [0.54.1] - 2026-11-20
+
+### Fixed
+
+- Return an empty JSON array from `mcpm update --json` and `mcpm outdated --json` when no servers are installed.
+
+## [0.54.0] - 2026-11-13
+
+### Added
+
+- Add separate strict zero-argument `mcpm_audit_report` MCP tool, reusing the version-1 CLI store coverage report with advertised output schema, structured content and equivalent JSON text in modern/legacy protocols. Preserve existing `mcpm_audit`, scoring and opt-in scanner behavior.
+
+## [0.53.0] - 2026-11-11
+
+### Added
+
+- Add CLI-only `mcpm audit --report-json` version-1 coverage evidence for the fixed mcpm store and latest registry metadata: explicit inventory gaps, per-item registry/static/external/health states and separate empty/no-findings/incomplete outcomes. Preserve legacy audit JSON, SARIF, MCP and score/gate behavior; no report-mode writes or expanded client discovery.
+
+### Documentation
+
+- Clarify homepage discovery versus trust assessment, show server installation and explicit guard activation, and qualify account/subscription copy.
+
+- Add a standalone dark project homepage under `website/`, with a command preview, client adapter overview, installation and explicit security boundaries; add Netlify staging configuration for GitHub deployments.
+
+- Shorten onboarding, index task guides, correct trust/guard/verification and historical-status claims, and compare stdio runtime inspection, server confinement and agent lifecycle hooks without changing behavior.
+
+## [0.52.1] - 2026-11-10
+
+### Changed
+
+- Publish an email-metadata patch using the verified npm maintainer contact `hello@m1ngshum.com`; runtime code and dependencies are unchanged from 0.52.0. Historical npm versions retain their original metadata.
+- Keep guard-playground and mcp-guardbench pinned to their tested 0.52.0 baseline for this metadata-only patch; no companion merge or deployment is included.
+
+## [0.52.0] - 2026-11-08
+
+### Added
+
+- Extend read-only `mcpm scope` with explicit `--client vscode`: fixed VS Code/Copilot configuration origins, format-specific JSON/JSONC reads, duplicate-declaration metadata and instruction-file metadata. Selected profile, forwarding, loading and enforcement remain unknown; Claude Code stays the default.
+
 ## [0.51.0] - 2026-11-06
 
 ### Added

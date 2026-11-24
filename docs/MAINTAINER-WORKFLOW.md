@@ -1,28 +1,57 @@
 # Maintainer workflow and context
 
-## Current checkpoint — 2026-11-06
+## Current checkpoint — 2026-11-20
 
-Current published CLI: **v0.51.0**. Experimental #156 archive-only local
-Agent Skills/Claude plugin change receipts shipped through Sol implementation,
-Astra review/fixes and CI-green [PR #327](https://github.com/getmcpm/cli/pull/327).
-Actual npm archive authentication, smoke, 87 modern/legacy protocol checks and
-real-consumer reruns passed with exact runtime/input/harness bindings. Both
-companion updates are Astra-reviewed/CI-green and merged; the deployed playground
-returned all seven expected public assets. See the
-[v0.51.0 release record](RELEASE-2026-11-06-v0.51.0.md).
+The latest published CLI is **v0.54.4**. Read-only `sync`, `list` and `diff`
+report unreadable client configs and retain results from readable configs. The
+[release record](RELEASE-2026-11-20-v0.54.4.md) includes package and protocol
+verification and links to the companion updates.
 
-The [artifact profile](ARTIFACT-REVIEW.md) keeps byte/declaration coverage and
-host state separate. The one-consumer retention decision met the bounded gate;
-manual source review remained necessary, with no measured efficiency or native
-activation/safety claim. The [candidate history](ARTIFACT-REVIEW-VALIDATION.md)
-retains earlier archive identities and excluded attempts. The public mcpm skill
-is 1.3.0. Contributor skills remain repo-only.
+The bounded `#131`/`#149` report slice shipped; broader audit and host coverage
+remain open. Earlier VS Code/Copilot `scope` evidence remains bound to its named
+release/client; Claude Code remains the default and broader `#141` stays open.
 
-The bounded #122 Claude policy slice remains documented against its named
-[v0.50.1 archive](RELEASE-2026-11-06-v0.50.1.md); its native measurements do not
-transfer to 0.51.0. Conditional #157/#159 retain consumer/demand stop rules;
-#158 requires demonstrated activation-drift need. Broader #141 remains open.
-See the [active backlog](BACKLOG.md).
+The [active backlog](BACKLOG.md) owns selected work and acceptance. Recent bounded
+MVP/decision records cover [archive review](ARTIFACT-REVIEW.md),
+[retained Skills](RETAINED-SKILLS-DECISION.md),
+[native hook lifecycle](NATIVE-PLUGIN-LIFECYCLE.md),
+[hook confinement NO-GO](HOOK-CONFINEMENT-DECISION.md),
+[external evidence deferral](EXTERNAL-EVIDENCE-DECISION.md) and
+[ACP trace deferral](ACP-TRACE-DECISION.md). Their measurements remain bound to
+named inputs/hosts, rather than transferring to every subsequent package.
+#331 remains separate. Contributor skills remain repo-only.
+
+## Delivery tracking
+
+For maintainer-owned work with authorized access, use the existing private
+**mcpm Delivery** GitHub Project in the getmcpm organization. It follows the
+Credspan delivery pattern with private planning issues as the durable execution
+records. Read that repository's `AGENTS.md` and `PROCESS.md`, alongside the shared
+`project-workflow` skill when available. Public selected criteria stay in
+[BACKLOG](BACKLOG.md); private issues retain assignments, blockers, handoffs and
+source evidence, and the Project displays their operational fields. GitHub
+code/PRs/checks own actual implementation and merge state; dated validation/release records own measured proof. Obsidian
+retains private context/history and the board link; chat work-state is a working aid.
+See the [November 15 documentation review](DOCS-REVIEW-2026-11-15.md).
+
+Use **Backlog → Ready → Building → Review → Done**, with **Planned, Implemented,
+Merged, Deployed, Verified** recorded separately as delivery evidence. Ready needs
+bounded scope/acceptance and cleared gates. Done applies only to the card's named
+acceptance: a verified negative experiment is not a production capability, and a
+shipped slice never closes its broad remaining-scope card. Keep #157/#159 consumer
+gates and #95 NO-GO explicit. Leave dates/priorities unset until triage/commitment.
+
+At start, search existing private issues/cards and reconcile the scoped task with
+public criteria. Record one active agent/chat owner before implementation; direct
+user assignment establishes ownership absent a conflict, while autonomous queue
+allocation needs a conditional claim or named coordinator. Read current task
+content before updating and preserve user edits. After meaningful changes, record
+exact review/head/check/tag/archive/deployment evidence and remaining limits, then
+read back issue state and Project fields. Keep public backlog IDs distinct from
+private issue numbers; completed bounded slices do not close broader work.
+Do not create duplicate tracking, expose private board/card/vault details in public
+PRs, or infer implementation/merge/release/provider-spend permission from a card.
+Public contributions must not require access to private maintainer tracking.
 
 ## Instruction and skill loading
 
@@ -73,12 +102,13 @@ the wrapper reference or Windows behavior. Local receipt:
 
 - [CONTRIBUTING](../CONTRIBUTING.md): toolchain, source checks and release smoke.
 - [Contracts](CONTRACTS.md), [architecture](ARCHITECTURE.md), [guard](GUARD.md),
-  [policy](POLICY.md), [security delivery status](SECURITY-HARDENING.md) and
-  [security reporting](../SECURITY.md): maintained behavior and boundaries.
+  [policy](POLICY.md) and [security reporting](../SECURITY.md): maintained behavior
+  and boundaries. [Security hardening](SECURITY-HARDENING.md) retains a dated plan.
 - [Protocol baseline](PROTOCOL-VALIDATION.md), [candidate serve](SERVE-PROTOCOL-VALIDATION.md),
   [Skills metadata](SKILLS-GUARD-VALIDATION.md), [doctor evidence](DOCTOR-EVIDENCE-VALIDATION.md),
   [native clients](NATIVE-CLIENT-VALIDATION.md), [Cursor](CURSOR-CLIENT-VALIDATION.md)
   and [Gemini](GEMINI-CLIENT-VALIDATION.md): choose evidence for the changed surface.
+- [Coverage-aware audit](AUDIT-REPORT.md): opt-in CLI store/report contract; legacy audit outputs remain separate.
 - [Project scope](PROJECT-SCOPE.md): read-only inventory coverage and unknowns.
   [Artifact review](ARTIFACT-REVIEW.md) and [candidate evidence](ARTIFACT-REVIEW-VALIDATION.md):
   archive/profile boundaries, concrete consumer decision and artifact attribution.

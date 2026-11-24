@@ -34,7 +34,8 @@ merging Dependabot's lockfile. GitHub Actions bumps are unaffected.
 
 `@types/node` is pinned to the engines floor (22), so a local `typecheck` only proves
 the code compiles against Node 22's API. CI re-runs it per matrix leg against that
-leg's own typings. To reproduce a `Typecheck against @types/node <major>` failure:
+leg's own typings. To reproduce a `Typecheck against @types/node <major>` failure,
+use an isolated clean checkout so restoring the two experiment files cannot erase existing work:
 
 ```
 pnpm add -D @types/node@26   # or 24 — the major CI failed on
@@ -45,7 +46,9 @@ git checkout -- package.json pnpm-lock.yaml
 ### Dogfooding a release
 
 `pnpm dogfood:release` packs the tarball, clean-installs it, and smoke-runs the real
-binary. It gates `pnpm publish`, so it runs against your *local* build and needs a Node
+binary. The supported tag-release workflow requires this gate before publishing.
+A direct local `pnpm publish` only runs the package's build lifecycle hook; it does not
+automatically run this smoke. The smoke uses your *local* build and needs a Node
 inside `engines.node`.
 
 To smoke an **already-published** version instead, set `MCPM_DOGFOOD_SPEC` — the same
@@ -63,9 +66,11 @@ Three places to run that, in increasing order of "not your machine":
 | a container | `docker run --rm -v "$PWD/scripts:/w/scripts:ro" -w /w -e MCPM_DOGFOOD_SPEC=@getmcpm/cli@latest node:26 ./scripts/dogfood-release.sh` | any Node major, disposable, no local Node needed |
 | GitHub | Actions → **Dogfood** → *Run workflow* | Node 22/24/26 + macOS, zero local setup |
 
-The smoke run uses a throwaway `$HOME`, so `doctor` sees a clean machine and nothing
-touches your real `~/.mcpm` or MCP client configs. `dogfood-confine.sh` does the same.
-Verified: after a full run in a container, `$HOME/.mcpm` does not exist.
+The release script sets a throwaway `$HOME` for its CLI smoke commands, so
+`doctor` sees synthetic client state. Build, pack and npm installation happen
+before that switch and use the normal home/caches; this is not an OS sandbox
+for package installation. `dogfood-confine.sh` also uses a disposable home for
+its fixture commands; `pnpm dogfood:confine` builds before running that script.
 
 macOS-only end-to-end check for the `--confine` sandbox:
 
@@ -79,9 +84,9 @@ Docker provisions the test dependencies, then runs with no network or host
 mounts. See [the matrix, evidence and limits](docs/PROTOCOL-VALIDATION.md).
 
 For installed VS Code/Claude Code checks inside disposable macOS VMs, see
-[native client validation](docs/NATIVE-CLIENT-VALIDATION.md). Its fixture/evidence
-self-checks run with `node --test scripts/native-client/self-check.mjs`; native
-VM runs require the separately pinned public client/runtime payload.
+[native client validation](docs/NATIVE-CLIENT-VALIDATION.md), including its
+account/VM-free self-check command. Native VM runs require the separately pinned
+public client/runtime payload.
 Candidate changes must use the explicit candidate mode and a fresh packed CLI;
 a passing published-baseline run does not validate changed production code.
 Use the separate `--approvals` native suite for default tool consent; the

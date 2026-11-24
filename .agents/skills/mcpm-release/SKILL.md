@@ -91,6 +91,9 @@ Clean-install the downloaded archive with disposable client state and run the
 repository's release smoke and modern/legacy direct/guarded protocol sandbox.
 Bind receipts to archive/runtime hashes, dependency lock, harness, public skill
 and actual isolation. Keep expected unsupported cases and exclusions visible.
+For [retained Skills fixtures](../../../docs/RETAINED-SKILLS-DECISION.md), verify
+expected versus observed statuses and per-member byte/origin/coverage bindings;
+a harness pass on an expected nonclean case is not a clean skill verdict.
 Use native-client checks where needed for the changed behavior; record exact
 versions and separate configured, observed-loaded and enforced evidence. Do not
 transfer old native results to a new archive or claim universal compatibility.
@@ -128,6 +131,12 @@ Claude Code `mcp get` reference previously launched a harmless server sentinel.
 
 ## Documentation and completion gate
 
+For maintainer-owned releases with authorized Project access, update the existing
+scoped private planning issue/card under the [tracking agreement](../../../docs/MAINTAINER-WORKFLOW.md#delivery-tracking).
+Keep merged, published/deployed and verified evidence separate; mark Done only
+when that card's acceptance is met. Private access is not required for public contributions.
+
+
 Update relevant CLI/companion docs, release proof and the mcpm Obsidian release,
 status/backlog notes when that vault is available. Keep candidate, published,
 merged and deployed checkpoints distinct. Do not mark a broader backlog item
@@ -142,3 +151,9 @@ action; never silently omit a companion or claim the entire release is synced.
 
 Report the CLI release link, actual artifact verification, companion outcomes,
 incoming relevant PRs and any material unchecked limits concisely.
+
+For [native inline-plugin lifecycle evidence](../../../docs/NATIVE-PLUGIN-LIFECYCLE.md),
+consume the complete expected/observed hook lifecycle and independent input/image
+bindings. A fixture hook marker proves only that command component on its named
+host; it cannot certify all plugin bytes or text-skill activation. Harness-only
+changes do not themselves require an npm release or companion repin.

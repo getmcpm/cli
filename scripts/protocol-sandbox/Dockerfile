@@ -4,6 +4,8 @@ COPY package.json package-lock.json ./
 RUN npm ci --ignore-scripts --no-audit --no-fund && npm cache clean --force
 RUN mkdir /evidence && chown 1000:1000 /evidence
 COPY harness.mjs self-check.mjs peer.mjs run.mjs ./
+COPY skills-verification.mjs skills-self-check.mjs skills-peer.mjs skills-oracle.json ./
+COPY skills-fixtures ./skills-fixtures
 COPY mcpm-SKILL.md ./
 COPY fixtures ./fixtures
 ENV HOME=/work/home TMPDIR=/work

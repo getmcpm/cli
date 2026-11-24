@@ -1,5 +1,10 @@
 # mcpm Roadmap — Developer & Enterprise Adoption
 
+> **Historical strategy/design snapshot.** Dates, delivery tables, estimates and
+> market claims below retain their original context. Current selected work is
+> [BACKLOG](BACKLOG.md); current behavior is [CONTRACTS](CONTRACTS.md) and
+> [GUARD](GUARD.md). Old proposals and release sequences are not current authorization.
+
 > **2026-11-05 delivery checkpoint:** released v0.49.0; native doctor validation
 > tooling merged in #307 and remains unreleased. Since this plan's older baseline,
 > update/settings preservation shipped in v0.45.0, package-version binding and
@@ -10,7 +15,7 @@
 > adoption measurement or a new commitment to the old “next up” sequence.
 
 
-> Status: **Active plan of record** · Current: **v0.42.0** · Baseline drafted at v0.16.0 (2026-07-03)
+> Historical status: **Plan of record** · Snapshot: **v0.42.0** · Baseline drafted at v0.16.0 (2026-07-03)
 >
 > Companion to [`VISION.md`](./VISION.md) (the strategy layer both roadmaps hang off) and
 > [`ROADMAP.md`](./ROADMAP.md) (the security/DevX feature roadmap, now ~80%

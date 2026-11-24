@@ -40,3 +40,6 @@ research/
 
 # Local Claude Code permissions (per-machine, never shared)
 .claude/settings.local.json
+
+# Local Netlify project linkage
+.netlify/

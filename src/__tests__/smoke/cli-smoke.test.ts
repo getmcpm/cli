@@ -15,7 +15,7 @@
 
 import { describe, it, expect, beforeAll } from "vitest";
 import { spawnSync, execSync } from "node:child_process";
-import { mkdtempSync, rmSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdtempSync, rmSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import os from "node:os";
 
@@ -55,6 +55,93 @@ function run(args: string[], home: string): RunResult {
   const stderr = r.stderr ?? "";
   return { stdout, stderr, code: r.status ?? -1, out: `${stdout}\n${stderr}` };
 }
+
+describe("CLI smoke — read-only client coverage", () => {
+  function setup(home: string): string {
+    const stack = path.join(home, "mcpm.yaml");
+    writeFileSync(stack, 'version: "1"\nservers:\n  missing: { url: "https://missing.invalid/mcp" }\n');
+    writeFileSync(path.join(home, "mcpm-lock.yaml"), 'lockfileVersion: 1\nlockedAt: "2026-11-20"\nservers:\n  missing: { url: "https://missing.invalid/mcp" }\n');
+    mkdirSync(path.join(home, ".cursor"));
+    writeFileSync(path.join(home, ".cursor", "mcp.json"), JSON.stringify({
+      mcpServers: { present: { url: "https://present.invalid/mcp" } },
+    }));
+    return stack;
+  }
+
+  it("treats an absent client source as missing rather than unreadable", () => {
+    withHome((home) => {
+      const stack = setup(home);
+      const sync = run(["sync", "--check", "--json"], home);
+      expect(sync.code).toBe(0);
+      expect(JSON.parse(sync.stdout).unreadableClients).toEqual([]);
+      const diff = run(["diff", "--file", stack, "--json"], home);
+      expect(diff.code).toBe(0);
+      expect(JSON.parse(diff.stdout)).toContainEqual(expect.objectContaining({ name: "missing", status: "missing" }));
+      const list = run(["list", "--json"], home);
+      expect(list.code).toBe(0);
+      expect(list.stderr).toBe("");
+      expect(JSON.parse(list.stdout)).toHaveLength(1);
+    });
+  });
+
+  function expectUnreadable(home: string, stack: string, client: string, readableClient: string): void {
+    const sync = run(["sync", "--check", "--json"], home);
+    expect(sync.code).toBe(2);
+    expect(JSON.parse(sync.stdout).unreadableClients).toEqual([client]);
+    const list = run(["list", "--json"], home);
+    expect(list.code).toBe(0);
+    expect(list.stderr).toContain(client);
+    expect(JSON.parse(list.stdout)).toMatchObject([{ client: readableClient, serverName: "present" }]);
+    const diff = run(["diff", "--file", stack, "--json"], home);
+    expect(diff.code).toBe(0);
+    expect(diff.stderr).toContain(client);
+    expect(JSON.parse(diff.stdout)).toContainEqual(expect.objectContaining({
+      name: "missing", status: "unreadable", clients: [client],
+    }));
+    expect(JSON.parse(diff.stdout)).not.toContainEqual(expect.objectContaining({ name: "missing", status: "missing" }));
+  }
+
+  it("preserves readable siblings when a client config is malformed", () => {
+    withHome((home) => {
+      const stack = setup(home);
+      writeFileSync(path.join(home, ".claude.json"), "{broken");
+      expectUnreadable(home, stack, "claude-code", "cursor");
+    });
+  });
+
+  it.skipIf(process.platform === "win32" || process.getuid?.() === 0)(
+    "reports a client config behind a permission-denied directory",
+    () => {
+      withHome((home) => {
+        const stack = setup(home);
+        writeFileSync(path.join(home, ".claude.json"), JSON.stringify({
+          mcpServers: { present: { type: "http", url: "https://present.invalid/mcp" } },
+        }));
+        const denied = path.join(home, ".cursor");
+        chmodSync(denied, 0o000);
+        try {
+          expectUnreadable(home, stack, "cursor", "claude-code");
+        } finally {
+          chmodSync(denied, 0o700);
+        }
+      });
+    },
+  );
+});
+
+describe("CLI smoke — empty update queries", () => {
+  it.each(["update", "outdated"])("%s keeps empty JSON and human output distinct", (command) => {
+    withHome((home) => {
+      const json = run([command, "--json"], home);
+      expect(json.code).toBe(0);
+      expect(JSON.parse(json.stdout)).toEqual([]);
+
+      const plain = run([command], home);
+      expect(plain.code).toBe(0);
+      expect(plain.stdout.trim()).toBe("No servers installed.");
+    });
+  });
+});
 
 describe("CLI smoke — sanity", () => {
   it("--version prints the package version and exits 0", () => {
@@ -246,7 +333,24 @@ describe("CLI smoke — guard list-signatures carries the OWASP MCP Top 10 pin (
   });
 });
 
-describe("CLI smoke — generated completions are valid shell", () => {
+describe("CLI smoke — generated completions", () => {
+  it("uses the init help description in zsh and fish completions", () => {
+    withHome((home) => {
+      const help = run(["init", "--help"], home);
+      expect(help.code).toBe(0);
+      const description = help.stdout.split(/\r?\n/).find((line) => line.startsWith("Scaffold a starter"));
+      expect(description).toBeDefined();
+
+      const zsh = run(["completions", "zsh"], home);
+      expect(zsh.code).toBe(0);
+      expect(zsh.stdout).toContain(`'init:${description}'`);
+
+      const fish = run(["completions", "fish"], home);
+      expect(fish.code).toBe(0);
+      expect(fish.stdout).toContain(`-a init -d '${description}'`);
+    });
+  });
+
   it("the bash completion script passes `bash -n` (syntax check)", () => {
     withHome((home) => {
       const script = run(["completions", "bash"], home).stdout;

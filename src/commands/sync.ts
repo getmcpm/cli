@@ -215,7 +215,7 @@ function renderDashboard(model: DriftModel, output: (text: string) => void): voi
 // ---------------------------------------------------------------------------
 
 import { Command } from "commander";
-import { detectInstalledClients } from "../config/detector.js";
+import { detectClientConfigCandidates } from "../config/detector.js";
 import { getConfigPath } from "../config/paths.js";
 import { getAdapter as getAdapterDefault } from "../config/index.js";
 import { stdoutOutput } from "../utils/output.js";
@@ -232,7 +232,7 @@ export function registerSyncCommand(program: Command): void {
         const result = await handleSync(
           { json: opts.json },
           {
-            detectClients: detectInstalledClients,
+            detectClients: detectClientConfigCandidates,
             getAdapter: getAdapterDefault,
             getPath: getConfigPath,
             output: stdoutOutput,

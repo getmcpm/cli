@@ -3,8 +3,9 @@
 `mcpm serve` uses `@modelcontextprotocol/server` 2.4.0 with the SDK's explicit
 `serveStdio(factory, { legacy: "serve" })` entry. Modern `2026-07-28` peers use
 `server/discover` and per-request metadata; legacy peers retain initialization.
-The same nine tools, full strict input schemas, handlers, trust gates, text
-results and declared search/info outputs serve both eras. The guard retains its
+Current source and v0.54.0 serve ten tools, including `mcpm_audit_report`;
+published v0.53.0 retains nine. Both eras use the same strict input schemas,
+handlers, trust gates, text results and declared versioned outputs. The guard retains its
 v1 SDK framing/types; it does not translate protocols. No HTTP endpoint is added.
 
 ## Reproduce
@@ -41,7 +42,7 @@ the fixed reference mode retains its original budgets.
 
 ## Assertions
 
-- Legacy SDK 1.32.1 and modern SDK client 2.3.1 discover all nine strict tools and
+- Legacy SDK 1.32.1 and modern SDK client 2.3.1 discover all ten current strict tools and
   call deterministic `mcpm_list` directly and guarded. Empty synthetic Cursor
   config makes that read-only fixture detectable; no real client is used.
 - Modern pinned mode negotiates `2026-07-28` without legacy initialization. Actual
@@ -63,7 +64,7 @@ reviewed results are recorded below; failed attempts remain diagnostic evidence.
 ## Limits
 
 This proves named stdio operations with synthetic peers and state. It does not
-prove all nine tool side effects against live clients, provider/model behavior,
+prove all tool side effects against live clients, provider/model behavior,
 HTTP/SSE/OAuth, Tasks/Skills extensions or universal protocol conformance. The
 modern search/info output checks use synthetic registry dependencies. Native
 editor compatibility and published-release verification are separate work.

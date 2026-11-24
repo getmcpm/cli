@@ -78,6 +78,11 @@ export const TOOL_DEFINITIONS = [
     },
   },
   {
+    name: "mcpm_audit_report",
+    description: "Versioned mcpm-store audit evidence with explicit inventory and check coverage; not a safety verdict.",
+    inputSchema: { type: "object" as const, properties: {}, required: [] },
+  },
+  {
     name: "mcpm_doctor",
     description: "Check MCP setup health: detected clients, available runtimes, configuration issues.",
     inputSchema: {
@@ -138,7 +143,7 @@ const serverName = z.string().min(1).max(256);
 const clientId = z.enum(CLIENT_IDS);
 
 /**
- * Zero-argument tools (`mcpm_audit`, `mcpm_doctor`) still declare a CLOSED
+ * Zero-argument tools (`mcpm_audit`, `mcpm_audit_report`, `mcpm_doctor`) still declare a CLOSED
  * schema rather than omitting `inputSchema` entirely. Omitting it advertises no
  * `additionalProperties: false`, so any argument a caller passes is silently
  * ignored — for a tool that takes nothing, that means EVERY argument is
@@ -285,4 +290,40 @@ export const DoctorOutput = z.object({
     message: z.string(),
   }).passthrough()),
   ok: z.boolean(),
+}).passthrough();
+
+const reportCheck = z.object({
+  state: z.enum(["performed", "not_run", "unavailable", "failed"]),
+  reason: z.string().optional(),
+}).passthrough();
+
+export const AuditReportOutput = z.object({
+  schemaVersion: z.literal(1),
+  source: z.literal("mcpm-store"),
+  metadataSelector: z.literal("latest"),
+  scope: z.object({ selectedChecks: z.array(z.string()), excludes: z.array(z.string()) }).passthrough(),
+  inventory: z.object({
+    state: z.enum(["complete", "empty", "incomplete"]),
+    presence: z.enum(["missing", "present", "unknown"]),
+    total: z.number().int().nonnegative().nullable(),
+    accepted: z.number().int().nonnegative(),
+    issues: z.array(z.object({ code: z.string(), index: z.number().int().nonnegative().optional() }).passthrough()),
+  }).passthrough(),
+  assessmentComplete: z.boolean(),
+  outcome: z.enum(["incomplete_assessment", "empty_inventory", "findings", "no_findings"]),
+  summary: z.object({
+    assessed: z.number().int().nonnegative(),
+    unassessed: z.number().int().nonnegative().nullable(),
+    findingCount: z.number().int().nonnegative(),
+  }).passthrough(),
+  servers: z.array(z.object({
+    name: z.string(),
+    score: InfoOutput.shape.trustScore.nullable(),
+    findings: z.array(z.object({
+      severity: z.enum(["critical", "high", "medium", "low"]),
+      type: z.string(),
+      source: z.enum(["static", "external"]).optional(),
+    }).passthrough()),
+    checks: z.object({ registry: reportCheck, static: reportCheck, external: reportCheck, health: reportCheck }).passthrough(),
+  }).passthrough()),
 }).passthrough();

@@ -16,6 +16,11 @@ runtime protection are the product. Keep changes small, deterministic and scoped
   and finish authorized work autonomously; ask only for missing material scope or
   permission. Review-only requests stay read-only. A build or PR does not imply
   authorization to merge, tag, publish, deploy or contact other people.
+- For maintainer-owned work with authorized Project access, reconcile the existing
+  private planning issue/card using [maintainer tracking rules](docs/MAINTAINER-WORKFLOW.md#delivery-tracking).
+  Read the private planning repository's `AGENTS.md` and `PROCESS.md` and the shared
+  `project-workflow` skill when available; retain one active implementation owner.
+  Public criteria stay in [BACKLOG](docs/BACKLOG.md); private access must not block public contributions.
 - Preserve dirty worktrees, unrelated files and local history. Use isolated
   checkouts when needed; never reset or restore another contributor's work.
 
@@ -58,9 +63,11 @@ runtime protection are the product. Keep changes small, deterministic and scoped
   actual enforcement are separate evidence. Static recognition cannot authenticate
   a launcher; a native command named inspection can still execute a server
   (Claude Code `mcp get` has done so). Keep read-only work non-executing.
-- `mcpm scope` inventories fixed Claude Code sources/instruction metadata only;
-  host version, effective selection, loading and enforcement stay unknown. It is
-  separate from DoctorModel and the nine served MCP tools.
+- `mcpm scope` defaults to the fixed Claude Code inventory; `--client vscode`
+  separately inventories fixed VS Code/Copilot sources and instruction metadata.
+  Source formats/origins are not cross-harness precedence or a selected-profile
+  calculation. Host version, effective selection, loading and enforcement stay
+  unknown. It is separate from DoctorModel and the ten served MCP tools.
 - Tests first for behavior: reproduce a bug before fixing the shared cause and
   inspect all callers. Exercise the public path and realistic edge cases, not a
   hand-copied implementation. For security predicates, verify the relevant clause

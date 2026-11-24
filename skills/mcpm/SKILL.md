@@ -2,8 +2,8 @@
 name: mcpm
 description: Discover, assess, verify and manage MCP servers with the @getmcpm/cli package. Use when working with mcpm evidence, project locks or AI client MCP configuration.
 metadata:
-  version: "1.3.0"
-  evidence-contract: "mcpm_search, mcpm_info, advertised mcpm_doctor and verify --json schemaVersion 1"
+  version: "1.3.3"
+  evidence-contract: "mcpm_search, mcpm_info, advertised mcpm_doctor, verify --json and advertised mcpm_audit_report/audit --report-json schemaVersion 1"
 ---
 
 # mcpm
@@ -31,12 +31,36 @@ CLI evidence and state the limitation; do not invent fields or upgrade silently.
   unknown schema version. Doctor structured output starts in v0.49.0; older servers
   still provide JSON text without this advertised contract.
 - For a user-selected project root, check `mcpm scope --help` for availability,
-  then use `mcpm scope <project-root> --json` when supported. This CLI-only,
-  read-only Claude Code inventory is separate from doctor and MCP tools. Check
-  `schemaVersion`, exit status, `inventoryComplete`, source states and coverage.
+  then use `mcpm scope <project-root> --json` for the default Claude Code profile.
+  Use `--client vscode` only when help advertises that selector and the user wants
+  VS Code. This CLI-only, read-only inventory is separate from doctor/MCP tools.
+  Check `client`, `schemaVersion`, exit status, `inventoryComplete`, source states
+  and coverage. VS Code `servers` and portable Copilot `mcpServers` have separate
+  origins/formats; `sameNameIn` observes duplicate declarations, not precedence
+  or an effective winner. Project portable `.mcp.json` can be JSONC or a bare map;
+  Copilot user `mcp-config.json` is strict JSON. Do not rewrite one as the other.
+  Default user-profile paths are candidates, not proof of the selected profile,
+  harness or forwarding. Named profiles, remote/workspace-file sources and
+  instruction applicability can remain unknown even when fixed inventory is complete.
   A complete fixed-source inventory does not establish complete host coverage,
   effective selection, loading or enforcement. Do not run clients or servers to
   fill unknown fields without authorization.
+- For bounded store coverage, discover `mcpm_audit_report` in `tools/list` and
+  require its version-1 output schema, then call it with `{}` (no arguments).
+  Prefer structuredContent, otherwise parse JSON text. Stop on isError; incomplete
+  assessment is report evidence, not a tool error. If unavailable, check
+  `mcpm audit --help` for `--report-json` (CLI report starts in v0.53.0).
+  The separate MCP report tool is newer; do not assume v0.53.0 has it.
+  This version-1 report reads the mcpm store and latest registry metadata;
+  it does not assess installed bytes, client configuration or health. Read
+  `inventory`, `assessmentComplete`, `outcome`, each server's `checks` and findings
+  together. Empty inventory differs from no findings; incomplete assessment keeps
+  sibling findings. Unrun/unavailable/failed checks never mean passed. A configured
+  `MCPM_EXTERNAL_SCANNER` can execute an installed program; unset it if execution
+  is outside scope. External `performed` means parseable adapter output, not
+  attested scanner success. Names remain untrusted identifiers; this report is not
+  anonymous. Stop on unknown schema versions. Do not combine with fix/other output
+  flags or assume legacy `--json`/`mcpm_audit` has this coverage contract.
 - Inspect installed configuration with `mcpm list --json`, `mcpm doctor --json`
   and `mcpm sync --check --json`. Those JSON shapes, except sync, are version
   dependent. An unreadable configuration is unknown, not an empty clean client.

@@ -40,6 +40,8 @@ import type { ClientId } from "../config/paths.js";
 import type { ConfigAdapter } from "../config/adapters/index.js";
 import { parseMinTrust } from "./install.js";
 import { describeRegistryError } from "../registry/errors.js";
+import { handleAuditReport } from "./audit-report.js";
+import type { AuditInventory } from "../store/audit-inventory.js";
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -112,6 +114,7 @@ function minAchievableAuditScore(scored: readonly TrustScore[]): number {
 // ---------------------------------------------------------------------------
 
 export interface AuditOptions {
+  reportJson?: boolean;
   json?: boolean;
   sarif?: boolean;
   fix?: boolean;
@@ -120,6 +123,8 @@ export interface AuditOptions {
 }
 
 export interface AuditDeps {
+  getAuditInventory?: () => Promise<AuditInventory>;
+  scannerConfigured?: () => boolean;
   getInstalledServers: () => Promise<InstalledServer[]>;
   getServer: (name: string) => Promise<ServerEntry>;
   scanTier1: (entry: ServerEntry) => Finding[];
@@ -264,6 +269,13 @@ export async function handleAudit(
   options: AuditOptions,
   deps: AuditDeps
 ): Promise<number> {
+  if (options.reportJson === true) {
+    if (options.json || options.sarif || options.fix || options.minTrust !== undefined || options.yes) {
+      throw new AuditUsageError("--report-json cannot be combined with --json, --sarif, --fix, --min-trust or --yes");
+    }
+    return handleAuditReport(deps);
+  }
+
   // Early validation
   if (options.fix === true && options.json === true && options.yes !== true) {
     throw new AuditUsageError("--fix --json requires --yes");
@@ -561,11 +573,12 @@ export function registerAuditCommand(program: Command): void {
     .command("audit")
     .description("Scan all installed servers and produce a trust report")
     .option("--json", "Output raw JSON instead of a formatted table")
+    .option("--report-json", "Output versioned coverage evidence for the mcpm store (read-only)")
     .option("--sarif", "Output a SARIF 2.1.0 report for GitHub code-scanning (report only)")
     .option("--fix", "remove servers whose trust score is below the threshold")
     .option("--min-trust <n>", "threshold used by --fix (default 50)", parseMinTrust)
     .option("-y, --yes", "skip confirmation prompts")
-    .action(async (opts: { json?: boolean; sarif?: boolean; fix?: boolean; minTrust?: number; yes?: boolean }) => {
+    .action(async (opts: AuditOptions) => {
       const { getInstalledServers } = await import("../store/servers.js");
       const { RegistryClient } = await import("../registry/client.js");
       const { scanTier1 } = await import("../scanner/tier1.js");
@@ -582,7 +595,7 @@ export function registerAuditCommand(program: Command): void {
         getInstalledServers,
         getServer: (name) => client.getServer(name),
         scanTier1,
-        checkScannerAvailable,
+        checkScannerAvailable: opts.reportJson ? () => checkScannerAvailable({ onWarn: () => undefined }) : checkScannerAvailable,
         scanTier2,
         computeTrustScore,
         output: stdoutOutput,
@@ -593,7 +606,7 @@ export function registerAuditCommand(program: Command): void {
       };
 
       const exitCode = await handleAudit(
-        { json: opts.json, sarif: opts.sarif, fix: opts.fix, minTrust: opts.minTrust, yes: opts.yes },
+        { reportJson: opts.reportJson, json: opts.json, sarif: opts.sarif, fix: opts.fix, minTrust: opts.minTrust, yes: opts.yes },
         deps
       ).catch((err: Error) => {
         console.error(chalk.red(err.message));
