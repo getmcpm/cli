@@ -34,6 +34,7 @@ record's current reproduction instructions and retained historical limits.
 
 - [Latest release: v0.54.4](RELEASE-2026-11-20-v0.54.4.md) and
   [all release notes](../CHANGELOG.md).
+- [v0.54.3 release verification](RELEASE-2026-11-20-v0.54.3.md).
 - [Protocol baseline](PROTOCOL-VALIDATION.md), [serve](SERVE-PROTOCOL-VALIDATION.md),
   [Skills metadata](SKILLS-GUARD-VALIDATION.md) and [doctor](DOCTOR-EVIDENCE-VALIDATION.md).
 - [Native clients](NATIVE-CLIENT-VALIDATION.md), [Cursor](CURSOR-CLIENT-VALIDATION.md),
