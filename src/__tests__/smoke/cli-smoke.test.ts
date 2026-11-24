@@ -333,7 +333,24 @@ describe("CLI smoke — guard list-signatures carries the OWASP MCP Top 10 pin (
   });
 });
 
-describe("CLI smoke — generated completions are valid shell", () => {
+describe("CLI smoke — generated completions", () => {
+  it("uses the init help description in zsh and fish completions", () => {
+    withHome((home) => {
+      const help = run(["init", "--help"], home);
+      expect(help.code).toBe(0);
+      const description = help.stdout.split(/\r?\n/).find((line) => line.startsWith("Scaffold a starter"));
+      expect(description).toBeDefined();
+
+      const zsh = run(["completions", "zsh"], home);
+      expect(zsh.code).toBe(0);
+      expect(zsh.stdout).toContain(`'init:${description}'`);
+
+      const fish = run(["completions", "fish"], home);
+      expect(fish.code).toBe(0);
+      expect(fish.stdout).toContain(`-a init -d '${description}'`);
+    });
+  });
+
   it("the bash completion script passes `bash -n` (syntax check)", () => {
     withHome((home) => {
       const script = run(["completions", "bash"], home).stdout;
