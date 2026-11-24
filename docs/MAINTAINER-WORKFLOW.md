@@ -1,16 +1,11 @@
 # Maintainer workflow and context
 
-## Current checkpoint — 2026-11-14
+## Current checkpoint — 2026-11-20
 
-Latest published CLI: **v0.54.0**, adding the separate strict zero-argument
-`mcpm_audit_report` tool with structured and matching JSON text evidence. The
-existing `mcpm_audit`, CLI formats, scoring and gates remain unchanged. Current
-source and v0.54.0 expose ten tools; the fixed published protocol reference remains
-unchanged. Public usage skill source is **1.3.3**.
-
-The [release record](RELEASE-2026-11-14-v0.54.0.md) owns fresh published-archive,
-modern/legacy protocol, CLI compatibility and companion evidence. Both companions
-align to **0.54.0**; prior measured records retain their original archive identity.
+The latest published CLI is **v0.54.4**. Read-only `sync`, `list` and `diff`
+report unreadable client configs and retain results from readable configs. The
+[release record](RELEASE-2026-11-20-v0.54.4.md) includes package and protocol
+verification and links to the companion updates.
 
 The bounded `#131`/`#149` report slice shipped; broader audit and host coverage
 remain open. Earlier VS Code/Copilot `scope` evidence remains bound to its named
@@ -25,6 +20,38 @@ MVP/decision records cover [archive review](ARTIFACT-REVIEW.md),
 [ACP trace deferral](ACP-TRACE-DECISION.md). Their measurements remain bound to
 named inputs/hosts, rather than transferring to every subsequent package.
 #331 remains separate. Contributor skills remain repo-only.
+
+## Delivery tracking
+
+For maintainer-owned work with authorized access, use the existing private
+**mcpm Delivery** GitHub Project in the getmcpm organization. It follows the
+Credspan delivery pattern with private planning issues as the durable execution
+records. Read that repository's `AGENTS.md` and `PROCESS.md`, alongside the shared
+`project-workflow` skill when available. Public selected criteria stay in
+[BACKLOG](BACKLOG.md); private issues retain assignments, blockers, handoffs and
+source evidence, and the Project displays their operational fields. GitHub
+code/PRs/checks own actual implementation and merge state; dated validation/release records own measured proof. Obsidian
+retains private context/history and the board link; chat work-state is a working aid.
+See the [November 15 documentation review](DOCS-REVIEW-2026-11-15.md).
+
+Use **Backlog → Ready → Building → Review → Done**, with **Planned, Implemented,
+Merged, Deployed, Verified** recorded separately as delivery evidence. Ready needs
+bounded scope/acceptance and cleared gates. Done applies only to the card's named
+acceptance: a verified negative experiment is not a production capability, and a
+shipped slice never closes its broad remaining-scope card. Keep #157/#159 consumer
+gates and #95 NO-GO explicit. Leave dates/priorities unset until triage/commitment.
+
+At start, search existing private issues/cards and reconcile the scoped task with
+public criteria. Record one active agent/chat owner before implementation; direct
+user assignment establishes ownership absent a conflict, while autonomous queue
+allocation needs a conditional claim or named coordinator. Read current task
+content before updating and preserve user edits. After meaningful changes, record
+exact review/head/check/tag/archive/deployment evidence and remaining limits, then
+read back issue state and Project fields. Keep public backlog IDs distinct from
+private issue numbers; completed bounded slices do not close broader work.
+Do not create duplicate tracking, expose private board/card/vault details in public
+PRs, or infer implementation/merge/release/provider-spend permission from a card.
+Public contributions must not require access to private maintainer tracking.
 
 ## Instruction and skill loading
 

@@ -134,19 +134,67 @@ describe("handleDiff", () => {
     expect(parsed[0].status).toBe("match");
   });
 
-  it("shows missing URL server with url detail", async () => {
+  it.each([
+    ["claude-desktop", "cursor"],
+    ["cursor", "claude-desktop"],
+  ] as const)("attributes remote endpoint drift when %s is detected first", async (first, second) => {
+    const expected = "https://user:stack-secret@one.example/mcp?token=lock-secret";
+    const different = "https://other:client-secret@two.example/mcp?key=installed-secret";
+    const stackPath = await writeStackAndLock(
+      `version: "1"\nservers:\n  remote: { url: "${expected}" }\n`,
+      `lockfileVersion: 1\nlockedAt: "2026-04-05T10:00:00Z"\nservers:\n  remote: { url: "${expected}" }\n`,
+    );
+    const output = vi.fn();
+    const deps = makeDeps({
+      detectClients: async () => [first, second],
+      getAdapter: (id) => makeAdapter({ remote: { url: id === "cursor" ? different : expected } }),
+      output,
+    });
+    await handleDiff({ stackFile: stackPath, json: true }, deps);
+    const json = output.mock.calls[0][0];
+    expect(JSON.parse(json)).toEqual(expect.arrayContaining([
+      { name: "remote", status: "match", detail: "installed", clients: ["claude-desktop"] },
+      { name: "remote", status: "mismatch", detail: "remote endpoint differs", clients: ["cursor"] },
+    ]));
+    output.mockClear();
+    await handleDiff({ stackFile: stackPath }, deps);
+    const human = output.mock.calls.map(([line]) => line).join("\n");
+    expect(human).toContain("remote endpoint differs [cursor]");
+    expect(human).toContain("installed [claude-desktop]");
+    expect(json + human).not.toMatch(/one\.example|two\.example|secret/);
+  });
+
+  it.each([
+    [{ command: "node" }, "installed transport differs from remote URL"],
+    [{ url: "https://locked.example/mcp" }, "declared and locked remote endpoints differ"],
+  ] as const)("reports remote transport or lock drift without printing the endpoint", async (entry, detail) => {
+    const locked = "https://locked.example/mcp";
+    const declared = "command" in entry ? locked : "https://declared.example/mcp";
+    const stackPath = await writeStackAndLock(
+      `version: "1"\nservers:\n  remote: { url: "${declared}" }\n`,
+      `lockfileVersion: 1\nlockedAt: "2026-04-05T10:00:00Z"\nservers:\n  remote: { url: "${locked}" }\n`,
+    );
+    const output = vi.fn();
+    const deps = makeDeps({ getAdapter: () => makeAdapter({ remote: entry }), output });
+    await handleDiff({ stackFile: stackPath, json: true }, deps);
+    expect(JSON.parse(output.mock.calls[0][0])).toEqual([
+      { name: "remote", status: "mismatch", detail, clients: ["claude-desktop"] },
+    ]);
+  });
+
+  it("shows a missing remote server without disclosing its URL", async () => {
     const urlStack = `
 version: "1"
 servers:
   my-remote:
-    url: "https://internal.company.com/mcp"
+    url: "https://user:secret@internal.company.com/mcp?token=secret"
 `;
     const urlLock = `
 lockfileVersion: 1
 lockedAt: "2026-04-05T10:00:00Z"
 servers:
   my-remote:
-    url: "https://internal.company.com/mcp"
+    url: "https://user:secret@internal.company.com/mcp?token=secret"
 `;
     const stackPath = await writeStackAndLock(urlStack, urlLock);
     const deps = makeDeps(); // empty installed
@@ -157,7 +205,8 @@ servers:
       .map((c) => c[0])
       .join("\n");
     expect(outputCalls).toContain("Missing");
-    expect(outputCalls).toContain("internal.company.com");
+    expect(outputCalls).toContain("remote URL (locked)");
+    expect(outputCalls).not.toMatch(/internal\.company\.com|secret/);
   });
 
   it("shows 'no servers to compare' when stack file and clients are empty", async () => {
@@ -254,7 +303,7 @@ servers:
     const outputCalls = (deps.output as ReturnType<typeof vi.fn>).mock.calls
       .map((c) => c[0])
       .join("\n");
-    expect(outputCalls).toContain("Version mismatch");
+    expect(outputCalls).toContain("Mismatch");
     expect(outputCalls).toContain("1 mismatched");
   });
 
