@@ -11,6 +11,7 @@ published section (it happened to #170).
 ### Fixed
 
 - Describe the starter `mcpm.yaml` scaffold in zsh and fish completions for `mcpm init`.
+
 ## [0.54.4] - 2026-11-20
 
 ### Fixed
