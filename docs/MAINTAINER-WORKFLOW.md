@@ -19,7 +19,9 @@ MVP/decision records cover [archive review](ARTIFACT-REVIEW.md),
 [external evidence deferral](EXTERNAL-EVIDENCE-DECISION.md) and
 [ACP trace deferral](ACP-TRACE-DECISION.md). Their measurements remain bound to
 named inputs/hosts, rather than transferring to every subsequent package.
-#331 remains separate. Contributor skills remain repo-only.
+The v0.54.5 candidate includes the merged Ora update (#331), other dependency
+updates, and corrected `mcpm init` completion help. Contributor skills remain
+repo-only.
 
 ## Delivery tracking
 

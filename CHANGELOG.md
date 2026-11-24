@@ -8,9 +8,17 @@ _Add entries here, never under a stamped version_ — a release commit renames t
 heading, and a branch that wrote beneath it merges without conflict straight into a
 published section (it happened to #170).
 
+## [0.54.5] - 2026-11-25
+
 ### Fixed
 
 - Describe the starter `mcpm.yaml` scaffold in zsh and fish completions for `mcpm init`.
+
+### Changed
+
+- Update runtime dependencies to Commander 15.1.0, Inquirer Prompts 8.8.0, and Ora 10.0.0. The supported Node.js range is unchanged.
+- Refresh the native-client and protocol validation locks to Hono 4.13.18 and `@hono/node-server` 2.1.11 (native client) and 2.1.8 (protocol sandbox).
+- Record the verification evidence for v0.54.3 and v0.54.4.
 
 ## [0.54.4] - 2026-11-20
 
