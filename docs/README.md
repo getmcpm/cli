@@ -32,7 +32,7 @@
 Measurements belong to their named archives, inputs and hosts; consult each
 record's current reproduction instructions and retained historical limits.
 
-- [Latest release: v0.54.1](RELEASE-2026-11-20-v0.54.1.md) and
+- [Latest release: v0.54.4](RELEASE-2026-11-20-v0.54.4.md) and
   [all release notes](../CHANGELOG.md).
 - [Protocol baseline](PROTOCOL-VALIDATION.md), [serve](SERVE-PROTOCOL-VALIDATION.md),
   [Skills metadata](SKILLS-GUARD-VALIDATION.md) and [doctor](DOCTOR-EVIDENCE-VALIDATION.md).

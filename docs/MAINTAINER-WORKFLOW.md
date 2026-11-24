@@ -2,14 +2,10 @@
 
 ## Current checkpoint — 2026-11-20
 
-Latest published CLI: **v0.54.1**. Successful empty `update --json` and
-`outdated --json` queries now write `[]`. The ten served tools and fixed
-protocol reference are unchanged. Public usage skill source is **1.3.3**.
-
-The [v0.54.1 release record](RELEASE-2026-11-20-v0.54.1.md) records verification
-of the published archive and protocol checks. Companion alignment is tracked
-in the linked PRs. The [v0.54.0 record](RELEASE-2026-11-14-v0.54.0.md) retains
-the original structured audit report and companion deployment evidence.
+The latest published CLI is **v0.54.4**. Read-only `sync`, `list` and `diff`
+report unreadable client configs and retain results from readable configs. The
+[release record](RELEASE-2026-11-20-v0.54.4.md) includes package and protocol
+verification and links to the companion updates.
 
 The bounded `#131`/`#149` report slice shipped; broader audit and host coverage
 remain open. Earlier VS Code/Copilot `scope` evidence remains bound to its named

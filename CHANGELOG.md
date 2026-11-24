@@ -11,6 +11,23 @@ published section (it happened to #170).
 ### Fixed
 
 - Describe the starter `mcpm.yaml` scaffold in zsh and fish completions for `mcpm init`.
+## [0.54.4] - 2026-11-20
+
+### Fixed
+
+- Report unreadable client configs in `sync`, `list` and `diff` without treating them as absent.
+
+## [0.54.3] - 2026-11-20
+
+### Fixed
+
+- Compare remote endpoint and transport drift per client in `mcpm diff` without printing endpoint values.
+
+## [0.54.2] - 2026-11-20
+
+### Fixed
+
+- Restore readable Git diffs for frozen integrity verification without changing cache keys.
 
 ## [0.54.1] - 2026-11-20
 
