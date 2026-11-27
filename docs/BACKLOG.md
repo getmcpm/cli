@@ -23,23 +23,14 @@ Planning issues link to these criteria; their issue numbers are distinct from
 the public backlog IDs. Neither issues nor Project status grant work
 authorization. Keep broad remaining scope separate from verified bounded slices. Private board/card links and vault contents stay outside public docs.
 
-## Next decisions — 2026-11-19
+## Bounded outcomes — 2026-11-27
+| Scope | Evidence and remaining boundary |
+| --- | --- |
+| Export coverage (`#150`) | [#378](https://github.com/getmcpm/cli/pull/378) merged the read-only [export preflight contract](CONTRACTS.md#export---preflight-schema-version-1). It reports client coverage, omissions and conflicting definitions before stack projection. Legacy export YAML remains compatible. Project ownership and transactional writes remain separate work. |
+| Codex inventory (`#141`) | [#379](https://github.com/getmcpm/cli/pull/379) merged the bounded [Codex selector](PROJECT-SCOPE.md#codex-profile---client-codex). It reports both fixed TOML origins and declared restrictions. Coverage of other layers and runtime selection remains unknown. |
+| Relay conformance | The existing [local harness](../scripts/protocol-sandbox/run.mjs) covers the evaluated legacy stdio exchange. On `b9a9e476`, direct and guarded initialization and tool-list responses matched. The [pinned upstream runner](https://github.com/modelcontextprotocol/conformance/blob/96a6f9478b7f2e125cf0360a213383cf57533893/README.md) takes a URL for server tests. The upstream evaluation stopped at that transport boundary. |
 
-| Order | Decision | Evidence needed to advance |
-| --- | --- | --- |
-| 1 | Give a team exporting its stack a way to detect conflicts and incomplete reads (backlog ID `#150`). | A CI consumer can distinguish the cases below using a versioned, read-only preflight while existing export YAML remains compatible. |
-| 2 | Evaluate Codex as the next project inventory profile (backlog ID `#141`). | One sanitized review case and a comparison with native tooling on a pinned Codex revision show a changed decision or one removable manual step. |
-| 3 | Evaluate one benign MCP exchange for upstream conformance coverage. | The upstream runner supports the role and transport, the case fills a documented gap, and another implementer can replay it. |
-
-**Export coverage.** Nine disposable-home runs of the published v0.54.0 CLI on Linux with Node 24.22.1 all exited 0. A single stdio entry, identical entries in Claude Code and Cursor, and conflicting commands/arguments in either client order produced byte-identical YAML and empty stderr. An empty home and a valid Cursor config under an inaccessible directory also produced identical YAML and empty stderr. An unreadable file and an invalid entry each warned when tested alone. A valid same-name sibling suppressed the invalid-entry warning. The existing export tests and path detector explain why coverage must be evaluated before name deduplication and stack projection. [Export tests](../src/__tests__/commands/export.test.ts) · [Client detection](../src/config/detector.ts) · [Export handler](../src/commands/export.ts)
-
-Acceptance includes source read failures, missing sources, omitted entries, equivalent duplicates and conflicts. Compare launch definitions before projecting them to YAML. Report source clients and differing field categories, withholding argument, URL, header and environment values. Reversing the two client definitions must retain the conflict. Preserve existing stack syntax and output.
-
-**Codex inventory.** Start with one decision about the origin of a server or its declared tool restrictions. Use inert fixtures for overlapping user/project declarations, a disabled server and an unreadable source. Keep effective selection, trust and runtime activation unknown. Stop if the native workflow already answers the question. [Pinned Codex configuration schema](https://github.com/openai/codex/blob/aadb51b2b60c488a7aa047775876c196eb60cb2f/codex-rs/core/config.schema.json) · [Current inventory contract](PROJECT-SCOPE.md)
-
-**Upstream fixture.** The pinned conformance guide shows a URL for server testing and a command for client testing. Verify transport support before preparing a fixture. Reuse an existing scenario where it applies. Keep an mcpm-specific discrepancy in the local suite, and stop the upstream experiment if it needs a new transport bridge. [Conformance runner](https://github.com/modelcontextprotocol/conformance/blob/96a6f9478b7f2e125cf0360a213383cf57533893/README.md) · [Direct/guarded comparison](../scripts/protocol-sandbox/harness.mjs)
-
-Broader audit coverage (backlog IDs `#131`/`#149`) needs one named consumer, source and decision beyond the store report. The evidence and ACP ingestion proposals retain their consumer gates, and the measured hook confinement decision still applies.
+Broader audit coverage (`#131`/`#149`) needs a named consumer, source and decision beyond the store report. External evidence and ACP ingestion retain their consumer gates. The measured hook confinement decision still applies.
 
 ## Previously selected work
 
@@ -277,8 +268,7 @@ or universal containment claim. [Hook kinds and lifecycle](https://code.claude.c
   input and versioned structured/text evidence; legacy audit JSON/SARIF/`mcpm_audit`
   remain unchanged. This does not close broad audit,
   native/client discovery, installed-byte or project-ownership coverage.
-- `#150`: project ownership remains; #308 fixes only named slices. Import/export warnings are not a machine-readable completeness
-  contract or transactional writes.
+- `#150`: export preflight is merged in #378. Project ownership and transactional writes remain open.
 - `#112`/`#124`/`#125`/`#126`/`#127`: prior policy/concurrency, EPIPE/EOF, pin-property and
   confinement hypotheses remain open; reproduce each before assigning scope.
 - `#142`: watch protocol/extension stages and pin revisions; current Skills is Beta.
