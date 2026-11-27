@@ -201,18 +201,17 @@ async function exportPreflight({ getPath, getAdapter }: Pick<ExportDeps, "getPat
 
     for (const name of Object.keys(entries)) {
       const entry = entries[name];
+      const group = definitions.get(name) ?? [];
+      group.push({ client, entry });
+      definitions.set(name, group);
+
       const stack = StackFileSchema.safeParse({
         version: "1",
         servers: { [name]: projectServer(entry) },
       });
       if (!stack.success || !Object.hasOwn(stack.data.servers, name)) {
         source.omitted.push({ name, reason: "unrepresentable-entry" });
-        continue;
       }
-
-      const group = definitions.get(name) ?? [];
-      group.push({ client, entry });
-      definitions.set(name, group);
     }
     source.omitted.sort((left, right) => left.name < right.name ? -1 : left.name > right.name ? 1 : 0);
   }

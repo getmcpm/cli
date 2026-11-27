@@ -516,6 +516,26 @@ describe("CLI smoke — export preflight", () => {
     });
   });
 
+  it("reports a conflict even when one parsed definition cannot be exported", () => {
+    withHome((home) => {
+      configure(claude(home), { sample: { url: "https://fixture-valid.invalid" } });
+      configure(cursor(home), { sample: { url: "fixture-invalid-url" } });
+      const report = preflight(home, false);
+      expect(report.sources[1].omitted).toEqual([]);
+      expect(report.sources[2]).toEqual({
+        client: "cursor",
+        status: "readable",
+        omitted: [{ name: "sample", reason: "unrepresentable-entry" }],
+      });
+      expect(report.duplicates).toEqual([{
+        name: "sample",
+        clients: ["claude-code", "cursor"],
+        status: "conflicting",
+        differingFields: ["url"],
+      }]);
+    });
+  });
+
   it("reports entries that the stack schema cannot represent", () => {
     withHome((home) => {
       configure(claude(home), { invalid: { url: "fixture-invalid-url" } });
