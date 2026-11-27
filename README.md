@@ -78,7 +78,7 @@ The binary is `mcpm`; the package is **`@getmcpm/cli`**. The Homebrew formula
 | Lock and verify | Package-version records, integrity and applicable Sigstore build-identity baselines; client-free CI verification |
 | Guard MCP traffic | Explicit stdio wrapping, field-scoped patterns, first-observation tool pins, drift checks and policy-controlled actions |
 | Manage client configuration | Detect, install, import, enable/disable and compare definitions across six client adapters |
-| Inventory project exposure | Read-only `scope` source/instruction metadata: Claude Code default, explicit VS Code/Copilot selector |
+| Inventory project exposure | Read-only `scope` metadata for Claude Code, VS Code/Copilot, and fixed Codex project and user sources |
 | Review local artifact changes | Experimental archive-only skill/plugin snapshot comparison with byte/declaration coverage and unknown host state |
 
 These operations answer different questions. An install-time metadata assessment
@@ -141,6 +141,7 @@ published artifact, compatibility and synchronized companion evidence.
 | Inspect captured MCP frames without a server | `mcpm guard inspect frames.ndjson --json` |
 | Inventory a project | `mcpm scope /path/to/project --json` |
 | Inventory fixed VS Code/Copilot sources | `mcpm scope /path/to/project --client vscode --json` |
+| Inventory fixed Codex TOML sources | `mcpm scope /path/to/project --client codex --json` |
 | Compare local skill snapshots | `mcpm review-artifacts before.tar after.tar --profile agent-skills-2026-11-06 --json` |
 
 `init` scaffolds an empty stack; it does not install curated starter packs. To
