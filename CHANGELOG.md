@@ -10,6 +10,7 @@ published section (it happened to #170).
 
 ### Added
 - Add read-only `mcpm export --preflight` JSON reporting for client coverage and conflicting server definitions.
+- Report fixed Codex project and user MCP declarations with `mcpm scope --client codex`.
 
 ## [0.54.5] - 2026-11-25
 
