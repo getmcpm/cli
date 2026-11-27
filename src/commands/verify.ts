@@ -120,7 +120,7 @@ export async function verifyHandler(deps: VerifyDeps, opts: VerifyOpts = {}): Pr
     const uncovered =
       stackFile === null
         ? []
-        : Object.keys(stackFile.servers).filter((name) => !(name in lockFile.servers));
+        : Object.keys(stackFile.servers).filter((name) => !Object.hasOwn(lockFile.servers, name));
 
     // A lock with zero servers verifies NOTHING, so it must never exit 0 on the
     // strength of gates that pass vacuously. Legitimate only when a stack file

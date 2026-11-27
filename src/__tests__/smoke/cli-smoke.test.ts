@@ -18,6 +18,7 @@ import { spawnSync, execSync } from "node:child_process";
 import { chmodSync, mkdtempSync, rmSync, existsSync, mkdirSync, readFileSync, realpathSync, symlinkSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import os from "node:os";
+import { parse as parseYaml } from "yaml";
 
 const BIN = path.resolve(process.cwd(), "dist/index.js");
 
@@ -55,6 +56,63 @@ function run(args: string[], home: string, extraEnv: NodeJS.ProcessEnv = {}): Ru
   const stderr = r.stderr ?? "";
   return { stdout, stderr, code: r.status ?? -1, out: `${stdout}\n${stderr}` };
 }
+
+describe("CLI smoke — verify lock coverage", () => {
+  it.skipIf(process.platform === "win32").each([
+    { name: "unrecorded", covered: false },
+    { name: "constructor", covered: true },
+  ])("propagates coverage for $name to the Action summary", ({ name, covered }) => {
+    withHome((home) => {
+      const stack = path.join(home, "mcpm.yaml");
+      const endpoint = '{ url: "https://fixture.invalid/mcp" }';
+      writeFileSync(stack, `version: "1"\nservers:\n  ${name}: ${endpoint}\n`);
+      writeFileSync(
+        path.join(home, "mcpm-lock.yaml"),
+        `lockfileVersion: 1\nlockedAt: "2026-11-20"\nservers:\n  ${covered ? name : "other"}: ${endpoint}\n`,
+      );
+
+      const cli = run(["verify", "--file", stack, "--json"], home);
+      const exitCode = covered ? 0 : 1;
+      expect(cli.code).toBe(exitCode);
+      expect(JSON.parse(cli.stdout)).toMatchObject({
+        schemaVersion: 1,
+        ok: covered,
+        uncovered: covered ? [] : [name],
+      });
+
+      const action = parseYaml(readFileSync(".github/actions/mcpm-verify/action.yml", "utf8"));
+      const summaryPath = path.join(home, "summary.md");
+      // Execute the real composite step against the built CLI without downloading a package.
+      const step = spawnSync("bash", ["-c", [
+        'npx() { shift 2; "$MCPM_NODE" "$MCPM_BIN" "$@"; }',
+        action.runs.steps[0].run,
+      ].join("\n")], {
+        cwd: home,
+        encoding: "utf8",
+        timeout: 30_000,
+        env: {
+          ...process.env,
+          HOME: home,
+          MCPM_DISABLE_OS_KEYCHAIN: "1",
+          MCPM_CLI_VERSION: "local",
+          MCPM_NODE: process.execPath,
+          MCPM_BIN: BIN,
+          GITHUB_STEP_SUMMARY: summaryPath,
+        },
+      });
+      expect(step.status).toBe(exitCode);
+      expect(JSON.parse(step.stdout)).toEqual(JSON.parse(cli.stdout));
+      const summary = readFileSync(summaryPath, "utf8");
+      expect(summary).toContain("### mcpm verify");
+      if (covered) {
+        expect(summary).not.toContain("missing from the lock");
+      } else {
+        expect(summary).toContain("1 declared server(s) missing from the lock");
+        expect(summary).toContain(`- \`${name}\``);
+      }
+    });
+  });
+});
 
 describe("CLI smoke — read-only client coverage", () => {
   function setup(home: string): string {

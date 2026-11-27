@@ -11,6 +11,9 @@ published section (it happened to #170).
 ### Added
 - Report fixed Codex project and user MCP declarations with `mcpm scope --client codex`.
 
+### Fixed
+- Check only recorded lock entries when calculating `mcpm verify` coverage.
+
 ## [0.54.5] - 2026-11-25
 
 ### Fixed
