@@ -15,7 +15,7 @@
 
 import { describe, it, expect, beforeAll } from "vitest";
 import { spawnSync, execSync } from "node:child_process";
-import { chmodSync, mkdtempSync, rmSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdtempSync, rmSync, existsSync, mkdirSync, readFileSync, realpathSync, symlinkSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import os from "node:os";
 
@@ -44,12 +44,12 @@ function withHome(fn: (home: string) => void): void {
   }
 }
 
-function run(args: string[], home: string): RunResult {
+function run(args: string[], home: string, extraEnv: NodeJS.ProcessEnv = {}): RunResult {
   const r = spawnSync(process.execPath, [BIN, ...args], {
     encoding: "utf-8",
     timeout: 30_000,
     input: "", // empty stdin → a command that waits for a TTY prompt fails fast instead of hanging
-    env: { ...process.env, HOME: home, MCPM_DISABLE_OS_KEYCHAIN: "1" },
+    env: { ...process.env, HOME: home, MCPM_DISABLE_OS_KEYCHAIN: "1", ...extraEnv },
   });
   const stdout = r.stdout ?? "";
   const stderr = r.stderr ?? "";
@@ -358,6 +358,172 @@ describe("CLI smoke — generated completions", () => {
       const check = spawnSync("bash", ["-n"], { input: script, encoding: "utf-8", timeout: 10_000 });
       if (check.error && (check.error as NodeJS.ErrnoException).code === "ENOENT") return; // bash absent — skip
       expect(check.status, `bash -n rejected the script:\n${check.stderr}`).toBe(0);
+    });
+  });
+});
+
+describe("CLI smoke — Codex scope inventory", () => {
+  function fixture(fn: (root: string, home: string, project: string, user: string) => void) {
+    withHome((temporary) => {
+      const root = path.join(realpathSync(temporary), "repo");
+      const home = path.join(realpathSync(temporary), "home");
+      const project = path.join(root, ".codex", "config.toml");
+      const user = path.join(home, "config.toml");
+      mkdirSync(path.dirname(project), { recursive: true });
+      mkdirSync(home);
+      fn(root, home, project, user);
+    });
+  }
+
+  function inventory(root: string, codexHome: string, json = true) {
+    const args = ["scope", root, "--client", "codex"];
+    if (json) args.push("--json");
+    return run(args, path.dirname(root), { CODEX_HOME: codexHome, USERPROFILE: path.dirname(root) });
+  }
+
+  it("reports both origins and declared restrictions without exposing launch values", () => {
+    fixture((root, home, project, user) => {
+      writeFileSync(project, `
+[mcp_servers.overlap]
+command = "fixture-secret-command"
+args = ["fixture-secret-arg"]
+env = { API_KEY = "fixture-secret-env" }
+enabled_tools = ["project_tool"]
+[mcp_servers.disabled_fixture]
+url = "https://fixture-secret.invalid/mcp"
+http_headers = { Authorization = "fixture-secret-header" }
+bearer_token_env_var = "fixture-secret-token-ref"
+enabled = false
+disabled_tools = ["blocked_tool"]
+`);
+      writeFileSync(user, `
+[mcp_servers.overlap]
+command = "fixture-secret-user-command"
+enabled = true
+enabled_tools = ["user_tool"]
+disabled_tools = []
+`);
+      // A populated fallback must not be consulted when CODEX_HOME is explicit.
+      const fallback = path.join(path.dirname(root), ".codex");
+      mkdirSync(fallback);
+      writeFileSync(path.join(fallback, "config.toml"), "[mcp_servers.fallback_only]");
+      writeFileSync(path.join(root, ".mcp.json"), '{"mcpServers":{"other_host":{}}}');
+      const result = inventory(root, home);
+      expect(result.code).toBe(0);
+      expect(result.stderr).toBe("");
+      expect(JSON.parse(result.stdout)).toMatchObject({
+        client: "codex", schemaVersion: 1, inventoryComplete: true, trust: "unknown",
+        effective: "unknown", loaded: "unknown", enforced: "unknown", instructions: [],
+        sources: [
+          { origin: "codex-project", path: project, state: "present" },
+          { origin: "codex-user", path: user, state: "present" },
+        ],
+        servers: [
+          { name: "disabled_fixture", origin: "codex-project", enabled: false, enabledTools: null,
+            disabledTools: ["blocked_tool"], sameNameIn: [] },
+          { name: "overlap", origin: "codex-project", enabled: null, enabledTools: ["project_tool"],
+            sameNameIn: ["codex-user"] },
+          { name: "overlap", origin: "codex-user", enabled: true, enabledTools: ["user_tool"],
+            disabledTools: [], sameNameIn: ["codex-project"] },
+        ],
+      });
+      const human = inventory(root, home, false);
+      expect(human.code).toBe(0);
+      expect(human.stdout).toContain("blocked_tool");
+      expect(human.stdout).toContain("same name in: codex-user");
+      expect(result.out + human.out).not.toMatch(/fixture-secret|fallback_only|other_host/);
+    });
+  });
+
+  it("uses the default Codex home when no explicit path is supplied", () => {
+    fixture((root) => {
+      const home = path.join(path.dirname(root), ".codex");
+      mkdirSync(home);
+      const user = path.join(home, "config.toml");
+      writeFileSync(user, '[mcp_servers.user_only]\ncommand = "fixture-secret"');
+      const result = inventory(root, "");
+      expect(result.code).toBe(0);
+      expect(JSON.parse(result.stdout)).toMatchObject({
+        inventoryComplete: true,
+        sources: [{ state: "missing" }, { path: user, state: "present" }],
+        servers: [{ name: "user_only", origin: "codex-user" }],
+      });
+      expect(result.out).not.toContain("fixture-secret");
+    });
+  });
+
+  it.each([
+    { label: "invalid syntax", data: '[mcp_servers.bad\ncommand = "fixture-secret"' },
+    { label: "duplicate keys", data: '[mcp_servers.bad]\nenabled = true\nenabled = false' },
+    { label: "invalid UTF-8", data: Buffer.from([0xc0, 0x80]) },
+    { label: "oversized input", data: Buffer.alloc(1024 * 1024 + 1, 0x20), state: "too-large" },
+  ])("keeps the readable sibling with $label", ({ data, state }) => {
+    fixture((root, home, project, user) => {
+      writeFileSync(project, data);
+      writeFileSync(user, '[mcp_servers.readable]\nenabled_tools = ["kept"]');
+      const result = inventory(root, home);
+      expect(result.code).toBe(1);
+      expect(result.stderr).toBe("");
+      expect(JSON.parse(result.stdout)).toMatchObject({
+        inventoryComplete: false,
+        sources: [{ state: state ?? "malformed" }, { state: "present" }],
+        servers: [{ name: "readable", enabledTools: ["kept"] }],
+      });
+      expect(result.out).not.toContain("fixture-secret");
+    });
+  });
+
+  it("retains valid declarations in a source with malformed reported metadata", () => {
+    fixture((root, home, project) => {
+      writeFileSync(project, '[mcp_servers.bad]\nenabled = "fixture-secret"\nenabled_tools = [42]\n[mcp_servers.good]\nenabled = true');
+      const result = inventory(root, home);
+      expect(result.code).toBe(1);
+      expect(JSON.parse(result.stdout)).toMatchObject({
+        sources: [{ state: "malformed" }, { state: "missing" }],
+        servers: [
+          { name: "bad", declaration: "malformed", enabled: null, enabledTools: null },
+          { name: "good", declaration: "object", enabled: true },
+        ],
+      });
+      expect(result.out).not.toContain("fixture-secret");
+    });
+  });
+
+  it.skipIf(process.platform === "win32" || process.getuid?.() === 0)(
+    "retains a readable sibling when the project config cannot be read",
+    () => fixture((root, home, project, user) => {
+      writeFileSync(project, "[mcp_servers.protected]");
+      writeFileSync(user, "[mcp_servers.readable]");
+      chmodSync(project, 0o000);
+      try {
+        const result = inventory(root, home);
+        expect(result.code).toBe(1);
+        expect(JSON.parse(result.stdout)).toMatchObject({
+          sources: [{ state: "unreadable" }, { state: "present" }],
+          servers: [{ name: "readable" }],
+        });
+        expect(result.out).not.toContain("protected");
+      } finally {
+        chmodSync(project, 0o600);
+      }
+    })
+  );
+
+  it.skipIf(process.platform === "win32")("skips symlinked files and home components", () => {
+    fixture((root, home, project, user) => {
+      writeFileSync(user, "[mcp_servers.readable]");
+      symlinkSync(user, project);
+      const linkedHome = path.join(path.dirname(root), "linked-home");
+      symlinkSync(home, linkedHome);
+      for (const [selected, state] of [[home, "present"], [linkedHome, "symlink-skipped"]]) {
+        const result = inventory(root, selected);
+        expect(result.code).toBe(1);
+        const report = JSON.parse(result.stdout);
+        expect(report.sources.map((source: { state: string }) => source.state)).toEqual(["symlink-skipped", state]);
+        expect(report.servers.map((server: { origin: string }) => server.origin)).toEqual(
+          selected === home ? ["codex-user"] : []
+        );
+      }
     });
   });
 });
