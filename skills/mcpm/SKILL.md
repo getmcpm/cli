@@ -2,7 +2,7 @@
 name: mcpm
 description: Discover, assess, verify and manage MCP servers with the @getmcpm/cli package. Use when working with mcpm evidence, project locks or AI client MCP configuration.
 metadata:
-  version: "1.3.3"
+  version: "1.3.4"
   evidence-contract: "mcpm_search, mcpm_info, advertised mcpm_doctor, verify --json and advertised mcpm_audit_report/audit --report-json schemaVersion 1"
 ---
 
@@ -45,6 +45,11 @@ CLI evidence and state the limitation; do not invent fields or upgrade silently.
   A complete fixed-source inventory does not establish complete host coverage,
   effective selection, loading or enforcement. Do not run clients or servers to
   fill unknown fields without authorization.
+- For Codex provenance, use `mcpm scope <project-root> --client codex --json`
+  when help advertises the selector. Review only the selected project and
+  Codex home TOML source states and declared tool restrictions. Treat same-name
+  rows as separate declarations. Effective selection, trust, loading and
+  enforcement remain unknown.
 - For bounded store coverage, discover `mcpm_audit_report` in `tools/list` and
   require its version-1 output schema, then call it with `{}` (no arguments).
   Prefer structuredContent, otherwise parse JSON text. Stop on isError; incomplete

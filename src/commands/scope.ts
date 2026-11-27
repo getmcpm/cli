@@ -1,8 +1,9 @@
 /** Read-only, bounded client configuration inventories; never host activation evidence. */
 import { lstat, realpath } from "node:fs/promises";
 import os from "node:os";
+import { isUtf8 } from "node:buffer";
 import path from "node:path";
-import { readConfig, inspect, type FileState } from "../config/read-bounded-json.js";
+import { readBoundedBytes, readConfig, inspect, type FileState } from "../config/read-bounded-json.js";
 import { Option, type Command } from "commander";
 import type { McpServerEntry } from "../config/adapters/index.js";
 import { McpServerEntrySchema } from "../config/adapters/base.js";
@@ -61,6 +62,19 @@ const object = (v: unknown): v is Record<string, unknown> => typeof v === "objec
 const code = (error: unknown): string | undefined => (error as NodeJS.ErrnoException)?.code;
 const missing = (error: unknown) => code(error) === "ENOENT";
 
+async function resolveScopeRoot(requested: string): Promise<ScopeModel["root"]> {
+  if (!requested) return { path: requested, state: "not-directory" };
+  try {
+    const canonical = await realpath(requested);
+    return (await lstat(canonical)).isDirectory()
+      ? { path: canonical, state: "directory" }
+      : { path: requested, state: "not-directory" };
+  } catch (error) {
+    const state = missing(error) ? "missing" : code(error) === "ENOTDIR" ? "not-directory" : "unreadable";
+    return { path: requested, state };
+  }
+}
+
 function guardForm(entry: Record<string, unknown>): Server["guardForm"] {
   if (typeof entry.command !== "string" || (entry.args !== undefined &&
       (!Array.isArray(entry.args) || !entry.args.every(a => typeof a === "string")))) return "unknown";
@@ -86,18 +100,10 @@ export async function buildScopeModel(projectRoot: string, deps: ScopeDeps = {})
   const requested = projectRoot === "" ? "" : path.resolve(projectRoot);
   const model: ScopeModel = {
     schemaVersion: 1, client: "claude-code", hostVersion: "unknown",
-    root: { path: requested, state: "unreadable" }, inventoryComplete: false,
+    root: await resolveScopeRoot(requested), inventoryComplete: false,
     effective: "unknown", loaded: "unknown", enforced: "unknown", sources: [], servers: [], instructions: [], coverage: [...COVERAGE],
   };
-  if (requested === "") { model.root.state = "not-directory"; return model; }
-  try {
-    const canonical = await realpath(requested);
-    if (!(await lstat(canonical)).isDirectory()) { model.root.state = "not-directory"; return model; }
-    model.root = { path: canonical, state: "directory" };
-  } catch (error) {
-    model.root.state = missing(error) ? "missing" : code(error) === "ENOTDIR" ? "not-directory" : "unreadable";
-    return model;
-  }
+  if (model.root.state !== "directory") return model;
   const root = model.root.path;
   // Home itself may be an OS alias; individual config components must still be real files.
   const home = path.resolve(deps.home ?? os.homedir());
@@ -184,19 +190,11 @@ const ScopeEntryWithoutEnvSchema = McpServerEntrySchema.omit({ env: true });
 export async function buildVSCodeScopeModel(projectRoot: string, deps: { home?: string; platform?: NodeJS.Platform } = {}): Promise<VSCodeScopeModel> {
   const requested = projectRoot === "" ? "" : path.resolve(projectRoot);
   const model: VSCodeScopeModel = {
-    schemaVersion: 1, client: "vscode", hostVersion: "unknown", root: { path: requested, state: "unreadable" },
+    schemaVersion: 1, client: "vscode", hostVersion: "unknown", root: await resolveScopeRoot(requested),
     inventoryComplete: false, effective: "unknown", loaded: "unknown", enforced: "unknown",
     sources: [], servers: [], instructions: [], coverage: [...VSCODE_COVERAGE],
   };
-  if (!requested) { model.root.state = "not-directory"; return model; }
-  try {
-    const canonical = await realpath(requested);
-    if (!(await lstat(canonical)).isDirectory()) { model.root.state = "not-directory"; return model; }
-    model.root = { path: canonical, state: "directory" };
-  } catch (error) {
-    model.root.state = missing(error) ? "missing" : code(error) === "ENOTDIR" ? "not-directory" : "unreadable";
-    return model;
-  }
+  if (model.root.state !== "directory") return model;
   const root = model.root.path, home = path.resolve(deps.home ?? os.homedir()), platform = deps.platform ?? process.platform;
   // An injected home keeps fixture reads inside that home; runtime Windows uses APPDATA like the existing adapter.
   const appData = platform === "darwin" ? path.join(home, "Library", "Application Support") : platform === "win32"
@@ -250,8 +248,122 @@ export async function buildVSCodeScopeModel(projectRoot: string, deps: { home?: 
   return model;
 }
 
-export function renderScope(model: ScopeModel | VSCodeScopeModel): string {
+type CodexOrigin = "codex-project" | "codex-user";
+interface CodexSource extends Source {
+  origin: CodexOrigin;
+}
+
+interface CodexServer {
+  name: string;
+  origin: CodexOrigin;
+  source: string;
+  configured: true;
+  declaration: "object" | "malformed";
+  enabled: boolean | null;
+  enabledTools: string[] | null;
+  disabledTools: string[] | null;
+  sameNameIn: CodexOrigin[];
+}
+
+export interface CodexScopeModel extends Omit<ScopeModel, "client" | "sources" | "servers"> {
+  client: "codex";
+  trust: "unknown";
+  sources: CodexSource[];
+  servers: CodexServer[];
+}
+
+const CODEX_COVERAGE = [
+  "Two fixed TOML sources only: selected root and selected Codex home. Ancestor, system, managed, profile, plugin, and other layers are unknown.",
+  "Same-name declarations show origins without inferring precedence. Trust, effective selection, loading and enforcement are unknown.",
+  "Only declared enabled state and tool allow/deny names are reported. Configuration values are not expanded or emitted. No clients or servers execute.",
+  "Reads are bounded to 1 MiB per file and skip symlink components. The explicitly selected project root is canonicalized.",
+];
+
+function tomlTable(value: unknown): value is Record<string, unknown> {
+  return object(value) && (Object.getPrototypeOf(value) === null || Object.getPrototypeOf(value) === Object.prototype);
+}
+
+function toolNames(value: unknown): string[] | null {
+  return Array.isArray(value) && value.every(name => typeof name === "string") ? value : null;
+}
+
+export async function buildCodexScopeModel(projectRoot: string, codexHome?: string): Promise<CodexScopeModel> {
+  const requested = projectRoot === "" ? "" : path.resolve(projectRoot);
+  const model: CodexScopeModel = {
+    schemaVersion: 1, client: "codex", hostVersion: "unknown",
+    root: await resolveScopeRoot(requested), inventoryComplete: false,
+    trust: "unknown", effective: "unknown", loaded: "unknown", enforced: "unknown",
+    sources: [], servers: [], instructions: [], coverage: [...CODEX_COVERAGE],
+  };
+  if (model.root.state !== "directory") return model;
+
+  const home = path.resolve(codexHome || path.join(os.homedir(), ".codex"));
+  const candidates = [
+    { path: path.join(model.root.path, ".codex", "config.toml"), scope: "project", origin: "codex-project" },
+    { path: path.join(home, "config.toml"), scope: "user", origin: "codex-user" },
+  ] as const;
+  const { parse } = await import("smol-toml");
+  const origins = new Map<string, CodexOrigin[]>();
+
+  for (const candidate of candidates) {
+    const result = await readBoundedBytes(candidate.path);
+    const source: CodexSource = { ...candidate, state: result.state };
+    model.sources.push(source);
+    if (!result.bytes) continue;
+
+    let declarations: unknown;
+    try {
+      if (!isUtf8(result.bytes)) throw new Error("Invalid UTF-8");
+      const parsed = parse(result.bytes.toString("utf8"), { integersAsBigInt: true, maxDepth: 64 });
+      declarations = own(parsed, "mcp_servers");
+    } catch {
+      source.state = "malformed";
+      continue;
+    }
+    if (declarations === undefined) continue;
+    if (!tomlTable(declarations)) { source.state = "malformed"; continue; }
+
+    for (const name of Object.keys(declarations).sort()) {
+      const raw = declarations[name];
+      const entry = tomlTable(raw) ? raw : undefined;
+      const enabled = entry && own(entry, "enabled");
+      const allow = entry && own(entry, "enabled_tools");
+      const deny = entry && own(entry, "disabled_tools");
+      const enabledTools = toolNames(allow);
+      const disabledTools = toolNames(deny);
+      const valid = entry && (enabled === undefined || typeof enabled === "boolean")
+        && (allow === undefined || enabledTools !== null) && (deny === undefined || disabledTools !== null);
+      if (!valid) source.state = "malformed";
+      model.servers.push({
+        name, origin: source.origin, source: source.path, configured: true,
+        declaration: valid ? "object" : "malformed",
+        enabled: typeof enabled === "boolean" ? enabled : null,
+        enabledTools, disabledTools, sameNameIn: [],
+      });
+      const peers = origins.get(name) ?? [];
+      peers.push(source.origin);
+      origins.set(name, peers);
+    }
+  }
+  for (const server of model.servers) {
+    server.sameNameIn = (origins.get(server.name) ?? []).filter(origin => origin !== server.origin);
+  }
+  model.inventoryComplete = model.sources.every(source => source.state === "present" || source.state === "missing");
+  return model;
+}
+
+export function renderScope(model: ScopeModel | VSCodeScopeModel | CodexScopeModel): string {
   const safe = (value: string) => sanitizeForTerminal(value);
+  if (model.client === "codex") {
+    const names = (tools: string[] | null) => tools === null ? "unspecified or invalid" : JSON.stringify(tools.map(safe));
+    return [
+      `Codex scope inventory: ${safe(model.root.path)} (${model.root.state})`,
+      `Fixed-source inventory: ${model.inventoryComplete ? "complete" : "incomplete"}; trust / effective / loaded / enforced: unknown`,
+      ...model.sources.map(source => `  ${source.origin}: ${safe(source.path)} (${source.state})`),
+      ...model.servers.map(server => `  ${safe(server.name)} [${server.origin}]: ${server.declaration}; enabled: ${server.enabled ?? "unspecified or invalid"}; allow: ${names(server.enabledTools)}; deny: ${names(server.disabledTools)}; same name in: ${server.sameNameIn.join(", ") || "none observed"}`),
+      ...model.coverage,
+    ].join("\n");
+  }
   if (model.client === "vscode") return [
     `VS Code scope inventory: ${safe(model.root.path)} (${model.root.state})`,
     `Fixed-source inventory: ${model.inventoryComplete ? "complete" : "incomplete"}; effective / loaded / enforced: unknown`,
@@ -275,10 +387,12 @@ export function renderScope(model: ScopeModel | VSCodeScopeModel): string {
 export function registerScopeCommand(program: Command): void {
   program.command("scope <project-root>")
     .description("Inventory fixed project/user sources without executing clients (Claude Code by default)")
-    .addOption(new Option("--client <client>", "Client inventory profile").choices(["claude-code", "vscode"]).default("claude-code"))
+    .addOption(new Option("--client <client>", "Client inventory profile").choices(["claude-code", "vscode", "codex"]).default("claude-code"))
     .option("--json", "Output the inventory as JSON")
-    .action(async (root: string, options: { json?: boolean; client: "claude-code" | "vscode" }) => {
-      const model = options.client === "vscode" ? await buildVSCodeScopeModel(root) : await buildScopeModel(root);
+    .action(async (root: string, options: { json?: boolean; client: "claude-code" | "vscode" | "codex" }) => {
+      const model = options.client === "codex"
+        ? await buildCodexScopeModel(root, process.env.CODEX_HOME)
+        : options.client === "vscode" ? await buildVSCodeScopeModel(root) : await buildScopeModel(root);
       stdoutOutput(options.json ? JSON.stringify(model, null, 2) : renderScope(model));
       if (!model.inventoryComplete) process.exitCode = 1;
     });

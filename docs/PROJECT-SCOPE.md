@@ -2,7 +2,7 @@
 
 `mcpm scope <project-root> [--json]` reads a bounded set of local configuration
 sources for an explicitly selected directory. Claude Code remains the default;
-`--client vscode` selects a separate fixed VS Code/Copilot profile. It does not run clients,
+`--client vscode` selects a separate fixed VS Code/Copilot profile, and `--client codex` selects two fixed Codex TOML sources. It does not run clients,
 commands, hooks, credential helpers or MCP servers, and never writes client
 configuration. Other client selectors are refused before inventory reads.
 
@@ -10,6 +10,7 @@ configuration. Other client selectors are refused before inventory reads.
 mcpm scope /path/to/project
 mcpm scope /path/to/project --json
 mcpm scope /path/to/project --client vscode --json
+mcpm scope /path/to/project --client codex --json
 ```
 
 An empty root argument is rejected; use `.` to explicitly select the current directory.
@@ -319,3 +320,31 @@ is recorded separately below.
 ## Published checkpoint — 2026-11-06
 
 The exact npm v0.50.0 archive passed seven scope CLI cases and 87 protocol comparisons. Independent archive/runtime/lock/harness/skill and actual isolation read-back passed. The separate native reference still executed the synthetic sentinel; it is not scope no-execution or activation proof. See [publication and companion evidence](RELEASE-2026-11-06-v0.50.0.md) for hashes, CI/deployment state and limits. Historical candidate receipts above retain their original attribution.
+
+## Codex profile (`--client codex`)
+
+The schema-version-1 `client: "codex"` report reads two candidates in order:
+
+| Origin | Candidate |
+|---|---|
+| `codex-project` | Explicit project root's `.codex/config.toml` |
+| `codex-user` | `config.toml` under nonempty `CODEX_HOME`, or `~/.codex` when unset or empty |
+
+Relative `CODEX_HOME` resolves against the current working directory. Each
+source lists its path and state. Reads use the bounded 1 MiB file snapshot
+reader, skip symlink components, require UTF-8, and reject TOML syntax errors,
+duplicate keys and over-depth inline values. An invalid file or malformed
+`mcp_servers` table does not suppress the other source. Malformed declaration
+metadata marks the source incomplete and retains readable sibling rows.
+
+Each `mcp_servers` declaration has its own row. `enabled`, `enabledTools`,
+and `disabledTools` report the declared boolean or tool-name list. A null
+field means unspecified or invalid. An empty tool list stays empty.
+`sameNameIn` records the other observed origins for that name. The report
+validates the reported field shapes. Native configuration validity, effective
+selection, trust, host version, loading and enforcement stay unknown.
+
+Launch, transport and credential values are withheld. Other configuration
+layers and instructions are outside the two-source inventory. Exit 0 means
+both fixed sources are present or missing. Invalid roots and incomplete reads
+return exit 1 while preserving the report.
