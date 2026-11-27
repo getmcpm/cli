@@ -105,7 +105,7 @@ audit contract](CONTRACTS.md).
 | `mcpm enable <name>` | Re-enable a previously disabled MCP server |
 | `mcpm import` | Import existing MCP servers from client config files |
 | `mcpm alias` | Create short aliases for long MCP server names |
-| `mcpm export` | Export installed servers as an mcpm.yaml stack file |
+| `mcpm export` | Export installed servers as an mcpm.yaml stack file. Use `--preflight` for a read-only JSON coverage report. |
 | `mcpm lock` | Resolve versions and create mcpm-lock.yaml with trust snapshots (+ npm provenance identity, WARNs on drift) |
 | `mcpm up` | Install all servers from mcpm.yaml with trust verification |
 | `mcpm verify` | Repo-only CI gate: verify lockfile integrity + re-verify Sigstore provenance vs npm's published record (`--json`) |

@@ -214,6 +214,25 @@ reason codes; stop on unknown versions. Existing audit `--json` (including its
 legacy empty-inventory text), SARIF, fix and `mcpm_audit` shapes/semantics are
 unchanged. The new report is incompatible with their output/mutation flags.
 
+### `export --preflight`, schema version 1
+
+This mode checks the supported user-level client paths without writing a stack.
+It emits one JSON report and exits 0 when the report is emitted. CI should
+require `schemaVersion === 1` and `ready === true` before exporting.
+Combining it with `--output` is an invocation error (exit 1).
+
+- `sources` lists each client in supported client order. Each record has
+  `client`, `status` (`absent`, `readable`, or `unreadable`), and `omitted`.
+  Omission records contain a server `name` and a `reason` of
+  `malformed-entry` or `unrepresentable-entry`.
+- `duplicates` lists duplicate server names in sorted order. Each record has
+  `name`, `clients`, `status` (`equivalent` or `conflicting`), and
+  `differingFields`. Comparison uses parsed client definitions, preserving
+  array order and ignoring object key order. The report omits config values,
+  absolute paths, and exception text.
+- `ready` is false for unreadable sources, omissions, or conflicts. An absent
+  source and equivalent duplicate definitions are compatible with a ready report.
+
 ### `verify --json`, schema version 1
 
 **Since v0.46.0: the existing `VerifyModel` has a stable versioned contract.**

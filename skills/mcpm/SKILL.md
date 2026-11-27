@@ -24,6 +24,11 @@ CLI evidence and state the limitation; do not invent fields or upgrade silently.
 - Verify an existing project lock with `mcpm verify --json`. No lock is a
   failure, not permission to create one. If the user wants a new stack, creating
   and locking it belongs to that authorized setup task.
+- Before exporting client definitions, check `mcpm export --help` for
+  `--preflight`. Require schema version 1 and `ready: true` in its JSON report.
+  Exit 0 means the report was emitted. Inspect source status, omitted names and
+  conflicts before relying on a YAML export. This checks declared user-level
+  configurations without launching servers or writing a stack.
 - Diagnose setup with `mcpm_doctor` when it advertises a version-1 output schema.
   Prefer structuredContent, fall back to JSON text, and inspect clients/issues,
   nullable crossClient and advisory secrets together. Missing/unreadable configs
