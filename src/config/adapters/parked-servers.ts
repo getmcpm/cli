@@ -11,8 +11,8 @@ export abstract class ParkedServersAdapter extends BaseAdapter {
   protected abstract readonly clientName: string;
   protected readonly rootKey = "mcpServers";
 
-  private async readPhysical(configPath: string): Promise<Record<string, unknown>> {
-    const raw = await super.readRaw(configPath);
+  private async readPhysical(configPath: string, requireExisting = false): Promise<Record<string, unknown>> {
+    const raw = await super.readRaw(configPath, requireExisting);
     if (!isObject(raw)) throw new Error(`Invalid ${this.clientName} configuration; expected an object.`);
     const active = raw.mcpServers === undefined ? {} : raw.mcpServers;
     const parked = raw[DISABLED_KEY] === undefined ? {} : raw[DISABLED_KEY];
@@ -22,8 +22,8 @@ export abstract class ParkedServersAdapter extends BaseAdapter {
     return raw;
   }
 
-  protected override async readRaw(configPath: string): Promise<Record<string, unknown>> {
-    const raw = await this.readPhysical(configPath);
+  protected override async readRaw(configPath: string, requireExisting = false): Promise<Record<string, unknown>> {
+    const raw = await this.readPhysical(configPath, requireExisting);
     const active = (raw.mcpServers ?? {}) as Record<string, unknown>;
     const parked = (raw[DISABLED_KEY] ?? {}) as Record<string, unknown>;
     const servers: Record<string, unknown> = Object.create(null);

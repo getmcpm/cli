@@ -47,7 +47,7 @@ export abstract class BaseAdapter implements ConfigAdapter {
    * Returns an empty object `{}` when the file does not exist (ENOENT).
    * Re-throws for all other errors (EACCES, malformed JSON, etc.).
    */
-  protected async readRaw(configPath: string): Promise<Record<string, unknown>> {
+  protected async readRaw(configPath: string, requireExisting = false): Promise<Record<string, unknown>> {
     // #26: refuse to traverse a symlinked config path. We check before the
     // read so an attacker who points <config> at a sensitive file can neither
     // have its bytes echoed into the .bak nor have our write land on the
@@ -58,7 +58,7 @@ export abstract class BaseAdapter implements ConfigAdapter {
     try {
       raw = await readFile(configPath, "utf-8");
     } catch (err) {
-      if (isEnoent(err)) {
+      if (!requireExisting && isEnoent(err)) {
         return {};
       }
       throw err;
@@ -231,8 +231,9 @@ export abstract class BaseAdapter implements ConfigAdapter {
         `mcpm: skipping malformed server entry "${sanitizeForTerminal(name)}" in ${configPath} ` +
           `(${this.clientId}): does not match the expected shape.\n`,
       ),
+    options: { requireExisting?: boolean } = {},
   ): Promise<Record<string, McpServerEntry>> {
-    const raw = await this.readRaw(configPath);
+    const raw = await this.readRaw(configPath, options.requireExisting);
     const servers = raw[this.rootKey];
     if (servers == null || typeof servers !== "object" || Array.isArray(servers)) {
       return {};

@@ -18,6 +18,7 @@ import { spawnSync, execSync } from "node:child_process";
 import { chmodSync, mkdtempSync, rmSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import os from "node:os";
+import { parse as parseYaml } from "yaml";
 
 const BIN = path.resolve(process.cwd(), "dist/index.js");
 
@@ -44,12 +45,12 @@ function withHome(fn: (home: string) => void): void {
   }
 }
 
-function run(args: string[], home: string): RunResult {
+function run(args: string[], home: string, extraEnv: NodeJS.ProcessEnv = {}): RunResult {
   const r = spawnSync(process.execPath, [BIN, ...args], {
     encoding: "utf-8",
     timeout: 30_000,
     input: "", // empty stdin → a command that waits for a TTY prompt fails fast instead of hanging
-    env: { ...process.env, HOME: home, MCPM_DISABLE_OS_KEYCHAIN: "1" },
+    env: { ...process.env, HOME: home, MCPM_DISABLE_OS_KEYCHAIN: "1", ...extraEnv },
   });
   const stdout = r.stdout ?? "";
   const stderr = r.stderr ?? "";
@@ -358,6 +359,206 @@ describe("CLI smoke — generated completions", () => {
       const check = spawnSync("bash", ["-n"], { input: script, encoding: "utf-8", timeout: 10_000 });
       if (check.error && (check.error as NodeJS.ErrnoException).code === "ENOENT") return; // bash absent — skip
       expect(check.status, `bash -n rejected the script:\n${check.stderr}`).toBe(0);
+    });
+  });
+});
+
+describe("CLI smoke — export preflight", () => {
+  const a = { command: "fixture-one", args: ["fixture-alpha"] };
+  const b = { command: "fixture-two", args: ["fixture-beta"] };
+  const malformed = { command: "fixture-malformed", args: 42 };
+  const clients = ["claude-desktop", "claude-code", "cursor", "vscode", "windsurf", "gemini-cli"];
+
+  function claude(home: string) {
+    return path.join(home, ".claude.json");
+  }
+
+  function cursor(home: string) {
+    return path.join(home, ".cursor", "mcp.json");
+  }
+
+  function configure(file: string, entries: Record<string, unknown>) {
+    mkdirSync(path.dirname(file), { recursive: true });
+    writeFileSync(file, JSON.stringify({ mcpServers: entries }));
+  }
+
+  function exportCli(home: string, args: string[] = [], extraEnv: NodeJS.ProcessEnv = {}) {
+    return run(["export", ...args], home, { USERPROFILE: home, APPDATA: home, ...extraEnv });
+  }
+
+  function preflight(home: string, ready: boolean, extraEnv?: NodeJS.ProcessEnv) {
+    const result = exportCli(home, ["--preflight"], extraEnv);
+    expect(result.code).toBe(0);
+    expect(result.stderr).toBe("");
+    const report = JSON.parse(result.stdout);
+    expect(report).toMatchObject({ schemaVersion: 1, ready });
+    expect(report.sources.map((source: { client: string }) => source.client)).toEqual(clients);
+    expect(result.stdout).not.toContain(home);
+    expect(result.stdout).not.toContain("fixture-");
+    return report;
+  }
+
+  function legacy(home: string, present: boolean, warning = false) {
+    const result = exportCli(home);
+    expect(result.code).toBe(0);
+    const stack = parseYaml(result.stdout);
+    expect(stack.version).toBe("1");
+    expect(stack.servers).toEqual(present ? { sample: { version: "latest" } } : {});
+    if (warning) expect(result.stderr).toContain("could not be read");
+    else expect(result.stderr).toBe("");
+  }
+
+  it.each([
+    { label: "no config", ready: true },
+    { label: "one definition", left: a, ready: true },
+    { label: "equivalent duplicates", left: a, right: a, ready: true },
+    { label: "different definitions", left: a, right: b, ready: false },
+    { label: "different definitions swapped", left: b, right: a, ready: false },
+    { label: "malformed entry", left: malformed, ready: false },
+    { label: "malformed entry with readable sibling", left: malformed, right: a, ready: false },
+  ])("$label", ({ left, right, ready }) => {
+    withHome((home) => {
+      if (left) configure(claude(home), { sample: left });
+      if (right) configure(cursor(home), { sample: right });
+      const report = preflight(home, ready);
+      expect(report.sources[1]).toEqual({
+        client: "claude-code",
+        status: left ? "readable" : "absent",
+        omitted: left === malformed ? [{ name: "sample", reason: "malformed-entry" }] : [],
+      });
+      expect(report.sources[2]).toEqual({
+        client: "cursor",
+        status: right ? "readable" : "absent",
+        omitted: [],
+      });
+      expect(report.duplicates).toEqual(left && right && left !== malformed ? [{
+        name: "sample",
+        clients: ["claude-code", "cursor"],
+        status: ready ? "equivalent" : "conflicting",
+        differingFields: ready ? [] : ["args", "command"],
+      }] : []);
+      legacy(home, Boolean((left && left !== malformed) || right), left === malformed && !right);
+    });
+  });
+
+  it.skipIf(process.platform === "win32" || process.getuid?.() === 0).each([
+    { kind: "file", index: 1 },
+    { kind: "directory", index: 2 },
+  ])("reports permission denied on a $kind", ({ index }) => {
+    withHome((home) => {
+      const file = index === 1 ? claude(home) : cursor(home);
+      configure(file, { sample: a });
+      const denied = index === 1 ? file : path.dirname(file);
+      chmodSync(denied, 0o000);
+      try {
+        expect(preflight(home, false).sources[index].status).toBe("unreadable");
+        legacy(home, false, index === 1);
+      } finally {
+        chmodSync(denied, 0o700);
+      }
+    });
+  });
+
+  it("marks a malformed config unreadable", () => {
+    withHome((home) => {
+      writeFileSync(claude(home), "{broken");
+      expect(preflight(home, false).sources[1].status).toBe("unreadable");
+      legacy(home, false, true);
+    });
+  });
+
+  it.each([
+    { client: "claude-code", file: claude, index: 1 },
+    { client: "cursor", file: cursor, index: 2 },
+  ])("records $client config disappearance after discovery", ({ file, index }) => {
+    withHome((home) => {
+      const target = file(home);
+      configure(target, { sample: a });
+      const preload = path.join(home, "remove-after-probe.cjs");
+      writeFileSync(preload, `
+        const fs = require("node:fs/promises");
+        const lstat = fs.lstat;
+        fs.lstat = async (file, ...args) => {
+          const stat = await lstat(file, ...args);
+          if (file === process.env.MCPM_FIXTURE_TARGET) await fs.unlink(file);
+          return stat;
+        };
+        require("node:module").syncBuiltinESMExports();
+      `);
+      expect(preflight(home, false, {
+        NODE_OPTIONS: `--require "${preload}"`,
+        MCPM_FIXTURE_TARGET: target,
+      }).sources[index].status).toBe("unreadable");
+      expect(existsSync(target)).toBe(false);
+    });
+  });
+
+  it("sorts groups, compares map keys independently of insertion order, and withholds values", () => {
+    withHome((home) => {
+      configure(claude(home), {
+        z: { url: "https://fixture-one.invalid", headers: { x: "fixture-header-a" } },
+        a: { ...a, args: ["fixture-one", "fixture-two"], env: { x: "fixture-x", y: "fixture-y" } },
+        m: { ...a, env: { x: "fixture-x", y: "fixture-y" } },
+      });
+      configure(cursor(home), {
+        m: { ...a, env: { y: "fixture-y", x: "fixture-x" } },
+        z: { url: "https://fixture-two.invalid", headers: { x: "fixture-header-b" } },
+        a: { ...a, args: ["fixture-two", "fixture-one"], env: { y: "fixture-y", x: "fixture-x" } },
+      });
+      const report = preflight(home, false);
+      expect(report.duplicates.map(({ name, status, differingFields }: {
+        name: string; status: string; differingFields: string[];
+      }) => [name, status, differingFields])).toEqual([
+        ["a", "conflicting", ["args"]],
+        ["m", "equivalent", []],
+        ["z", "conflicting", ["headers", "url"]],
+      ]);
+    });
+  });
+
+  it("reports entries that the stack schema cannot represent", () => {
+    withHome((home) => {
+      configure(claude(home), { invalid: { url: "fixture-invalid-url" } });
+      expect(preflight(home, false).sources[1].omitted).toEqual([
+        { name: "invalid", reason: "unrepresentable-entry" },
+      ]);
+    });
+  });
+
+  it("returns an error when the preflight report cannot be written", () => {
+    withHome((home) => {
+      const preload = path.join(home, "fail-output.cjs");
+      writeFileSync(preload, `
+        process.stdout.write = (_chunk, callback) => {
+          const error = Object.assign(new Error("fixture-write-error"), { code: "EPIPE" });
+          process.nextTick(() => {
+            callback(error);
+            process.stdout.emit("error", error);
+          });
+          return false;
+        };
+      `);
+      const result = exportCli(home, ["--preflight"], { NODE_OPTIONS: `--require "${preload}"` });
+      expect(result.code).toBe(1);
+      expect(result.stdout).toBe("");
+      expect(result.stderr).toContain("Could not write export preflight report.");
+      expect(result.stderr).not.toContain("fixture-write-error");
+    });
+  });
+
+  it("rejects preflight with --output and preserves plain file export", () => {
+    withHome((home) => {
+      configure(claude(home), { sample: a });
+      const file = path.join(home, "stack.yaml");
+      const invalid = exportCli(home, ["--preflight", "--output", file]);
+      expect(invalid.code).toBe(1);
+      expect(invalid.stdout).toBe("");
+      expect(invalid.stderr).toContain("--preflight cannot be combined with --output");
+      expect(existsSync(file)).toBe(false);
+      const plain = exportCli(home, ["--output", file]);
+      expect(plain.code).toBe(0);
+      expect(plain.stderr).toBe("");
+      expect(readFileSync(file, "utf8").trimEnd()).toBe(exportCli(home).stdout.trimEnd());
     });
   });
 });

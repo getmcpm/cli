@@ -24,10 +24,10 @@ import type { ClientId } from "../paths.js";
 export class ClaudeCodeAdapter extends BaseAdapter {
   constructor(private readonly policyContext: ClaudePolicyContext = {}) { super(); }
 
-  protected override async readRaw(configPath: string): Promise<Record<string, unknown>> {
+  protected override async readRaw(configPath: string, requireExisting = false): Promise<Record<string, unknown>> {
     const directory = await realpath(path.dirname(configPath)).catch(() => path.dirname(configPath));
     const read = await readConfig(path.join(directory, path.basename(configPath)), { allowEmpty: true });
-    if (read.state !== "present" && read.state !== "missing") {
+    if (read.state !== "present" && (requireExisting || read.state !== "missing")) {
       throw new Error(`Claude Code file policy unknown: Current configuration ${read.state}`);
     }
     const raw = read.value ?? {};

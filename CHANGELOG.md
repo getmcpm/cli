@@ -8,6 +8,9 @@ _Add entries here, never under a stamped version_ — a release commit renames t
 heading, and a branch that wrote beneath it merges without conflict straight into a
 published section (it happened to #170).
 
+### Added
+- Add read-only `mcpm export --preflight` JSON reporting for client coverage and conflicting server definitions.
+
 ## [0.54.5] - 2026-11-25
 
 ### Fixed

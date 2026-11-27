@@ -11,10 +11,13 @@
  * - registerExportCommand()  — Commander registration
  */
 
-import type { ClientId } from "../config/paths.js";
+import { lstat } from "node:fs/promises";
+import { isDeepStrictEqual } from "node:util";
+import { CLIENT_IDS, type ClientId } from "../config/paths.js";
+import { isEnoent } from "../utils/fs.js";
 import type { ConfigAdapter, McpServerEntry } from "../config/adapters/index.js";
 import type { StackFile, StackEnvVar } from "../stack/schema.js";
-import { serializeYaml } from "../stack/schema.js";
+import { serializeYaml, StackFileSchema } from "../stack/schema.js";
 import { sanitizeForTerminal } from "../guard/sanitize.js";
 import { DEFAULT_MIN_RELEASE_AGE_HOURS } from "../scanner/cooldown.js";
 
@@ -165,6 +168,85 @@ export async function handleExport(
   }
 }
 
+type ExportSource = {
+  client: ClientId;
+  status: "absent" | "readable" | "unreadable";
+  omitted: Array<{ name: string; reason: "malformed-entry" | "unrepresentable-entry" }>;
+};
+
+async function exportPreflight({ getPath, getAdapter }: Pick<ExportDeps, "getPath" | "getAdapter">) {
+  const definitions = new Map<string, Array<{ client: ClientId; entry: McpServerEntry }>>();
+  const sources: ExportSource[] = [];
+
+  for (const client of CLIENT_IDS) {
+    const path = getPath(client);
+    const source: ExportSource = { client, status: "unreadable", omitted: [] };
+    sources.push(source);
+    try {
+      if (!(await lstat(path)).isFile()) continue;
+    } catch (err) {
+      if (isEnoent(err)) source.status = "absent";
+      continue;
+    }
+
+    let entries: Record<string, McpServerEntry>;
+    try {
+      entries = await getAdapter(client).read(path, (name) => {
+        source.omitted.push({ name, reason: "malformed-entry" });
+      }, { requireExisting: true });
+    } catch {
+      continue;
+    }
+    source.status = "readable";
+
+    for (const name of Object.keys(entries)) {
+      const entry = entries[name];
+      const stack = StackFileSchema.safeParse({
+        version: "1",
+        servers: { [name]: projectServer(entry) },
+      });
+      if (!stack.success || !Object.hasOwn(stack.data.servers, name)) {
+        source.omitted.push({ name, reason: "unrepresentable-entry" });
+        continue;
+      }
+
+      const group = definitions.get(name) ?? [];
+      group.push({ client, entry });
+      definitions.set(name, group);
+    }
+    source.omitted.sort((left, right) => left.name < right.name ? -1 : left.name > right.name ? 1 : 0);
+  }
+
+  const duplicates = [...definitions]
+    .sort(([left], [right]) => left < right ? -1 : left > right ? 1 : 0)
+    .flatMap(([name, group]) => {
+      if (group.length < 2) return [];
+      const fields = new Set(group.flatMap(({ entry }) => Object.keys(entry)));
+      const fieldValue = (entry: McpServerEntry, field: string) =>
+        Object.hasOwn(entry, field) ? (entry as Record<string, unknown>)[field] : undefined;
+      const first = group[0].entry;
+      const differingFields = [...fields].sort().filter((field) =>
+        group.some(({ entry }) =>
+          !isDeepStrictEqual(fieldValue(first, field), fieldValue(entry, field))
+        )
+      );
+      return [{
+        name,
+        clients: group.map(({ client }) => client),
+        status: differingFields.length ? "conflicting" : "equivalent",
+        differingFields,
+      }];
+    });
+
+  return {
+    schemaVersion: 1,
+    ready: sources.every(({ status, omitted }) => status !== "unreadable" && omitted.length === 0)
+      && duplicates.every(({ status }) => status === "equivalent"),
+    sources,
+    duplicates,
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Stack file builder
 // ---------------------------------------------------------------------------
@@ -182,19 +264,7 @@ function buildStackFile(
   const stackServers: StackFile["servers"] = Object.create(null);
 
   for (const [name, { entry }] of Object.entries(servers)) {
-    if (entry.url) {
-      // URL-based server
-      stackServers[name] = {
-        url: entry.url,
-        ...(entry.env ? { env: buildEnvDeclarations(entry.env) } : {}),
-      };
-    } else {
-      // Registry-based server (version unknown from config, use latest)
-      stackServers[name] = {
-        version: "latest",
-        ...(entry.env ? { env: buildEnvDeclarations(entry.env) } : {}),
-      };
-    }
+    stackServers[name] = projectServer(entry);
   }
 
   return {
@@ -208,6 +278,11 @@ function buildStackFile(
     },
     servers: stackServers,
   };
+}
+
+function projectServer(entry: McpServerEntry): StackFile["servers"][string] {
+  const env = entry.env ? { env: buildEnvDeclarations(entry.env) } : {};
+  return entry.url ? { url: entry.url, ...env } : { version: "latest", ...env };
 }
 
 function buildEnvDeclarations(
@@ -241,9 +316,24 @@ export function registerExportCommand(program: Command): void {
     .command("export")
     .description("Export installed MCP servers as an mcpm.yaml stack file")
     .option("-o, --output <file>", "write to file instead of stdout")
-    .action(async (opts: { output?: string }) => {
+    .option("--preflight", "report client coverage and duplicate definitions as JSON without writing a stack")
+    .action(async (opts: { output?: string; preflight?: boolean }) => {
       const chalk = (await import("chalk")).default;
+      const fail = (message: string) => {
+        console.error(chalk.red(message));
+        process.exit(1);
+      };
       try {
+        if (opts.preflight) {
+          if (opts.output !== undefined) throw new Error("--preflight cannot be combined with --output");
+          const report = await exportPreflight({ getAdapter: getAdapterDefault, getPath: getConfigPath });
+          // CI requires the whole report. Even a closed pipe means the report
+          // could not be delivered, unlike ordinary human-facing CLI output.
+          process.stdout.write(JSON.stringify(report, null, 2) + "\n", (err) => {
+            if (err) fail("Could not write export preflight report.");
+          });
+          return;
+        }
         await handleExport(
           { output: opts.output },
           {
@@ -256,8 +346,7 @@ export function registerExportCommand(program: Command): void {
           }
         );
       } catch (err) {
-        console.error(chalk.red((err as Error).message));
-        process.exit(1);
+        fail((err as Error).message);
       }
     });
 }
