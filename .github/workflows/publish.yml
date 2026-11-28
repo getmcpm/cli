@@ -182,7 +182,7 @@ jobs:
       # The installer is best-effort too: without it a cosign download failure
       # would abort the job after npm publish and cost the GitHub Release and
       # the registry listing.
-      - uses: sigstore/cosign-installer@756fe2d284c7292c4e9b62c8a28f1e5629c59532 # v4.1.3
+      - uses: sigstore/cosign-installer@881c63bd87e38389154debd8331404ce7ca8a3ab # v4.1.4
         continue-on-error: true
       - name: Sign SBOM (keyless, Sigstore)
         if: hashFiles('mcpm.cdx.json') != ''
